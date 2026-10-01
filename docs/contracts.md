@@ -157,20 +157,104 @@ results:
 - `artifact_id`, size, and the path relative to the output root.
 - Role: screen configuration, provider request, or provider response.
 - Acquisition time in UTC.
-- Source format identifier and version, for example `p123api-screen-backtest` version 1 once verified.
+- Source format identifier and version, for example [`p123api-screen-backtest` version 1](#p123api-screen-backtest-version-1).
 - The adapter and parser version that interpreted it.
 - Provenance class, and source identity where available, for example the provider operation and account-independent identifiers.
 
 ## Supported provider payloads
 
-**Status: no response layout has been verified yet.** Release 0.1.0 task R01-T02 adds `p123api-screen-backtest` version 1 here. It is built from the reference response in `reference/p123api-screen-backtest/`, where the response itself stays git-ignored. Until then, Trial Folio makes no claim about any response layout.
-
-For each layout, this section records:
+Trial Folio supports only the response layouts recorded here. For each layout, this section records:
 
 - **Identity.** The layout identifier and version, and the `p123api` version it was observed with.
 - **Structure.** The top-level keys, and the structure used to validate a response.
 - **Metrics.** Each one's `metric_id`, its JSON path, its unit, the precision the response carries, and its definition.
 - **Everything else.** What the response contains that Trial Folio preserves but does not interpret, such as the per-period series in 0.1.0.
+
+### `p123api-screen-backtest` version 1
+
+Introduced in 0.1.0 (task R01-T02). Portfolio123 doesn't document the response fields, so everything below is a verified observation of the reference response in [`reference/p123api-screen-backtest/`](../reference/p123api-screen-backtest/README.md). The response itself stays git-ignored. The run record there holds the checks behind each "reproduced" statement. A definition marked "not reproduced" is Portfolio123's own, and Trial Folio reports the value as given.
+
+**Identity.**
+
+- The layout is the decoded JSON body that `p123api`'s `screen_backtest(params, to_pandas=False)` returns for `POST /screen/backtest`. It was observed with `p123api` 3.1.0.
+- The response carries no version of its own. Trial Folio labels a response version 1 when it has the required structure below.
+
+**Required structure.** A response without it is saved, and the result is flagged `provider.response_invalid`:
+
+- The top level is an object with `stats` and `results` objects.
+- `stats` has `port` and `bench` objects.
+- `results.columns` is an array of strings. `results.rows` is an array of arrays, each as long as `columns`.
+
+Nothing else is required. Extra keys, or a missing `chart` or summary row, don't make a response invalid. Individual values fail as follows:
+
+- **A metric key that is missing, or whose value is `null`,** makes that metric unavailable with `blank_in_source`. A value that isn't a JSON number is unavailable with `unparseable_in_source`.
+- **Coverage dates.** If `results.rows` is empty, or `columns` lacks `Tran Dt` or `End Dt`, then `coverage_start` and `coverage_end` are unavailable with `blank_in_source`. A date that isn't `YYYY-MM-DD` is `unparseable_in_source`. `coverage_periods` is always the number of rows, including zero.
+
+**Numbers and precision.**
+
+- The wrapper decodes JSON numbers into binary floating point. Trial Folio saves each one in its shortest round-trip form. For values of up to 15 significant digits, that form keeps every digit the provider sent except trailing zeros.
+- Trial Folio reads numbers from the saved text as decimals, never as binary floats. A value keeps exactly the digits it has there, and `source_decimals` is the number of digits after its decimal point.
+- A value can therefore carry fewer decimal places than the request's `precision`. The reference response was requested at 4, and its `stats.port.standard_dev` has 3. Trial Folio doesn't pad it back to 4.
+- No value in the reference response carries more decimal places than the requested precision.
+
+**Metrics.** `metrics.csv` has these rows, in this order:
+
+| # | `metric_id` | `subject` | Source | Unit | Definition |
+|---|---|---|---|---|---|
+| 1 | `coverage_start` | `strategy` | Calculated: the earliest `Tran Dt` in `results.rows` | `date` | The first transaction date |
+| 2 | `coverage_end` | `strategy` | Calculated: the latest `End Dt` in `results.rows` | `date` | The end of the last period |
+| 3 | `coverage_periods` | `strategy` | Calculated: the number of `results.rows` | `count` | The number of rebalance periods |
+| 4 | `total_return` | `strategy` | `stats.port.total_return` | `percent` | Cumulative return over the backtest. Reproduced: the last `chart` level minus 100. |
+| 5 | `annualized_return` | `strategy` | `stats.port.annualized_return` | `percent` | Compound annual growth rate over the calendar days from the first to the last `chart` date, with 365.25-day years. Reproduced. |
+| 6 | `max_drawdown` | `strategy` | `stats.port.max_drawdown` | `percent` | The largest peak-to-trough decline in the daily `chart` levels, as a negative number. Reproduced. |
+| 7 | `standard_deviation` | `strategy` | `stats.port.standard_dev` | `percent` | Annualized standard deviation of monthly returns: the sample standard deviation of the month-end-to-month-end changes in the `chart` levels, times √12. Reproduced. |
+| 8 | `sharpe_ratio` | `strategy` | `stats.port.sharpe_ratio` | `ratio` | Portfolio123's Sharpe ratio. Its risk-free rate isn't documented. Not reproduced. |
+| 9 | `sortino_ratio` | `strategy` | `stats.port.sortino_ratio` | `ratio` | Portfolio123's Sortino ratio. Its risk-free rate and target aren't documented. Not reproduced. |
+| 10 | `correlation` | `strategy` | `stats.correlation` | `ratio` | Correlation with the benchmark. Close to, but not equal to, the correlation of the monthly returns. Not reproduced. |
+| 11 | `r_squared` | `strategy` | `stats.r_squared` | `ratio` | The square of `correlation`. Consistent: the reported `correlation`, squared and rounded, gives the reported value. |
+| 12 | `beta` | `strategy` | `stats.beta` | `ratio` | Beta against the benchmark. Close to, but not equal to, the regression beta of the monthly returns. Not reproduced. |
+| 13 | `alpha` | `strategy` | `stats.alpha` | `percent` | Portfolio123's alpha against the benchmark. The unit is inferred from the value's magnitude, and the method isn't documented. Not reproduced. |
+| 14 | `risk_samples` | `strategy` | `stats.samples` | `count` | The number of returns behind the risk statistics. Reproduced: it equals the number of monthly returns in the `standard_deviation` reproduction, which runs from the end of the first month to the end of the next-to-last month. |
+| 15–20 | Rows 4–9 again | `benchmark` | The same keys under `stats.bench` | As rows 4–9 | As rows 4–9, for the benchmark. The same checks reproduce rows 4–7. |
+
+The other columns are filled the same way on every row:
+
+- **`source_label`** is the last key of the JSON path, for example `standard_dev`. **`source_location`** is the full path, for example `stats.port.standard_dev`. Both are empty for the coverage rows.
+- **`origin` and `provenance`.** Rows 1–3 are `calculated` and `inferred`, under the rules in the table. Every other row is `reported` and `verified`.
+- **`period_start` and `period_end`** are `coverage_start` and `coverage_end` on every row. They're empty when those are unavailable.
+- **`benchmark`** holds the request's `screen.benchmark` on rows 10–13, which compare the strategy with the benchmark. It's empty on every other row.
+
+**Risk statistics.** Release 0.1.0 doesn't send `riskStatsPeriod`, so Portfolio123's default applies, which is documented as Monthly:
+
+- The [API: Screen](https://portfolio123.customerly.help/en/articles/43324-api-screen) page lists the values as `['Monthly'] | 'Weekly' | 'Daily'`.
+- The [wrapper documentation](https://portfolio123.customerly.help/en/articles/13765-the-api-wrapper-p123api) says that for an optional parameter, "the default value when not specified is the first value in the list (if any)".
+
+The reference response agrees: the standard deviations (rows 7 and 18) reproduce from monthly returns, and `risk_samples` counts them. The other risk statistics, rows 8–13, 19, and 20, presumably use the same period, but that isn't verified. R01-T03 records the effective value as an inferred setting that cites this documentation.
+
+**Coverage.**
+
+- Rows appear newest first in the reference response. Trial Folio uses the earliest and latest dates, not row positions.
+- Each period's `End Dt` is the next period's `Tran Dt`. The first and last periods can be shorter than the rebalance frequency.
+- The first period's `As Of Dt` and `Rank Dt` fall before the start date, because the first positions are chosen from earlier data. They are signal dates, not coverage.
+- `coverage_mismatch` flags a difference between coverage and the requested `startDt` or `endDt`. It appears on the date settings in `settings.csv`, which R01-T03 names. In the reference response, coverage equals the requested dates.
+
+**Preserved but not interpreted in 0.1.0:**
+
+- **`cost` and `quotaRemaining`** are integers: the credits charged and the credits left. The attempt record keeps them as provider metadata. `quotaRemaining` is account information, so it's kept out of `metrics.csv`, the report, and the JSON summary (proposed default).
+- **`results.rows`,** apart from the two coverage dates. It has one row per rebalance period, with these columns:
+
+  | Column | Type | Observed meaning |
+  |---|---|---|
+  | `#` | integer | The period number, 1 for the earliest |
+  | `As Of Dt`, `Rank Dt`, `Tran Dt`, `End Dt` | `YYYY-MM-DD` string | The period's as-of, ranking, transaction, and end dates |
+  | `#Pos`, `New Pos`, `Sold Pos` | integer | Positions held, bought, and sold |
+  | `Turn` | number | Turnover in percent. It equals `Sold Pos` divided by `#Pos`, times 100, in every reference period. |
+  | `Ret%`, `Bench%`, `Excess%` | number | The period's return in percent for the strategy and the benchmark, and their difference. `Ret%` and `Bench%` reproduce from the `chart` levels. |
+  | `100 USD Investment`, `100 USD in SPY:USA` | number | The value of 100 invested, at the period's end. Reproduced. Their names contain the currency and the benchmark, so they change with those settings. |
+  | `Costs`, `Cash`, `Min % no slip`, `Max % no slip`, `StdDev` | number | Not verified |
+
+- **`results.average`, `results.upMarkets`, and `results.downMarkets`.** Each is one element shorter than `columns`: element *i* belongs to `columns[i+1]`. Element 0 is `null`. In `upMarkets` and `downMarkets`, element 1, under `Rank Dt`, holds the number of periods in the group. The other non-null elements are means of their column: over all periods, over periods whose `Bench%` is above zero, and over the rest. No period had a `Bench%` of exactly zero, so which group it joins is unverified. The wrapper's `to_pandas=True` conversion appends these arrays as table rows without the offset, which moves each value one column to the left. Trial Folio doesn't use that conversion ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md), decision 4).
+- **`chart`,** five parallel arrays with one entry per weekday from the start date to the end date, including market holidays: `dates`, `screenReturns`, `benchReturns`, `turnoverPct`, and `positionCnt`. Despite their names, `screenReturns` and `benchReturns` are levels of 100 invested, starting at 100, not returns. `turnoverPct` and `positionCnt` hold whole numbers written as decimals, such as `25.0`.
 
 ## Metrics and missing values
 
@@ -242,7 +326,7 @@ One row for each metric of each result. That includes coverage values, which use
 |---|---|
 | `label` | Result label |
 | `subject` | `strategy` or `benchmark` |
-| `metric_id` | Stable identifier from the layout mapping, for example `annualized_return`. Coverage uses `coverage_start`, `coverage_end`, and `coverage_periods`. |
+| `metric_id` | Stable identifier from the layout mapping, for example `annualized_return` in [`p123api-screen-backtest` version 1](#p123api-screen-backtest-version-1). Coverage uses `coverage_start`, `coverage_end`, and `coverage_periods`. |
 | `source_label` | The metric's label as it appears in the source. Empty for coverage values. |
 | `value` | Decimal or date string. Empty when unavailable. |
 | `unit` | One of the units in [metrics and missing values](#metrics-and-missing-values) |
@@ -607,6 +691,6 @@ JSON Schemas are generated from the models, never maintained by hand, and commit
 
 | Question | Impact | Recommended default | Resolve by |
 |---|---|---|---|
-| Which metric identifiers and setting names do the verified response and screen configuration provide? | The metric definitions, `settings.csv`, and the review configuration's intended-change keys | Derive them from the reference call and the API documentation in [0.1.0](releases/0.1.0-api-execution.md), tasks R01-T01 to R01-T03 | Before 0.1.0 is Ready |
+| Which setting names does the screen configuration provide? The metric identifiers are settled in [`p123api-screen-backtest` version 1](#p123api-screen-backtest-version-1). | `settings.csv`, and the review configuration's intended-change keys | Derive them from the reference call and the API documentation | [0.1.0](releases/0.1.0-api-execution.md) task R01-T03 |
 | What is the non-interactive plan-approval option called? | CLI contract for 0.1.0 | `--approve <plan-hash>` | 0.1.0 task R01-T04 |
 | Are failed screen-backtest requests charged? | Budget accounting for failed and uncertain attempts | Count them against the budget as possibly charged until verified | 0.1.0 reference call or live check |
