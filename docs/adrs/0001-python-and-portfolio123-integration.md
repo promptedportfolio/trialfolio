@@ -1,6 +1,6 @@
 # ADR 0001: Python and Portfolio123 integration
 
-**Status:** Accepted. Decision 3 is superseded by [ADR 0005](0005-build-on-the-portfolio123-api-only.md): Trial Folio no longer reads DataMiner exports or configurations. Its code boundary remains in force through REQ-02. The language and dependency constraints are owner requirements, and provider behavior is re-verified in each release.
+**Status:** Accepted. Decision 3 is superseded by [ADR 0005](0005-build-on-the-portfolio123-api-only.md): Trial Folio no longer reads DataMiner exports or configurations. Its code boundary remains in force through REQ-02. [ADR 0006](0006-observe-the-wrappers-http-exchanges.md) (proposed) extends decision 6 by recording each HTTP exchange the wrapper makes. The language and dependency constraints are owner requirements, and provider behavior is re-verified in each release.
 **Date:** 2026-10-01
 
 ## Context
@@ -42,7 +42,7 @@ These are **verified observations** from the guide's 2026-10-01 check; the [veri
 ## Consequences
 
 - Trial Folio depends on `p123api`'s behavior and versions. Wrapper upgrades are tested against recorded payloads, and changes that affect evidence are noted in release notes.
-- Visibility into retries is limited to what the wrapper exposes. Attempt records say so instead of implying request-level visibility.
+- When this ADR was accepted, visibility into retries was limited to what the wrapper exposes. Now [ADR 0006](0006-observe-the-wrappers-http-exchanges.md) records each HTTP exchange below the wrapper, so attempt records show every request it sends.
 - Supporting a DataMiner layout requires a real reference export ([D-09](../spec.md#decisions)). Synthetic fixtures mirror its structure, never its data.
 - Portfolio123 operations cost API credits, so the default test suite blocks network access, and live checks are opt-in with a budget.
 

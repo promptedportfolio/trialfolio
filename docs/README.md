@@ -26,6 +26,7 @@ These are the specifications for Trial Folio. Nothing in them is implemented yet
 | [adrs/0003-versioned-research-artifacts.md](adrs/0003-versioned-research-artifacts.md) | File-based, immutable, versioned artifacts |
 | [adrs/0004-custom-personal-research-license.md](adrs/0004-custom-personal-research-license.md) | The custom source-available license |
 | [adrs/0005-build-on-the-portfolio123-api-only.md](adrs/0005-build-on-the-portfolio123-api-only.md) | Building on the Portfolio123 API only, with no DataMiner integration, and the reordered releases |
+| [adrs/0006-observe-the-wrappers-http-exchanges.md](adrs/0006-observe-the-wrappers-http-exchanges.md) | Recording each HTTP exchange the `p123api` wrapper makes, so failures are classified by what was sent |
 | [spec-authoring-guide.md](spec-authoring-guide.md) | Bootstrap context used to write these documents. Superseded wherever an owning document says otherwise |
 
 At the repository root:

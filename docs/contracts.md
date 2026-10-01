@@ -37,7 +37,7 @@ Every artifact records these versions separately:
 | `schema_version` | Artifact schema version, `<major>.<minor>.<patch>`, independent of the application version |
 | `parser_version` | Version of the adapter that interpreted a provider response, per supported layout |
 | `canonicalization_version` | Version of the canonical-hashing rules used for identities |
-| Provider wrapper version | `p123api` version used for provider requests |
+| Provider library versions | The versions of `p123api`, `requests`, and `urllib3` used for provider requests ([plan contents](#plan-contents)) |
 | Method versions | Version of each analytical method applied (when methods are introduced) |
 | `license_id`, `notice_version` | The applicable license identifier (`LicenseRef-NSPRL-1.0`) and financial-notice version (`1.0`), defined in [../LICENSE](../LICENSE) and [disclaimers.md](disclaimers.md) |
 
@@ -52,8 +52,8 @@ Identifiers are introduced with the release that can define their semantics.
 | `artifact_id` | 0.1.0 | Content address of one stored file | `sha256:<64 hex>` of the file's bytes |
 | `review_id` | 0.2.0 | One `trialfolio review` output | Random UUID, version 4 |
 | `label` | 0.2.0 | User-declared name of one compared result, unique within a review | `[a-z0-9][a-z0-9_-]{0,63}` |
-| `plan_hash` | 0.1.0 | Identity of an approved plan | `sha256:` of the plan's canonical form |
-| `case_id` | 0.1.0 | Stable identity of one fully resolved configuration | `case-` plus the first 16 hex digits of the SHA-256 of the canonical resolved configuration |
+| `plan_hash` | 0.1.0 | Identity of a plan, which execution requires as approval | `sha256:` of the plan's canonical form ([plan hashing](#plan-hashing)) |
+| `case_id` | 0.1.0 | Stable identity of one fully resolved configuration | `case-` plus the first 16 hex digits of the SHA-256 of the canonical resolved settings ([plan hashing](#plan-hashing)) |
 | `case_key` | 0.3.0 | User-declared readable name for a planned case | Same pattern as `label` |
 | `attempt_id` | 0.1.0 | One execution attempt of a case | Random UUID, version 4 |
 | `experiment_id` | 0.3.0 | One declared experiment | User-declared slug, same pattern as `label` |
@@ -113,7 +113,7 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 
 **Verified values.** Following [D-20](spec.md#decisions), the configuration accepts only values a recorded live call has verified. Free-form values, such as universe names, benchmark symbols, formulas, holdings counts, and slippage, are verified by form: R01-T01 sent one of each, and Portfolio123 accepted them.
 
-- **Verified by R01-T01:** a formula ranking, `rebalance_weeks` 4, `open`, `complete`, and precision 4.
+- **Verified by R01-T01:** a formula ranking, `rebalance_weeks` 4, `open`, `complete`, precision 4, and a slippage sent as a JSON float, the form every slippage takes ([decimals](#screen-configuration)).
 - **Verified by R01-T05 before 0.1.0 is Ready:** `rebalance_weeks` 1, ranking by name, and ranking by ID, each in its own call. A value that fails its check is removed from these tables.
 - **Documented but not accepted until a release verifies them:**
   - `max_holdings` 0, meaning no limit
@@ -141,13 +141,21 @@ Either one fails with `config.invalid`, and the message names the supported form
 **Rules that span keys and values:**
 
 - **YAML types.** Trial Folio accepts only unambiguous YAML values, and rejects forms that a YAML 1.1 safe loader would quietly convert:
-  - **Integers** are plain decimal digits, with no leading zero, underscore, sign, or base prefix. So `010`, `1_000`, `+5`, and `0x10` are rejected.
+  - **Integers** are plain decimal digits, with no leading zero, underscore, sign, or base prefix. So `010`, `1_000`, `+5`, and `0x10` are rejected. An integer is at most 9007199254740991 (2^53 − 1), the largest a JSON number keeps exactly, so canonical hashing stays exact. A larger one fails with `config.invalid`.
   - **Booleans** are `true` or `false`, and are never accepted where a number is expected, or the reverse.
   - **Dates** have no time part. So `2016-01-01 09:30:00` is rejected. A date may be a YAML date or a string in exactly `YYYY-MM-DD` form.
-- **Decimals.** A decimal is read from its YAML text, never through binary floating point. Before it's recorded, hashed, or compared, it is normalized: trailing zeros after the decimal point are removed, so `0.250` and `0.25` are the same setting. It is sent as a JSON number with exactly those digits. A number written as a string is rejected.
+- **Decimals.** A decimal is read from its YAML text, never through binary floating point.
+  - **Form.** It's written in plain notation: digits, optionally followed by a decimal point and more digits. There's no sign, exponent, or leading zero before another digit, so `2.5e-1`, `-0.25`, `.25`, and `00.25` are rejected. A whole number such as `0` or `1` is accepted.
+  - **Normalization.** Before it's recorded, hashed, or compared, trailing zeros after the decimal point are removed, and then the point if no digits follow it. So `0.250` and `0.25` are the same setting, and so are `1.0` and `1`.
+  - **Limits.** After normalization, it has at most 15 significant digits, at most 4 digits after the decimal point, and is less than 10^16. A value outside these limits fails with `config.invalid`.
+  - **On the wire.** Every decimal is sent as a JSON float, the type R01-T01 verified with `0.25`, never as an integer. `requests` writes the request body with Python's `json` module; Trial Folio refuses to run where `requests` would use `simplejson` instead ([plan contents](#plan-contents)). `json` writes a float in its shortest round-trip form. So the JSON text of a decimal is its normalized form, with `.0` added to a whole number:
+    - **A whole number,** such as `1` (1%), is sent as `1.0`.
+    - **Any other value,** such as `0.25` (0.25%, or 25 basis points), is sent with exactly its digits. Most values, such as `0.1`, have no exact binary form. But a value of up to 15 significant digits survives the round trip through binary floating point: its shortest round-trip form has exactly its digits.
+    - **No exponent.** `json` writes a float with an exponent below 0.0001 or from 10^16 up, for example `0.00001` as `1e-05`. R01-T01 verified only plain notation, and the limits keep every value in it.
+  - **Not a string.** A number written as a string is rejected.
 - **Dates.** `end_date` is later than `start_date`.
 - **Formulas.** Formulas are the user's strategy definition. They're sent and saved, but never logged. Write them in single quotes. Portfolio123 formulas often contain double quotes, which single quotes keep as they are. YAML processes no escapes inside single quotes, and a single quote inside one is written twice (`''`).
-- **Descriptions.** `title` and `purpose` describe the run. They are recorded in the plan and the run manifest with `user_supplied` provenance ([plans and approval](#plans-and-approval), R01-T04). They're never sent, and they aren't part of the resolved settings that identify a case.
+- **Descriptions.** `title` and `purpose` describe the run. They are recorded in the plan and the run manifest with `user_supplied` provenance ([plan contents](#plan-contents)). They're never sent, and they aren't part of the resolved settings that identify a case.
 
 **Sent on every request.** Trial Folio adds three fixed values, which 0.1.0's scope doesn't let the configuration change. R01-T01 verified each one.
 
@@ -538,17 +546,191 @@ Introduced in 0.1.0.
 | `skipped` | Deliberately not run, with a reason |
 | `unknown` | Completion is uncertain: a request may have been sent and a response was not durably recorded |
 
-An attempt record contains the `attempt_id`, the `case_id`, start and end times, the outcome, any error code, references to the redacted request and the saved response, provider metadata, the wrapper version, and any charge or quota information the provider returned.
+An attempt has two records in its directory, `cases/<case_id>/attempts/<attempt_id>/`. Each is written once and never replaced ([atomic writes](#artifact-storage)):
 
-Trial Folio saves decoded provider payloads, which is what the wrapper exposes, and labels them as decoded payloads. It does not claim to capture HTTP bytes, status codes, or headers on success, because the verified wrapper does not expose them ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md#verification-notes)). Trial Folio configures the wrapper for a single HTTP attempt per call, so every retry is its own recorded attempt. The one exception is the wrapper's single re-authentication reissue after a 401 or 403, which Trial Folio cannot observe; attempt records state that limitation.
+- **The start record, `started.json`,** is written durably just before the request is sent. It holds the `attempt_id`, the `case_id`, the `plan_hash` it runs under, the start time, the installed versions of `p123api`, `requests`, and `urllib3`, and the [HTTP exchanges](#http-exchanges) completed before it: Trial Folio's authentication call, when the attempt started with one.
+- **The attempt record, `attempt.json`,** is written once, when the attempt ends. It holds everything in the start record, plus the end time, the outcome, any error code, all the exchanges and whether the attempt is `possibly_charged`, references to the redacted request and the saved response, provider metadata, and any charge or quota information the provider returned.
 
-**Uncertain completion.** Trial Folio writes a `running` record durably before sending a request. On restart, a `running` attempt without a durable response becomes `unknown`. An `unknown` attempt is never retried automatically, because the original request may have been charged or may have changed provider state.
+An attempt with a start record and no attempt record is `running` ([uncertain completion](#uncertain-completion)).
+
+Trial Folio saves decoded provider payloads, which is what the wrapper exposes, and labels them as decoded payloads. It doesn't capture HTTP headers, and it keeps a raw body only in one case: a 200 the wrapper can't decode, which it saves as `response.raw`, labeled undecoded ([HTTP exchanges](#http-exchanges)). Trial Folio configures the wrapper for a single HTTP attempt per call, and its adapter allows one exchange per call, as below. So the request is sent at most once, and running the command again is a new attempt.
+
+### HTTP exchanges
+
+Trial Folio mounts its own transport adapter on the wrapper's HTTP session, for both `https://` and `http://`, so every request the wrapper makes passes through it ([ADR 0006](adrs/0006-observe-the-wrappers-http-exchanges.md)). The adapter records each exchange in memory, in order. The start record keeps the exchanges completed before it, and the attempt record keeps them all:
+
+| Field | Contents |
+|---|---|
+| `request` | The method and path, for example `POST /auth` or `POST /screen/backtest` |
+| `result` | `response`: a complete response arrived. `not_connected`: the connection provably never opened, so nothing was sent. `interrupted`: no complete response arrived, and the connection can't be shown never to have opened, so the request may have reached Portfolio123. |
+| `status` | The HTTP status of a `response`. `null` otherwise. |
+
+- **Not connected means provably not sent.** An exchange is `not_connected` only when the `requests` error wraps a `urllib3` `MaxRetryError` whose `reason`, after unwrapping a `urllib3` `ProxyError` to its `original_error`, is a `ConnectTimeoutError`. That class covers a failed name lookup (`NameResolutionError`), a refused or unreachable connection (`NewConnectionError`), and a connect timeout, to Portfolio123 or to a proxy. It's the test `urllib3`'s `Retry` applies, in `_is_connection_error`, to decide that a request is safe to retry because the server didn't receive it. Every other ending without a complete response is `interrupted`, including a reset, a read timeout, a TLS failure, and an interrupt during the name lookup. So an unclear case counts as possibly sent.
+- **Recorded before sending.** The adapter adds each exchange to the list before it sends, and fills in the result afterwards. An exchange still without a result when the attempt record is written, for example after Ctrl-C, is `interrupted`. An exchange that already has a result keeps it.
+- **The body is read inside the adapter.** A body that breaks off is therefore recorded as `interrupted`.
+- **Nothing else is recorded,** with one exception. The adapter keeps no headers, tokens, or exception objects, and no bodies, except the body of a 200 on the request's exchange, which it holds in memory. If the wrapper can't decode that body, Trial Folio saves it as `response.raw`, labeled undecoded, so the evidence is kept ([INV-01](spec.md#enduring-invariants)). An authentication body holds the token, so it's never kept. The adapter changes no request or response, and passes every error on unchanged.
+- **One exchange per call.** Each call to the wrapper, whether Trial Folio's own authentication call or the request's call, makes exactly one exchange. The adapter refuses any further exchange during the same call before connecting, whatever its path, by raising an error of Trial Folio's own type. The wrapper catches only `requests.ConnectionError`, so that error ends the call. A refused exchange sent nothing, so it isn't recorded. The rule refuses, without depending on how either is triggered:
+  - **The wrapper's resend.** After a 401 or 403, the wrapper re-authenticates and resends the request ([retry policy](#budget-and-retries)). Its `POST /auth` is a second exchange, so it's refused, and the request isn't resent.
+  - **A redirect.** `requests` follows a 301, 302, 303, 307, or 308 that has a `Location` header by sending the next request through the same session, and so through the adapter. That's a second exchange, so it's refused. Any other 3xx is an ordinary response. Either way, the exchange records the 3xx as a `response`.
+- **No retries inside an exchange.** The adapter keeps `requests`' default `urllib3` retry setting, `Retry(0, read=False)`, so `urllib3` never resends within one exchange.
+- **When Trial Folio authenticates.** It authenticates with a call of its own before the first request, and again before a later request only when an earlier one got a 401 or 403, because the wrapper then drops its token. So the first exchange of an attempt is either its own `POST /auth`, or the request itself, sent with the token already held. In 0.1.0, with one request, every attempt starts with Trial Folio's own `POST /auth`.
+- **Possibly charged.** This is the one definition the budget, the counts, and the failure behavior use. A send of the request may have reached Portfolio123, and so counts as possibly charged, when its exchange has a result other than `not_connected`, whatever its status or outcome. An attempt is `possibly_charged` when its request's exchange is such a send, or when it's `running` ([uncertain completion](#uncertain-completion)). Authentication isn't counted ([budget](#budget-and-retries)).
+- **Classification.** Trial Folio classifies an attempt from its exchanges, and from whether the call returned a decoded response. A 200 the wrapper decodes and one it can't decode give the same exchanges, and only the call's return tells them apart. Trial Folio never reads the wrapper's exception object beyond its type and message: it takes only a sanitized message ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md), decision 7). When the adapter refused a second exchange, the call ends with Trial Folio's own error, which carries no Portfolio123 text. The message then names the status of the call's exchange, and says why the next exchange was refused: a re-authentication after a 401 or 403, or a redirect. [0.1.0's failure behavior](releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior) maps each situation to an outcome and an error code.
+
+### Uncertain completion
+
+Trial Folio authenticates first, when it [needs to](#http-exchanges), then writes the start record durably, and only then sends the request.
+
+- **Authentication fails.** There's no start record. The attempt record is written as `failed`, because the request wasn't sent. Authentication isn't counted in the budget's credits, and whether it costs credits is an [open question](releases/0.1.0-api-execution.md#open-questions).
+- **A start record without an attempt record** is `running`. Its request is sent at most once, so a reader counts it as one possible send: `possibly_charged`, and one provider request. On restart, as in 0.3.0's resume, Trial Folio writes its attempt record, and rewrites nothing:
+  - **With a saved response.** A `response.json` or `response.raw` in the attempt's directory is complete, because it's published atomically ([atomic writes](#artifact-storage)), and either is saved only after a 200. So the attempt record is written as `succeeded`, with the request's exchange recorded as a `response` with status 200 and a note that it was completed from the saved response. A `response.raw` is flagged `provider.response_invalid`, as it would have been.
+  - **Without one.** The attempt record is written as `unknown`, possibly charged, with one provider request.
+- **An `unknown` attempt** is never retried automatically, because the original request may have been charged or may have changed provider state. `unknown` always means that no response was durably recorded.
+
+### Endings that decide the error code
+
+Two kinds of ending decide the command's error code, whatever the exchanges show:
+
+- **A user interrupt,** such as Ctrl-C: `command.interrupted`, exit 130 ([interrupts](#interrupts)).
+- **A storage failure:** `storage.write_failed`, exit 4. For example, the request got a 200, and then writing `response.json` failed.
+
+If both happen, the interrupt's code wins. Either way, the exchanges still decide the attempt's outcome and whether it's `possibly_charged`, as the [0.1.0 failure rows](releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior) give them, with an exchange still in flight counted as `interrupted`. A 200 whose response wasn't saved durably is `unknown`. Trial Folio writes the attempt record if it still can, with that outcome, and with the overriding code as its error code unless the outcome is `succeeded`. If it can't, the start record is left, and reads as `running`.
+
+### Interrupts
+
+A user interrupt, such as Ctrl-C, reaches Trial Folio as an exception it can catch, and [decides the error code](#endings-that-decide-the-error-code). What the command leaves depends on when the interrupt arrives:
+
+- **Before the claim succeeds.** The command removes what the claim created, as a [failed claim](#cli-behavior) does, so nothing is left.
+- **After the claim, before authenticating.** The attempt record is written as `failed`, not possibly charged, so the planned case is accounted for ([INV-07](spec.md#enduring-invariants)). Without a manifest, the output is visibly incomplete.
+- **During authentication, or before the request's send starts.** The attempt record is written as `failed`, not possibly charged.
+- **During the request's send, or after it.** The attempt record is written with the outcome the request's exchange gives: `unknown` and possibly charged while the send is in flight.
+- **After the attempt record is written.** It isn't changed.
+
+A process that's killed, for example with `SIGKILL` or by a power loss, can't record anything. A start record it leaves is `running`, as above. If it's killed before the start record is written, there's no record of the attempt.
 
 ## Plans and approval
 
 **Requirement (REQ-04).** Before any charged or mutating provider request, Trial Folio builds a plan from the configuration. A plan contains every fully resolved case, the requests each case needs, a request budget, the retry policy, and the categories of data that will leave the machine. Its `plan_hash` is the SHA-256 of its canonical form. Execution requires that exact hash as approval. If the plan changes, the approval no longer applies.
 
-The CLI shows the plan and its hash. On an interactive terminal it MAY ask for confirmation. Non-interactive use requires the hash as an explicit option; release 0.1.0 fixes the option's name. The core never prompts.
+The core builds plans and checks approvals, and never prompts. The CLI shows the plan and obtains the approval.
+
+### Plan contents
+
+Schema version 1.0.0, introduced in 0.1.0 (task R01-T04). A 1.0.0 plan has exactly one case; release 0.3.0's plan 1.1.0 adds several cases and revisions. `plan.json` holds:
+
+| Field | Contents |
+|---|---|
+| `schema_version` | `1.0.0` |
+| `trialfolio_version` | The version that built the plan |
+| `canonicalization_version` | `1`: the [canonical hashing](#canonical-hashing) rules behind `plan_hash` and `case_id` |
+| `provider_wrapper` | `p123api` and its installed version, which will send the requests. The retry policy describes that version's behavior. So Trial Folio plans only with a version a release has verified: 3.1.0 for 0.1.0 ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md#verification-notes)). Any other installed version fails with `environment.unsupported` before the plan is shown. The package pins the verified version exactly, so a clean install gets it, and a test checks that the pin is in the verified list ([ADR 0006](adrs/0006-observe-the-wrappers-http-exchanges.md)). This row and the next own the verified versions; other documents link here. |
+| `transport` | `requests` and `urllib3` and their installed versions. Trial Folio's adapter relies on how they raise errors, send a redirect through the session, and retry within one exchange ([HTTP exchanges](#http-exchanges)), so the same rules apply as for `provider_wrapper`: Trial Folio plans only with verified versions, `requests` 2.34.2 and `urllib3` 2.8.0 for 0.1.0, and the package pins them exactly. Trial Folio also requires `requests` to write request bodies with the standard library's `json`. `requests` switches to `simplejson` whenever that's importable (`requests.compat`), and the [decimals rules](#screen-configuration) are verified only for `json`. So an environment where `simplejson` is importable fails with `environment.unsupported` too. |
+| `title`, `purpose` | From the configuration, with `user_supplied` provenance. `purpose` is `null` when the configuration has none. Neither is sent. |
+| `cases` | The cases, in order. Exactly one in 1.0.0. |
+| `budget` | The request budget, [below](#budget-and-retries) |
+| `retry_policy` | The retry policy, [below](#budget-and-retries) |
+| `data_sent` | The categories of data that leave the machine, [below](#data-sent) |
+| `plan_hash` | `sha256:` and 64 lowercase hex digits, as [hashing](#plan-hashing) defines |
+
+Each case holds:
+
+| Field | Contents |
+|---|---|
+| `case_id` | The case's identity, [below](#plan-hashing) |
+| `requests` | The provider requests the case needs, in order, each with an `operation` and its `params`. Exactly one in 0.1.0. |
+| `settings` | Every row of the [screen settings](#screen-settings), in that order, with the `settings.csv` columns except `label`, `original_key`, `original_value`, and `source_artifact`. `provenance` is replaced by `expected_provenance`. |
+
+**The 0.1.0 request.** Its `operation` is `screen_backtest`: `p123api`'s `screen_backtest`, which sends `POST /screen/backtest`. Its `params` is the JSON object passed to the wrapper, exactly as it will be sent. Its numbers are JSON numbers, in the form the [decimals rules](#screen-configuration) give, so a whole-number slippage is the float `1.0`, never the integer `1`, and the request body's text for each number equals its text in `params`. Each parameter's JSON type is fixed: `slippage` is always a float, and the other numbers are always integers. So the plan hash, which covers the values, also fixes the text sent, although RFC 8785 writes `1.0` as `1` ([canonical hashing](#canonical-hashing)). It holds no credentials; the wrapper sends those separately.
+
+**Settings in the plan.**
+
+- **Values keep their JSON types.** Integers are numbers, decimals are normalized decimal strings, dates are `YYYY-MM-DD` strings, lists are arrays, mappings are objects, and tokens such as `not_sent` are strings. `flags` is an array of codes, empty when none apply. Any other column that `settings.csv` leaves empty is `null`.
+- **Expected provenance.** Nothing in a plan has been sent yet, so no value in it is `verified` ([provenance](#provenance)). Instead, each row records `expected_provenance`: the provenance the value will have once the request is sent. Values in the request expect `verified`. `settings.csv` records the actual provenance after the attempt.
+- **Flags known before execution.** These are `inferred_default` and `not_snapshotted`. `coverage_mismatch` needs the response, so it appears only in `settings.csv`.
+- **No trace of how the file was written.** The four columns left out depend on how the configuration file is written. So two files that resolve to the same settings give the same plan, for example an omitted `data_vendor` and an explicit `FactSet` ([D-16](spec.md#decisions)), or `0.250` and `0.25`.
+
+### Budget and retries
+
+**Budget.** The values for 0.1.0:
+
+| Field | Value |
+|---|---|
+| `provider_requests` | 1: the most times Trial Folio sends a provider request. The request is sent at most once ([HTTP exchanges](#http-exchanges)), so this is also the worst case. |
+| `credits_per_request` | 5: Portfolio123's documented cost of a screen backtest. The plan records the source, [API: Screen](https://portfolio123.customerly.help/en/articles/43324-api-screen), and the date it was checked, 2026-10-01. |
+| `credits` | 5: `provider_requests` times `credits_per_request`, the most credits the request can use at the documented cost. Authentication isn't included. |
+| `authentication_calls` | 1: the most authentication calls the plan makes ([when Trial Folio authenticates](#http-exchanges)). Whether they cost credits is unknown, so `credits` leaves them out, and a later release with several requests can still bound them. |
+
+- **What counts.** Every send that may have reached Portfolio123 counts, whatever its status or outcome, because whether failed requests are charged is unverified. A send that's `not_connected` didn't reach it, and doesn't count ([possibly charged](#http-exchanges)).
+- **Within budget.** A run or experiment is within its budget when its `provider_requests` count, the sends that may have reached Portfolio123 ([JSON summary](#json-summary)), is at most the budget's `provider_requests`. Execution never starts a send that would exceed it, and never makes more authentication calls than `authentication_calls`.
+- **Authentication's cost is unknown.** Trial Folio authenticates through the wrapper's `POST /auth` before the first request, and again only after a 401 or 403. Portfolio123's [API credits](https://portfolio123.customerly.help/en/articles/13766-api-credits) page doesn't say whether that costs credits (checked 2026-10-01). So `credits` leaves authentication out, the budget states the most authentication calls instead, and the plan display says their cost is unknown. See the [0.1.0 open questions](releases/0.1.0-api-execution.md#open-questions).
+- **The documented cost, not the charge.** The budget uses the documented cost. The attempt records the `cost` Portfolio123 reports.
+
+**Retry policy.**
+
+| Field | Value |
+|---|---|
+| `automatic_retries` | 0. Trial Folio never resends a request on its own. Running the command again is a new attempt. |
+| `wrapper_attempts_per_call` | 1. Trial Folio sets the wrapper to one HTTP attempt per call, with `set_max_request_retries(1)`, for authentication and for the backtest. |
+| `exchanges_per_call` | 1. Trial Folio's adapter refuses any second exchange in a call before connecting ([HTTP exchanges](#http-exchanges)). That refuses the wrapper's re-authentication and resend after a 401 or 403, which the pinned `p123api` 3.1.0 always attempts and no setting disables ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md#verification-notes)), and any redirect `requests` would follow. |
+
+### Data sent
+
+`data_sent` lists each category of data that leaves the machine. Each entry names its recipient, Portfolio123, through `p123api`, and the settings it carries, if any:
+
+| Category | Contents |
+|---|---|
+| `credentials` | The API ID and key, sent to authenticate. They're never recorded. |
+| `strategy_definition` | The universe, the rules, and the ranking: its formula, or a ranking system's name or ID |
+| `backtest_settings` | The holdings, benchmark, dates, rebalance frequency, transaction price, slippage, point-in-time method, and precision, plus the fixed type, method, and currency |
+
+These are categories of data, not the setting categories of `settings.csv`. Nothing else is sent: not the title, the purpose, `data_vendor`, the configuration file, file paths, earlier results, or logs.
+
+### Plan hashing
+
+- **The plan hash** is `sha256:` plus the hex SHA-256 of the [canonical form](#canonical-hashing) of the plan without its `plan_hash` field.
+- **The case ID** is `case-` plus the first 16 hex digits of the SHA-256 of the canonical form of the case's `settings`, with each row reduced to `setting`, `value`, and `unit`. Changing any resolved setting changes it. The title, the purpose, and how the file is written don't.
+- **Nothing varies between invocations.** The plan holds no timestamps, output directory, file paths, attempt IDs, credentials, or account information. So the same configuration, Trial Folio version, and versions of `p123api`, `requests`, and `urllib3` give the same plan and hash on any machine, at any time, and for any output directory. That's what lets a user review a plan in one command and approve it in the next.
+- **Any change needs a new approval.** That includes a changed setting, title, purpose, budget, Trial Folio version, or version of `p123api`, `requests`, or `urllib3`. So after upgrading any of them, the same configuration needs approving again.
+- **Saved plans are checked.** A reader recomputes the hash of a saved `plan.json`. If it differs from `plan_hash`, the run is invalid (`input.not_a_run`).
+
+### Approval
+
+The core recomputes a plan's hash from its contents, and executes the plan only when it's given a hash equal to that. It never trusts a stored `plan_hash` field. Otherwise it fails with `plan.approval_required` and sends nothing. The CLI gets the hash in one of two ways:
+
+- **`--approve <plan-hash>`, for non-interactive use.** The value must be the full hash exactly as shown: `sha256:` and 64 lowercase hex digits. An abbreviated, malformed, or different hash doesn't match. With `--approve`, the CLI never asks for approval. The license acknowledgment is separate, and comes first ([order of steps](#approval)).
+- **Interactive confirmation.** Without `--approve`, when stdin and stderr are both terminals, the CLI shows the plan and asks the user to type `approve`. It then passes the hash of the plan it showed. Any other answer, an empty line, or the end of input is a refusal.
+
+Without a match, the command fails with `plan.approval_required`, exit 2, and creates no output. The plan hash has been shown, with the full plan on a terminal, and the message gives the exact option that approves this plan. So running without `--approve` from a script gets the hash without sending anything, and with `--json`, the summary's `ids` carry the `plan_hash`.
+
+**The plan display.** The CLI writes it to stderr directly, never through logging, because it contains configuration values and formulas ([logging](#logging-and-local-diagnostics)). For the same reason, it shows the full plan only when stderr is a terminal: when it asks for confirmation, and when approval fails. When stderr isn't a terminal, as in a script or a CI job whose output may be kept, it shows only the plan hash and the budget, and says that running the command in a terminal shows the full plan. With a matching `--approve`, the plan is already approved, so it also shows only the plan hash and the budget. The full plan shows:
+
+- the title and purpose
+- the request exactly as it will be sent
+- every resolved setting with its expected provenance, marking inferred defaults, settings not snapshotted, commission not modeled, and parameters not sent
+- the budget, that a request that reaches Portfolio123 may be charged even if it fails, and the most authentication calls, whose cost is unknown
+- the retry policy
+- the data sent, its recipient, and what isn't sent
+- the plan hash, and how to approve it
+
+**Order of steps in `trialfolio run`.** Trial Folio creates no output and sends no request before step 7. So a plan can be reviewed, and its hash obtained, without credentials.
+
+1. Check the license acknowledgment (`license.not_acknowledged`).
+2. Validate the configuration (`config.invalid`).
+3. Check that the output directory is absent or empty (`output.not_empty`).
+4. Check that the installed `p123api`, `requests`, and `urllib3` are verified versions, and that `requests` would write request bodies with `json` ([plan contents](#plan-contents); `environment.unsupported`). Build the plan and show it, as [the plan display](#approval) says.
+5. Check the approval (`plan.approval_required`).
+6. Check that credentials are present (`provider.auth_failed`).
+7. [Claim the output directory](#cli-behavior) with `plan.json` (`output.not_empty`). Logging to `<out>/logs/` starts only after the claim succeeds ([logging](#logging-and-local-diagnostics)). Write `configuration.yaml`, from the bytes read in step 2. That's the first [atomic write](#artifact-storage), so a file system that can't take one fails here, with `storage.write_failed`, before any request.
+8. Authenticate with Trial Folio's own call. If that fails, write the attempt record as `failed` and stop ([uncertain completion](#uncertain-completion)). An interrupt after the claim and before the request's send starts writes it as `failed` too ([interrupts](#interrupts)).
+9. Write the start record durably, together with the directories that hold it ([syncing](#artifact-storage)), and send the request. Write the attempt record when the call ends.
+
+**Records.**
+
+- **The start record and the attempt record** name the `plan_hash` the attempt ran under.
+- **The manifest** records the `plan_hash` and how it was approved: `interactive` or `option`.
+- **Logs** record the plan hash and the case ID, never the plan's contents.
+
+In 0.1.0, a hash that doesn't match is `plan.approval_required`. `plan.changed` is for a saved plan that the configuration no longer resolves to, which arrives with resuming experiments in 0.3.0.
 
 ## Artifact storage
 
@@ -556,7 +738,15 @@ The CLI shows the plan and its hash. On an interactive terminal it MAY ask for c
 
 - **Relative paths.** Paths in manifests are relative to the output root, never absolute, so a moved or served directory stays valid.
 - **Immutability.** Source artifacts are never modified after they are written. Trial Folio never overwrites an existing artifact; corrections and migrations produce new artifacts.
-- **Atomic writes.** Each file is written to a temporary name in the same directory, flushed and synced to disk, and then renamed into place.
+- **Atomic writes.** Each file is written to a temporary name in the same directory, flushed and synced to disk, and then published under its final name without replacing anything. The one exception is the file that [claims an output directory](#cli-behavior), which is created directly under its final name.
+  - **Never replace.** If the final name exists, even because another process created it at the same moment, publishing fails, and the temporary file is removed. So a record that changes state is written as a new file, never over an old one: an attempt's start record and its attempt record are two files ([execution outcomes](#execution-outcomes-and-attempts)).
+  - **Linux and macOS.** `os.rename` and `os.replace` silently replace an existing file there, so they aren't used. Trial Folio hard-links the temporary file to the final name with `os.link`, which fails if the name exists. It then removes the temporary name and syncs the directory.
+  - **Windows.** `os.rename` fails if the name exists, so it's used.
+  - **No hard links.** On Linux and macOS, a file system without hard links, such as FAT or exFAT, can't take these writes. The first atomic write, which for `run` is `configuration.yaml`, fails with `storage.write_failed`, before any request is sent, and the message says why. On Windows, `os.rename` works on those file systems.
+- **Syncing.** A sync is `os.fsync`.
+  - **macOS.** `fsync` doesn't flush the drive's write cache there, so Trial Folio calls `fcntl.fcntl` with `fcntl.F_FULLFSYNC` instead. Where the file system doesn't support it, such as some network volumes, Trial Folio falls back to `fsync`, and logs a warning that the write is less durable. R01-T08 verifies how macOS reports the lack of support.
+  - **New directories, on Linux and macOS.** A directory's entry is durable only once the directory holding it is synced. So before a file in a directory Trial Folio created counts as durable, it syncs each directory it created on the way, and the parent of the first one. That includes the start record's `cases/<case_id>/attempts/<attempt_id>/`.
+  - **Windows.** Python can't open a directory there to sync it, and `os.rename` doesn't ask for the rename to be written through to disk. So Trial Folio syncs files only. That's a limitation: after a power loss on Windows, the entry of any newly published file may be lost, in a new directory or an existing one, so a start record, an attempt record, or a saved response may be lost. R01-T08 verifies both behaviors on Windows.
 - **Completion.** A case is complete only after its required payload and its attempt record are durably written. The manifest is written last, and a missing or incomplete manifest means the output is incomplete.
 - **Hashes.** Hashes detect changes. They do not prove that a provider's data is scientifically correct, and they do not make local files tamper-proof.
 
@@ -568,9 +758,11 @@ Proposed layout for a 0.1.0 run; the release specification owns the final layout
   plan.json
   configuration.yaml                                byte-for-byte copy of the screen configuration
   cases/<case_id>/attempts/<attempt_id>/
-    attempt.json
+    started.json                                    start record, written before the request is sent
+    attempt.json                                    attempt record, written once when the attempt ends
     request.json                                    redacted
     response.json                                   the decoded response
+    response.raw                                    only for a 200 the wrapper couldn't decode: the body as received, labeled undecoded
   normalized/metrics.csv
   normalized/settings.csv
   report.html
@@ -583,19 +775,25 @@ The manifest records:
 
 - `schema_version`, `artifact_type` (`review`, `run`, or `experiment`), `trialfolio_version`, and the creation time in UTC.
 - The command and its non-secret options.
+- For a run or an experiment, the `plan_hash` and how the plan was approved: `interactive` or `option` ([approval](#approval)). The synthetic run `trialfolio demo` writes sends nothing, so its approval is `not_required`.
 - Every input and output artifact with its `artifact_id`.
 - Parser versions, `license_id`, and `notice_version`.
 - A capability statement of what the artifact does and does not contain. For example, it says whether return series are present, and states `statistical_validation: not_assessed` and `trading_readiness: not_assessed`.
-- Counts: results, cases, attempts by outcome, provider requests, retries, and returned cost or quota metadata.
+- Counts: results, cases, attempts by outcome, provider requests as the [JSON summary](#json-summary) counts them, retries, and returned cost or quota metadata.
 
 Raw files and JSON metadata come first, and normalized tables are CSV. Parquet MAY be added for large tables when needed. SQLite MAY later index outputs, but it MUST NOT become a first-release prerequisite or the only copy of any evidence.
 
 ## Canonical hashing
 
-Proposed default:
+Proposed default until 0.1.0 is Ready. These rules then become `canonicalization_version` 1, which plan 1.0.0 and `case_id` use (R01-T04), and any later change makes a new version.
 
 - Canonical JSON follows [RFC 8785, JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785.html), applied to the model's serialized form.
-- Decimal values are strings carrying their declared precision.
+- Decimal values are strings: a configuration decimal in its normalized form ([screen configuration](#screen-configuration)), and a metric value with exactly the digits its saved source carries. The exception is a provider request recorded as it's sent, such as a plan's `params`: its numbers stay JSON numbers ([ADR 0003](adrs/0003-versioned-research-artifacts.md), decision 6).
+- RFC 8785 differs from Python's `json.dumps` in two ways that matter here:
+  - **Numbers.** RFC 8785 writes a number as ECMAScript does, so a whole-number float such as the slippage `1.0` becomes `1`. The [decimals rules](#screen-configuration) keep every other value in plain notation, where the two agree.
+  - **Text.** `json.dumps` escapes non-ASCII text by default, so `Café` becomes `Caf\u00e9`, while RFC 8785 keeps the UTF-8 text.
+
+  So the canonical form needs an RFC 8785 implementation, never `json.dumps`. R01-T10 chooses one, and fixtures with a slippage of `1` and a non-ASCII title check it (R01-AC25).
 - Dates use `YYYY-MM-DD`. Datetimes are UTC ISO 8601 with a `Z` suffix.
 - Secrets are excluded by construction. Models that hold credentials are never serialized or hashed.
 - Hashes are SHA-256.
@@ -644,7 +842,7 @@ The command is `trialfolio`. Commands are introduced by release:
 
 | Command | Release | Purpose |
 |---|---|---|
-| `trialfolio run <config> --out <dir>` | 0.1.0 | Plan and execute one supported screen backtest |
+| `trialfolio run <config> --out <dir> [--approve <plan-hash>]` | 0.1.0 | Plan and execute one supported screen backtest, once its [plan is approved](#approval) |
 | `trialfolio report <run-dir> --out <dir>` | 0.1.0 | Re-render a saved run's report offline |
 | `trialfolio demo --out <dir>` | 0.1.0 | Proposed: write a synthetic example run, labeled synthetic, and render its report offline |
 | `trialfolio review <config> --out <dir>` | 0.2.0 | Compare saved runs offline |
@@ -653,9 +851,19 @@ The command is `trialfolio`. Commands are introduced by release:
 | `trialfolio license [--accept]` | 0.1.0 | Print the license, the full notice, and the acknowledgment status; `--accept` records the acknowledgment |
 
 - **stdout** carries the command's result: a short human summary, or with `--json` the [JSON summary](#json-summary).
-- **stderr** carries progress, warnings, and errors, which come from the same events as the log file.
+- **stderr** carries progress, warnings, and errors, which come from the same events as the log file. It also carries the [plan display](#approval) and the confirmation prompts, which are written directly and never logged, because they show configuration values.
 - **Output directory.** `review` and `run` create the output directory. They refuse to write into a directory that exists and is not empty (`output.not_empty`). There is no overwrite option in 0.1.0. `experiment` reuses an existing directory only to resume the same plan, as release 0.3.0 specifies.
-- **Validation first.** All inputs are validated before the output directory is created, so an invalid or unsupported input writes nothing.
+- **Claiming the directory.** A command that creates a new output checks the directory early, but another process can write to it before the command writes anything, for example while `run` waits for approval. So the command claims the directory with its first file. `experiment` resuming its own existing directory doesn't claim it; it takes the experiment lock instead, as release 0.3.0 specifies. The claim:
+  1. It creates the directory if it's absent, and any missing parent directories, one at a time, remembering which ones it created. A directory that another process creates first is used as it is, and not remembered.
+  2. It creates its first file directly under its final name, with an exclusive create that fails if the name exists, then writes and syncs it. No temporary file is involved, so nothing else is written into a directory that isn't claimed.
+  3. It lists the directory.
+
+  If the first file existed already, or the directory holds anything else, the claim fails with `output.not_empty`. Each command lists the directory only after its own file exists. So when two commands claim the same directory at once, at most one succeeds. If the directory disappears during the claim, because a competing claim that created it failed and removed it, the claim also fails with `output.not_empty`.
+
+  A command whose claim fails removes only what it created: the file it created, if any, and then the directories it remembers creating, deepest first, each only if it's empty. It removes each with `os.rmdir`, which never removes a non-empty directory. If another process has written there, that directory and its parents are left as they are, and the result is still `output.not_empty`. A command writes nothing else, logs included, into a directory it hasn't claimed.
+
+  A crash while the first file is written leaves it incomplete. A saved `plan.json` is checked against its hash, and there's no manifest, so the output is visibly incomplete.
+- **Validation first.** All inputs are validated before the output directory is created, so an invalid or unsupported input creates no output. An interactive license acknowledgment, which comes first, still writes its own record.
 - **Partial success.** A command that finishes with some cases failed, skipped, or uncertain writes complete accounting and exits with code 6.
 
 Exit codes (proposed default):
@@ -665,9 +873,9 @@ Exit codes (proposed default):
 | 0 | Command completed and outputs were written. This says nothing about any strategy. |
 | 1 | Unexpected internal error |
 | 2 | Usage error: invalid arguments, missing plan approval, or license not acknowledged |
-| 3 | Invalid or unsupported configuration, input, or artifact |
+| 3 | Invalid or unsupported configuration, input, artifact, or environment |
 | 4 | Output problem: directory not empty, write failure, or experiment locked by another process |
-| 5 | Provider error: authentication, quota, unsupported capability, or invalid response |
+| 5 | Provider error: authentication, provider unavailable, quota, unsupported capability, rejected request, uncertain outcome, or invalid response |
 | 6 | Partial completion: at least one planned case failed, was skipped, or is uncertain |
 | 130 | Interrupted by the user |
 
@@ -682,10 +890,10 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
 | `trialfolio_version` | Application version |
 | `outcome` | `completed`, `partial`, or `failed` |
 | `exit_code` | The process exit code |
-| `ids` | Identifiers the command created, for example `{"review_id": "…"}`. Empty when it created none. |
+| `ids` | Identifiers the command created, for example `{"review_id": "…"}`. For `run`: `plan_hash` and `case_id` once the plan is built, even if it isn't approved, and `attempt_id` whenever an attempt record or a start record exists, including after a failed authentication. Empty when it created none. |
 | `output_dir` | The output directory as given on the command line. `null` if none was created. |
 | `outputs` | Output files relative to `output_dir`, keyed by role: `manifest`, `report`, `metrics`, `settings`, `differences` |
-| `counts` | For `run`: `attempts`, `provider_requests`, `metrics_unavailable`, `warnings`, and the credit `cost` when the provider reports it. For `review` (0.2.0): `results`, `settings_flagged`, `metrics_unavailable`, `warnings`. |
+| `counts` | For `run`: `attempts`; `provider_requests`, the sends of the planned request that may have reached Portfolio123, never authentication ([HTTP exchanges](#http-exchanges)), which the [budget](#budget-and-retries) limits; `metrics_unavailable`; `warnings`; and the credit `cost` when the provider reports it. For `review` (0.2.0): `results`, `settings_flagged`, `metrics_unavailable`, `warnings`. |
 | `statistical_validation`, `trading_readiness` | `not_assessed` in every 0.x release that doesn't assess them |
 | `error` | `null`, or `{"code": …, "message": …}` using the codes in [errors](#errors) |
 
@@ -724,18 +932,22 @@ The core raises typed errors with stable dotted codes and actionable messages. O
 | `input.not_found` | 3 | A referenced file does not exist |
 | `input.not_a_run` | 3 | An input directory is not a complete Trial Folio run: its manifest is missing, or its files don't match their hashes. The message names the problem. |
 | `artifact.unknown_schema_version` | 3 | An artifact's schema version has no reader |
+| `environment.unsupported` | 3 | The installed `p123api`, `requests`, or `urllib3` isn't a verified version, or `requests` would write request bodies with `simplejson` ([plan contents](#plan-contents)). It's found before the plan is shown, so nothing is sent and no output is created. The message names the verified versions and how to restore them. Exit 3, like an unsupported input, because the fix is local. |
 | `license.not_acknowledged` | 2 | A data-processing command ran without an acknowledgment of the current license and notice versions |
-| `plan.approval_required` | 2 | A charged or mutating operation was requested without the matching plan hash |
-| `plan.changed` | 3 | The configuration no longer resolves to the approved or saved plan |
+| `plan.approval_required` | 2 | A charged or mutating operation was requested without the matching plan hash: no `--approve`, a different hash, or a refused confirmation |
+| `plan.changed` | 3 | The configuration no longer resolves to a saved plan, for example when resuming an experiment (0.3.0). A hash given with `--approve` that doesn't match is `plan.approval_required`. |
 | `output.not_empty` | 4 | The output directory exists and is not empty |
-| `storage.write_failed` | 4 | An artifact could not be written durably |
+| `storage.write_failed` | 4 | An artifact could not be written durably. This is the code even when a request was already sent; the attempt record still gives the outcome ([endings that decide the error code](#endings-that-decide-the-error-code)). |
 | `experiment.locked` | 4 | Another process holds the experiment lock |
-| `provider.auth_failed` | 5 | Credentials were rejected or missing |
+| `provider.auth_failed` | 5 | Credentials were missing, Trial Folio's authentication call got a 400, 401, 402, 403, or 406, or Portfolio123 refused a request's authorization with a 401 or 403 |
+| `provider.unavailable` | 5 | Portfolio123 couldn't be reached, or didn't complete Trial Folio's authentication call: that call got a 5xx or no complete response, or the request's connection was never established ([HTTP exchanges](#http-exchanges)). Either way, the request wasn't sent. |
 | `provider.quota_exceeded` | 5 | The provider refused the request because of quota or credits |
-| `provider.unsupported_capability` | 5 | The requested setting or operation is not supported by the verified provider path |
-| `provider.response_invalid` | 5 | The response was saved but failed validation |
-| `provider.outcome_unknown` | 5 | A request may have been sent, but no response was durably recorded, for example after a read timeout; it is never retried automatically |
+| `provider.unsupported_capability` | 5 | Portfolio123 rejected the request with a 400: a setting or operation the verified provider path doesn't support. The request may have been charged. |
+| `provider.request_rejected` | 5 | Portfolio123 answered Trial Folio's authentication call or the request with a status below 500 that no other code covers, such as a 204, 3xx, 404, or 429. The message gives the status, and Portfolio123's sanitized message when the wrapper's exception message carries one. After a refused second exchange, such as a redirect, there's none ([HTTP exchanges](#http-exchanges)). |
+| `provider.response_invalid` | 5 | The response was saved but failed validation, or couldn't be decoded and was saved undecoded as `response.raw` |
+| `provider.outcome_unknown` | 5 | A request may have been sent, but no response was durably recorded: for example after a read timeout or a 5xx. It is never retried automatically. |
 | `execution.partial` | 6 | Some planned cases did not succeed; all are accounted for |
+| `command.interrupted` | 130 | The user interrupted the command, for example with Ctrl-C. The message says whether a request may have been sent, as the attempt record does ([interrupts](#interrupts)). |
 | `internal.unexpected` | 1 | A defect; the message asks the user to report it with the log location |
 
 ## Interface-independent core
@@ -783,13 +995,18 @@ Development credentials are handled as [AGENTS.md](../AGENTS.md#credentials-and-
 - **Local only.** No log handler, trace or metrics exporter, crash reporter, analytics call, or update check sends anything off the machine. The only outbound traffic is provider requests the user invokes or explicitly enables. Telemetry built into dependencies is disabled.
 - **Content.** Logs never contain credentials, strategy definitions, formulas, configuration values, provider payloads, results, or input file contents, at any level. Artifacts are referenced by ID and hash instead. Validation errors are logged with `errors(include_input=False)`, or with `hide_input_in_errors` enabled, and logged tracebacks omit local variables.
 - **Mechanism (proposed default).** The standard `logging` module, with no added dependency. Core modules use `logging.getLogger(__name__)` and never configure handlers; the CLI configures them.
-- **Format.** Log files hold one JSON object per line with these snake_case fields: `timestamp` (UTC ISO 8601), `level`, `event` (a stable dotted name), `message`, `trialfolio_version`, `component`, and the applicable `review_id`, `case_id`, `attempt_id`, `request_id`, and `parent_id`. The terminal shows human-readable messages on stderr from the same events.
+- **Format.** Log files hold one JSON object per line with these snake_case fields: `timestamp` (UTC ISO 8601), `level`, `event` (a stable dotted name), `message`, `trialfolio_version`, `component`, and the applicable `review_id`, `plan_hash`, `case_id`, `attempt_id`, `request_id`, and `parent_id`. The terminal shows human-readable messages on stderr from the same events.
 - **Levels.** ERROR for a failed operation, WARNING for a degraded condition the command continues through, INFO for lifecycle milestones, and DEBUG for diagnostic detail.
 - **Tracing.** Start and end events carry duration and outcome for each command, case, attempt, and provider request, linked by IDs, and this serves as the trace. OpenTelemetry is adopted only through an ADR, with local file exporters only.
 - **Metrics.** There is no metrics system. Per-run counts and durations go in the manifest.
-- **Storage.** Logs go to `logs/` inside the output directory, or to a per-user local log directory for commands without one. Log size is bounded by rotation. The README documents the locations and how to delete them.
+- **Storage.** Logs go to `logs/` inside the output directory, or to the per-user log directory for commands without one, such as `trialfolio license`. A command with an output directory holds its events in memory until it has [claimed the directory](#cli-behavior). If it stops before then, including when the claim fails, it writes no log file, and its messages appear only on stderr. The exception is `internal.unexpected`: the command then writes the held events to the per-user log directory, and its message names that file. Log size is bounded by rotation. The README documents the locations and how to delete them.
+- **The per-user log directory** follows the same pattern as the [acknowledgment record](#license-acknowledgment), in each platform's conventional place for logs:
+  - `TRIALFOLIO_LOG_DIR`, if set
+  - otherwise `$XDG_STATE_HOME/trialfolio/logs` or `~/.local/state/trialfolio/logs` on Linux
+  - `~/Library/Logs/trialfolio` on macOS
+  - `%LOCALAPPDATA%\trialfolio\logs` on Windows
 
-Initial event names: `cli.command.started`, `cli.command.completed`, `review.input.loaded`, `artifact.write.completed`, `report.render.completed`, `plan.created`, `attempt.started`, `attempt.completed`, `provider.request.started`, `provider.request.completed`, `provider.request.failed`, `case.completed`, `experiment.resumed`.
+Initial event names: `cli.command.started`, `cli.command.completed`, `review.input.loaded`, `artifact.write.completed`, `report.render.completed`, `plan.created`, `plan.approved`, `attempt.started`, `attempt.completed`, `provider.request.started`, `provider.request.completed`, `provider.request.failed`, `case.completed`, `experiment.resumed`.
 
 ## Fixtures
 
@@ -820,5 +1037,4 @@ JSON Schemas are generated from the models, never maintained by hand, and commit
 
 | Question | Impact | Recommended default | Resolve by |
 |---|---|---|---|
-| What is the non-interactive plan-approval option called? | CLI contract for 0.1.0 | `--approve <plan-hash>` | 0.1.0 task R01-T04 |
-| Are failed screen-backtest requests charged? | Budget accounting for failed and uncertain attempts | Count them against the budget as possibly charged until verified | 0.1.0 reference call or live check |
+| Are failed screen-backtest requests charged? | Budget accounting for failed and uncertain attempts | Until verified, count every send that may have reached Portfolio123 as possibly charged, whatever its outcome, and no other ([possibly charged](#http-exchanges)) | 0.1.0 reference call or live check |

@@ -13,7 +13,9 @@ At each release, regenerate the component tables from the resolved dependency se
 | Component | Role | Planned from | License |
 |---|---|---|---|
 | pydantic | Contracts: validation and serialization | 0.1.0 | MIT |
-| p123api | Portfolio123 API wrapper; the only Portfolio123 code dependency | 0.1.0 | MIT |
+| p123api | Portfolio123 API wrapper; the only Portfolio123 code dependency. Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | 0.1.0 | MIT |
+| requests | HTTP client under p123api. Trial Folio's transport adapter subclasses its `HTTPAdapter` ([ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)). Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | 0.1.0 | Apache-2.0 |
+| urllib3 | HTTP library under requests. The adapter reads its connection errors ([ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)). Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | 0.1.0 | MIT |
 
 Record any other dependency here when it's chosen, for example a YAML parser or a templating library.
 
