@@ -11,7 +11,8 @@ Prepared on October 1, 2026. Provider observations are documentation and source-
 **Owner decisions recorded on 2026-10-01.** These supersede conflicting text below. The current record is the decision table in [spec.md](spec.md#owner-decisions-and-defaults).
 
 - The product is **Trial Folio**. The repository and the CLI command are `trialfolio`.
-- No representative export or provider payload exists yet. The owner keeps Portfolio123 API credentials in a secret manager. Reference data is procured with them when a release needs it, and the owner performs any Portfolio123 web-UI steps on request.
+- Trial Folio builds on the Portfolio123 API only and does not integrate with DataMiner. Release 0.1.0 is API execution, 0.2.0 reviews saved runs, and 0.3.0 runs experiments ([ADR 0005](adrs/0005-build-on-the-portfolio123-api-only.md)). This supersedes sections 5 and 8 where they conflict.
+- No representative provider response exists yet. The owner keeps Portfolio123 API credentials in a secret manager. Reference data is procured with them when a release needs it, and the owner performs any Portfolio123 web-UI steps on request.
 - The project is the engine for reproducing published factor research. Project materials do not name any publication or brand.
 - Nathan Slaughter adopts the license himself. Counsel review is not a condition of adopting the license or of release.
 - Generated reports contain no scripts, count as output rather than covered code, and may be shared with the concise notice intact. Users remain responsible for data-provider terms.
