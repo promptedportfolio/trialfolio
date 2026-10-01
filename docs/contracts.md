@@ -113,7 +113,7 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 
 **Verified values.** Following [D-20](spec.md#decisions), the configuration accepts only values a recorded live call has verified. Free-form values, such as universe names, benchmark symbols, formulas, holdings counts, and slippage, are verified by form: R01-T01 sent one of each, and Portfolio123 accepted them.
 
-- **Verified by R01-T01:** a formula ranking, `rebalance_weeks` 4, `open`, `complete`, precision 4, and a fractional slippage. A whole-number slippage is sent as a JSON integer, a form no call has verified yet ([decimals](#screen-configuration), [0.1.0 open questions](releases/0.1.0-api-execution.md#open-questions)).
+- **Verified by R01-T01:** a formula ranking, `rebalance_weeks` 4, `open`, `complete`, precision 4, and a slippage sent as a JSON float, the form every slippage takes ([decimals](#screen-configuration)).
 - **Verified by R01-T05 before 0.1.0 is Ready:** `rebalance_weeks` 1, ranking by name, and ranking by ID, each in its own call. A value that fails its check is removed from these tables.
 - **Documented but not accepted until a release verifies them:**
   - `max_holdings` 0, meaning no limit
@@ -148,12 +148,10 @@ Either one fails with `config.invalid`, and the message names the supported form
   - **Form.** It's written in plain notation: digits, optionally followed by a decimal point and more digits. There's no sign, exponent, or leading zero before another digit, so `2.5e-1`, `-0.25`, `.25`, and `00.25` are rejected. A whole number such as `0` or `1` is accepted.
   - **Normalization.** Before it's recorded, hashed, or compared, trailing zeros after the decimal point are removed, and then the point if no digits follow it. So `0.250` and `0.25` are the same setting, and so are `1.0` and `1`.
   - **Limits.** After normalization, it has at most 15 significant digits, at most 4 digits after the decimal point, and is less than 10^16. A value outside these limits fails with `config.invalid`.
-  - **On the wire.** `requests` writes the request body with Python's `json` module, or with `simplejson` if it's installed. `json` writes a float in its shortest round-trip form, and an integer as its digits; R01-T09 checks that `simplejson` does the same. So Trial Folio sends a decimal in a form whose JSON text equals its normalized form:
-    - **A whole number,** such as `1`, is sent as an integer, `1`. Sent as a float, it would be written `1.0`.
-    - **Any other value** is sent as a float. Most values, such as `0.1`, have no exact binary form. But a value of up to 15 significant digits survives the round trip through binary floating point: its shortest round-trip form has exactly its digits.
+  - **On the wire.** Every decimal is sent as a JSON float, the type R01-T01 verified with `0.25`, never as an integer. `requests` writes the request body with Python's `json` module, or with `simplejson` if it's installed. `json` writes a float in its shortest round-trip form; R01-T09 checks that `simplejson` does the same. So the JSON text of a decimal is its normalized form, with `.0` added to a whole number:
+    - **A whole number,** such as `1` (1%), is sent as `1.0`.
+    - **Any other value,** such as `0.25` (0.25%, or 25 basis points), is sent with exactly its digits. Most values, such as `0.1`, have no exact binary form. But a value of up to 15 significant digits survives the round trip through binary floating point: its shortest round-trip form has exactly its digits.
     - **No exponent.** `json` writes a float with an exponent below 0.0001 or from 10^16 up, for example `0.00001` as `1e-05`. R01-T01 verified only plain notation, and the limits keep every value in it.
-
-    R01-T01 sent only a fractional slippage, `0.25`. A whole-number slippage sent as an integer is unverified ([0.1.0 open questions](releases/0.1.0-api-execution.md#open-questions)).
   - **Not a string.** A number written as a string is rejected.
 - **Dates.** `end_date` is later than `start_date`.
 - **Formulas.** Formulas are the user's strategy definition. They're sent and saved, but never logged. Write them in single quotes. Portfolio123 formulas often contain double quotes, which single quotes keep as they are. YAML processes no escapes inside single quotes, and a single quote inside one is written twice (`''`).
@@ -630,7 +628,7 @@ Each case holds:
 | `requests` | The provider requests the case needs, in order, each with an `operation` and its `params`. Exactly one in 0.1.0. |
 | `settings` | Every row of the [screen settings](#screen-settings), in that order, with the `settings.csv` columns except `label`, `original_key`, `original_value`, and `source_artifact`. `provenance` is replaced by `expected_provenance`. |
 
-**The 0.1.0 request.** Its `operation` is `screen_backtest`: `p123api`'s `screen_backtest`, which sends `POST /screen/backtest`. Its `params` is the JSON object passed to the wrapper, exactly as it will be sent. Its numbers are JSON numbers, in the form the [decimals rules](#screen-configuration) give, so a whole-number slippage is the integer `1`, never `1.0`, and the request body's text for each number equals its text in `params`. It holds no credentials; the wrapper sends those separately.
+**The 0.1.0 request.** Its `operation` is `screen_backtest`: `p123api`'s `screen_backtest`, which sends `POST /screen/backtest`. Its `params` is the JSON object passed to the wrapper, exactly as it will be sent. Its numbers are JSON numbers, in the form the [decimals rules](#screen-configuration) give, so a whole-number slippage is the float `1.0`, never the integer `1`, and the request body's text for each number equals its text in `params`. Each parameter's JSON type is fixed: `slippage` is always a float, and the other numbers are always integers. So the plan hash, which covers the values, also fixes the text sent, although RFC 8785 writes `1.0` as `1` ([canonical hashing](#canonical-hashing)). It holds no credentials; the wrapper sends those separately.
 
 **Settings in the plan.**
 
@@ -779,7 +777,11 @@ Proposed default until 0.1.0 is Ready. These rules then become `canonicalization
 
 - Canonical JSON follows [RFC 8785, JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785.html), applied to the model's serialized form.
 - Decimal values are strings: a configuration decimal in its normalized form ([screen configuration](#screen-configuration)), and a metric value with exactly the digits its saved source carries. The exception is a provider request recorded as it's sent, such as a plan's `params`: its numbers stay JSON numbers ([ADR 0003](adrs/0003-versioned-research-artifacts.md), decision 6).
-- RFC 8785 writes a number as ECMAScript does. For the numbers 0.1.0 sends, that's the same text Python's `json` writes, because the [decimals rules](#screen-configuration) send a whole number as an integer and keep every other value in plain notation. RFC 8785 still differs from `json.dumps` elsewhere: `json.dumps` escapes non-ASCII text by default, so `Café` becomes `Café`, while RFC 8785 keeps the UTF-8 text. So the canonical form needs an RFC 8785 implementation, never `json.dumps`. R01-T10 chooses one, and a fixture with a non-ASCII title checks it (R01-AC25).
+- RFC 8785 differs from Python's `json.dumps` in two ways that matter here:
+  - **Numbers.** RFC 8785 writes a number as ECMAScript does, so a whole-number float such as the slippage `1.0` becomes `1`. The [decimals rules](#screen-configuration) keep every other value in plain notation, where the two agree.
+  - **Text.** `json.dumps` escapes non-ASCII text by default, so `Café` becomes `Caf\u00e9`, while RFC 8785 keeps the UTF-8 text.
+
+  So the canonical form needs an RFC 8785 implementation, never `json.dumps`. R01-T10 chooses one, and fixtures with a slippage of `1` and a non-ASCII title check it (R01-AC25).
 - Dates use `YYYY-MM-DD`. Datetimes are UTC ISO 8601 with a `Z` suffix.
 - Secrets are excluded by construction. Models that hold credentials are never serialized or hashed.
 - Hashes are SHA-256.
