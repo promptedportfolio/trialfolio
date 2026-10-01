@@ -1,0 +1,405 @@
+Nathan Slaughter Personal Research License
+Version 1.0
+License identifier: LicenseRef-NSPRL-1.0
+Status: Draft — not yet adopted
+
+Copyright (c) 2026 Nathan Slaughter
+
+This text has no effect until Nathan Slaughter adopts it. Adoption is
+recorded by changing the status line above to "Adopted" with the adoption
+date (for example, "Status: Adopted 2026-10-15") and making the same change
+in docs/adrs/0004-custom-personal-research-license.md.
+
+DRAFTING NOTES (delete this block when the license is adopted)
+- The definition of Personal Research (section 1.10) is proposed and
+  awaits the author's confirmation.
+- All other terms reflect the author's decisions recorded on 2026-10-01.
+- See docs/licensing-policy.md, "Outstanding decisions".
+
+
+0. About this license
+
+This is a source-available license. It is not an open-source license. It
+has not been approved by the Open Source Initiative, and it does not grant
+the freedoms the Open Source Definition requires. It limits who may use the
+Covered Software and reserves publication and distribution to the Licensor.
+
+
+1. Definitions
+
+1.1  "Licensor" means Nathan Slaughter.
+
+1.2  "Covered Software" means the Trial Folio software and associated
+     project materials that the Licensor has the right to license and makes
+     available under this license, in any version, and any portion of them.
+     It includes source code, object code, documentation, examples,
+     templates, stylesheets, configuration formats, schemas, tests, and
+     fixtures. It does not include Third-Party Components or Outputs.
+
+1.3  "Modification" means any change to, addition to, deletion from,
+     translation of, or other work based on any portion of the Covered
+     Software. Every restriction this license places on the Covered
+     Software also applies to Modifications.
+
+1.4  "Third-Party Component" means software or other material that is
+     included with or used by the Covered Software and is licensed by
+     someone other than the Licensor under separate terms.
+
+1.5  "You" means the natural person exercising rights under this license.
+
+1.6  "Eligible Individual" means a natural person who is not a
+     Professional User and who uses the Covered Software only on their own
+     behalf, not on behalf of an Organization.
+
+1.7  "Professional User" means an individual to whom any one or more of
+     the following applies:
+
+     (a) the individual has more than US $5,000,000 in Liquid Assets;
+     (b) the individual makes investment decisions for anyone other than
+         themselves and their Family Members; or
+     (c) the individual Resells Research about stocks as their Primary
+         Source of Income.
+
+     These conditions are alternatives; any one of them is enough. Liquid
+     Assets of exactly US $5,000,000 do not meet condition (a). Condition
+     (b) applies whether or not the individual is paid. Conditions (a) and
+     (c) apply even when the individual intends to use the Covered Software
+     only for their own research.
+
+1.8  "Liquid Assets" means cash, cash equivalents, and readily marketable
+     financial assets that the individual beneficially owns, valued in U.S.
+     dollars, excluding retirement accounts.
+
+1.9  "Family Members" means the members of an individual's family. This
+     license does not further define the term.
+
+1.10 "Personal Research" means private analysis by an Eligible Individual
+     for their own purposes, including research for investment decisions
+     concerning themselves and their Family Members. It does not include
+     work for an employer or other Organization, services to clients or
+     other persons, or redistribution.
+
+1.11 "Primary Source of Income" means a source that provides more than
+     half of the individual's total income.
+
+1.12 "Resell Research" means to provide research about stocks to other
+     persons for compensation, whether the individual produced the research
+     or obtained it from others.
+
+1.13 "Organization" means any company, partnership, trust, fund,
+     association, government body, nonprofit, or other entity that is not a
+     natural person.
+
+1.14 "Public Project" means any project, repository, package, product,
+     publication, or service that is available to the public or to any
+     group of people beyond You, whether it is free, paid, commercial,
+     nonprofit, source available, or open source.
+
+1.15 "Published Code" means source code, object code, or other code that
+     is published, distributed, or otherwise made available to any person
+     other than You, in any form and by any means.
+
+1.16 "Hosted Service" means making the Covered Software, or functionality
+     it provides, available over a network to any person other than You,
+     including as a web application, API, or managed service. Access by
+     Your Family Members that section 6.2 permits is not a Hosted Service.
+
+1.17 "Output" means data, files, and other results that the Covered
+     Software generates from Your inputs, including normalized data,
+     manifests, and Reports.
+
+1.18 "Report" means a human-readable report, such as an HTML file, that
+     the Covered Software generates, in the form in which it was generated.
+
+1.19 "Written Permission" means permission that meets section 10.
+
+1.20 "Contributor" means any person other than the Licensor whose
+     contribution the Licensor has accepted into the Covered Software.
+
+
+2. Personal research grant
+
+2.1  If You are an Eligible Individual and You comply with this license,
+     the Licensor grants You a personal, non-exclusive, non-transferable,
+     non-sublicensable, royalty-free license, for Personal Research only,
+     to:
+
+     (a) download, install, and run the Covered Software;
+     (b) make the copies reasonably necessary for that use, including
+         private backups; and
+     (c) make private Modifications and run them.
+
+2.2  Your copies and Modifications must stay private: kept on devices,
+     accounts, and storage that only You can access.
+
+2.3  This license grants no right to publish, distribute, sublicense,
+     sell, lend, or otherwise supply the Covered Software or any
+     Modification to anyone else, except as Written Permission allows.
+     Section 7 covers Outputs.
+
+2.4  All rights not expressly granted are reserved. No right is granted by
+     implication, estoppel, or otherwise. No trademark right is granted.
+
+
+3. Professional Users
+
+3.1  A Professional User must obtain the Licensor's prior express Written
+     Permission before using the Covered Software for any purpose.
+
+3.2  If You become a Professional User, You must obtain Written Permission
+     before You continue to use the Covered Software.
+
+3.3  "Professional User" is a category of this license only. It is not a
+     statement about investment-adviser registration, accredited-investor
+     or qualified-purchaser status, or eligibility for any legal exemption.
+     This license does not authorize anyone to provide regulated services.
+
+
+4. Organizations
+
+Organizations, and individuals using the Covered Software on an
+Organization's behalf, including for an employer, are outside the grant in
+section 2. They must obtain Written Permission before any use.
+
+
+5. Public projects, published code, and reserved uses
+
+5.1  No person may incorporate the Covered Software, any portion of it, or
+     any Modification into any Public Project or any Published Code without
+     the Licensor's prior express Written Permission. This applies whether
+     the receiving project is free, paid, commercial, nonprofit, source
+     available, or open source.
+
+5.2  The following uses are also reserved. Each requires the Licensor's
+     prior express Written Permission, whether or not the Covered Software
+     has been modified:
+
+     (a) publishing, redistributing, sublicensing, selling, lending, or
+         otherwise supplying copies to anyone else;
+     (b) public forks and other public copies of the source;
+     (c) vendoring the source into other software;
+     (d) packages, and binaries, executables, or archives that contain the
+         code;
+     (e) container images and virtual-machine images that contain the code;
+     (f) notebooks or other documents that contain copied code; and
+     (g) Hosted Services that incorporate the Covered Software.
+
+5.3  Written Permission to use the Covered Software as a Professional User
+     or for an Organization does not include any right under this section
+     unless it says so expressly.
+
+
+6. Local operation
+
+6.1  Running the Covered Software on a machine You control, for Your own
+     Personal Research, is not a Hosted Service.
+
+6.2  You may let Your Family Members use the Covered Software or its
+     functionality through an interface You run on a machine You control,
+     for Personal Research. That use is not a Hosted Service. You are
+     responsible for their use complying with this license.
+
+6.3  Letting any other person use the Covered Software or its
+     functionality through an interface You run is a Hosted Service under
+     section 5.2(g) and requires Written Permission.
+
+
+7. Reports and other Outputs
+
+7.1  Outputs are not Covered Software. The Licensor claims no ownership,
+     through this license, of Your inputs, Your numerical findings, or
+     third-party data.
+
+7.2  You may share or publish Reports You generated, provided the concise
+     research notice in each Report (Appendix A, part 2) stays intact and
+     unaltered.
+
+7.3  This license does not restrict sharing Outputs other than Reports.
+
+7.4  Material of the Covered Software that is taken out of an Output and
+     used separately, such as templates, stylesheets, markup structure, or
+     code, remains Covered Software. Sections 7.2 and 7.3 do not permit
+     publishing the Covered Software, its templates, or any code.
+
+7.5  You are responsible for complying with the terms of any data provider,
+     including Portfolio123, that cover provider data contained in an
+     Output You share or publish.
+
+
+8. Third-party components
+
+Third-Party Components are licensed under their own terms, and those terms
+govern them. This license does not restrict any right those terms grant,
+and the Licensor claims no rights in material he does not own. If this
+license and a Third-Party Component's license conflict about that
+component, the component's own license controls.
+
+
+9. Notices and acknowledgment of research limitations
+
+9.1  Keep the following intact in every copy and Modification: the
+     copyright notice, this license, CONTACT.md, THIRD_PARTY_NOTICES.md,
+     and docs/disclaimers.md. Do not remove or alter the notices the
+     Covered Software places in Reports or in its interfaces.
+
+9.2  By using the Covered Software, You acknowledge that You have read the
+     research and financial-result notice in Appendix A, that You
+     understand the limitations of backtested, simulated, and hypothetical
+     results, and that nothing in the Covered Software or its Outputs
+     represents or promises that You or anyone else can realize any
+     financial gain.
+
+
+10. Written Permission
+
+10.1 Written Permission must be express, in writing, and sent or signed by
+     the Licensor. It must identify the recipient, the permitted scope, any
+     duration, and any publication or distribution rights.
+
+10.2 None of the following is Written Permission: an inquiry, silence, a
+     lack of objection, an automatic reply, attribution, a donation, or the
+     purchase of an unrelated product.
+
+10.3 Written Permission grants only what it states. On any matter it does
+     not address, this license applies.
+
+10.4 Send requests to nathan@nathanslaughter.com, as described in
+     CONTACT.md.
+
+
+11. Acceptance
+
+By downloading, installing, copying, modifying, or using the Covered
+Software, You accept this license. If You do not accept it, You have no
+right to do any of those things. If You are not an Eligible Individual and
+have no Written Permission, You may not use the Covered Software.
+
+
+12. Termination
+
+12.1 Your rights under this license end automatically if You breach it.
+
+12.2 The Licensor may reinstate terminated rights in writing.
+
+12.3 When Your rights end, You must stop using the Covered Software and
+     delete the copies and Modifications in Your possession. You may keep
+     the Outputs You generated, subject to section 7.
+
+
+13. Survival
+
+Sections 1, 7.1, 7.4, 7.5, 8, 12.3, and 13 through 19 survive the end of
+Your rights under this license.
+
+
+14. No warranty
+
+AS IS; AS AVAILABLE; WITH ALL FAULTS. TO THE MAXIMUM EXTENT PERMITTED BY
+APPLICABLE LAW, THE COVERED SOFTWARE AND ALL ASSOCIATED MATERIALS AND
+OUTPUTS ARE PROVIDED WITHOUT ANY WARRANTY, REPRESENTATION, GUARANTEE, OR
+CONDITION, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE. THIS INCLUDES
+WARRANTIES OR CONDITIONS OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, TITLE, NON-INFRINGEMENT, SATISFACTORY QUALITY, ACCURACY,
+COMPLETENESS, TIMELINESS, RELIABILITY, AVAILABILITY, SECURITY,
+COMPATIBILITY, AND THOSE ARISING FROM COURSE OF DEALING, USAGE OF TRADE, OR
+COURSE OF PERFORMANCE.
+
+NO WARRANTY IS MADE THAT THE COVERED SOFTWARE IS ERROR-FREE, UNINTERRUPTED,
+FREE OF HARMFUL COMPONENTS, SUITABLE FOR ANY PARTICULAR PERSON OR
+INVESTMENT, OR CAPABLE OF PRODUCING ANY FINANCIAL BENEFIT. NO DUTY TO
+PROVIDE SUPPORT, UPDATES, CORRECTIONS, OR CONTINUED DATA OR SERVICE ACCESS
+IS UNDERTAKEN EXCEPT UNDER A SEPARATE EXPRESS WRITTEN AGREEMENT.
+
+
+15. Limitation of liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, NATHAN SLAUGHTER AND THE
+CONTRIBUTORS ARE NOT LIABLE FOR LOSSES OR DAMAGES ARISING FROM ACCESS TO,
+USE OF, RELIANCE ON, OR INABILITY TO USE THE COVERED SOFTWARE OR ITS
+OUTPUTS. THIS LIMITATION INCLUDES DIRECT, INDIRECT, INCIDENTAL,
+CONSEQUENTIAL, SPECIAL, EXEMPLARY, AND PUNITIVE DAMAGES; INVESTMENT OR
+TRADING LOSSES; LOST PROFITS, OPPORTUNITIES, SAVINGS, DATA, OR GOODWILL;
+BUSINESS INTERRUPTION; AND THIRD-PARTY CLAIMS, WHETHER ASSERTED IN
+CONTRACT, TORT, INCLUDING ORDINARY NEGLIGENCE WHERE LAWFULLY LIMITABLE,
+STRICT LIABILITY, OR OTHERWISE, EVEN IF THE POSSIBILITY OF SUCH LOSS WAS
+KNOWN.
+
+
+16. Rights preserved by law
+
+NOTHING IN THIS LICENSE EXCLUDES OR LIMITS LIABILITY, WARRANTIES,
+REMEDIES, OR RIGHTS THAT APPLICABLE LAW DOES NOT ALLOW TO BE EXCLUDED,
+LIMITED, OR WAIVED. THIS INCLUDES ANY APPLICABLE NON-WAIVABLE
+SECURITIES-LAW OR CONSUMER-PROTECTION RIGHTS AND LIABILITY FOR FRAUD,
+WILLFUL MISCONDUCT, GROSS NEGLIGENCE, OR OTHER CONDUCT TO THE EXTENT ITS
+EXCLUSION IS PROHIBITED.
+
+This license does not restrict any right that applicable law does not
+allow a license to restrict.
+
+
+17. Governing law
+
+This license is governed by the laws of the State of Texas, without regard
+to its conflict-of-laws rules, except where mandatory applicable law
+requires otherwise.
+
+
+18. Severability
+
+If a court holds any provision of this license unenforceable, that
+provision is enforced to the maximum extent permitted, and the rest of the
+license remains in effect.
+
+
+19. Future versions
+
+The Licensor may publish new versions of this license under new
+identifiers. The Covered Software is licensed under the version that
+accompanies it. A new version does not change the terms that apply to a
+copy You received under an earlier version.
+
+
+Appendix A. Research and financial-result notice (Notice version 1.0)
+
+This appendix must match docs/disclaimers.md word for word.
+
+Part 1. Full notice
+
+This software, its documentation, examples, analyses, and outputs are
+provided for general research and informational purposes. They do not
+constitute personalized investment, financial, legal, accounting, or tax
+advice, an offer or solicitation concerning any security, or a
+recommendation to buy, sell, hold, or apply any investment strategy. Use of
+the software does not itself establish an advisory, fiduciary, brokerage,
+or client relationship with Nathan Slaughter or the project's contributors.
+
+Historical, hypothetical, simulated, and backtested results are not actual
+trading results unless expressly identified and supported as such. They
+depend on data, assumptions, modeling choices, and historical conditions
+and may be affected by hindsight, selection bias, overfitting, incomplete
+data, revisions, liquidity constraints, and costs or execution effects that
+are omitted or inaccurately modeled. Statistical significance does not
+establish future profitability or practical tradability.
+
+No result, ranking, score, comparison, example, or statement represents or
+promises that any person could or will realize financial gains, outperform
+a benchmark, avoid losses, or obtain similar results by investing in any
+security or applying any strategy. Past or simulated performance is not a
+reliable assurance of future results. Investments can lose some or all of
+their value; leveraged positions may produce losses beyond the initial
+capital.
+
+Users are responsible for independently evaluating information, obtaining
+appropriate professional advice, complying with applicable law and
+third-party terms, and making their own decisions. Nathan Slaughter does
+not undertake through this software to assess any user's financial
+situation, suitability, objectives, or tolerance for loss.
+
+Part 2. Concise report notice
+
+Research output only. Backtested and hypothetical results do not represent
+achievable returns. No financial gain, future performance, suitability, or
+protection from loss is represented or promised. This report is not
+personalized investment advice. See the full license and research
+limitations.
