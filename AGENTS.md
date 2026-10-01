@@ -2,7 +2,11 @@
 
 Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and eventually evaluating Portfolio123 strategy evidence with scientific discipline. This file is the entry point for coding agents. It links to the documents that own each requirement; it does not repeat them.
 
-**Current state (2026-10-01):** Specifications only. No application code, models, schemas, fixtures, or working commands exist. The next implementable release is [0.1.0](docs/releases/0.1.0-review.md). It becomes Ready once its specification tasks are done: the reference exports are procured (R01-T01) and documented (R01-T02), and the specification is finished (R01-T03).
+**Current state (2026-10-01):** Specifications only. No application code, models, schemas, fixtures, or working commands exist. The next implementable release is [0.1.0](docs/releases/0.1.0-api-execution.md). It becomes Ready once its specification tasks are done:
+
+- the reference response is procured (R01-T01) and documented (R01-T02)
+- the screen configuration (R01-T03) and plan (R01-T04) are specified
+- the specification is finished (R01-T05)
 
 ## Reading order
 
@@ -34,12 +38,12 @@ Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and event
 - **Inject them per command** into those environment variables, as `.env.local` says. Never commit `.env.local`, and never copy its references into tracked files. Never write secret values to a file, a log, the terminal, or an artifact.
 - **Live calls cost credits.** A screen backtest costs 5 API credits. Make live calls only with the owner's approval and a declared budget, and only through opt-in live tests or tasks.
 - **Keep reference data local.** Reference exports and payloads go in `exports/` or `payloads/` folders under `reference/`. Those folders are git-ignored and never committed ([REQ-11](docs/spec.md#enduring-requirements)). The configurations and run records beside them are committed. Committed fixtures are synthetic.
-- **Ask the owner for account-side steps.** Steps in the Portfolio123 website or the DataMiner desktop app are the owner's; list exactly what you need. In DataMiner, don't tick "save credentials" unless the owner accepts a plaintext config file.
+- **Ask the owner for account-side steps.** Steps in the Portfolio123 website are the owner's; list exactly what you need. Trial Folio doesn't use DataMiner ([ADR 0005](docs/adrs/0005-build-on-the-portfolio123-api-only.md)).
 - **Leave shared account objects alone.** Do not create or overwrite shared objects in the Portfolio123 account, such as `APIRankingSystem`, without the owner's approval.
 
 ## Development commands
 
-These commands are intended and do not work yet, because there is no project scaffold. They are set up in R01-T04, and this section is updated when they have been verified.
+These commands are intended and do not work yet, because there is no project scaffold. They are set up in R01-T06, and this section is updated when they have been verified.
 
 | Command (intended) | Purpose |
 |---|---|
@@ -61,7 +65,7 @@ Tooling: Python 3.12 or later, with `uv` for environments and dependencies ([D-0
 
 ## Git workflow
 
-This workflow is [D-11](docs/spec.md#decisions). Hooks in `.githooks/` enforce it. Git runs them when `core.hooksPath` is `.githooks`. Set that once per clone with `git config core.hooksPath .githooks`; `scripts/setup` will do it once R01-T04 adds that script. The hooks enforce the following:
+This workflow is [D-11](docs/spec.md#decisions). Hooks in `.githooks/` enforce it. Git runs them when `core.hooksPath` is `.githooks`. Set that once per clone with `git config core.hooksPath .githooks`; `scripts/setup` will do it once R01-T06 adds that script. The hooks enforce the following:
 
 - **`commit-msg`:** a Conventional Commits subject, and removal of AI attribution lines.
 - **`pre-commit`:**

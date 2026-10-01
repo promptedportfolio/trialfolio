@@ -1,14 +1,14 @@
 # Trial Folio
 
-> **Requires a Portfolio123 subscription.** This project works with Portfolio123 research exports and the Portfolio123 API, which require a Portfolio123 subscription with the appropriate access.
+> **Requires a Portfolio123 subscription.** This project works with the Portfolio123 API, which requires a Portfolio123 subscription with the appropriate access.
 
 Trial Folio is a command-line tool for investors who research strategies in [Portfolio123](https://www.portfolio123.com/). It helps you:
 
-- Compare backtest results.
-- See exactly which settings differ between them.
+- Run backtests through the Portfolio123 API, with every setting recorded next to its result.
+- Compare runs and see exactly which settings differ between them.
 - Keep a durable, inspectable record of what you tested, including the tests that failed.
 
-Portfolio123 does the backtesting. Trial Folio records what you tested and compares the results, so you can see whether they support a conclusion.
+Portfolio123 does the backtesting. Trial Folio plans each request, records exactly what was sent and returned, and compares the results, so you can see whether they support a conclusion.
 
 ## Status
 
@@ -16,12 +16,12 @@ Portfolio123 does the backtesting. Trial Folio records what you tested and compa
 
 | Capability | Planned release | Status |
 |---|---|---|
-| Compare DataMiner screen-backtest exports and their configurations, offline, against a baseline | [0.1.0](docs/releases/0.1.0-review.md) | Specified (Draft) |
-| Run one screen backtest through the Portfolio123 API and keep the settings with the results | [0.2.0](docs/releases/0.2.0-api-execution.md) | Outlined (Draft) |
+| Run one screen backtest through the Portfolio123 API and keep the settings with the results | [0.1.0](docs/releases/0.1.0-api-execution.md) | Specified (Draft) |
+| Compare saved runs, offline, against a baseline | [0.2.0](docs/releases/0.2.0-review.md) | Outlined (Draft) |
 | Run a small, planned experiment of screen variants, with safe resume | [0.3.0](docs/releases/0.3.0-experiments.md) | Outlined (Draft) |
 | Descriptive return analytics, robustness diagnostics, statistical evaluation, forward tracking | [Roadmap](docs/roadmap.md) | Not specified |
 
-**Supported formats:** none yet. Release 0.1.0 will support exactly one DataMiner ScreenBacktest CSV layout, once a real export has verified it. Every other layout will be rejected with a clear error, never guessed at.
+**Supported inputs:** none yet. Release 0.1.0 will support one documented long-only stock screen backtest through the Portfolio123 API, once a real response has verified it. Unsupported settings will be rejected with a clear error before anything is sent. Trial Folio doesn't import results produced elsewhere.
 
 Statistical validation and trading readiness are **not assessed** by any planned release before the statistical evaluation increment.
 
@@ -34,28 +34,29 @@ No installation is available yet. When 0.1.0 is implemented, this section will g
 This is the planned command; it does not work yet:
 
 ```text
-trialfolio review comparison.yaml --out review/
+trialfolio run screen.yaml --out runs/baseline/
 ```
 
-It will copy your exports and configurations unchanged into `review/`. It will then write:
+It will show you the exact request, its credit cost, and a plan hash, and send nothing until you approve. Then it will write:
 
-- normalized comparison tables (CSV)
-- a manifest recording what was imported and how
-- a self-contained HTML report that flags differing benchmarks, dates, costs, and other settings
+- the request (without credentials) and Portfolio123's full response, saved before anything is derived from them
+- normalized results tables (CSV)
+- a manifest recording what was run and how
+- a self-contained HTML report
 
-A missing value is shown as unavailable, never as zero.
+A missing value is shown as unavailable, never as zero. Release 0.2.0 adds `trialfolio review` to compare saved runs.
 
 ## Limitations
 
-- **Summary exports can't show everything.** Trial Folio compares what an export contains. It does not reconstruct returns, drawdowns, or confidence intervals from summary statistics.
-- **Your files are taken as you supplied them.** Imported files and configurations are recorded as user-supplied. Trial Folio can't confirm how they were produced.
+- **Summary statistics can't show everything.** Trial Folio reports what Portfolio123 returns. It doesn't reconstruct returns, drawdowns, or confidence intervals from summary statistics.
+- **Runs cost API credits.** Each backtest uses Portfolio123 API credits. Trial Folio shows the documented cost and a request budget before sending anything.
 - **Reruns can differ.** A Portfolio123 rerun can give different results as its data and engine change, so Trial Folio treats each run as a new attempt.
 - **A backtest is a simulation.** See [research limitations](docs/disclaimers.md).
 
 ## Your data stays on your machine
 
-- Releases 0.1.0 and later run the review offline.
-- From 0.2.0, Trial Folio contacts Portfolio123 only for requests you approve.
+- Trial Folio contacts Portfolio123 only for requests you approve.
+- Re-rendering reports, the demo, and (from 0.2.0) reviews run offline.
 - Logs stay local and never contain credentials, strategy definitions, configuration values, or results. They will be written to `logs/` inside each output directory. Delete that directory to delete them.
 - Optional LLM features are planned for a later increment. They will be off by default, and remote model providers will process data under their own terms.
 

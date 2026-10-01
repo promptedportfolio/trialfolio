@@ -93,7 +93,7 @@ Requirement. Proposed text; keep it consistent across the README, this document,
 
 The README MUST place this notice near the top, before installation instructions:
 
-> **Requires a Portfolio123 subscription.** This project works with Portfolio123 research exports and the Portfolio123 API, which require a Portfolio123 subscription with the appropriate access.
+> **Requires a Portfolio123 subscription.** This project works with the Portfolio123 API, which requires a Portfolio123 subscription with the appropriate access.
 
 The README MUST end with this notice:
 

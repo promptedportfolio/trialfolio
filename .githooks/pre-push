@@ -3,7 +3,7 @@
 #    pull requests on GitHub.
 # 2. Require <type>/<name> branch names.
 # 3. Run scripts/check before any push that changes more than docs, once
-#    scripts/check exists (release 0.1.0, task R01-T04).
+#    scripts/check exists (release 0.1.0, task R01-T06).
 # Never bypass this hook (AGENTS.md, Git workflow).
 protected="refs/heads/main"
 zero="0000000000000000000000000000000000000000"
@@ -48,7 +48,7 @@ done
 
 check="$(git rev-parse --show-toplevel)/scripts/check"
 if [ ! -x "$check" ]; then
-  echo "pre-push: scripts/check doesn't exist yet (release 0.1.0, task R01-T04); no checks to run." >&2
+  echo "pre-push: scripts/check doesn't exist yet (release 0.1.0, task R01-T06); no checks to run." >&2
   exit 0
 fi
 

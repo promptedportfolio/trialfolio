@@ -13,7 +13,7 @@ At each release, regenerate the component tables from the resolved dependency se
 | Component | Role | Planned from | License |
 |---|---|---|---|
 | pydantic | Contracts: validation and serialization | 0.1.0 | MIT |
-| p123api | Portfolio123 API wrapper; the only Portfolio123 code dependency | 0.2.0 | MIT |
+| p123api | Portfolio123 API wrapper; the only Portfolio123 code dependency | 0.1.0 | MIT |
 
 Record any other dependency here when it's chosen, for example a YAML parser or a templating library.
 
@@ -60,12 +60,11 @@ Trial Folio works with Portfolio123's tools through their outputs and the API, n
 
 | Software | License observed | How Trial Folio uses it |
 |---|---|---|
-| [p123api-py](https://github.com/portfolio-123/p123api-py/blob/master/LICENSE) | MIT | Declared dependency, from 0.2.0. It is the only Portfolio123 code dependency. |
-| [DataMiner](https://github.com/portfolio-123/dataminer/blob/master/LICENSE) | GPL-3.0 | Its export files and user-supplied configurations are read as data. No code is included. |
+| [p123api-py](https://github.com/portfolio-123/p123api-py/blob/master/LICENSE) | MIT | Declared dependency, from 0.1.0. It is the only Portfolio123 code dependency. |
+| [DataMiner](https://github.com/portfolio-123/dataminer/blob/master/LICENSE) | GPL-3.0 | Not used. Trial Folio doesn't read its files or include its code ([ADR 0005](docs/adrs/0005-build-on-the-portfolio123-api-only.md)). |
 | [FactorMiner](https://github.com/portfolio-123/factor-miner) | No license declared | Not used in current releases. No code is included. |
 
 - DataMiner and FactorMiner code is never imported, vendored, bundled, or ported. That includes containers, notebooks, examples, and test utilities. GPL-3.0 prohibits the further restrictions Trial Folio's license imposes. A repository without a license grants no permission to copy or adapt its code.
-- Matching their file layouts and key names for compatibility is permitted.
 - Fixtures, sample configurations, and sample exports are never copied from those repositories. Trial Folio uses synthetic fixtures.
 - Any later need for upstream code requires a recorded license review and Nathan Slaughter's decision before anything is copied.
 

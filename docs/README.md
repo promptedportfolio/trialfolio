@@ -4,7 +4,7 @@ These are the specifications for Trial Folio. Nothing in them is implemented yet
 
 ## Where to start
 
-- **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. The next implementable release is [0.1.0 Review](releases/0.1.0-review.md), which becomes Ready after its reference export is procured and documented.
+- **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. The next implementable release is [0.1.0 API execution](releases/0.1.0-api-execution.md). It becomes Ready after its specification tasks are done, starting with procuring and documenting a reference response.
 - **Understanding the product:** read [spec.md](spec.md), then [roadmap.md](roadmap.md).
 - **Checking permissions or notices:** read [../LICENSE](../LICENSE), [licensing-policy.md](licensing-policy.md), and [disclaimers.md](disclaimers.md).
 
@@ -18,13 +18,14 @@ These are the specifications for Trial Folio. Nothing in them is implemented yet
 | [methodology.md](methodology.md) | Research design, statistical assumptions, evidence requirements, and interpretation (METH) |
 | [licensing-policy.md](licensing-policy.md) | Eligibility, reserved uses, permissions, publication and distribution, and release gates (LIC) |
 | [disclaimers.md](disclaimers.md) | Notice texts and placement, warranty summary, Portfolio123 notices and terms, and operating safeguards (DSC) |
-| [releases/0.1.0-review.md](releases/0.1.0-review.md) | Offline comparison of DataMiner exports (R01) |
-| [releases/0.2.0-api-execution.md](releases/0.2.0-api-execution.md) | One screen backtest through the API (R02). An outline, to be completed before implementation |
+| [releases/0.1.0-api-execution.md](releases/0.1.0-api-execution.md) | One screen backtest through the API, with a saved record and report (R01) |
+| [releases/0.2.0-review.md](releases/0.2.0-review.md) | Offline comparison of saved runs against a baseline (R02). An outline, to be completed before implementation |
 | [releases/0.3.0-experiments.md](releases/0.3.0-experiments.md) | Finite experiments with resume (R03). An outline, to be completed before implementation |
 | [adrs/0001-python-and-portfolio123-integration.md](adrs/0001-python-and-portfolio123-integration.md) | Python, `p123api`, and the third-party code boundary, with verification notes |
 | [adrs/0002-pydantic-contracts-and-protocols.md](adrs/0002-pydantic-contracts-and-protocols.md) | Pydantic models, generated schemas, and narrow protocols |
 | [adrs/0003-versioned-research-artifacts.md](adrs/0003-versioned-research-artifacts.md) | File-based, immutable, versioned artifacts |
 | [adrs/0004-custom-personal-research-license.md](adrs/0004-custom-personal-research-license.md) | The custom source-available license |
+| [adrs/0005-build-on-the-portfolio123-api-only.md](adrs/0005-build-on-the-portfolio123-api-only.md) | Building on the Portfolio123 API only, with no DataMiner integration, and the reordered releases |
 | [spec-authoring-guide.md](spec-authoring-guide.md) | Bootstrap context used to write these documents. Superseded wherever an owning document says otherwise |
 
 At the repository root:
