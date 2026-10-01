@@ -30,9 +30,8 @@ Releases 0.1.0, 0.2.0, and 0.3.0 make no statistical, robustness, or deployment 
 
 | From | Evidence preserved | Why later assessments need it |
 |---|---|---|
-| 0.1.0 | Original imported files and hashes; attached configurations labeled user-supplied; the export's reported precision | Provenance (METH-05) and honest limits on what summary statistics support (METH-05.10) |
-| 0.1.0 | Intended changes distinguished from unexplained differences in dates, benchmark, currency, costs, and execution | A comparison means something only when its differences are known (METH-01.4, METH-09.3) |
-| 0.2.0 | Redacted request, full returned payload, provider metadata, resolved settings, snapshots of mutable references | Later analysis without fresh provider data, and honest treatment of reruns (METH-05.7, INV-05) |
+| 0.1.0 | Redacted request, full returned response and its hash, provider metadata, verified resolved settings, snapshots of mutable references, the response's reported precision | Later analysis without fresh provider data, honest treatment of reruns, and honest limits on what summary statistics support (METH-05.7, METH-05.10, INV-05) |
+| 0.2.0 | Intended changes distinguished from unexplained differences in dates, benchmark, currency, costs, execution, and data source | A comparison means something only when its differences are known (METH-01.4, METH-09.3) |
 | 0.3.0 | Study purpose, every planned case, declared prior research, every attempt and outcome, plan revisions | Research history for multiple-testing treatment (METH-03) and for separating development from confirmation (METH-02) |
 
 INV-09 requires this history to exist before any statistical correction is implemented. A count that starts at installation is not a research history (METH-03.4).
@@ -44,18 +43,18 @@ INV-09 requires this history to exist before any statistical correction is imple
 | ID | Requirement | Release or increment | Artifacts | Acceptance evidence | Status |
 |---|---|---|---|---|---|
 | METH-01 | Define the question before measuring success | Statistical evaluation (protocol); 0.3.0 records declared purpose | Study protocol; declared purpose | Protocol validation rejects a missing primary objective, benchmark, or cost input | Proposed |
-| METH-01.4 | No silent benchmark, cost, or date defaults | 0.1.0 (flag), 0.2.0 (resolve) | Resolved settings; comparison flags | R01 fixtures with differing benchmarks; R02 plan shows every resolved setting | Proposed |
+| METH-01.4 | No silent benchmark, cost, or date defaults | 0.1.0 (resolve), 0.2.0 (flag) | Resolved settings; comparison flags | R01 plan shows every resolved setting; R02 fixtures with differing benchmarks | Proposed |
 | METH-02 | Separate development, selection, and confirmation | Statistical evaluation | Partition boundaries; prior-exposure record; frozen candidate family | Tests that selection cannot read confirmation data; protocol archived before exposure | Proposed |
 | METH-02.6 | Prove the owner never inspected data elsewhere | None | Limitation statement | Not achievable by a local tool | Unavailable |
 | METH-03 | Research history and multiple testing | History from 0.3.0; treatment in Statistical evaluation | All cases, candidates, attempts, plan revisions, declared prior research, search-history status | R03 accounting fixtures; later, family construction tests | Proposed |
 | METH-04 | Inference before any statistical badge | Statistical evaluation | Significance policy; estimates; adjusted and unadjusted p-values; seeds | Methods ADR; independent reference calculations; calibration under synthetic nulls | Proposed |
 | METH-05 | Data integrity appropriate to the claim | 0.1.0 onward (provenance, coverage); Simulation review and later (point-in-time, universes) | Source artifacts; coverage records; exclusions with originals | Fixtures for missingness, duplicates, alignment, label boundaries | Proposed |
-| METH-05.10 | No reconstruction from summary statistics | 0.1.0 | Capability declaration of the imported result | R01 report omits return-series, interval, and drawdown-history sections when the export lacks them | Proposed |
+| METH-05.10 | No reconstruction from summary statistics | 0.1.0 | Capability declaration of the saved run | R01 report omits return-series, interval, and drawdown-history sections, and never exceeds the response's precision | Proposed |
 | METH-06 | Robustness and economic usefulness | 0.3.0 (predefined variants run); Robustness and rank diagnostics (assessment) | Predefined perturbation set; cost and turnover records | Perturbation set archived before results; cost sensitivity reconciles with a full rerun where they differ | Proposed |
 | METH-07 | Multidimensional assessment and permitted conclusions | 0.1.0 onward ("not assessed"); Statistical evaluation (outcomes) | Assessment record per dimension; applicable notice version | Report tests: dimensions separate; no affirmative judgment before its method is Validated | Proposed |
 | METH-08 | Optional LLM research agents | Optional discovery | Proposal log; prompts; model identifiers; outputs; decisions | Contract tests with recorded responses; boundary tests that protected outcomes are never sent | Proposed |
 | METH-09 | Reproducing published research | Partly 0.3.0 (variants the backend supports); Descriptive return analytics, Simulation review, and Robustness and rank diagnostics (full set; see [roadmap.md](roadmap.md#driving-use-case-coverage)) | Preregistered protocol; deviation record; fixed analysis-set version | A reproduction fixture study produces every analysis in the fixed set, including failed and inconclusive cases | Proposed |
-| METH-09.7 | Rolling returns | Descriptive return analytics | Dated return series | Unavailable from summary-statistic imports; window counts checked by hand on a fixture | Unavailable in 0.1.0; Proposed later |
+| METH-09.7 | Rolling returns | Descriptive return analytics | Dated return series | Needs dated return series; window counts checked by hand on a fixture | Unavailable in 0.1.0; Proposed later |
 
 ## METH-01 Define the question before measuring success
 
@@ -176,7 +175,7 @@ The assessment MUST persist the calculated adjusted p-values and, where the chos
 
 ## METH-05 Data integrity appropriate to the claim
 
-The integrity required rises with the claim. A comparison of imported summaries needs provenance and coverage; a confirmatory claim needs all of the following.
+The integrity required rises with the claim. A comparison of saved summaries needs provenance and coverage; a confirmatory claim needs all of the following.
 
 **METH-05.1 Point-in-time data.** Account for availability dates, reporting delays, and preliminary versus complete financial data.
 
@@ -196,7 +195,7 @@ The integrity required rises with the claim. A comparison of imported summaries 
 
 **METH-05.9 Cross-provider checks.** Tiingo MAY eventually support price checks, benchmark series, and forward tracking where its data is suitable. It does not reconstruct Portfolio123's historical fundamentals or universes. Identifier, calendar, dividend, and price-adjustment conventions MUST be reconciled before providers are compared.
 
-**METH-05.10 No reconstruction from summaries.** Summary statistics alone do not justify reconstructing returns, confidence intervals, or drawdown histories. Imported values MUST NOT be displayed with more precision than the export provides. Sections that need data the source lacks are marked unavailable, not approximated.
+**METH-05.10 No reconstruction from summaries.** Summary statistics alone do not justify reconstructing returns, confidence intervals, or drawdown histories. Values MUST NOT be displayed with more precision than their source provides. Sections that need data the source lacks are marked unavailable, not approximated.
 
 ## METH-06 Robustness and economic usefulness
 
@@ -224,7 +223,7 @@ The integrity required rises with the claim. A comparison of imported summaries 
 
 **METH-07.3 Permitted outcomes.** Candidate outcomes are rejected, inconclusive, and meeting predefined criteria for additional forward research. A dimension whose method is not Validated is reported as "not assessed". Releases 0.1.0 to 0.3.0 MUST report statistical validation and trading readiness as "not assessed" (INV-10).
 
-**METH-07.4 Process success is not strategy success.** A completed run, experiment, or import says nothing about whether the strategy is useful. Reports MUST keep execution status separate from any research outcome, and a green completion status MUST NOT resemble a "safe to trade" endorsement.
+**METH-07.4 Process success is not strategy success.** A completed run, review, or experiment says nothing about whether the strategy is useful. Reports MUST keep execution status separate from any research outcome, and a green completion status MUST NOT resemble a "safe to trade" endorsement.
 
 **METH-07.5 Claim limits.** A report MUST NOT present a result as a promise, prediction, or representation of gains a user could realize. Passing a backtest is not an assurance of future superiority. Any later terminology about deployment review requires legal review of the actual functionality and presentation, and MUST NOT become a recommendation that an individual invest. Notices are defined in [disclaimers.md](disclaimers.md).
 
@@ -273,9 +272,9 @@ Each variant runs only where the backend's capability has been verified.
 
 **METH-09.6 Gross and net.** Results are reported before and after the protocol's declared trading-cost and slippage assumptions (METH-06.5).
 
-**METH-09.7 Rolling returns.** For each variant and the benchmark, over the protocol's holding periods (proposed default: 7, 30, 90, 180, and 365 calendar days), report the median, mean, 10th and 90th percentile, and worst return; the share of windows in which the strategy beat the benchmark; the number of windows; and the number of non-overlapping windows. Overlapping windows are not independent observations, and every summary of them MUST say so. Rolling returns require dated return series and are Unavailable from summary-statistic imports (METH-05.10).
+**METH-09.7 Rolling returns.** For each variant and the benchmark, over the protocol's holding periods (proposed default: 7, 30, 90, 180, and 365 calendar days), report the median, mean, 10th and 90th percentile, and worst return; the share of windows in which the strategy beat the benchmark; the number of windows; and the number of non-overlapping windows. Overlapping windows are not independent observations, and every summary of them MUST say so. Rolling returns require dated return series and are Unavailable where a source has only summary statistics (METH-05.10).
 
-**METH-09.8 Quantiles.** Where a rank performance test was run, report return by bucket, the top-minus-bottom spread, and the rank correlation between bucket and return as a check that returns rise steadily across buckets. DataMiner's RankPerformance operation runs a screen backtest per bucket; its results are not assumed equivalent to a direct rank performance call.
+**METH-09.8 Quantiles.** Where a rank performance test was run, report return by bucket, the top-minus-bottom spread, and the rank correlation between bucket and return as a check that returns rise steadily across buckets. The bucket semantics of Portfolio123's rank-performance operation MUST be verified before any quantile claim.
 
 **METH-09.9 Period splits.** Where the data covers them, report the full-period metrics for three periods: before the paper's sample ended, between the end of the sample and publication, and after publication. State the share of the test period that falls after the paper's sample and after its publication. The paper's sample period has already been used by its authors, so results there are retrospective by construction (METH-02.2). The post-publication period is out of sample for the paper but not necessarily unseen by the researcher; record any prior exposure.
 
