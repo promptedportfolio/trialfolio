@@ -544,11 +544,11 @@ Introduced in 0.1.0.
 
 An attempt record contains the `attempt_id`, the `case_id`, the `plan_hash` it ran under, start and end times, the outcome, any error code, its [HTTP exchanges](#http-exchanges) and whether it's `possibly_charged`, references to the redacted request and the saved response, provider metadata, the installed versions of `p123api`, `requests`, and `urllib3`, and any charge or quota information the provider returned.
 
-Trial Folio saves decoded provider payloads, which is what the wrapper exposes, and labels them as decoded payloads. It does not claim to capture HTTP bytes or headers, because the verified wrapper does not expose them ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md#verification-notes)). Trial Folio configures the wrapper for a single HTTP attempt per call, so the wrapper never retries on its own, and running the command again is a new attempt. The one exception is the wrapper's resend after a 401 or 403, which Trial Folio can't prevent but records as an exchange.
+Trial Folio saves decoded provider payloads, which is what the wrapper exposes, and labels them as decoded payloads. It does not claim to capture HTTP bytes or headers, because the verified wrapper does not expose them ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md#verification-notes)). Trial Folio configures the wrapper for a single HTTP attempt per call, turns off redirects, and refuses the wrapper's re-authentication after a 401 or 403, as below. So the request is sent at most once, and running the command again is a new attempt.
 
 ### HTTP exchanges
 
-Trial Folio mounts its own transport adapter on the wrapper's HTTP session, so every request the wrapper makes passes through it ([ADR 0006](adrs/0006-observe-the-wrappers-http-exchanges.md)). The adapter records each exchange in memory, in order, and the attempt record keeps the list:
+Trial Folio mounts its own transport adapter on the wrapper's HTTP session, for both `https://` and `http://`, so every request the wrapper makes passes through it ([ADR 0006](adrs/0006-observe-the-wrappers-http-exchanges.md)). The adapter records each exchange in memory, in order, and the attempt record keeps the list:
 
 | Field | Contents |
 |---|---|
@@ -557,15 +557,17 @@ Trial Folio mounts its own transport adapter on the wrapper's HTTP session, so e
 | `status` | The HTTP status of a `response`. `null` otherwise. |
 
 - **Not connected means provably not sent.** An exchange is `not_connected` only when the `requests` error wraps a `urllib3` `MaxRetryError` whose `reason` is a `ConnectTimeoutError`. That class covers a failed name lookup (`NameResolutionError`), a refused or unreachable connection (`NewConnectionError`), and a connect timeout. `urllib3` uses the same test to decide that a request is safe to retry, because the server didn't receive it. Every other error is `interrupted`, including a reset, a read timeout, and a TLS failure. So an unclear case counts as possibly sent.
+- **Recorded before sending.** The adapter adds each exchange to the list before it sends, and fills in the result afterwards. An exchange still without a result when the attempt record is written, for example after Ctrl-C, counts as `interrupted`.
 - **The body is read inside the adapter.** A body that breaks off is therefore recorded as `interrupted`.
-- **Nothing else is recorded.** The adapter keeps no headers, bodies, tokens, or exception objects. It changes no request or response, and passes every error on unchanged, so the wrapper behaves as it would without it.
-- **Authentication first.** Trial Folio authenticates with its own call before the call that sends the request. So the first exchange is its own `POST /auth`, and a `POST /auth` during the request's call is the wrapper's re-authentication after a 401 or 403.
-- **Possibly charged.** An attempt is `possibly_charged` when any exchange during the request's call, other than a `POST /auth`, has a result other than `not_connected`. Authentication isn't counted ([budget](#budget-and-retries)).
+- **Nothing else is recorded.** The adapter keeps no headers, bodies, tokens, or exception objects. It changes no request or response, and passes every error on unchanged.
+- **No redirects.** Trial Folio sets the session's `max_redirects` to 0. On a redirect, `requests` then raises `TooManyRedirects` before it sends anything more, and the exchange records the 3xx as a `response`.
+- **Authentication first, and only once.** Trial Folio authenticates with its own call before the call that sends the request, so the first exchange is its own `POST /auth`. After a 401 or 403, the wrapper would re-authenticate and resend the request. Once Trial Folio's own authentication has succeeded, the adapter refuses any further `POST /auth`: it raises an error of Trial Folio's own type without connecting. The wrapper catches only `requests.ConnectionError`, so that error ends the call, and the request isn't resent. A refused `POST /auth` sent nothing, so it isn't recorded.
+- **Possibly charged.** An attempt is `possibly_charged` when its request's exchange has a result other than `not_connected`. Authentication isn't counted ([budget](#budget-and-retries)).
 - **Classification reads the exchanges.** Trial Folio classifies a failure from the exchanges, never from the wrapper's exception. From the exception it takes only a sanitized message ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md), decision 7). [0.1.0's failure behavior](releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior) gives the classification.
 
 ### Uncertain completion
 
-Trial Folio authenticates first, then writes a `running` record durably, and only then sends the request. If authentication fails, the attempt is recorded as `failed`, with no `running` record before it, because nothing that may be charged was sent. If the process stops during authentication, the output has no attempt record, for the same reason. On restart, a `running` attempt without a durable response becomes `unknown`. An `unknown` attempt is never retried automatically, because the original request may have been charged or may have changed provider state.
+Trial Folio authenticates first, then writes a `running` record durably, and only then sends the request. If authentication fails, the attempt is recorded as `failed`, with no `running` record before it, because the request wasn't sent. If the process stops during authentication, the output has no attempt record, for the same reason. Authentication isn't counted in the budget, and whether it costs credits is an [open question](releases/0.1.0-api-execution.md#open-questions). On restart, a `running` attempt without a durable response becomes `unknown`. An `unknown` attempt is never retried automatically, because the original request may have been charged or may have changed provider state.
 
 ## Plans and approval
 
@@ -613,13 +615,13 @@ Each case holds:
 
 | Field | Value |
 |---|---|
-| `provider_requests` | 1: the most provider requests Trial Folio will send |
+| `provider_requests` | 1: the most times Trial Folio sends a provider request. The request is sent at most once ([HTTP exchanges](#http-exchanges)), so this is also the worst case. |
 | `credits_per_request` | 5: Portfolio123's documented cost of a screen backtest. The plan records the source, [API: Screen](https://portfolio123.customerly.help/en/articles/43324-api-screen), and the date it was checked, 2026-10-01. |
-| `credits` | 5: `provider_requests` times `credits_per_request` |
-| `worst_case_credits` | 10. If Portfolio123 answers the request with 401 or 403, the wrapper re-authenticates and sends it once more. Trial Folio can't prevent that, though it records it ([retry policy](#budget-and-retries)), so at worst 2 requests are sent, and both might be charged. |
+| `credits` | 5: `provider_requests` times `credits_per_request`, the most credits the plan can use at the documented cost |
 
 - **Every request counts,** whatever its outcome, because whether failed requests are charged is unverified.
-- **Authentication isn't counted.** Trial Folio authenticates, through the wrapper's `POST /auth`, before the request, and the wrapper re-authenticates after a 401 or 403. Portfolio123's [API credits](https://portfolio123.customerly.help/en/articles/13766-api-credits) page doesn't say whether that costs credits (checked 2026-10-01). See the [0.1.0 open questions](releases/0.1.0-api-execution.md#open-questions).
+- **Within budget.** A run or experiment is within its budget when its `provider_requests` count, the sends that may have reached Portfolio123 ([JSON summary](#json-summary)), is at most the budget's `provider_requests`. Execution never starts a send that would exceed it.
+- **Authentication isn't counted.** Trial Folio authenticates once, through the wrapper's `POST /auth`, before the request. Portfolio123's [API credits](https://portfolio123.customerly.help/en/articles/13766-api-credits) page doesn't say whether that costs credits (checked 2026-10-01). See the [0.1.0 open questions](releases/0.1.0-api-execution.md#open-questions).
 - **The documented cost, not the charge.** The budget uses the documented cost. The attempt records the `cost` Portfolio123 reports.
 
 **Retry policy.**
@@ -628,11 +630,8 @@ Each case holds:
 |---|---|
 | `automatic_retries` | 0. Trial Folio never resends a request on its own. Running the command again is a new attempt. |
 | `wrapper_attempts_per_call` | 1. Trial Folio sets the wrapper to one HTTP attempt per call, with `set_max_request_retries(1)`, for authentication and for the backtest. |
-| `limitations` | What the wrapper does that Trial Folio can't prevent, listed below |
-
-The `limitations`, from the pinned `p123api` 3.1.0 source ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md#verification-notes)):
-
-- **A resend after 401 or 403.** The wrapper re-authenticates and resends the request once. No setting disables this. Trial Folio records both sends as [HTTP exchanges](#http-exchanges).
+| `redirects` | `not_followed`. A 3xx response ends the call ([HTTP exchanges](#http-exchanges)). |
+| `reauthentication` | `refused`. After a 401 or 403, the pinned `p123api` 3.1.0 re-authenticates and resends the request once, and no setting disables that ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md#verification-notes)). Trial Folio refuses that re-authentication before it's sent, so the request isn't resent ([HTTP exchanges](#http-exchanges)). |
 
 ### Data sent
 
@@ -658,7 +657,7 @@ These are categories of data, not the setting categories of `settings.csv`. Noth
 
 The core recomputes a plan's hash from its contents, and executes the plan only when it's given a hash equal to that. It never trusts a stored `plan_hash` field. Otherwise it fails with `plan.approval_required` and sends nothing. The CLI gets the hash in one of two ways:
 
-- **`--approve <plan-hash>`, for non-interactive use.** The value must be the full hash exactly as shown: `sha256:` and 64 lowercase hex digits. An abbreviated, malformed, or different hash doesn't match. With `--approve`, the CLI never prompts.
+- **`--approve <plan-hash>`, for non-interactive use.** The value must be the full hash exactly as shown: `sha256:` and 64 lowercase hex digits. An abbreviated, malformed, or different hash doesn't match. With `--approve`, the CLI never asks for approval. The license acknowledgment is separate, and comes first ([order of steps](#approval)).
 - **Interactive confirmation.** Without `--approve`, when stdin and stderr are both terminals, the CLI shows the plan and asks the user to type `approve`. It then passes the hash of the plan it showed. Any other answer, an empty line, or the end of input is a refusal.
 
 Without a match, the command fails with `plan.approval_required`, exit 2, and creates no output. The plan hash has been shown, with the full plan on a terminal, and the message gives the exact option that approves this plan. So running without `--approve` from a script gets the hash without sending anything, and with `--json`, the summary's `ids` carry the `plan_hash`.
@@ -668,8 +667,8 @@ Without a match, the command fails with `plan.approval_required`, exit 2, and cr
 - the title and purpose
 - the request exactly as it will be sent
 - every resolved setting with its expected provenance, marking inferred defaults, settings not snapshotted, commission not modeled, and parameters not sent
-- the budget, its worst case, and that failed or uncertain attempts may be charged
-- the retry policy and its limitations
+- the budget, and that failed or uncertain attempts may be charged
+- the retry policy
 - the data sent, its recipient, and what isn't sent
 - the plan hash, and how to approve it
 
@@ -681,7 +680,7 @@ Without a match, the command fails with `plan.approval_required`, exit 2, and cr
 4. Check that the installed `p123api` is a verified version (`provider.unsupported_capability`). Build the plan and show it, as [the plan display](#approval) says.
 5. Check the approval (`plan.approval_required`).
 6. Check that credentials are present (`provider.auth_failed`).
-7. [Claim the output directory](#cli-behavior) with `plan.json` (`output.not_empty`, or `storage.write_failed` on a file system that can't take [atomic writes](#artifact-storage)). Write `configuration.yaml`, from the bytes read in step 2.
+7. [Claim the output directory](#cli-behavior) with `plan.json` (`output.not_empty`, or `storage.write_failed` on a file system that can't take [atomic writes](#artifact-storage)). Logging to `<out>/logs/` starts only after the claim succeeds ([logging](#logging-and-local-diagnostics)). Write `configuration.yaml`, from the bytes read in step 2.
 8. Authenticate with Trial Folio's own call. If that fails, write the attempt record as `failed` and stop ([uncertain completion](#uncertain-completion)).
 9. Write the `running` attempt record, and send the request.
 
@@ -703,7 +702,8 @@ In 0.1.0, a hash that doesn't match is `plan.approval_required`. `plan.changed` 
   - **Never replace.** If the final name exists, even because another process created it at the same moment, publishing fails, and the temporary file is removed.
   - **Linux and macOS.** `os.rename` and `os.replace` silently replace an existing file there, so they aren't used. Trial Folio hard-links the temporary file to the final name with `os.link`, which fails if the name exists. It then removes the temporary name and syncs the directory.
   - **Windows.** `os.rename` fails if the name exists, so it's used.
-  - **No hard links.** A file system without hard links, such as FAT or exFAT, can't take these writes. The first write, which for `run` is `plan.json`, fails with `storage.write_failed`, before any request is sent, and the message says why.
+  - **Syncing.** A sync is `os.fsync`. On macOS, `fsync` doesn't flush the drive's write cache, so Trial Folio also calls `fcntl.fcntl` with `fcntl.F_FULLFSYNC`.
+  - **No hard links.** On Linux and macOS, a file system without hard links, such as FAT or exFAT, can't take these writes. The first write, which for `run` is `plan.json`, fails with `storage.write_failed`, before any request is sent, and the message says why. On Windows, `os.rename` works on those file systems.
 - **Completion.** A case is complete only after its required payload and its attempt record are durably written. The manifest is written last, and a missing or incomplete manifest means the output is incomplete.
 - **Hashes.** Hashes detect changes. They do not prove that a provider's data is scientifically correct, and they do not make local files tamper-proof.
 
@@ -809,7 +809,9 @@ The command is `trialfolio`. Commands are introduced by release:
   2. It writes its first file without replacing any file ([atomic writes](#artifact-storage)).
   3. It lists the directory.
 
-  If the first file existed already, or the directory holds anything else, the command removes the file it wrote, if any, and stops with `output.not_empty`. Each command lists the directory only after its own file exists. So when two commands claim the same directory at once, at most one succeeds.
+  If the first file existed already, or the directory holds anything else, the claim fails with `output.not_empty`. Each command lists the directory only after its own file exists. So when two commands claim the same directory at once, at most one succeeds.
+
+  A command whose claim fails, with `output.not_empty` or `storage.write_failed`, removes what it created: the file it wrote, if any, and the directory, if it created it. The directory then holds only what was there before, or what another process wrote. A command writes nothing else, logs included, into a directory it hasn't claimed.
 - **Validation first.** All inputs are validated before the output directory is created, so an invalid or unsupported input creates no output. An interactive license acknowledgment, which comes first, still writes its own record.
 - **Partial success.** A command that finishes with some cases failed, skipped, or uncertain writes complete accounting and exits with code 6.
 
@@ -840,7 +842,7 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
 | `ids` | Identifiers the command created, for example `{"review_id": "…"}`. For `run`: `plan_hash` and `case_id` once the plan is built, even if it isn't approved, and `attempt_id` once an attempt starts. Empty when it created none. |
 | `output_dir` | The output directory as given on the command line. `null` if none was created. |
 | `outputs` | Output files relative to `output_dir`, keyed by role: `manifest`, `report`, `metrics`, `settings`, `differences` |
-| `counts` | For `run`: `attempts`; `provider_requests`, the sends of the planned request that may have reached Portfolio123, including the wrapper's resend but never authentication ([HTTP exchanges](#http-exchanges)); `metrics_unavailable`; `warnings`; and the credit `cost` when the provider reports it. For `review` (0.2.0): `results`, `settings_flagged`, `metrics_unavailable`, `warnings`. |
+| `counts` | For `run`: `attempts`; `provider_requests`, the sends of the planned request that may have reached Portfolio123, never authentication ([HTTP exchanges](#http-exchanges)), which the [budget](#budget-and-retries) limits; `metrics_unavailable`; `warnings`; and the credit `cost` when the provider reports it. For `review` (0.2.0): `results`, `settings_flagged`, `metrics_unavailable`, `warnings`. |
 | `statistical_validation`, `trading_readiness` | `not_assessed` in every 0.x release that doesn't assess them |
 | `error` | `null`, or `{"code": …, "message": …}` using the codes in [errors](#errors) |
 
@@ -885,11 +887,11 @@ The core raises typed errors with stable dotted codes and actionable messages. O
 | `output.not_empty` | 4 | The output directory exists and is not empty |
 | `storage.write_failed` | 4 | An artifact could not be written durably |
 | `experiment.locked` | 4 | Another process holds the experiment lock |
-| `provider.auth_failed` | 5 | Credentials were missing or rejected. Or Portfolio123 refused a request's authorization, and then re-authenticating failed or the resend was refused too. |
-| `provider.unavailable` | 5 | Portfolio123 couldn't be reached: Trial Folio's authentication call failed without a rejection, or a request's connection was never established. The attempt record says whether an earlier send may have reached Portfolio123 ([HTTP exchanges](#http-exchanges)). |
+| `provider.auth_failed` | 5 | Credentials were missing, Trial Folio's authentication call got a status other than 200 below 500, or Portfolio123 refused a request's authorization with a 401 or 403 |
+| `provider.unavailable` | 5 | Portfolio123 couldn't be reached, so the request wasn't sent: Trial Folio's authentication call got a 5xx or no complete response, or the request's connection was never established ([HTTP exchanges](#http-exchanges)) |
 | `provider.quota_exceeded` | 5 | The provider refused the request because of quota or credits |
 | `provider.unsupported_capability` | 5 | The requested setting or operation is not supported by the verified provider path |
-| `provider.request_rejected` | 5 | Portfolio123 answered the request with an error status that no other code covers, such as 404 or 429. The message gives the status and Portfolio123's sanitized message. |
+| `provider.request_rejected` | 5 | Portfolio123 answered the request with a status below 500 that no other code covers, such as a 3xx, 404, or 429. The message gives the status and Portfolio123's sanitized message. |
 | `provider.response_invalid` | 5 | The response was saved but failed validation |
 | `provider.outcome_unknown` | 5 | A request may have been sent, but no response was durably recorded: for example after a read timeout, a 5xx, or a response that couldn't be decoded. It is never retried automatically. |
 | `execution.partial` | 6 | Some planned cases did not succeed; all are accounted for |
@@ -944,7 +946,7 @@ Development credentials are handled as [AGENTS.md](../AGENTS.md#credentials-and-
 - **Levels.** ERROR for a failed operation, WARNING for a degraded condition the command continues through, INFO for lifecycle milestones, and DEBUG for diagnostic detail.
 - **Tracing.** Start and end events carry duration and outcome for each command, case, attempt, and provider request, linked by IDs, and this serves as the trace. OpenTelemetry is adopted only through an ADR, with local file exporters only.
 - **Metrics.** There is no metrics system. Per-run counts and durations go in the manifest.
-- **Storage.** Logs go to `logs/` inside the output directory, or to a per-user local log directory for commands without one. A command with an output directory holds its events in memory until it creates the directory. If it stops before then, it writes no log file, and its messages appear only on stderr. The exception is `internal.unexpected`: the command then writes the held events to the per-user log directory, and its message names that file. Log size is bounded by rotation. The README documents the locations and how to delete them.
+- **Storage.** Logs go to `logs/` inside the output directory, or to a per-user local log directory for commands without one, such as `trialfolio license`. A command with an output directory holds its events in memory until it has [claimed the directory](#cli-behavior). If it stops before then, including when the claim fails, it writes no log file, and its messages appear only on stderr. The exception is `internal.unexpected`: the command then writes the held events to the per-user log directory, and its message names that file. Log size is bounded by rotation. The README documents the locations and how to delete them.
 
 Initial event names: `cli.command.started`, `cli.command.completed`, `review.input.loaded`, `artifact.write.completed`, `report.render.completed`, `plan.created`, `plan.approved`, `attempt.started`, `attempt.completed`, `provider.request.started`, `provider.request.completed`, `provider.request.failed`, `case.completed`, `experiment.resumed`.
 

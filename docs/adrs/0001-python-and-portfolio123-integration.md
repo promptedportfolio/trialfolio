@@ -42,7 +42,7 @@ These are **verified observations** from the guide's 2026-10-01 check; the [veri
 ## Consequences
 
 - Trial Folio depends on `p123api`'s behavior and versions. Wrapper upgrades are tested against recorded payloads, and changes that affect evidence are noted in release notes.
-- Visibility into retries is limited to what the wrapper exposes. Attempt records say so instead of implying request-level visibility.
+- Visibility into retries is limited to what the wrapper exposes. [ADR 0006](0006-observe-the-wrappers-http-exchanges.md) adds request-level visibility by recording each HTTP exchange below the wrapper.
 - Supporting a DataMiner layout requires a real reference export ([D-09](../spec.md#decisions)). Synthetic fixtures mirror its structure, never its data.
 - Portfolio123 operations cost API credits, so the default test suite blocks network access, and live checks are opt-in with a budget.
 
