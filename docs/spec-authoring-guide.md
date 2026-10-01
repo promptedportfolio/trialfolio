@@ -429,7 +429,7 @@ Provider access and raw-data redistribution are distinct. Before publishing exam
 
 ### Pydantic models
 
-Use Pydantic v2 for application-owned configuration, result manifests, study protocols when introduced, assessment records, and other serialized boundaries. Use its v2 validation and serialization methods. Configure unknown-field handling explicitly; reject misspelled application configuration. Parse CSV and provider-specific units in named adapter steps before validating normalized objects. Never use validation bypasses for untrusted input. [Pydantic models](https://docs.pydantic.dev/latest/concepts/models/)
+Use Pydantic v2 for application-owned configuration, result manifests, study protocols when introduced, assessment records, and other serialized boundaries. Use its v2 validation and serialization methods. Configure unknown-field handling explicitly; reject misspelled application configuration. Parse CSV and provider-specific units in named adapter steps before validating normalized objects. Never use validation bypasses for untrusted input. [Pydantic models](https://pydantic.dev/docs/validation/latest/concepts/models/)
 
 The following are project design requirements:
 
@@ -442,7 +442,7 @@ The following are project design requirements:
 - Test the actual YAML, CSV, JSON, and Python validation paths used by the application.
 - Keep large time series and tabular data in suitable tables; Pydantic need not model every dataframe row.
 
-Use Pydantic models as the canonical executable structure and generate published JSON Schemas from them. Specify validation versus serialization schema mode when their representations differ. Schema generation does not encode every custom semantic validator, so test runtime semantics separately. Commit generated schemas and check for drift when the contract implementation exists. [Pydantic JSON Schema](https://docs.pydantic.dev/latest/concepts/json_schema/)
+Use Pydantic models as the canonical executable structure and generate published JSON Schemas from them. Specify validation versus serialization schema mode when their representations differ. Schema generation does not encode every custom semantic validator, so test runtime semantics separately. Commit generated schemas and check for drift when the contract implementation exists. [Pydantic JSON Schema](https://pydantic.dev/docs/validation/latest/concepts/json_schema/)
 
 Contract prose remains authoritative for intended meaning. A model defect must be fixed; “the model accepted it” does not establish scientific correctness. Do not independently hand-maintain the same field structure in Python and JSON Schema.
 
