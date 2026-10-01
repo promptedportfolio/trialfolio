@@ -2,11 +2,7 @@
 
 Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and eventually evaluating Portfolio123 strategy evidence with scientific discipline. This file is the entry point for coding agents. It links to the documents that own each requirement; it does not repeat them.
 
-**Current state (2026-10-01):** Specifications only. No application code, models, schemas, fixtures, or working commands exist. The next implementable release is [0.1.0](docs/releases/0.1.0-api-execution.md). It becomes Ready once its specification tasks are done:
-
-- the reference response is procured (R01-T01) and documented (R01-T02)
-- the screen configuration (R01-T03) and plan (R01-T04) are specified
-- the specification is finished (R01-T05)
+**Current state (2026-10-01):** Specifications only. No application code, models, schemas, fixtures, or working commands exist. The next implementable release is [0.1.0](docs/releases/0.1.0-api-execution.md). Its specification tasks, R01-T01 to R01-T05, are done. It becomes Ready when the owner signs off ([step 6](docs/releases/0.1.0-api-execution.md#completing-this-specification)).
 
 ## Reading order
 
@@ -43,22 +39,25 @@ Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and event
 
 ## Development commands
 
-These commands are intended and do not work yet, because there is no project scaffold. They are set up in R01-T06, and this section is updated when they have been verified.
+These commands are intended and do not work yet, because there is no project scaffold. They are set up in R01-T06, and this section is updated when they have been verified. [0.1.0's verification commands](docs/releases/0.1.0-api-execution.md#verification-commands-and-expected-evidence) say what each one checks.
 
 | Command (intended) | Purpose |
 |---|---|
 | `scripts/setup` | Once per clone: enable the Git hooks |
 | `uv sync` | Create the environment |
+| `scripts/check` | Every check that needs no credentials or reference data; the `pre-push` hook runs it |
 | `uv run pytest` | Default suite; network access blocked; no live calls |
-| `uv run pytest -m reference` | Conformance against local reference data (opt-in) |
-| `uv run pytest -m live` | Live Portfolio123 checks (opt-in, with credentials and a budget) |
+| `scripts/schemas` | Regenerate the JSON Schemas under `schemas/`; `--check` is the drift check |
+| `uv run pytest -m packaging` | Build the wheel, inspect it, and run the demo from a clean install |
+| `TRIALFOLIO_REFERENCE_DIR=reference uv run pytest -m reference` | Conformance against local reference data (opt-in) |
+| `uv run pytest -m live` | Live Portfolio123 checks (opt-in, with credentials and a budget in `TRIALFOLIO_LIVE_BUDGET_CREDITS`) |
 
 Tooling: Python 3.12 or later, with `uv` for environments and dependencies ([D-02](docs/spec.md#decisions)). Add dependencies with `uv add`, and record each one in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Verification expectations
 
 - **Trace every test.** Each test traces to a requirement, an acceptance criterion, or a corrected defect.
-- **Test through public entry points.** Test through core functions and CLI commands, not private helpers. Use test doubles only at real boundaries: the provider client, the network below `urllib3` (a local server on localhost, or a socket-level fake, so the real `requests` and `urllib3` code runs through Trial Folio's own transport adapter, [ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)), the clock, and injected storage failures.
+- **Test through public entry points.** Test through core functions and CLI commands, not private helpers. Use test doubles only at real boundaries: the provider client, the network below `urllib3` (a local server on localhost, or a socket-level fake, so the real `requests` and `urllib3` code runs through Trial Folio's own transport adapter, [ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)), the clock, injected storage failures, and the installed package versions.
 - **Keep the default suite offline.** It blocks network access. Live checks are opt-in and never run in default CI.
 - **Check the report and the logs.** Report tests confirm the notices are present, that there are no scripts or external references, and that unavailable values are labeled. Log tests seed canary values and confirm none of them appears.
 - **Test the project's own behavior only.** Do not test third-party behavior such as Pydantic's type checks or `p123api`'s retries. Test Trial Folio's use of them.

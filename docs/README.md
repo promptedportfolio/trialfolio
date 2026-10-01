@@ -4,7 +4,7 @@ These are the specifications for Trial Folio. Nothing in them is implemented yet
 
 ## Where to start
 
-- **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. The next implementable release is [0.1.0 API execution](releases/0.1.0-api-execution.md). It becomes Ready after its specification tasks are done, starting with procuring and documenting a reference response.
+- **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. The next implementable release is [0.1.0 API execution](releases/0.1.0-api-execution.md). Its specification tasks are done, and it becomes Ready when the owner signs off.
 - **Understanding the product:** read [spec.md](spec.md), then [roadmap.md](roadmap.md).
 - **Checking permissions or notices:** read [../LICENSE](../LICENSE), [licensing-policy.md](licensing-policy.md), and [disclaimers.md](disclaimers.md).
 

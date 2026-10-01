@@ -114,7 +114,7 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 **Verified values.** Following [D-20](spec.md#decisions), the configuration accepts only values a recorded live call has verified. Free-form values, such as universe names, benchmark symbols, formulas, holdings counts, and slippage, are verified by form: R01-T01 sent one of each, and Portfolio123 accepted them.
 
 - **Verified by R01-T01:** a formula ranking, `rebalance_weeks` 4, `open`, `complete`, precision 4, and a slippage sent as a JSON float, the form every slippage takes ([decimals](#screen-configuration)).
-- **Verified by R01-T05 before 0.1.0 is Ready:** `rebalance_weeks` 1, ranking by name, and ranking by ID, each in its own call. A value that fails its check is removed from these tables.
+- **Verified by R01-T05:** `rebalance_weeks` 1, ranking by name, sent as a string, and ranking by ID, sent as a JSON integer, each in its own call ([run record](../reference/p123api-screen-backtest-values/README.md)).
 - **Documented but not accepted until a release verifies them:**
   - `max_holdings` 0, meaning no limit
   - `rebalance_weeks` 2, 3, 6, 8, 13, 26, and 52
@@ -229,7 +229,7 @@ This example is validated in two ways:
 - **Against Portfolio123.** It resolves to exactly the request in [`reference/p123api-screen-backtest/request.json`](../reference/p123api-screen-backtest/request.json), which Portfolio123 accepted in R01-T01.
 - **Against this mapping.** The example was parsed with a YAML safe loader and mapped by the rules above, and the result equals that request.
 
-Once implemented, a fixture test repeats the second check (R01-T05 names it).
+Once implemented, a test repeats the second check: `tests/contract/test_screen_configuration.py::test_documented_example_resolves_to_reference_request` ([0.1.0's test pairing](releases/0.1.0-api-execution.md#test-pairing)).
 
 ### Review configuration
 
@@ -308,7 +308,7 @@ Trial Folio supports only the response layouts recorded here. For each layout, t
 
 ### `p123api-screen-backtest` version 1
 
-Introduced in 0.1.0 (task R01-T02). Portfolio123 doesn't document the response fields, so everything below is a verified observation of the reference response in [`reference/p123api-screen-backtest/`](../reference/p123api-screen-backtest/README.md). The response itself stays git-ignored. The run record there holds the checks behind each "reproduced" statement. A definition marked "not reproduced" is Portfolio123's own, and Trial Folio reports the value as given.
+Introduced in 0.1.0 (task R01-T02). Portfolio123 doesn't document the response fields, so everything below is a verified observation of the reference response in [`reference/p123api-screen-backtest/`](../reference/p123api-screen-backtest/README.md). The response itself stays git-ignored. The run record there holds the checks behind each "reproduced" statement. R01-T05's three responses, with weekly rebalancing and with rankings by name and by ID, have the same keys and structure ([run record](../reference/p123api-screen-backtest-values/README.md)). A definition marked "not reproduced" is Portfolio123's own, and Trial Folio reports the value as given.
 
 **Identity.**
 
@@ -389,7 +389,7 @@ The reference response agrees: the standard deviations (rows 7 and 18) reproduce
   | `100 USD Investment`, `100 USD in SPY:USA` | number | The value of 100 invested, at the period's end. Reproduced. Their names contain the currency and the benchmark, so they change with those settings. |
   | `Costs`, `Cash`, `Min % no slip`, `Max % no slip`, `StdDev` | number | Not verified |
 
-- **`results.average`, `results.upMarkets`, and `results.downMarkets`.** Each is one element shorter than `columns`: element *i* belongs to `columns[i+1]`. Element 0 is `null`. In `upMarkets` and `downMarkets`, element 1, under `Rank Dt`, holds the number of periods in the group. The other non-null elements are means of their column: over all periods, over periods whose `Bench%` is above zero, and over the rest. No period had a `Bench%` of exactly zero, so which group it joins is unverified. The wrapper's `to_pandas=True` conversion appends these arrays as table rows without the offset, which moves each value one column to the left. Trial Folio doesn't use that conversion ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md), decision 4).
+- **`results.average`, `results.upMarkets`, and `results.downMarkets`.** Each is one element shorter than `columns`: element *i* belongs to `columns[i+1]`. Element 0 is `null`. In `upMarkets` and `downMarkets`, element 1, under `Rank Dt`, holds the number of periods in the group. The other non-null elements are means of their column: over all periods, over periods whose `Bench%` is zero or above as shown, and over the rest. R01-T01's response had no period at zero. In R01-T05's weekly response, one period's `Bench%` reads `0` at 4 decimal places, and it's counted in `upMarkets` ([run record](../reference/p123api-screen-backtest-values/README.md)). Its unrounded return may not be zero, so whether Portfolio123 counts a return of exactly zero as up is unverified. The wrapper's `to_pandas=True` conversion appends these arrays as table rows without the offset, which moves each value one column to the left. Trial Folio doesn't use that conversion ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md), decision 4).
 - **`chart`,** five parallel arrays with one entry per weekday from the start date to the end date, including market holidays: `dates`, `screenReturns`, `benchReturns`, `turnoverPct`, and `positionCnt`. Despite their names, `screenReturns` and `benchReturns` are levels of 100 invested, starting at 100, not returns. `turnoverPct` and `positionCnt` hold whole numbers written as decimals, such as `25.0`.
 
 ## Metrics and missing values
@@ -581,7 +581,7 @@ Trial Folio mounts its own transport adapter on the wrapper's HTTP session, for 
 
 Trial Folio authenticates first, when it [needs to](#http-exchanges), then writes the start record durably, and only then sends the request.
 
-- **Authentication fails.** There's no start record. The attempt record is written as `failed`, because the request wasn't sent. Authentication isn't counted in the budget's credits, and whether it costs credits is an [open question](releases/0.1.0-api-execution.md#open-questions).
+- **Authentication fails.** There's no start record. The attempt record is written as `failed`, because the request wasn't sent. Authentication isn't counted in the budget's credits ([budget](#budget-and-retries)).
 - **A start record without an attempt record** is `running`. Its request is sent at most once, so a reader counts it as one possible send: `possibly_charged`, and one provider request. On restart, as in 0.3.0's resume, Trial Folio writes its attempt record, and rewrites nothing:
   - **With a saved response.** A `response.json` or `response.raw` in the attempt's directory is complete, because it's published atomically ([atomic writes](#artifact-storage)), and either is saved only after a 200. So the attempt record is written as `succeeded`, with the request's exchange recorded as a `response` with status 200 and a note that it was completed from the saved response. A `response.raw` is flagged `provider.response_invalid`, as it would have been.
   - **Without one.** The attempt record is written as `unknown`, possibly charged, with one provider request.
@@ -658,11 +658,11 @@ Each case holds:
 | `provider_requests` | 1: the most times Trial Folio sends a provider request. The request is sent at most once ([HTTP exchanges](#http-exchanges)), so this is also the worst case. |
 | `credits_per_request` | 5: Portfolio123's documented cost of a screen backtest. The plan records the source, [API: Screen](https://portfolio123.customerly.help/en/articles/43324-api-screen), and the date it was checked, 2026-10-01. |
 | `credits` | 5: `provider_requests` times `credits_per_request`, the most credits the request can use at the documented cost. Authentication isn't included. |
-| `authentication_calls` | 1: the most authentication calls the plan makes ([when Trial Folio authenticates](#http-exchanges)). Whether they cost credits is unknown, so `credits` leaves them out, and a later release with several requests can still bound them. |
+| `authentication_calls` | 1: the most authentication calls the plan makes ([when Trial Folio authenticates](#http-exchanges)). Portfolio123 doesn't document their cost, so `credits` leaves them out, and this field bounds them instead, including in a later release with several requests. |
 
 - **What counts.** Every send that may have reached Portfolio123 counts, whatever its status or outcome, because whether failed requests are charged is unverified. A send that's `not_connected` didn't reach it, and doesn't count ([possibly charged](#http-exchanges)).
 - **Within budget.** A run or experiment is within its budget when its `provider_requests` count, the sends that may have reached Portfolio123 ([JSON summary](#json-summary)), is at most the budget's `provider_requests`. Execution never starts a send that would exceed it, and never makes more authentication calls than `authentication_calls`.
-- **Authentication's cost is unknown.** Trial Folio authenticates through the wrapper's `POST /auth` before the first request, and again only after a 401 or 403. Portfolio123's [API credits](https://portfolio123.customerly.help/en/articles/13766-api-credits) page doesn't say whether that costs credits (checked 2026-10-01). So `credits` leaves authentication out, the budget states the most authentication calls instead, and the plan display says their cost is unknown. See the [0.1.0 open questions](releases/0.1.0-api-execution.md#open-questions).
+- **Authentication's cost.** Trial Folio authenticates through the wrapper's `POST /auth` before the first request, and again only after a 401 or 403. Portfolio123's [API credits](https://portfolio123.customerly.help/en/articles/13766-api-credits) page doesn't say whether that costs credits (checked 2026-10-01). It cost none in R01-T05's live checks ([run record](../reference/p123api-screen-backtest-values/README.md)). That's an observation, not a documented price, so `credits` leaves authentication out, and the budget states the most authentication calls instead. The plan display says that authentication's cost isn't documented, and that it cost no credits when last checked.
 - **The documented cost, not the charge.** The budget uses the documented cost. The attempt records the `cost` Portfolio123 reports.
 
 **Retry policy.**
@@ -707,7 +707,7 @@ Without a match, the command fails with `plan.approval_required`, exit 2, and cr
 - the title and purpose
 - the request exactly as it will be sent
 - every resolved setting with its expected provenance, marking inferred defaults, settings not snapshotted, commission not modeled, and parameters not sent
-- the budget, that a request that reaches Portfolio123 may be charged even if it fails, and the most authentication calls, whose cost is unknown
+- the budget, that a request that reaches Portfolio123 may be charged even if it fails, and the most authentication calls, whose cost isn't documented
 - the retry policy
 - the data sent, its recipient, and what isn't sent
 - the plan hash, and how to approve it
@@ -750,7 +750,7 @@ In 0.1.0, a hash that doesn't match is `plan.approval_required`. `plan.changed` 
 - **Completion.** A case is complete only after its required payload and its attempt record are durably written. The manifest is written last, and a missing or incomplete manifest means the output is incomplete.
 - **Hashes.** Hashes detect changes. They do not prove that a provider's data is scientifically correct, and they do not make local files tamper-proof.
 
-Proposed layout for a 0.1.0 run; the release specification owns the final layout:
+The layout of a 0.1.0 run, which [0.1.0's required outputs](releases/0.1.0-api-execution.md#required-outputs) fix:
 
 ```text
 <out>/
@@ -844,7 +844,7 @@ The command is `trialfolio`. Commands are introduced by release:
 |---|---|---|
 | `trialfolio run <config> --out <dir> [--approve <plan-hash>]` | 0.1.0 | Plan and execute one supported screen backtest, once its [plan is approved](#approval) |
 | `trialfolio report <run-dir> --out <dir>` | 0.1.0 | Re-render a saved run's report offline |
-| `trialfolio demo --out <dir>` | 0.1.0 | Proposed: write a synthetic example run, labeled synthetic, and render its report offline |
+| `trialfolio demo --out <dir>` | 0.1.0 | Write a synthetic example run, labeled synthetic, and render its report offline |
 | `trialfolio review <config> --out <dir>` | 0.2.0 | Compare saved runs offline |
 | `trialfolio experiment <config> --out <dir>` | 0.3.0 | Plan, execute, and resume a finite experiment |
 | `trialfolio --version` | 0.1.0 | Print the application version |
@@ -982,7 +982,7 @@ There is no universal provider interface, plugin registry, or service framework.
 | `TRIALFOLIO_P123_API_ID` | Portfolio123 API ID |
 | `TRIALFOLIO_P123_API_KEY` | Portfolio123 API key |
 
-The CLI reads the variables and passes a credential object to the provider client. Credential objects are never serialized, hashed, logged, or written to artifacts.
+The CLI reads the variables and passes a credential object to the provider client. Credential objects are never serialized, hashed, logged, or written to artifacts. The credentials go only to the wrapper's default endpoint, Portfolio123's API. No option or environment variable changes the endpoint, so nothing can redirect them. Tests reach a local server through the CLI's entry function instead ([0.1.0's test doubles](releases/0.1.0-api-execution.md#test-pairing)).
 
 The wrapper's error objects need the same care. The response attached to a `p123api` `ClientException` carries the `Authorization` header, and for authentication failures its request body contains the API key. The client's token accessor exposes the bearer token. Trial Folio never logs, serializes, or saves these objects. From an error it keeps only the status code and a sanitized message. Redaction tests seed canary values and check that they appear nowhere in the outputs or logs, including after an authentication failure.
 
@@ -996,7 +996,7 @@ Development credentials are handled as [AGENTS.md](../AGENTS.md#credentials-and-
 - **Content.** Logs never contain credentials, strategy definitions, formulas, configuration values, provider payloads, results, or input file contents, at any level. Artifacts are referenced by ID and hash instead. Validation errors are logged with `errors(include_input=False)`, or with `hide_input_in_errors` enabled, and logged tracebacks omit local variables.
 - **Mechanism (proposed default).** The standard `logging` module, with no added dependency. Core modules use `logging.getLogger(__name__)` and never configure handlers; the CLI configures them.
 - **Format.** Log files hold one JSON object per line with these snake_case fields: `timestamp` (UTC ISO 8601), `level`, `event` (a stable dotted name), `message`, `trialfolio_version`, `component`, and the applicable `review_id`, `plan_hash`, `case_id`, `attempt_id`, `request_id`, and `parent_id`. The terminal shows human-readable messages on stderr from the same events.
-- **Levels.** ERROR for a failed operation, WARNING for a degraded condition the command continues through, INFO for lifecycle milestones, and DEBUG for diagnostic detail.
+- **Levels.** ERROR for a failed operation, WARNING for a degraded condition the command continues through, INFO for lifecycle milestones, and DEBUG for diagnostic detail. Log files record INFO and above. Setting `TRIALFOLIO_LOG_LEVEL` to `DEBUG`, `INFO`, `WARNING`, or `ERROR` changes that, for diagnosis. Any other value is ignored, with a warning on stderr. The content rules apply at every level.
 - **Tracing.** Start and end events carry duration and outcome for each command, case, attempt, and provider request, linked by IDs, and this serves as the trace. OpenTelemetry is adopted only through an ADR, with local file exporters only.
 - **Metrics.** There is no metrics system. Per-run counts and durations go in the manifest.
 - **Storage.** Logs go to `logs/` inside the output directory, or to the per-user log directory for commands without one, such as `trialfolio license`. A command with an output directory holds its events in memory until it has [claimed the directory](#cli-behavior). If it stops before then, including when the claim fails, it writes no log file, and its messages appear only on stderr. The exception is `internal.unexpected`: the command then writes the held events to the per-user log directory, and its message names that file. Log size is bounded by rotation. The README documents the locations and how to delete them.
@@ -1031,10 +1031,10 @@ Expected outputs change only with a stated reason. Reference responses procured 
 
 ## Schema generation and drift
 
-JSON Schemas are generated from the models, never maintained by hand, and committed under `schemas/`. The generation mode, validation or serialization, is stated wherever the two differ. A check fails when committed schemas differ from freshly generated ones. Schemas do not encode every semantic validator, so the runtime semantics are tested separately.
+JSON Schemas are generated from the models, never maintained by hand, and committed under `schemas/`, one file for each contract and each schema version that has a reader. The generation mode, validation or serialization, is stated wherever the two differ. `scripts/schemas` writes them. `scripts/schemas --check` is the drift check: it generates every schema in memory, compares the result with `schemas/`, lists each file that differs, is missing, or is extra, and fails if there's any. `scripts/check` runs it. Schemas do not encode every semantic validator, so the runtime semantics are tested separately.
 
 ## Open questions
 
 | Question | Impact | Recommended default | Resolve by |
 |---|---|---|---|
-| Are failed screen-backtest requests charged? | Budget accounting for failed and uncertain attempts | Until verified, count every send that may have reached Portfolio123 as possibly charged, whatever its outcome, and no other ([possibly charged](#http-exchanges)) | 0.1.0 reference call or live check |
+| Are failed screen-backtest requests charged? | Budget accounting for failed and uncertain attempts | Until verified, count every send that may have reached Portfolio123 as possibly charged, whatever its outcome, and no other ([possibly charged](#http-exchanges)) | The owner compares the account's credit history, or asks Portfolio123. R01-T01's and R01-T05's calls didn't settle it. |
