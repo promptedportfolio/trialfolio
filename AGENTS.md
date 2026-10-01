@@ -58,7 +58,7 @@ Tooling: Python 3.12 or later, with `uv` for environments and dependencies ([D-0
 ## Verification expectations
 
 - **Trace every test.** Each test traces to a requirement, an acceptance criterion, or a corrected defect.
-- **Test through public entry points.** Test through core functions and CLI commands, not private helpers. Use test doubles only at real boundaries: the provider client, the HTTP transport under it (to test Trial Folio's own transport adapter, [ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)), the clock, and injected storage failures.
+- **Test through public entry points.** Test through core functions and CLI commands, not private helpers. Use test doubles only at real boundaries: the provider client, the network below `urllib3` (a local server on localhost, or a socket-level fake, so the real `requests` and `urllib3` code runs through Trial Folio's own transport adapter, [ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)), the clock, and injected storage failures.
 - **Keep the default suite offline.** It blocks network access. Live checks are opt-in and never run in default CI.
 - **Check the report and the logs.** Report tests confirm the notices are present, that there are no scripts or external references, and that unavailable values are labeled. Log tests seed canary values and confirm none of them appears.
 - **Test the project's own behavior only.** Do not test third-party behavior such as Pydantic's type checks or `p123api`'s retries. Test Trial Folio's use of them.

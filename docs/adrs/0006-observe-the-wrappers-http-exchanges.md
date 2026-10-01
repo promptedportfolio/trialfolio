@@ -22,15 +22,14 @@ The first draft of the plan specification inferred which request failed from the
    - `not_connected`
    - `interrupted`
 
-   The adapter records each exchange before sending it, reads the body itself, and records nothing but the method, path, result, and status. It changes no request or response, and passes every error on unchanged.
+   The adapter records each exchange before sending it, reads the body itself, and records nothing but the method, path, result, and status. The one exception is the body of a 200 on the request's exchange, which it holds so that Trial Folio can save it undecoded if the wrapper can't decode it. It changes no request or response, and passes every error on unchanged.
 3. **Not connected means provably not sent.** An exchange is `not_connected` only when `urllib3`'s own test, the one its `Retry` uses to decide that the server didn't receive a request, says so. Every other ending without a complete response is `interrupted`, so an unclear case counts as possibly sent.
 4. **Classification reads the exchanges,** and whether the call returned a decoded response, never the wrapper's exception object beyond its type and a sanitized message (ADR 0001, decision 7).
-5. **Send the request at most once.**
-   - **Refuse the re-authentication.** Trial Folio authenticates with its own call just before each request's call, so a 401 or 403 on the request doesn't mean an expired token, and a resend would only risk a second charge. So the adapter allows `POST /auth` only during Trial Folio's own authentication call, and refuses it during a request's call, which ends that call before the resend. Each request's call starts with Trial Folio's own authentication, so a run with several requests, as in 0.3.0, keeps working.
-   - **Turn off redirects.** Trial Folio sets the session's `max_redirects` to 0, so `requests` stops at the first redirect it would follow, before it sends anything more.
-6. **Exact versions.** The adapter relies on the wrapper's session, a private attribute (`Client._session` in 3.1.0), on how the wrapper reacts to an error during authentication, and on how `requests` and `urllib3` raise errors and stop at a redirect. So all three are treated alike. The package pins each one exactly: `p123api` 3.1.0, `requests` 2.34.2, and `urllib3` 2.8.0 for 0.1.0. Trial Folio refuses to plan with any other installed version, the plan records all three versions so approval binds them, and each attempt record holds them. A new version of any of them is verified before Trial Folio accepts it.
+5. **One exchange per call.** During each call to the wrapper, Trial Folio's own authentication call or a request's call, the adapter allows exactly one exchange, and refuses any further one before connecting, whatever its path, with an error of Trial Folio's own type that ends the call. So each request is sent at most once, without depending on how a second send would come about. In 3.1.0 that refuses the wrapper's re-authentication and resend after a 401 or 403, and any redirect `requests` would follow. The adapter keeps `requests`' default `urllib3` retry setting, so `urllib3` never resends within one exchange either.
+6. **Authenticate only when needed.** Trial Folio authenticates with its own call before the first request, and again only before a request that follows a 401 or 403, after which the wrapper has dropped its token. The plan's budget states the most authentication calls, because their cost is unknown.
+7. **Exact versions.** The adapter relies on the wrapper's session, a private attribute (`Client._session` in 3.1.0), on how the wrapper reacts to an error during a call, and on how `requests` and `urllib3` raise errors, send a redirect through the session, and retry. So all three are treated alike. The package pins each one exactly, to the versions [contracts.md, plan contents](../contracts.md#plan-contents) lists. Trial Folio refuses to plan with any other installed version, the plan records all three versions so approval binds them, and each attempt record holds them. A new version of any of them is verified before Trial Folio accepts it.
 
-[contracts.md, HTTP exchanges](../contracts.md#http-exchanges) owns the exact rules: the record, the `not_connected` test, possibly charged, the refusal, and redirects. [0.1.0's failure behavior](../releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior) maps each situation to an outcome and an error code.
+[contracts.md, HTTP exchanges](../contracts.md#http-exchanges) owns the exact rules: the record, the `not_connected` test, possibly charged, the one-exchange rule, and when Trial Folio authenticates. [0.1.0's failure behavior](../releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior) maps each situation to an outcome and an error code.
 
 ## Alternatives considered
 
@@ -38,14 +37,16 @@ The first draft of the plan specification inferred which request failed from the
 |---|---|
 | Infer the failed request from the wrapper's exception (the first draft) | It depends on the same library internals, leaves the resend and a 5xx unobservable, and needs a rule for every exception shape. Its review found shapes it missed. |
 | Let the wrapper resend after a 401 or 403, and record both sends (the second draft) | It allows two charged sends for one approval, and needs failure rules for every way the re-authentication and the resend can end. A resend after Trial Folio's own fresh authentication is unlikely to succeed. |
+| Refuse each known resend path separately (the third draft): `POST /auth` during a request's call, and `max_redirects` set to 0 | Each rule depends on one way the wrapper or `requests` sends again. A path a later version adds, such as a retry on 429, would slip through. |
+| Authenticate before every request | It doubles the provider calls in a run with several requests, and authentication's cost is unknown. |
 | Call the HTTP API directly, without `p123api` | It gives full control, but duplicates the authentication and endpoint handling that ADR 0001 and [ADR 0005](0005-build-on-the-portfolio123-api-only.md) chose not to duplicate. Reconsider it if a later wrapper version leaves no session to mount an adapter on. |
 | A response hook on the session | A hook sees only responses, not connection errors or bodies that break off. |
 | Patch or subclass the wrapper's client | It changes the wrapper's behavior, and couples Trial Folio to more of its internals than one session attribute. |
 
 ## Consequences
 
-- **One send per approval.** The request is sent at most once, so it can use at most its documented cost, 5 credits for a screen backtest. Authentication isn't included, because whether it costs credits is unknown, and the plan says so.
-- **No retry on a 401 or 403.** If Portfolio123 refuses the request's authorization, the attempt fails instead of re-authenticating. Running the command again is a new attempt.
+- **One send per approval.** The request is sent at most once, so it can use at most its documented cost, 5 credits for a screen backtest. Authentication isn't included, because whether it costs credits is unknown; the budget bounds the number of authentication calls instead.
+- **No retry on a 401 or 403.** If Portfolio123 refuses the request's authorization, the attempt fails instead of re-authenticating. Running the command again is a new attempt. In a run with several requests, a token that expires costs one failed attempt, and Trial Folio authenticates again before the next request.
 - **Failures are told apart.** A 5xx is told apart from a failed connection, and an authentication failure from a failure of the request.
 - **Possibly charged is a recorded fact.** It follows from which exchanges connected, not from an inference about the exception.
 - **One private attribute.** Upgrading `p123api` requires re-verifying the adapter, which ADR 0001's follow-up conditions already require for any wrapper behavior Trial Folio relies on.
@@ -53,5 +54,5 @@ The first draft of the plan specification inferred which request failed from the
 
 ## Follow-up conditions
 
-- R01-T09 verifies the adapter against the installed `p123api`, `requests`, and `urllib3`: every exchange passes through it, each failure kind gets its documented result, the re-authentication is refused without a resend, and no redirect is followed.
+- R01-T09 verifies the adapter against the installed `p123api`, `requests`, and `urllib3`: every exchange passes through it, each failure kind gets its documented result, a second exchange in a call is refused before connecting, and `urllib3` retries stay off.
 - If a wrapper version stops exposing a session Trial Folio can mount an adapter on, write a new ADR that considers direct HTTP calls.
