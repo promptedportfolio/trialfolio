@@ -106,7 +106,7 @@ The README MUST end with this notice:
 
 ### DSC-10 Portfolio123 terms that bear on users
 
-Verified observation, checked 2026-10-01. Source: Portfolio123 [Terms of Use and Conditions](https://www.portfolio123.com/legal), "Last Updated February 24, 2023". The link resolves to `https://www.portfolio123.com/doc/p123_terms.html`. These are factual extracts for orientation, not legal advice about what the terms permit. Reverify before relying on them.
+Verified observation, checked 2026-10-01. Source: Portfolio123 [Terms of Use and Conditions](https://www.portfolio123.com/legal), "Last Updated February 24, 2023". That link opens Portfolio123's legal documents page. Its Terms of Use link leads to `https://www.portfolio123.com/doc/p123_terms.html`, which embeds the text. These are factual extracts for orientation, not legal advice about what the terms permit. Reverify before relying on them.
 
 | Section | What the terms say | Why it matters to Trial Folio |
 |---|---|---|

@@ -381,7 +381,7 @@ Raw files and JSON metadata come first, and normalized tables are CSV. Parquet M
 
 Proposed default:
 
-- Canonical JSON follows [RFC 8785, JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785), applied to the model's serialized form.
+- Canonical JSON follows [RFC 8785, JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785.html), applied to the model's serialized form.
 - Decimal values are strings carrying their declared precision.
 - Dates use `YYYY-MM-DD`. Datetimes are UTC ISO 8601 with a `Z` suffix.
 - Secrets are excluded by construction. Models that hold credentials are never serialized or hashed.
