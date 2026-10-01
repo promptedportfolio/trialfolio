@@ -1,0 +1,62 @@
+#!/bin/sh
+# 1. Block direct pushes to main. Changes reach main through squash-merged
+#    pull requests on GitHub.
+# 2. Require <type>/<name> branch names.
+# 3. Run scripts/check before any push that changes more than docs, once
+#    scripts/check exists (release 0.1.0, task R01-T04).
+# Never bypass this hook (AGENTS.md, Git workflow).
+protected="refs/heads/main"
+zero="0000000000000000000000000000000000000000"
+needs_check=""
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "$protected" ]; then
+    echo "pre-push: direct pushes to main are not allowed. Push a branch and open a pull request." >&2
+    exit 1
+  fi
+  # Deleting a remote branch needs no checks.
+  [ "$local_sha" = "$zero" ] && continue
+
+  # Branch names start with the kind of change, matching the commit types.
+  case "$remote_ref" in
+    refs/heads/*)
+      branch=${remote_ref#refs/heads/}
+      if ! printf '%s\n' "$branch" | grep -Eq '^(feat|fix|docs|chore|ci|refactor|test|perf|build|style|revert)/[a-z0-9][a-z0-9._-]*$'; then
+        echo "pre-push: branch '$branch' should be named <type>/<short-name>, e.g. feat/review (AGENTS.md, Git workflow)." >&2
+        exit 1
+      fi
+      ;;
+  esac
+
+  if [ "$remote_sha" = "$zero" ]; then
+    base=$(git merge-base "$local_sha" origin/main 2>/dev/null || true)
+  else
+    base=$remote_sha
+  fi
+  if [ -z "$base" ]; then
+    needs_check=1
+    continue
+  fi
+  # Documentation, Markdown, the license, and reference configurations need no
+  # code checks; anything else does.
+  if git diff --name-only "$base" "$local_sha" | grep -Ev '^docs/|\.md$|^LICENSE$|^reference/' | grep -q .; then
+    needs_check=1
+  fi
+done
+
+[ -z "$needs_check" ] && exit 0
+
+check="$(git rev-parse --show-toplevel)/scripts/check"
+if [ ! -x "$check" ]; then
+  echo "pre-push: scripts/check doesn't exist yet (release 0.1.0, task R01-T04); no checks to run." >&2
+  exit 0
+fi
+
+# The checks run on the working tree, so it must match what's being pushed.
+if ! git diff --quiet HEAD --; then
+  echo "pre-push: uncommitted changes. Commit or stash them so the checks test what you push." >&2
+  exit 1
+fi
+
+echo "pre-push: running scripts/check (see AGENTS.md)" >&2
+exec "$check" >&2

@@ -1,0 +1,47 @@
+#!/bin/sh
+# Checks the staged changes before each commit (AGENTS.md, Git workflow):
+# 1. No commits on main; work happens on a branch and reaches main by PR.
+# 2. No Portfolio123 exports or payloads, even force-added (REQ-11).
+# 3. No likely secrets and no files over 5 MB.
+# Only staged content is checked, so it stays fast.
+
+branch=$(git symbolic-ref --quiet --short HEAD || true)
+if [ "$branch" = "main" ]; then
+  echo "pre-commit: don't commit on main. Create a branch first, e.g. git switch -c feat/<name>." >&2
+  exit 1
+fi
+
+# Added, copied, modified, or renamed files; deletions need no checks.
+files=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$files" ] && exit 0
+
+max_bytes=5242880
+secret_pattern='-----BEGIN [A-Z ]*PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}|AKIA[0-9A-Z]{16}|sk-(ant-)?[A-Za-z0-9_-]{32,}|xox[baprs]-[A-Za-z0-9-]{10,}|(api[_-]?key|token|secret|password)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9_\-]{24,}["'"'"']'
+
+# check_file prints its findings to stderr and "fail" to stdout.
+check_file() {
+  f=$1
+  case "$f" in
+    reference/*/exports/* | reference/*/payloads/*)
+      echo "pre-commit: $f is Portfolio123 data. Reference exports and payloads stay local (REQ-11)." >&2
+      echo fail
+      return
+      ;;
+  esac
+  size=$(git cat-file -s ":$f")
+  if [ "$size" -gt "$max_bytes" ]; then
+    echo "pre-commit: $f is $size bytes (limit 5 MB). Large files and vendor data don't belong in the repo." >&2
+    echo fail
+  fi
+  if git show ":$f" | grep -Eqi -e "$secret_pattern"; then
+    echo "pre-commit: $f looks like it contains a secret. Keep credentials in a secret manager, never in the repo (AGENTS.md)." >&2
+    echo fail
+  fi
+}
+
+result=$(printf '%s\n' "$files" | while IFS= read -r f; do check_file "$f"; done)
+
+case "$result" in
+  *fail*) exit 1 ;;
+esac
+exit 0

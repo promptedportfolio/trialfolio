@@ -1,0 +1,39 @@
+#!/bin/sh
+# 1. Strip AI tool attribution from commit messages.
+# 2. Require a Conventional Commits subject (AGENTS.md, Git workflow).
+msg_file="$1"
+tmp="$msg_file.tmp"
+
+# Drop attribution lines, collapse the blank lines they leave behind, and trim
+# trailing blank lines.
+grep -v -i -E \
+  -e '^[[:space:]]*co-authored-by:.*(claude|anthropic\.com)' \
+  -e 'generated with \[?claude code' \
+  "$msg_file" |
+  awk '
+    NF == 0 { if (n && lines[n] != "") lines[++n] = ""; next }
+    { lines[++n] = $0 }
+    END { while (n && lines[n] == "") n--; for (i = 1; i <= n; i++) print lines[i] }
+  ' >"$tmp" && mv "$tmp" "$msg_file"
+
+# The subject is the first line that isn't a git comment.
+subject=$(grep -v '^#' "$msg_file" | head -n 1)
+
+# fixup!/squash!/amend! commits are folded into others before pushing, and
+# git writes its own subjects for reverts and merges.
+case "$subject" in
+  "fixup! "* | "squash! "* | "amend! "* | "Revert \""* | "Merge "*) exit 0 ;;
+esac
+
+types='feat|fix|docs|chore|ci|refactor|test|perf|build|style|revert'
+if ! printf '%s\n' "$subject" | grep -Eq "^($types)(\([a-z0-9._/-]+\))?!?: [^ ].*$"; then
+  cat >&2 <<EOF
+commit-msg: the subject must follow Conventional Commits (AGENTS.md, Git workflow):
+
+  type(scope): subject      e.g. feat(review): add baseline comparison
+
+  type is one of: $(printf '%s' "$types" | tr '|' ' ')
+  got: $subject
+EOF
+  exit 1
+fi
