@@ -1,6 +1,6 @@
 # ADR 0001: Python and Portfolio123 integration
 
-**Status:** Accepted. Decision 3 is superseded by [ADR 0005](0005-build-on-the-portfolio123-api-only.md): Trial Folio no longer reads DataMiner exports or configurations. Its code boundary remains in force through REQ-02. The language and dependency constraints are owner requirements, and provider behavior is re-verified in each release.
+**Status:** Accepted. Decision 3 is superseded by [ADR 0005](0005-build-on-the-portfolio123-api-only.md): Trial Folio no longer reads DataMiner exports or configurations. Its code boundary remains in force through REQ-02. [ADR 0006](0006-observe-the-wrappers-http-exchanges.md) (proposed) extends decision 6 by recording each HTTP exchange the wrapper makes. The language and dependency constraints are owner requirements, and provider behavior is re-verified in each release.
 **Date:** 2026-10-01
 
 ## Context
