@@ -1,0 +1,7 @@
+# Provider data: reference exports and payloads stay local (REQ-11)
+reference/*/exports/
+reference/*/payloads/
+
+# Local credential files, such as secret-manager references (AGENTS.md)
+*.env
+.env*
