@@ -199,7 +199,7 @@ The integrity required rises with the claim. A comparison of saved summaries nee
 
 ## METH-06 Robustness and economic usefulness
 
-**METH-06.1 Predefined perturbations.** Robustness perturbations MUST be predefined and bounded, and archived before their results are seen. Candidates include neighboring factor weights, removal of one factor, liquidity thresholds, holdings count, rebalance schedule, universe boundaries, signal delays, execution assumptions, and higher costs.
+**METH-06.1 Predefined perturbations.** Robustness perturbations MUST be predefined and bounded, and archived before their results are seen. Candidates include neighboring factor weights, removal of one factor, liquidity thresholds, holdings count, rebalance schedule, universe boundaries, signal delays, execution assumptions, and higher costs. Rebalance periods and sell rules start from the default set in [P-13](spec.md#proposed-defaults), and a protocol's own values replace it. Universes have no default ([D-19](spec.md#decisions)).
 
 **METH-06.2 Universes and benchmarks.** A universe change alters the opportunity set and may require a different benchmark. A legitimate strategy need not work in every universe. The assessment asks whether sensitivity is consistent with the economic hypothesis and the intended trading domain.
 

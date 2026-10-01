@@ -111,7 +111,7 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 | `precision` | integer | Yes | 2, 3, or 4: the decimal places in results | `precision` |
 | `data_vendor` | string | No | `FactSet` only ([D-16](spec.md#decisions)). Any other value, including `Compustat`, fails with `config.invalid`. | Never sent, because the endpoint documents no vendor parameter |
 
-**Verified values.** Every value this configuration accepts is verified by a live check before 0.1.0 is Ready (R01-T05, [spec.md, open questions](spec.md#open-questions)). A value that fails its check is removed from these tables. Free-form values, such as universe names, benchmark symbols, and formulas, are verified by form: R01-T01 sent a universe name, a benchmark symbol, and formulas, and Portfolio123 accepted them.
+**Verified values.** Every value this configuration accepts is verified by a live check before 0.1.0 is Ready (R01-T05), because 0.1.0 [accepts only verified settings](releases/0.1.0-api-execution.md#required-behavior). A value that fails its check is removed from these tables. Free-form values, such as universe names, benchmark symbols, and formulas, are verified by form: R01-T01 sent a universe name, a benchmark symbol, and formulas, and Portfolio123 accepted them.
 
 - **Verified by R01-T01:** a formula ranking, 25 holdings, `rebalance_weeks` 4, `open`, a slippage of 0.25%, `complete`, and precision 4.
 - **Not yet verified:**
