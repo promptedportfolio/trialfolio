@@ -1,0 +1,23 @@
+{
+  "screen": {
+    "type": "stock",
+    "universe": "SP500",
+    "maxNumHoldings": 25,
+    "method": "long",
+    "currency": "USD",
+    "benchmark": "SPY",
+    "ranking": {
+      "formula": "EarnYield",
+      "lowerIsBetter": false
+    },
+    "rules": [
+      {
+        "formula": "AvgDailyTot(30) > 1000000",
+        "type": "common"
+      }
+    ]
+  },
+  "asOfDt": "2025-12-31",
+  "pitMethod": "Complete",
+  "precision": 4
+}
