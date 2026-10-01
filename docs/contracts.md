@@ -100,26 +100,26 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 | `universe` | string | Yes | A Portfolio123 universe name, for example `SP500` | `screen.universe` |
 | `rules` | list of strings | Yes | At least one screening formula. Each one is a non-empty string, and their order is kept. | `screen.rules`, each as `{"formula": "…"}`. It has no `type` field, because Portfolio123 rejects one (R01-T01). |
 | `ranking` | mapping | Yes | Exactly one of the [ranking forms](#ranking-forms) | `screen.ranking` |
-| `max_holdings` | integer | Yes | 0 or more. 0 means no limit, as Portfolio123 documents. | `screen.maxNumHoldings` |
+| `max_holdings` | integer | Yes | 1 or more | `screen.maxNumHoldings` |
 | `benchmark` | string | Yes | A Portfolio123 benchmark symbol, for example `SPY` | `screen.benchmark` |
 | `start_date` | date | Yes | `YYYY-MM-DD` | `startDt` |
 | `end_date` | date | Yes | `YYYY-MM-DD`, later than `start_date`. There is no default of today. | `endDt` |
-| `rebalance_weeks` | integer | Yes | 1, 2, 3, 4, 6, 8, 13, 26, or 52 | `rebalFreq`: `Every Week` for 1, otherwise `Every N Weeks`, for example `Every 4 Weeks` |
-| `transaction_price` | string | Yes | `open`, `high_low_average`, or `close` | `transPrice`: 1, 3, or 4 |
+| `rebalance_weeks` | integer | Yes | 1 or 4 | `rebalFreq`: `Every Week` for 1, or `Every 4 Weeks` for 4 |
+| `transaction_price` | string | Yes | `open`. Required, so the price convention is always explicit. | `transPrice`: 1 |
 | `slippage_percent` | decimal | Yes | 0 or more, in percent: `0.25` means 0.25%. There is no default of zero. | `slippage` |
-| `pit_method` | string | Yes | `complete` or `prelim`, Portfolio123's point-in-time method | `pitMethod`: `Complete` or `Prelim` |
-| `precision` | integer | Yes | 2, 3, or 4: the decimal places in results | `precision` |
+| `pit_method` | string | Yes | `complete`, Portfolio123's point-in-time method | `pitMethod`: `Complete` |
+| `precision` | integer | Yes | 4: the decimal places in results | `precision` |
 | `data_vendor` | string | No | `FactSet` only ([D-16](spec.md#decisions)). Any other value, including `Compustat`, fails with `config.invalid`. | Never sent, because the endpoint documents no vendor parameter |
 
-**Verified values.** Every value this configuration accepts is verified by a live check before 0.1.0 is Ready (R01-T05), because 0.1.0 [accepts only verified settings](releases/0.1.0-api-execution.md#required-behavior). A value that fails its check is removed from these tables. Free-form values, such as universe names, benchmark symbols, and formulas, are verified by form: R01-T01 sent a universe name, a benchmark symbol, and formulas, and Portfolio123 accepted them.
+**Verified values.** Following [D-20](spec.md#decisions), the configuration accepts only values a recorded live call has verified. Free-form values, such as universe names, benchmark symbols, formulas, holdings counts, and slippage, are verified by form: R01-T01 sent one of each, and Portfolio123 accepted them.
 
-- **Verified by R01-T01:** a formula ranking, 25 holdings, `rebalance_weeks` 4, `open`, a slippage of 0.25%, `complete`, and precision 4.
-- **Not yet verified:**
-  - ranking by name and by ID
-  - `max_holdings` 0
-  - `rebalance_weeks` 1, 2, 3, 6, 8, 13, 26, and 52
-  - `high_low_average` and `close`
-  - `prelim`
+- **Verified by R01-T01:** a formula ranking, `rebalance_weeks` 4, `open`, `complete`, and precision 4.
+- **Verified by R01-T05 before 0.1.0 is Ready:** `rebalance_weeks` 1, ranking by name, and ranking by ID, each in its own call. A value that fails its check is removed from these tables.
+- **Documented but not accepted until a release verifies them:**
+  - `max_holdings` 0, meaning no limit
+  - `rebalance_weeks` 2, 3, 6, 8, 13, 26, and 52
+  - `transaction_price` `high_low_average` and `close` (`transPrice` 3 and 4)
+  - `pit_method` `prelim`
   - precision 2 and 3
 
 #### Ranking forms

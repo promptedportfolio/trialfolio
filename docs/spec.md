@@ -124,7 +124,8 @@ Decisions are the owner's. Proposed defaults stand until changed before the impl
 | D-16 | FactSet, Portfolio123's standard data, is the only supported data vendor. An omitted vendor setting is left out of the request and recorded as FactSet, an inferred default. An explicit `FactSet` is accepted and recorded the same way, but not sent, because the endpoint documents no vendor parameter. The screen-backtest response doesn't report the vendor, so it stays inferred. Compustat is out of scope: Trial Folio provides no facilities for it and does not test it. | Requirement | 2026-10-01 |
 | D-17 | License acknowledgment: a one-time local acknowledgment for each license and notice version, with non-interactive options for automation, as [contracts.md](contracts.md#license-acknowledgment) specifies. It is a notice, not an eligibility check. | Requirement | 2026-10-01 |
 | D-18 | Build on the Portfolio123 API only. Trial Folio does not integrate with DataMiner. Release 0.1.0 runs a screen backtest through the API, 0.2.0 reviews saved runs, and 0.3.0 runs experiments ([ADR 0005](adrs/0005-build-on-the-portfolio123-api-only.md)). | Requirement | 2026-10-01 |
-| D-19 | Universes have no default. Every screen, experiment, rank, and simulation configuration names at least one universe. | Requirement | 2026-10-01 |
+| D-19 | Universes have no default. Every configuration names at least one universe. A screen backtest takes one universe, so several universes run as several screens, one per universe. An experiment makes each one its own case. 0.1.0's single-run configuration names exactly one. | Requirement | 2026-10-01 |
+| D-20 | A release accepts only the setting values a recorded live call has verified. Release 0.1.0 verifies 1-week rebalancing, ranking by name, and ranking by ID, each in its own call, under a budget the owner approves. Other values are verified when a release needs them; for experiments, that's in R03-T01. | Requirement | 2026-10-01 |
 
 ### Proposed defaults
 
@@ -142,7 +143,7 @@ Decisions are the owner's. Proposed defaults stand until changed before the impl
 | P-10 | Public sample data | Clearly labeled synthetic fixtures | 0.1.0 |
 | P-11 | Logging | Python's standard `logging`, JSON lines to a local file, human-readable messages on stderr | 0.1.0 |
 | P-12 | Test runner | pytest, with network access blocked in the default suite | 0.1.0 |
-| P-13 | Default variant set | The set used when a study gives none, replaced entirely by any values or rules the user gives. Periods of 1 week and 4 weeks for rank performance, screen reconstitution, and simulation rebalancing. For simulations, sell rules at rank 99 and rank 95. Variants used to choose among candidates count toward the research history ([METH-03.2](methodology.md#meth-03-research-history-and-multiple-testing)). | 0.3.0 for screens; the rank and simulation increments for the rest |
+| P-13 | Default variant set | Applies to experiments and studies, except paper reproductions, which follow [METH-09.4](methodology.md#meth-09-reproducing-published-research). Periods of 1 week and 4 weeks for screen rebalancing (`rebalance_weeks`), rank performance, and simulation rebalancing. For simulations, sell rules at rank 99 and rank 95 (see the open question on their definition). Defaults apply per setting: values the configuration lists for a setting replace that setting's defaults, and an empty list turns them off. A default identical to the baseline is skipped, so it never adds a duplicate case. Every variant case is recorded in the research history. A variant whose outcome chooses a candidate is part of the search ([METH-03.3](methodology.md#meth-03-research-history-and-multiple-testing)). | 0.3.0 for screens; Robustness and rank diagnostics, and Simulation review, for the rest |
 
 ## Out of scope
 
@@ -159,4 +160,5 @@ These are outside Trial Folio unless a later decision adds them after the analys
 | Question | Impact | Recommended default | Resolve by |
 |---|---|---|---|
 | Is `trialfolio` available as a PyPI distribution name, and should Trial Folio be published there at all? | Package metadata and installation instructions | Keep `trialfolio`. Decide the channel under D-08. | Before packaging for release |
+| How are the default sell rules at rank 99 and rank 95 defined ([P-13](#proposed-defaults))? | Simulation turnover and results | Sell a holding when its rank falls below 99, or below 95 | The Simulation review specification |
 | Which distribution channel satisfies the no-publication restriction? | Public release (D-08) | A private repository, with access granted per written permission | Before the first Released status |
