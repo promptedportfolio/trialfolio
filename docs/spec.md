@@ -1,0 +1,159 @@
+# Trial Folio product specification
+
+**Status:** Draft
+**Date:** 2026-10-01
+**Owner:** Nathan Slaughter
+
+This document owns Trial Folio's purpose, vocabulary, enduring invariants, enduring product requirements, and the record of owner decisions. Release scope lives in [releases/](releases/), interface semantics in [contracts.md](contracts.md), research design in [methodology.md](methodology.md), and legal terms in [../LICENSE](../LICENSE) and [licensing-policy.md](licensing-policy.md). Nothing described here is implemented yet.
+
+Requirement keywords follow the [spec authoring guide](spec-authoring-guide.md#2-interpret-requirements-and-uncertainty-consistently): MUST for required behavior, SHOULD for a default whose exceptions need a documented reason, MAY for optional behavior.
+
+## Purpose
+
+Trial Folio is a configuration-driven command-line tool for collecting, comparing, reproducing, and eventually evaluating investment-strategy evidence from Portfolio123 with scientific discipline. It reuses Portfolio123's research engines and its official Python wrapper. Its own contribution is controlled experimentation, durable evidence, transparent comparisons, and defensible evaluation.
+
+Trial Folio is a research tool. It does not give investment advice, place trades, or judge whether anyone should invest.
+
+## Primary use
+
+The driving use case is reproducing published factor research in Portfolio123. A study takes a paper's factors, rebuilds them as Portfolio123 screens and ranking systems, and records what could and could not be reproduced. That work sets these needs, which the roadmap addresses in order:
+
+- Preregistration: the protocol is recorded before any test, and later changes are dated amendments.
+- Every study and case is kept and reported, whether or not it reproduces.
+- A deviation record compares each setting with the paper's.
+- Fixed variants: the paper's construction on the full universe and without microcaps, a practitioner screen variant, and stable-identifier universe slices.
+- Results gross and net of declared costs, rolling returns over several holding periods, quantile-bucket returns, and period splits around the paper's sample and publication dates.
+
+[methodology.md](methodology.md) (METH-09) defines the scientific meaning of these needs. [roadmap.md](roadmap.md) shows which increment delivers each one. Trial Folio stays general enough for other strategy research, but when priorities conflict, this use case decides.
+
+## Users and outcomes
+
+| ID | User outcome | First delivered |
+|---|---|---|
+| OUT-01 | Compare existing DataMiner screen-backtest results and their configurations, and see exactly what differs | [0.1.0](releases/0.1.0-review.md) |
+| OUT-02 | Run one supported screen backtest and keep the link between its settings and results | [0.2.0](releases/0.2.0-api-execution.md) |
+| OUT-03 | Run and review a finite, controlled experiment in which every planned case is accounted for | [0.3.0](releases/0.3.0-experiments.md) |
+| OUT-04 | Evaluate a strategy against a predeclared objective with honest statistics and robustness evidence | [Roadmap](roadmap.md#after-030) |
+| OUT-05 | Compare timestamped signals and modeled execution with later observed results | [Roadmap](roadmap.md#after-030) |
+
+The first user is the owner, an individual investor with a Portfolio123 subscription and API access. Later users are other eligible individuals under the [license](../LICENSE).
+
+Trial Folio eventually supports two kinds of research objective. The first is performance above a suitable benchmark after specified costs. The second is attractive standalone returns and risk. Each confirmatory study MUST choose one primary objective, with its decision criteria, before its evaluation results are seen. Reporting both kinds of result does not permit choosing whichever one passes ([METH-01](methodology.md)).
+
+## Vocabulary
+
+| Term | Meaning |
+|---|---|
+| Study | A research question, objective, data boundaries, search history, and evaluation protocol |
+| Experiment | A declared collection of cases addressing one question |
+| Case | One resolved configuration or candidate strategy within an experiment |
+| Candidate | A strategy specification considered during research; it can appear in several cases |
+| Attempt | One execution or acquisition attempt for a case |
+| Artifact | Saved input, output, metadata, or derived evidence |
+| Assessment | A versioned interpretation of artifacts using specified methods |
+| Report | A presentation of an assessment and its evidence |
+| Baseline | The run or case that other runs or cases are compared against, chosen explicitly |
+| Provenance | Where a value came from and how confident Trial Folio is in it: verified, user-supplied, inferred, or unknown |
+
+These distinctions hold even where an early release uses fewer objects. A retry is an attempt, not a new strategy hypothesis. The number of provider requests is not the size of a multiple-testing family.
+
+## Enduring invariants
+
+These hold in every release that touches the relevant data. Release specifications cite them by ID.
+
+| ID | Invariant |
+|---|---|
+| INV-01 | Preserve all collected and evaluated evidence within retention rights, including failed, rejected, and abandoned research cases where known. |
+| INV-02 | Preserve source provenance, and distinguish verified metadata, user-supplied metadata, inferred values, and unknowns. |
+| INV-03 | Never silently replace unavailable information with zero or a favorable default. |
+| INV-04 | Keep source responses separate from normalized data and calculated results. |
+| INV-05 | Regenerate analysis and reports from archived artifacts without acquiring fresh provider data. |
+| INV-06 | Record the inputs, implementation version, and method settings behind every calculated result. |
+| INV-07 | Account for every planned case, including skipped, failed, incomplete, and uncertain attempts. |
+| INV-08 | Make the settings, actual coverage, costs, and limitations of every comparison visible. |
+| INV-09 | Record research history before implementing statistical corrections. |
+| INV-10 | Make scientific and trading-readiness claims only when their stated evidence requirements have been met. |
+| INV-11 | Keep credentials out of artifacts, logs, fixtures, and reports. |
+| INV-12 | Keep historical artifacts readable as the application evolves. |
+| INV-13 | Preserve the author's licensing restrictions, attribution, financial-result notices, and applicable third-party rights. |
+| INV-14 | Keep logs, traces, and diagnostics on the machine or container that produced them, and never transmit user inputs or outputs except in provider requests the user invokes or explicitly enables. |
+
+"All evidence" means all material retrieved and evaluated, plus known acquisition failures and unavailable fields. It does not imply access to proprietary provider databases or to outputs the API cannot return. An imported CSV cannot recover the raw API responses behind it.
+
+## Enduring requirements
+
+| ID | Requirement | Owner document |
+|---|---|---|
+| REQ-01 | Trial Folio MUST be implemented in Python, using Pydantic v2 at serialized boundaries and `typing.Protocol` for narrow behavioral interfaces. Releases 0.1.0 to 0.3.0 MUST NOT require an LLM API or any language other than Python. | [ADR 0001](adrs/0001-python-and-portfolio123-integration.md), [ADR 0002](adrs/0002-pydantic-contracts-and-protocols.md) |
+| REQ-02 | The official `p123api` wrapper MUST be the only Portfolio123 code dependency. DataMiner and FactorMiner code MUST NOT be imported, vendored, bundled, or ported. Their exports and user-supplied configurations are read as data. | [ADR 0001](adrs/0001-python-and-portfolio123-integration.md) |
+| REQ-03 | The application core MUST be independent of the CLI. Core functions accept validated models and return result models. They do not print, prompt, parse arguments, exit, read environment variables, or read secrets. | [contracts.md](contracts.md#interface-independent-core) |
+| REQ-04 | No charged or mutating provider request may run without an approved plan identified by its hash. | [contracts.md](contracts.md#plans-and-approval) |
+| REQ-05 | All artifact reads and writes MUST go through the `ArtifactStore` interface, with paths recorded relative to the run root. | [contracts.md](contracts.md#artifact-storage) |
+| REQ-06 | Logs are diagnostics, not evidence. They MUST stay local, MUST NOT contain credentials, strategy definitions, formulas, configuration values, provider payloads, results, or imported file contents, and MUST NOT be the only record of an outcome. | [contracts.md](contracts.md#logging-and-local-diagnostics) |
+| REQ-07 | Application releases and artifact schemas MUST each use `<major>.<minor>.<patch>` semantic versioning, independently of each other. | [contracts.md](contracts.md#versioning) |
+| REQ-08 | Every human-facing report MUST be self-contained, contain no scripts or external resources, show the concise financial-result notice, and label unavailable sections as unavailable instead of inventing them. | [contracts.md](contracts.md#reports), [disclaimers.md](disclaimers.md) |
+| REQ-09 | Credentials MUST come from an injected source: environment variables for the CLI, and a keychain or equivalent for any later desktop interface. | [contracts.md](contracts.md#credentials) |
+| REQ-10 | Runtime LLM features, when added, MUST support Anthropic, OpenAI, and local-model backends behind one narrow protocol. They MUST be disabled by default, installed as optional extras, and disclosed before the first request of a run. | [roadmap.md](roadmap.md#after-030), [methodology.md](methodology.md) (METH-08) |
+| REQ-11 | Raw provider data MUST NOT be committed or published unless the provider's terms are confirmed to permit it. Committed fixtures are synthetic by default, and each records its origin and redistribution status. | [contracts.md](contracts.md#fixtures) |
+| REQ-12 | README.md MUST carry the Portfolio123 subscription notice near the top and the non-affiliation notice at the end. | [disclaimers.md](disclaimers.md) |
+| REQ-13 | Process success MUST be kept separate from any statement about a strategy's usefulness. A green completion status must not look like an endorsement to trade. | [contracts.md](contracts.md#reports), [methodology.md](methodology.md) (METH-07) |
+
+## Owner decisions and defaults
+
+Decisions are the owner's. Proposed defaults stand until changed before the implementation or study that depends on them. Change a row by editing it and noting the date; record significant reversals in an ADR.
+
+### Decisions
+
+| ID | Decision | Label | Date |
+|---|---|---|---|
+| D-01 | The product is **Trial Folio**. The repository and CLI command are `trialfolio`. The Python distribution and import package are proposed as `trialfolio`; PyPI availability is unchecked. | Requirement; package name is a proposed default | 2026-10-01 |
+| D-02 | Python, Pydantic v2, and `typing.Protocol`. Tooling follows the owner's other repositories: Python 3.12 or later, `uv`, and pytest. | Requirement; tooling is a proposed default | 2026-10-01 |
+| D-03 | The project's own material is licensed under the custom, source-available Nathan Slaughter Personal Research License. Nathan Slaughter adopts it himself; counsel review is not a condition of adoption or release. | Requirement | 2026-10-01 |
+| D-04 | Licensing contact: Nathan Slaughter, nathan@nathanslaughter.com. | Requirement | 2026-10-01 |
+| D-05 | Texas governing law, subject to mandatory applicable law. | Requirement | 2026-10-01 |
+| D-06 | Professional User definitions: liquid assets exclude retirement accounts; "primary source of income" means more than half of total income; "family members" has no defined list. | Requirement | 2026-10-01 |
+| D-07 | Reports contain no scripts, count as output rather than covered code, and may be shared with the concise notice intact. Users remain responsible for data-provider terms. | Requirement | 2026-10-01 |
+| D-08 | A release is Implemented when it works, is verified, and is used privately. It is Released only after the license is adopted and a distribution channel consistent with the no-publication restriction is chosen. The repository stays private until then. | Requirement | 2026-10-01 |
+| D-09 | No representative export or provider payload exists yet. The owner keeps Portfolio123 API credentials in a secret manager. Reference data is procured with them when a release needs it, and the owner performs Portfolio123 web-UI steps on request. | Requirement | 2026-10-01 |
+| D-10 | Trial Folio is the engine for reproducing published factor research. Project materials do not name any publication, brand, or series. | Requirement | 2026-10-01 |
+| D-11 | Development workflow: feature branches named `<type>/<short-description>`, pull requests, squash merges with conventional-commit titles, and merges only by the owner. Git hooks in `.githooks/`, adapted from the owner's other repositories, enforce it. | Requirement | 2026-10-01 |
+| D-12 | The [spec authoring guide](spec-authoring-guide.md) is bootstrap context. Accepted requirements in the documents that own them take precedence over it. | Requirement | 2026-10-01 |
+| D-13 | "Resells research" in the Professional User income criterion includes research the individual produced, not only research obtained from others. | Requirement | 2026-10-01 |
+| D-14 | Outputs other than reports, such as normalized CSV files and manifests, may be shared on the same terms as reports. Data-provider terms still apply. | Requirement | 2026-10-01 |
+| D-15 | An eligible individual's family members may use an interface that individual runs on a machine they control, for personal research. Access by anyone else is a hosted service needing written permission. | Requirement | 2026-10-01 |
+| D-16 | FactSet, Portfolio123's standard data, is the only supported data vendor. An absent vendor setting is treated as DataMiner treats it: FactSet, recorded as an inferred default. Compustat is out of scope: Trial Folio provides no facilities for it and does not test it. | Requirement | 2026-10-01 |
+| D-17 | License acknowledgment: a one-time local acknowledgment for each license and notice version, with non-interactive options for automation, as [contracts.md](contracts.md#license-acknowledgment) specifies. It is a notice, not an eligibility check. | Requirement | 2026-10-01 |
+
+### Proposed defaults
+
+| ID | Topic | Default | Resolve by |
+|---|---|---|---|
+| P-01 | Initial strategy scope | Long-only stock screens | 0.1.0 |
+| P-02 | First export layout | One actual current DataMiner ScreenBacktest CSV layout, procured under D-09; all other layouts explicitly unsupported | Before importer compatibility is claimed ([0.1.0](releases/0.1.0-review.md)) |
+| P-03 | Schema maintenance | Pydantic models generate versioned JSON Schemas | First executable contracts |
+| P-04 | Storage | Local immutable source artifacts, JSON metadata, CSV normalized output | 0.1.0 |
+| P-05 | Execution | Sequential, finite, explicit cases | 0.2.0 and 0.3.0 |
+| P-06 | Benchmark, capital, costs, risk limits | Explicit study inputs; no universal settings | Before the relevant assessment |
+| P-07 | Statistical threshold and method | Family-wise 5% level with a method justified in a methods ADR; not a product-wide constant | Methods ADR and study protocol |
+| P-08 | Historical split | Chronological, justified by data, horizon, prior exposure, and power | Before evaluation data is exposed |
+| P-09 | Runtime LLM use | Optional, deferred, bounded to development data | Optional discovery increment |
+| P-10 | Public sample data | Clearly labeled synthetic fixtures | 0.1.0 |
+| P-11 | Logging | Python's standard `logging`, JSON lines to a local file, human-readable messages on stderr | 0.1.0 |
+| P-12 | Test runner | pytest, with network access blocked in the default suite | 0.1.0 |
+
+## Out of scope
+
+These are outside Trial Folio unless a later decision adds them after the analysis each one needs:
+
+- Personalized investment advice, suitability assessments, or allocations for any person.
+- Trade execution, custody, discretion over accounts, or brokerage connections.
+- Autonomous strategy discovery in the first releases.
+- An exact clone of the DataMiner interface or every DataMiner option.
+- A hosted service that produces results for other people.
+
+## Open questions
+
+| Question | Impact | Recommended default | Resolve by |
+|---|---|---|---|
+| Is `trialfolio` available as a PyPI distribution name, and should Trial Folio be published there at all? | Package metadata and installation instructions | Keep `trialfolio`. Decide the channel under D-08. | Before packaging for release |
+| Which distribution channel satisfies the no-publication restriction? | Public release (D-08) | A private repository, with access granted per written permission | Before the first Released status |
