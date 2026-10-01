@@ -546,6 +546,8 @@ An attempt record contains the `attempt_id`, the `case_id`, the `plan_hash` it r
 
 Trial Folio saves decoded provider payloads, which is what the wrapper exposes, and labels them as decoded payloads. It does not claim to capture HTTP bytes, status codes, or headers on success, because the verified wrapper does not expose them ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md#verification-notes)). Trial Folio configures the wrapper for a single HTTP attempt per call, so every retry is its own recorded attempt. The one exception is the wrapper's single re-authentication reissue after a 401 or 403, which Trial Folio cannot observe; attempt records state that limitation.
 
+**Which request failed.** Trial Folio authenticates with its own call before the call that sends the request. A failure in its own authentication call means the request wasn't sent. A failure during the request's call is either the request itself or the wrapper's re-authentication after a 401 or 403, which means the request had reached Portfolio123. Trial Folio tells the two apart by the path of the failed request, `POST /auth` or the request's own, read in memory from the exception and never logged. A 5xx carries no path, so it's treated as a failure of the request itself ([0.1.0 failure behavior](releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior)).
+
 **Uncertain completion.** Trial Folio writes a `running` record durably before sending a request. On restart, a `running` attempt without a durable response becomes `unknown`. An `unknown` attempt is never retried automatically, because the original request may have been charged or may have changed provider state.
 
 ## Plans and approval
@@ -600,7 +602,7 @@ Each case holds:
 | `worst_case_credits` | 10. If Portfolio123 answers the request with 401 or 403, the wrapper re-authenticates and sends it once more. Trial Folio can't prevent or observe that ([retry policy](#budget-and-retries)), so at worst 2 requests are sent, and both might be charged. |
 
 - **Every request counts,** whatever its outcome, because whether failed requests are charged is unverified.
-- **Authentication isn't counted.** The wrapper authenticates by `POST /auth` before its first request. Portfolio123's [API credits](https://portfolio123.customerly.help/en/articles/13766-api-credits) page doesn't say whether that costs credits (checked 2026-10-01). See the [0.1.0 open questions](releases/0.1.0-api-execution.md#open-questions).
+- **Authentication isn't counted.** Trial Folio authenticates, through the wrapper's `POST /auth`, before the request. Portfolio123's [API credits](https://portfolio123.customerly.help/en/articles/13766-api-credits) page doesn't say whether that costs credits (checked 2026-10-01). See the [0.1.0 open questions](releases/0.1.0-api-execution.md#open-questions).
 - **The documented cost, not the charge.** The budget uses the documented cost. The attempt records the `cost` Portfolio123 reports.
 
 **Retry policy.**
@@ -663,7 +665,7 @@ Without a match, the command fails with `plan.approval_required`, exit 2, and cr
 4. Check that the installed `p123api` is a verified version (`provider.unsupported_capability`). Build the plan and show it: in full, unless `--approve` gives the matching hash.
 5. Check the approval (`plan.approval_required`).
 6. Check that credentials are present (`provider.auth_failed`).
-7. Claim the output directory: create it if it's absent, then create `plan.json` in it without replacing any file. If another process created `plan.json` first, stop with `output.not_empty`. Then write `configuration.yaml`, from the bytes read in step 2, and the `running` attempt record, and send the request.
+7. Claim the output directory: create it if it's absent, then create `plan.json` in it without replacing any file. If another process created `plan.json` first, stop with `output.not_empty`. Then write `configuration.yaml`, from the bytes read in step 2, and the `running` attempt record. Authenticate, and send the request.
 
 **Records.**
 
@@ -791,7 +793,7 @@ Exit codes (proposed default):
 | 2 | Usage error: invalid arguments, missing plan approval, or license not acknowledged |
 | 3 | Invalid or unsupported configuration, input, or artifact |
 | 4 | Output problem: directory not empty, write failure, or experiment locked by another process |
-| 5 | Provider error: authentication, quota, unsupported capability, or invalid response |
+| 5 | Provider error: authentication, provider unavailable, quota, unsupported capability, uncertain outcome, or invalid response |
 | 6 | Partial completion: at least one planned case failed, was skipped, or is uncertain |
 | 130 | Interrupted by the user |
 
@@ -854,7 +856,8 @@ The core raises typed errors with stable dotted codes and actionable messages. O
 | `output.not_empty` | 4 | The output directory exists and is not empty |
 | `storage.write_failed` | 4 | An artifact could not be written durably |
 | `experiment.locked` | 4 | Another process holds the experiment lock |
-| `provider.auth_failed` | 5 | Credentials were rejected or missing |
+| `provider.auth_failed` | 5 | Credentials were missing or rejected, or Portfolio123 refused a request's authorization and re-authenticating failed |
+| `provider.unavailable` | 5 | Portfolio123 couldn't be reached, or authentication failed without a rejection, so the request wasn't sent ([which request failed](#execution-outcomes-and-attempts)) |
 | `provider.quota_exceeded` | 5 | The provider refused the request because of quota or credits |
 | `provider.unsupported_capability` | 5 | The requested setting or operation is not supported by the verified provider path |
 | `provider.response_invalid` | 5 | The response was saved but failed validation |
