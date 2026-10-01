@@ -11,7 +11,7 @@ This document owns the release sequence, dependencies, the value of each increme
 - **Narrow before deferring correctness.** When time is short, the functionality is narrowed; basic correctness is never deferred to a later release.
 - **Scope targets are not deadlines.** Releases 0.1.0, 0.2.0, and 0.3.0 together are sized for about three cumulative focused working days, which may be spread over two weeks. Since [ADR 0005](adrs/0005-build-on-the-portfolio123-api-only.md), 0.1.0 takes a larger share and 0.2.0 a smaller one. They are scope targets, not promises, and verification is never skipped to meet them.
 - **Implemented is not Released ([D-08](spec.md#decisions)).** A release is Implemented when it works, is verified, and is used privately by the owner. It becomes Released, meaning publicly distributed, only after Nathan Slaughter adopts the license and chooses a distribution channel consistent with the no-publication restriction. The gates are listed in [licensing-policy.md](licensing-policy.md).
-- **Reference data is procured when needed ([D-09](spec.md#decisions)).** No representative provider response exists yet. The first task of each release that depends on a provider format is procuring a reference sample with the owner's credentials and approval, and the owner does any Portfolio123 web-UI steps.
+- **Reference data is procured when needed ([D-09](spec.md#decisions)).** So far the only reference response is 0.1.0's screen backtest. The first task of each release that depends on a provider format is procuring a reference sample with the owner's credentials and approval, and the owner does any Portfolio123 web-UI steps.
 
 ## Releases 0.1.0 to 0.3.0
 
@@ -36,7 +36,7 @@ These are proposed increments. Names, order, and estimates are refined as their 
 | Forward tracking | Compare timestamped signals and modeled execution with later observed results and imported fills | Identifier alignment, price conventions, execution records |
 | Optional discovery | Use FactorMiner or bounded LLM proposals to generate candidates within development data | Reliable evaluation boundaries and complete selection history; the model backends of [REQ-10](spec.md#enduring-requirements) |
 
-**Descriptive return analytics** is a proposed addition to the guide's sequence, made because of the driving use case ([D-10](spec.md#decisions)). Reproduction studies need the same descriptive analysis for every study before any statistical evaluation exists. It computes descriptive numbers only, with no significance claims. The wrapper source shows per-rebalance-period screen returns, benchmark returns, turnover, and position counts in the screen-backtest response. That's unverified until 0.1.0 inspects a real response ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md#verification-notes)). If it holds, this increment can follow 0.3.0 directly, using the responses that 0.1.0 and 0.3.0 already archive.
+**Descriptive return analytics** is a proposed addition to the guide's sequence, made because of the driving use case ([D-10](spec.md#decisions)). Reproduction studies need the same descriptive analysis for every study before any statistical evaluation exists. It computes descriptive numbers only, with no significance claims. The 0.1.0 reference response confirms per-rebalance-period screen returns, benchmark returns, turnover, and position counts. It also has a daily series of strategy and benchmark values ([`p123api-screen-backtest` version 1](contracts.md#p123api-screen-backtest-version-1)). So this increment can follow 0.3.0 directly, using the responses that 0.1.0 and 0.3.0 already archive.
 
 The two to four working weeks estimated earlier applies to a broader validated tool. It is not a prerequisite for 0.1.0, and it is not a schedule for the full scientific roadmap.
 
@@ -88,5 +88,5 @@ Deferred until a later increment is specified:
 
 | Question | Impact | Recommended default | Resolve by |
 |---|---|---|---|
-| Does Descriptive return analytics come before Simulation review? | Order of increments | Put it first if the 0.1.0 reference response confirms the per-period series; otherwise, after Simulation review | End of 0.1.0 |
+| Does Descriptive return analytics come before Simulation review? | Order of increments | Put it first. The 0.1.0 reference response confirms the per-period series (R01-T02). | End of 0.1.0 |
 | Which variant types can 0.3.0 offer? | 0.3.0 scope | Only the types whose backend support is recorded with integration evidence in 0.2.0 or 0.3.0 | 0.3.0 specification Ready |

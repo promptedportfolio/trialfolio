@@ -63,6 +63,10 @@ Recorded on 2026-10-01 from public sources, without account access. These are do
 - **Screen backtest call.** `screen_backtest(params, to_pandas=False)` sends `POST /screen/backtest` and returns the decoded JSON body. Raw bytes, the status code, and headers are not exposed on success. The body's `cost` and `quotaRemaining` are also copied to client attributes, which the next call overwrites.
 - **`to_pandas=True`** drops `cost`, `quotaRemaining`, and any unrecognized top-level fields.
 - **Response shape, derived from source and undocumented.** `stats`, with portfolio and benchmark summary statistics; `results`, a per-period table with averages and up- and down-market rows; and `chart`, with dates, screen and benchmark returns, turnover percentages, and position counts.
+  - **Confirmed by the 0.1.0 reference response** (R01-T02), which [`p123api-screen-backtest` version 1](../contracts.md#p123api-screen-backtest-version-1) documents. There are two corrections:
+    - The chart's screen and benchmark series are levels, not returns: the value of 100 invested, starting at 100.
+    - The average and up- and down-market rows are one element shorter than the table's columns, and they align from its second column. `to_pandas=True` appends them without that offset, which moves each value one column to the left.
+  - **The installed wrapper matches the pinned source.** The `p123api` 3.1.0 wheel's `client.py` equals `p123api/client.py` at the pinned commit, apart from line endings.
 - **Retries.**
   - The wrapper retries connection errors and HTTP 5xx responses up to 5 total attempts by default, which `set_max_request_retries` configures.
   - It reissues a request once after re-authenticating on a 401 or 403.

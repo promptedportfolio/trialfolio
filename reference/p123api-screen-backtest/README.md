@@ -46,3 +46,29 @@ Whether rejected requests are charged is still unknown. The response's `quotaRem
 - **`results`** is a table with 19 columns and one row per rebalance period: 131 rows here. It also has `average`, `upMarkets`, and `downMarkets` rows.
 - **`chart`** is a daily series: 2,609 points of `dates`, `screenReturns`, `benchReturns`, `turnoverPct`, and `positionCnt`, from 2016-01-01 to 2025-12-31.
 - **Vendor.** The response doesn't report the data vendor.
+
+## Checks for R01-T02
+
+R01-T02 documents the layout as [`p123api-screen-backtest` version 1](../../docs/contracts.md#p123api-screen-backtest-version-1). These checks ran against `payloads/response.json` with a short, uncommitted Python standard-library script. Portfolio123's values aren't recorded here; only the outcomes are.
+
+"Monthly returns" means the changes in the `chart` levels between the last chart dates of consecutive months. The checks use the 118 such returns from the end of the first month to the end of the next-to-last month.
+
+| Check | Outcome |
+|---|---|
+| No numeric value has more than 4 decimal places, the requested precision | Passed. `stats.port.standard_dev` has 3. |
+| `chart.dates` holds every weekday from 2016-01-01 to 2025-12-31, market holidays included | Passed: 2,609 dates |
+| Both `chart` level series start at 100, and the last level minus 100 equals `total_return` | Passed for the strategy and the benchmark |
+| `annualized_return` equals the compound annual growth rate over the chart's calendar days, with 365.25-day years | Passed for both, at 4 decimal places |
+| `max_drawdown` equals the largest peak-to-trough decline in the daily levels | Passed for both |
+| `standard_dev` equals the sample standard deviation of the monthly returns, times √12 | Passed for both. `stats.samples` equals the count, 118. |
+| `r_squared` equals `correlation` squared, rounded to 4 places | Passed |
+| `correlation` and `beta` from the monthly returns | Close to the reported values, but not equal |
+| `sharpe_ratio` and `sortino_ratio` from the monthly returns with a zero risk-free rate, and `alpha` from the monthly regression | Not reproduced |
+| `100 USD Investment` and `100 USD in SPY:USA` equal the `chart` levels at each period's `End Dt` | Passed for all 131 periods |
+| `Ret%` and `Bench%` equal the change in the `chart` levels from `Tran Dt` to `End Dt`, within 0.001 | Passed for all 131 periods |
+| `Excess%` equals `Ret%` minus `Bench%`, within 0.0001 | Passed |
+| `Turn` equals `Sold Pos` divided by `#Pos`, times 100 | Passed for all 131 periods |
+| Each period's `End Dt` is the next period's `Tran Dt`. The earliest `Tran Dt` and the latest `End Dt` equal the requested dates. | Passed |
+| Element *i* of `results.average`, `upMarkets`, and `downMarkets` is the mean of `columns[i+1]` over all periods, over periods with `Bench%` above zero, and over the rest | Passed for every non-null element. Element 1 of the up- and down-market rows is the period count. No period had a `Bench%` of zero. |
+| `to_pandas=True` moves the summary rows one column to the left | Confirmed with synthetic rows under pandas 3.0.6, following the wrapper's source |
+| The `p123api` 3.1.0 wheel from PyPI matches the source commit pinned in [ADR 0001](../../docs/adrs/0001-python-and-portfolio123-integration.md#verification-notes) | Passed: `client.py` is identical apart from line endings |
