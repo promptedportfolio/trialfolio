@@ -35,9 +35,9 @@ Every artifact records these versions separately:
 |---|---|
 | `trialfolio_version` | Application version that wrote the artifact |
 | `schema_version` | Artifact schema version, `<major>.<minor>.<patch>`, independent of the application version |
-| `parser_version` | Version of the importer that interpreted a source file, per supported layout |
+| `parser_version` | Version of the adapter that interpreted a provider response, per supported layout |
 | `canonicalization_version` | Version of the canonical-hashing rules used for identities |
-| Provider wrapper version | `p123api` version used for provider requests (0.2.0 onward) |
+| Provider wrapper version | `p123api` version used for provider requests |
 | Method versions | Version of each analytical method applied (when methods are introduced) |
 | `license_id`, `notice_version` | The applicable license identifier (`LicenseRef-NSPRL-1.0`) and financial-notice version (`1.0`), defined in [../LICENSE](../LICENSE) and [disclaimers.md](disclaimers.md) |
 
@@ -50,12 +50,12 @@ Identifiers are introduced with the release that can define their semantics.
 | Identifier | Introduced | Meaning | Proposed form |
 |---|---|---|---|
 | `artifact_id` | 0.1.0 | Content address of one stored file | `sha256:<64 hex>` of the file's bytes |
-| `review_id` | 0.1.0 | One `trialfolio review` output | Random UUID, version 4 |
-| `label` | 0.1.0 | User-declared name of one compared result, unique within a review | `[a-z0-9][a-z0-9_-]{0,63}` |
-| `plan_hash` | 0.2.0 | Identity of an approved plan | `sha256:` of the plan's canonical form |
-| `case_id` | 0.2.0 | Stable identity of one fully resolved configuration | `case-` plus the first 16 hex digits of the SHA-256 of the canonical resolved configuration |
+| `review_id` | 0.2.0 | One `trialfolio review` output | Random UUID, version 4 |
+| `label` | 0.2.0 | User-declared name of one compared result, unique within a review | `[a-z0-9][a-z0-9_-]{0,63}` |
+| `plan_hash` | 0.1.0 | Identity of an approved plan | `sha256:` of the plan's canonical form |
+| `case_id` | 0.1.0 | Stable identity of one fully resolved configuration | `case-` plus the first 16 hex digits of the SHA-256 of the canonical resolved configuration |
 | `case_key` | 0.3.0 | User-declared readable name for a planned case | Same pattern as `label` |
-| `attempt_id` | 0.2.0 | One execution attempt of a case | Random UUID, version 4 |
+| `attempt_id` | 0.1.0 | One execution attempt of a case | Random UUID, version 4 |
 | `experiment_id` | 0.3.0 | One declared experiment | User-declared slug, same pattern as `label` |
 | `study_id`, `candidate_id`, `assessment_id` | Later | Defined when their increment is specified | — |
 
@@ -68,26 +68,36 @@ Configuration identity and attempt identity MUST stay separate. Re-running the s
 | Class | Meaning |
 |---|---|
 | `verified` | Captured by Trial Folio from the provider during an attempt it executed, or independently confirmed and recorded as such |
-| `user_supplied` | Read from a file the user provided, including imported exports and attached configurations |
+| `user_supplied` | Provided by the user as description rather than as a request setting, for example a declared purpose or an intended-change reason |
 | `inferred` | Derived by Trial Folio under a documented rule, for example a date range read from row dates; the rule is recorded |
 | `unknown` | Not available from any source |
 
-Everything in 0.1.0 is `user_supplied`, `inferred`, or `unknown`, because Trial Folio did not observe the original provider exchange. Each value also records its source artifact and location where applicable, for example the CSV column or YAML key.
+Every Portfolio123 result Trial Folio holds comes from a request it planned, sent, and recorded ([ADR 0005](adrs/0005-build-on-the-portfolio123-api-only.md)). So the settings sent and the values captured are `verified`, and a provider default applied to an omitted setting is `inferred`. Each value also records its source artifact and location where applicable, for example the configuration key or the response's JSON path.
 
 ## Configuration files
 
 Configuration files are YAML documents owned by the user. The rules apply to every kind:
 
-- Each file declares `kind` (`review`, `screen`, or `experiment`) and `schema_version`.
+- Each file declares `kind` (`screen` from 0.1.0, `review` from 0.2.0, `experiment` from 0.3.0) and `schema_version`.
 - Unknown keys are rejected, so misspellings fail instead of being ignored.
 - YAML is loaded with a safe loader. Values are not coerced: a percentage is written as a number with a declared unit, not as `"5%"`; dates use `YYYY-MM-DD`; booleans are `true` or `false` only.
 - Configuration never contains credentials. A credential-like key is rejected.
 - File paths inside a configuration are resolved relative to the configuration file.
 - Duplicate keys are rejected; a YAML loader must not silently keep the last one.
 
+### Screen configuration
+
+Schema version 1.0.0, introduced in 0.1.0. **Not specified yet.** Release 0.1.0 task R01-T03 specifies it here. The specification covers:
+
+- every key, with its type, unit, and whether it's required
+- the normalized setting name and category of each key, as used in `settings.csv`
+- a validated example
+
+It covers only the settings the Portfolio123 API documentation and the 0.1.0 reference call verify. Until then, no screen configuration format exists.
+
 ### Review configuration
 
-Schema version 1.0.0, introduced in 0.1.0. Release 0.2.0 extends it to 1.1.0.
+Schema version 1.0.0, introduced in 0.2.0. It names saved runs written by `trialfolio run`.
 
 **Top-level keys:**
 
@@ -105,8 +115,7 @@ Schema version 1.0.0, introduced in 0.1.0. Release 0.2.0 extends it to 1.1.0.
 | Key | Type | Required | Rules |
 |---|---|---|---|
 | `label` | string | Yes | Matches `[a-z0-9][a-z0-9_-]{0,63}`, and is unique within the file |
-| `export` | path | Yes | A DataMiner export; must be a regular file |
-| `configuration` | path | No | The DataMiner configuration that produced the export; must be a regular file |
+| `run` | path | Yes | A complete run directory written by `trialfolio run` |
 | `description` | string | No | Up to 500 characters, shown in the report |
 | `intended_changes` | list | No | Not allowed on the baseline entry |
 
@@ -114,16 +123,16 @@ Schema version 1.0.0, introduced in 0.1.0. Release 0.2.0 extends it to 1.1.0.
 
 | Key | Type | Required | Rules |
 |---|---|---|---|
-| `setting` | string | Yes | A normalized setting name from the verified layout's mapping ([supported import layouts](#supported-import-layouts); fixed by 0.1.0 task R01-T02). An unknown name fails with `config.invalid`, and the message lists the valid names. A result may list each setting at most once. |
+| `setting` | string | Yes | A normalized setting name from the [screen configuration](#screen-configuration). An unknown name fails with `config.invalid`, and the message lists the valid names. A result may list each setting at most once. |
 | `reason` | string | Yes | 1–500 characters, shown in the report |
 
 **Rules that span keys:**
 
 - **Intended change not observed.** If a declared change isn't there because the two values are equal, the result is still valid. The difference is classified `same` and flagged `intended_change_not_observed`.
-- **Intended change that can't be confirmed.** If the setting is missing from either result, the difference is `unknown` and is flagged.
-- **Same export named twice.** Two entries may name the same export file. Identical bytes are flagged `identical_source`, as a warning.
+- **Intended change that can't be confirmed.** If the setting is missing from either run, the difference is `unknown` and is flagged.
+- **Identical responses.** Two entries may name runs whose saved responses are byte-identical. That is flagged `identical_source`, as a warning.
 
-Example (the setting name is illustrative until R01-T02 fixes the names):
+Example (the setting name is illustrative until 0.1.0 task R01-T03 fixes the names):
 
 ```yaml
 kind: review
@@ -133,11 +142,9 @@ purpose: Check whether doubling holdings changes risk as expected.
 baseline: hold25
 results:
   - label: hold25
-    export: exports/hold25.csv
-    configuration: configs/hold25.yaml
+    run: runs/hold25
   - label: hold50
-    export: exports/hold50.csv
-    configuration: configs/hold50.yaml
+    run: runs/hold50
     intended_changes:
       - setting: max_num_holdings
         reason: Doubling holdings is the change under review.
@@ -148,26 +155,22 @@ results:
 **Requirement (INV-04).** Source files are preserved byte for byte before anything is derived from them. A source artifact record contains:
 
 - `artifact_id`, size, and the path relative to the output root.
-- The original file name, which is recorded but not trusted as a path.
-- Role: export, configuration, provider request, or provider response.
-- Import or acquisition time in UTC.
-- Source format identifier and version, for example the DataMiner ScreenBacktest CSV layout identifier once verified.
-- The parser and parser version that interpreted it, or a statement that it was attached without interpretation.
+- Role: screen configuration, provider request, or provider response.
+- Acquisition time in UTC.
+- Source format identifier and version, for example `p123api-screen-backtest` version 1 once verified.
+- The adapter and parser version that interpreted it.
 - Provenance class, and source identity where available, for example the provider operation and account-independent identifiers.
 
-Attached configuration files are preserved even when Trial Folio cannot interpret some of their settings. Uninterpreted settings are listed as such.
+## Supported provider payloads
 
-## Supported import layouts
-
-**Status: no layout has been verified yet.** Release 0.1.0 task R01-T02 adds `dataminer-screenbacktest-csv` version 1 here. It is built from the reference exports in [reference/dataminer-screenbacktest/](../reference/dataminer-screenbacktest/README.md). Until then, Trial Folio makes no claim to import any export layout.
+**Status: no response layout has been verified yet.** Release 0.1.0 task R01-T02 adds `p123api-screen-backtest` version 1 here. It is built from the reference response in `reference/p123api-screen-backtest/`, where the response itself stays git-ignored. Until then, Trial Folio makes no claim about any response layout.
 
 For each layout, this section records:
 
-- **Identity.** The layout identifier and version, and the tool build it was observed from.
-- **Structure.** The section structure and header rows used to detect the layout.
-- **Metrics.** Each one's `metric_id`, its source label and location, its unit, the precision the source reports, and its definition.
-- **Settings.** The documented configuration keys, each with its normalized setting name, category, and documented default. Time-dependent defaults are marked as such.
-- **Everything else.** What the layout contains that Trial Folio preserves but does not interpret.
+- **Identity.** The layout identifier and version, and the `p123api` version it was observed with.
+- **Structure.** The top-level keys, and the structure used to validate a response.
+- **Metrics.** Each one's `metric_id`, its JSON path, its unit, the precision the response carries, and its definition.
+- **Everything else.** What the response contains that Trial Folio preserves but does not interpret, such as the per-period series in 0.1.0.
 
 ## Metrics and missing values
 
@@ -177,7 +180,7 @@ For each layout, this section records:
 |---|---|
 | Value | A decimal string carrying the source's precision, for example `"12.30"`. Never a float in interchange JSON, and never NaN or infinity. |
 | Unit | One of `percent` (12.30 means 12.30%), `ratio` (dimensionless, for example beta or Sharpe), `currency:<ISO 4217 code>`, `count`, `days`, or `date` |
-| Definition | A metric identifier and a reference to its documented definition; for imported metrics, the source's own label and the layout's documented meaning |
+| Definition | A metric identifier and a reference to its documented definition; for provider metrics, the response's own key and the layout's documented meaning |
 | Context | Period covered, return frequency where known, and benchmark where the metric is benchmark-relative |
 | Origin | `reported` (read from a source) or `calculated` (computed by Trial Folio, with method and version) |
 | Availability | `available`, or `unavailable` with a reason code |
@@ -198,9 +201,9 @@ An unavailable metric is never written as zero, blank, or a placeholder number. 
 
 ## Settings and differences
 
-Each compared result has original settings, stored as they appear in the source, and resolved settings: normalized names, values, and units under the verified layout mapping. Settings that refer to mutable objects in the provider account, such as a saved ranking system or universe by name, are recorded as external references. Each one is marked snapshotted, if its definition was captured, or not snapshotted, with reproducibility labeled incomplete.
+Each run has original settings, as written in its screen configuration, and resolved settings: the normalized names, values, and units that were actually sent. Settings that refer to mutable objects in the provider account, such as a saved ranking system or universe by name, are recorded as external references. Each one is marked snapshotted, if its definition was captured, or not snapshotted, with reproducibility labeled incomplete.
 
-When a source tool applied a default because a setting was absent, the effective value is `inferred`: the record cites the documented default and the version of the documentation it came from. A default that depends on when the tool ran, such as an end date of "today", is `unknown` unless the data itself establishes it, for example the last date in a returned series. Trial Folio never assumes the run date.
+When a setting was omitted and the provider applied its default, the effective value is `inferred`: the record cites the documented default and the version of the documentation it came from. A default that depends on when the tool ran, such as an end date of "today", is `unknown` unless the data itself establishes it, for example the last date in a returned series. Trial Folio never assumes the run date.
 
 Each setting in each non-baseline result is classified against the baseline:
 
@@ -217,7 +220,7 @@ Metric differences are computed only between comparable values: the same unit, t
 
 ## Normalized tables
 
-Schema version 1.0.0, introduced in 0.1.0. Release 0.2.0 writes the same tables from provider payloads. These tables are public contract. The manifest records each table's schema version, because a CSV file can't carry its own.
+Schema version 1.0.0. `metrics.csv` and `settings.csv` are introduced in 0.1.0, and `differences.csv` in 0.2.0. These tables are public contract. The manifest records each table's schema version, because a CSV file can't carry its own.
 
 **Format rules for every table:**
 
@@ -251,7 +254,7 @@ One row for each metric of each result. That includes coverage values, which use
 | `period_start`, `period_end` | The period the metric covers. Empty when unknown. |
 | `benchmark` | The benchmark, for benchmark-relative metrics. Empty otherwise. |
 | `source_artifact` | `artifact_id` of the source file |
-| `source_location` | Where the value was read: `<section>/<row label>/<column label>` in the verified layout. Empty for calculated values. |
+| `source_location` | Where the value was read: its JSON path in the response, for example `stats.port.annualized_return`, as fixed by the verified layout. Empty for calculated values. |
 
 ### `settings.csv`
 
@@ -267,10 +270,10 @@ One row for each setting of each result. This includes documented settings that 
 | `unit` | Unit for numeric values. Empty otherwise. |
 | `interpretation` | `interpreted` or `not_interpreted` |
 | `provenance` | `user_supplied`, `inferred`, or `unknown` (`verified` from 0.2.0) |
-| `inference_rule` | For `inferred` values, the rule and its source, for example DataMiner's documented default and the date the documentation was checked. Empty otherwise. |
-| `original_key` | The key path in the source configuration, for example `Default Settings.Max Num Holdings`. Empty when absent. |
+| `inference_rule` | For `inferred` values, the rule and its source, for example Portfolio123's documented default and the date the documentation was checked. Empty otherwise. |
+| `original_key` | The key path in the screen configuration. Empty when the setting was omitted. |
 | `original_value` | The value exactly as written in the source. Empty when absent. |
-| `source_artifact` | `artifact_id` of the configuration. Empty when no configuration was attached. |
+| `source_artifact` | `artifact_id` of the saved screen configuration |
 | `flags` | Flag codes, separated by semicolons. Empty when none apply. |
 
 ### `differences.csv`
@@ -307,11 +310,11 @@ One row for each setting and each metric of each non-baseline result, compared w
 | `time_dependent_default` | An absent setting whose default depends on when the tool ran, such as an End Date of "today". The value is `unknown` unless the data establishes it. |
 | `unsupported_value` | The value is recorded, but it is unsupported and unverified, for example a data vendor other than FactSet ([D-16](spec.md#decisions)) |
 | `coverage_mismatch` | Requested dates and actual coverage differ |
-| `identical_source` | Two results have byte-identical exports |
+| `identical_source` | Two results have byte-identical saved responses |
 
 ## Execution outcomes and attempts
 
-Introduced in 0.2.0.
+Introduced in 0.1.0.
 
 | Outcome | Meaning |
 |---|---|
@@ -332,7 +335,7 @@ Trial Folio saves decoded provider payloads, which is what the wrapper exposes, 
 
 **Requirement (REQ-04).** Before any charged or mutating provider request, Trial Folio builds a plan from the configuration. A plan contains every fully resolved case, the requests each case needs, a request budget, the retry policy, and the categories of data that will leave the machine. Its `plan_hash` is the SHA-256 of its canonical form. Execution requires that exact hash as approval. If the plan changes, the approval no longer applies.
 
-The CLI shows the plan and its hash. On an interactive terminal it MAY ask for confirmation. Non-interactive use requires the hash as an explicit option; release 0.2.0 fixes the option's name. The core never prompts.
+The CLI shows the plan and its hash. On an interactive terminal it MAY ask for confirmation. Non-interactive use requires the hash as an explicit option; release 0.1.0 fixes the option's name. The core never prompts.
 
 ## Artifact storage
 
@@ -344,21 +347,24 @@ The CLI shows the plan and its hash. On an interactive terminal it MAY ask for c
 - **Completion.** A case is complete only after its required payload and its attempt record are durably written. The manifest is written last, and a missing or incomplete manifest means the output is incomplete.
 - **Hashes.** Hashes detect changes. They do not prove that a provider's data is scientifically correct, and they do not make local files tamper-proof.
 
-Proposed layout for 0.1.0; the release specification owns the final layout:
+Proposed layout for a 0.1.0 run; the release specification owns the final layout:
 
 ```text
 <out>/
   manifest.json
-  sources/<label>/export.csv            byte-for-byte copy; original name recorded in manifest
-  sources/<label>/configuration.yaml    byte-for-byte copy, when supplied
+  plan.json
+  configuration.yaml                                byte-for-byte copy of the screen configuration
+  cases/<case_id>/attempts/<attempt_id>/
+    attempt.json
+    request.json                                    redacted
+    response.json                                   the decoded response
   normalized/metrics.csv
   normalized/settings.csv
-  normalized/differences.csv
   report.html
-  logs/                                 diagnostics; excluded from hashes and from the manifest's evidence
+  logs/                                             diagnostics; excluded from hashes and from the manifest's evidence
 ```
 
-Releases 0.2.0 and 0.3.0 add `plan.json` and `cases/<case_id>/attempts/<attempt_id>/`, which holds `attempt.json`, `request.json` (redacted), and `response.json`. Release 0.3.0 adds `experiment.json` and a lock file.
+Release 0.2.0 defines the review layout. The proposal is `inputs/<label>/`, holding byte-for-byte copies of each compared run's manifest and normalized tables, plus `normalized/differences.csv`. Release 0.3.0 adds `experiment.json` and a lock file.
 
 The manifest records:
 
@@ -425,9 +431,10 @@ The command is `trialfolio`. Commands are introduced by release:
 
 | Command | Release | Purpose |
 |---|---|---|
-| `trialfolio review <config> --out <dir>` | 0.1.0 | Compare imported results offline |
-| `trialfolio demo --out <dir>` | 0.1.0 | Proposed: write the synthetic demo inputs and run a review offline |
-| `trialfolio run <config> --out <dir>` | 0.2.0 | Plan and execute one supported screen backtest |
+| `trialfolio run <config> --out <dir>` | 0.1.0 | Plan and execute one supported screen backtest |
+| `trialfolio report <run-dir> --out <dir>` | 0.1.0 | Re-render a saved run's report offline |
+| `trialfolio demo --out <dir>` | 0.1.0 | Proposed: write a synthetic example run, labeled synthetic, and render its report offline |
+| `trialfolio review <config> --out <dir>` | 0.2.0 | Compare saved runs offline |
 | `trialfolio experiment <config> --out <dir>` | 0.3.0 | Plan, execute, and resume a finite experiment |
 | `trialfolio --version` | 0.1.0 | Print the application version |
 | `trialfolio license [--accept]` | 0.1.0 | Print the license, the full notice, and the acknowledgment status; `--accept` records the acknowledgment |
@@ -465,13 +472,13 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
 | `ids` | Identifiers the command created, for example `{"review_id": "…"}`. Empty when it created none. |
 | `output_dir` | The output directory as given on the command line. `null` if none was created. |
 | `outputs` | Output files relative to `output_dir`, keyed by role: `manifest`, `report`, `metrics`, `settings`, `differences` |
-| `counts` | For `review`: `results`, `settings_flagged`, `metrics_unavailable`, `warnings` |
+| `counts` | For `run`: `attempts`, `provider_requests`, `metrics_unavailable`, `warnings`, and the credit `cost` when the provider reports it. For `review` (0.2.0): `results`, `settings_flagged`, `metrics_unavailable`, `warnings`. |
 | `statistical_validation`, `trading_readiness` | `not_assessed` in every 0.x release that doesn't assess them |
 | `error` | `null`, or `{"code": …, "message": …}` using the codes in [errors](#errors) |
 
 ### License acknowledgment
 
-**Requirement ([D-17](spec.md#decisions), [LIC-12](licensing-policy.md#lic-12-acceptance-and-acknowledgment)).** Before a command processes any data, the user acknowledges the license and the research notice once. This applies to `review` and `demo`, and later to `run` and `experiment`. Each acknowledgment covers one license identifier and one notice version. Only a change to either one asks again.
+**Requirement ([D-17](spec.md#decisions), [LIC-12](licensing-policy.md#lic-12-acceptance-and-acknowledgment)).** Before a command processes any data, the user acknowledges the license and the research notice once. This applies to `run`, `report`, and `demo`, and later to `review` and `experiment`. Each acknowledgment covers one license identifier and one notice version. Only a change to either one asks again.
 
 - **Interactive.** When stdin and stderr are both terminals and there's no valid acknowledgment, the CLI prints three things to stderr:
   - the concise notice
@@ -502,8 +509,7 @@ The core raises typed errors with stable dotted codes and actionable messages. O
 |---|---|---|
 | `config.invalid` | 3 | Configuration fails validation, including unknown keys and cross-field rules |
 | `input.not_found` | 3 | A referenced file does not exist |
-| `import.unsupported_layout` | 3 | The export does not match a verified layout; the message names the supported layouts |
-| `import.malformed` | 3 | The export matches a layout but a row or value is invalid |
+| `input.not_a_run` | 3 | An input directory is not a complete Trial Folio run: its manifest is missing, or its files don't match their hashes. The message names the problem. |
 | `artifact.unknown_schema_version` | 3 | An artifact's schema version has no reader |
 | `license.not_acknowledged` | 2 | A data-processing command ran without an acknowledgment of the current license and notice versions |
 | `plan.approval_required` | 2 | A charged or mutating operation was requested without the matching plan hash |
@@ -525,7 +531,7 @@ The core raises typed errors with stable dotted codes and actionable messages. O
 
 - The CLI parses arguments, reads configuration files, injects credentials, calls core functions, formats output, and maps errors to exit codes.
 - Core functions accept validated models and return result models. They do not print, prompt, parse arguments, exit the process, read environment variables, or read secrets.
-- Importers accept file content together with a declared source name, not only a filesystem path.
+- Readers of configurations and saved runs accept content together with a declared source name, not only a filesystem path, so an uploaded file follows the same path as a local one.
 - Planning returns a plan model, and execution requires the approved plan hash.
 - Long-running execution reports progress through callbacks or events and supports cancellation between provider requests. It holds a lock that prevents two processes from executing the same experiment, and it serializes Portfolio123 shared-state operations per account across processes.
 
@@ -535,13 +541,12 @@ Protocols are introduced only when a release needs them. Each protocol's documen
 
 | Protocol | Release | Responsibility |
 |---|---|---|
-| `ResultImporter` | 0.1.0 | Interpret one verified export layout from content plus a source name, and return a validated imported result or `import.unsupported_layout` / `import.malformed` |
 | `ArtifactStore` | 0.1.0 | Persist and read artifacts by relative path, with atomic writes and immutability as above |
 | `ReportRenderer` | 0.1.0 | Render a saved comparison or assessment to HTML without provider or network access |
-| `ScreenBacktestClient` | 0.2.0 | Execute the one supported screen-backtest request and return the captured provider evidence |
+| `ScreenBacktestClient` | 0.1.0 | Execute the one supported screen-backtest request and return the captured provider evidence |
 | `ModelClient` | Later | Send a bounded structured request to the configured model backend and return validated output with usage metadata ([REQ-10](spec.md#enduring-requirements)) |
 
-There is no universal provider interface, plugin registry, or service framework. Import and execution paths converge on the same result model without pretending to be the same operation. A runtime-checkable protocol does not verify signatures or behavior, so static type checking and contract tests carry those obligations.
+There is no universal provider interface, plugin registry, or service framework. Later operations, such as experiments, converge on the same result model without pretending to be the same operation. A runtime-checkable protocol does not verify signatures or behavior, so static type checking and contract tests carry those obligations.
 
 ## Credentials
 
@@ -563,7 +568,7 @@ Development credentials are handled as [AGENTS.md](../AGENTS.md#credentials-and-
 **Requirements (REQ-06, INV-14).**
 
 - **Local only.** No log handler, trace or metrics exporter, crash reporter, analytics call, or update check sends anything off the machine. The only outbound traffic is provider requests the user invokes or explicitly enables. Telemetry built into dependencies is disabled.
-- **Content.** Logs never contain credentials, strategy definitions, formulas, configuration values, provider payloads, results, or imported file contents, at any level. Artifacts are referenced by ID and hash instead. Validation errors are logged with `errors(include_input=False)`, or with `hide_input_in_errors` enabled, and logged tracebacks omit local variables.
+- **Content.** Logs never contain credentials, strategy definitions, formulas, configuration values, provider payloads, results, or input file contents, at any level. Artifacts are referenced by ID and hash instead. Validation errors are logged with `errors(include_input=False)`, or with `hide_input_in_errors` enabled, and logged tracebacks omit local variables.
 - **Mechanism (proposed default).** The standard `logging` module, with no added dependency. Core modules use `logging.getLogger(__name__)` and never configure handlers; the CLI configures them.
 - **Format.** Log files hold one JSON object per line with these snake_case fields: `timestamp` (UTC ISO 8601), `level`, `event` (a stable dotted name), `message`, `trialfolio_version`, `component`, and the applicable `review_id`, `case_id`, `attempt_id`, `request_id`, and `parent_id`. The terminal shows human-readable messages on stderr from the same events.
 - **Levels.** ERROR for a failed operation, WARNING for a degraded condition the command continues through, INFO for lifecycle milestones, and DEBUG for diagnostic detail.
@@ -571,7 +576,7 @@ Development credentials are handled as [AGENTS.md](../AGENTS.md#credentials-and-
 - **Metrics.** There is no metrics system. Per-run counts and durations go in the manifest.
 - **Storage.** Logs go to `logs/` inside the output directory, or to a per-user local log directory for commands without one. Log size is bounded by rotation. The README documents the locations and how to delete them.
 
-Initial event names: `cli.command.started`, `cli.command.completed`, `review.import.started`, `review.import.completed`, `artifact.write.completed`, `report.render.completed`, `plan.created`, `attempt.started`, `attempt.completed`, `provider.request.started`, `provider.request.completed`, `provider.request.failed`, `case.completed`, `experiment.resumed`.
+Initial event names: `cli.command.started`, `cli.command.completed`, `review.input.loaded`, `artifact.write.completed`, `report.render.completed`, `plan.created`, `attempt.started`, `attempt.completed`, `provider.request.started`, `provider.request.completed`, `provider.request.failed`, `case.completed`, `experiment.resumed`.
 
 ## Fixtures
 
@@ -581,7 +586,7 @@ Initial event names: `cli.command.started`, `cli.command.completed`, `review.imp
 - Its redistribution status.
 - The requirements or acceptance criteria it exercises.
 
-Expected outputs change only with a stated reason. Reference exports and payloads procured with the owner's account ([D-09](spec.md#decisions)) stay local and git-ignored unless Portfolio123's terms are confirmed to permit redistribution. No fixture, sample configuration, or sample export is copied from DataMiner or FactorMiner repositories.
+Expected outputs change only with a stated reason. Reference responses procured with the owner's account ([D-09](spec.md#decisions)) stay local and git-ignored unless Portfolio123's terms are confirmed to permit redistribution. No fixture, sample configuration, or sample export is copied from DataMiner or FactorMiner repositories.
 
 ## Pydantic conventions
 
@@ -602,6 +607,6 @@ JSON Schemas are generated from the models, never maintained by hand, and commit
 
 | Question | Impact | Recommended default | Resolve by |
 |---|---|---|---|
-| Which setting names and metric identifiers does the verified ScreenBacktest layout provide? | The normalized setting names, the metric definitions, and the `comparison.yaml` intended-change keys | Derive them from the reference export procured in [0.1.0](releases/0.1.0-review.md), task R01-T01 | Before 0.1.0 is Ready |
-| What is the non-interactive plan-approval option called? | CLI contract for 0.2.0 | `--approve <plan-hash>` | 0.2.0 specification |
-| Are failed screen-backtest requests charged? | Budget accounting for failed and uncertain attempts | Count them against the budget as possibly charged until verified | 0.2.0 live integration check |
+| Which metric identifiers and setting names do the verified response and screen configuration provide? | The metric definitions, `settings.csv`, and the review configuration's intended-change keys | Derive them from the reference call and the API documentation in [0.1.0](releases/0.1.0-api-execution.md), tasks R01-T01 to R01-T03 | Before 0.1.0 is Ready |
+| What is the non-interactive plan-approval option called? | CLI contract for 0.1.0 | `--approve <plan-hash>` | 0.1.0 task R01-T04 |
+| Are failed screen-backtest requests charged? | Budget accounting for failed and uncertain attempts | Count them against the budget as possibly charged until verified | 0.1.0 reference call or live check |
