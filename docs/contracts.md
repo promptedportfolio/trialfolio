@@ -87,7 +87,7 @@ Configuration files are YAML documents owned by the user. The rules apply to eve
 
 ### Screen configuration
 
-Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration describes one long-only stock screen backtest, run through `p123api`'s `screen_backtest`. It covers only the settings in [0.1.0's scope](releases/0.1.0-api-execution.md#included-scope). Each one is either verified by the reference call (R01-T01) or documented on Portfolio123's [API: Screen](https://portfolio123.customerly.help/en/articles/43324-api-screen) page, checked 2026-10-01.
+Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration describes one long-only stock screen backtest, run through `p123api`'s `screen_backtest`. It covers only the settings in [0.1.0's scope](releases/0.1.0-api-execution.md#included-scope), as documented on Portfolio123's [API: Screen](https://portfolio123.customerly.help/en/articles/43324-api-screen) page, checked 2026-10-01.
 
 **Keys:**
 
@@ -106,31 +106,48 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 | `end_date` | date | Yes | `YYYY-MM-DD`, later than `start_date`. There is no default of today. | `endDt` |
 | `rebalance_weeks` | integer | Yes | 1, 2, 3, 4, 6, 8, 13, 26, or 52 | `rebalFreq`: `Every Week` for 1, otherwise `Every N Weeks`, for example `Every 4 Weeks` |
 | `transaction_price` | string | Yes | `open`, `high_low_average`, or `close` | `transPrice`: 1, 3, or 4 |
-| `slippage_percent` | number | Yes | 0 or more, in percent: `0.25` means 0.25%. There is no default of zero. | `slippage` |
+| `slippage_percent` | decimal | Yes | 0 or more, in percent: `0.25` means 0.25%. There is no default of zero. | `slippage` |
 | `pit_method` | string | Yes | `complete` or `prelim`, Portfolio123's point-in-time method | `pitMethod`: `Complete` or `Prelim` |
 | `precision` | integer | Yes | 2, 3, or 4: the decimal places in results | `precision` |
 | `data_vendor` | string | No | `FactSet` only ([D-16](spec.md#decisions)). Any other value, including `Compustat`, fails with `config.invalid`. | Never sent, because the endpoint documents no vendor parameter |
 
-R01-T01 verified one value for each sent key. It used universe `SP500`, one rule, a formula ranking, 25 holdings, benchmark `SPY`, 2016-01-01 to 2025-12-31, 4 weeks, `open`, 0.25%, `complete`, and precision 4. Every other value is documented but not yet sent. If Portfolio123 rejects a documented value, the result is `provider.unsupported_capability`.
+**Verified values.** Every value this configuration accepts is verified by a live check before 0.1.0 is Ready (R01-T05, [spec.md, open questions](spec.md#open-questions)). A value that fails its check is removed from these tables. Free-form values, such as universe names, benchmark symbols, and formulas, are verified by form: R01-T01 sent a universe name, a benchmark symbol, and formulas, and Portfolio123 accepted them.
+
+- **Verified by R01-T01:** a formula ranking, 25 holdings, `rebalance_weeks` 4, `open`, a slippage of 0.25%, `complete`, and precision 4.
+- **Not yet verified:**
+  - ranking by name and by ID
+  - `max_holdings` 0
+  - `rebalance_weeks` 1, 2, 3, 6, 8, 13, 26, and 52
+  - `high_low_average` and `close`
+  - `prelim`
+  - precision 2 and 3
 
 #### Ranking forms
 
 | Form | Keys in `ranking` | Sent as |
 |---|---|---|
-| A single formula (recommended) | `formula`, a non-empty string; `lower_is_better`, a boolean, required | `{"formula": "…", "lowerIsBetter": …}`. Verified by R01-T01. |
+| A single formula (recommended) | `formula`, a non-empty string; `lower_is_better`, a boolean, required | `{"formula": "…", "lowerIsBetter": …}` |
 | An existing ranking system, by name | `name`, a non-empty string | The name, as a string |
 | An existing ranking system, by ID | `id`, a positive integer | The ID, as an integer |
 
 - **One form only.** `ranking` holds exactly one of `formula`, `name`, and `id`. `lower_is_better` is allowed only with `formula`.
 - **Account objects.** A ranking system named by name or ID is a mutable object in the provider account. Release 0.1.0 doesn't retrieve its definition, so it is recorded as an external reference that is not snapshotted, and reproducibility is labeled incomplete.
-- **Not supported:** a ranking method override, written as `{"method": …, "id": …}`, and ranking definitions given as nodes or XML.
+- **Not supported:**
+  - a ranking method override, which Portfolio123 writes as `{"method": …, "id": …}` or `{"method": …, "name": …}`
+  - ranking definitions given as nodes or XML
+
+Either one fails with `config.invalid`, and the message names the supported forms.
 
 **Rules that span keys and values:**
 
-- **Dates.** `end_date` is later than `start_date`. A date is either a YAML date or a string in exactly `YYYY-MM-DD` form.
-- **Numbers.** Numbers are read from their YAML text as decimals, so `0.25` stays `0.25`. An integer key rejects `25.0`, and no key accepts a number written as a string.
-- **Formulas.** Formulas are the user's strategy definition. They're sent and saved, but never logged. Quote a formula in YAML if it contains `: ` or `#`, or starts with a character YAML treats specially, such as `>`, `!`, or `&`. The example below quotes every rule.
-- **Descriptions.** `title` and `purpose` describe the run. They're recorded with `user_supplied` provenance, never sent, and aren't part of the resolved settings that identify a case.
+- **YAML types.** Trial Folio accepts only unambiguous YAML values, and rejects forms that a YAML 1.1 safe loader would quietly convert:
+  - **Integers** are plain decimal digits, with no leading zero, underscore, sign, or base prefix. So `010`, `1_000`, `+5`, and `0x10` are rejected.
+  - **Booleans** are `true` or `false`, and are never accepted where a number is expected, or the reverse.
+  - **Dates** have no time part. So `2016-01-01 09:30:00` is rejected. A date may be a YAML date or a string in exactly `YYYY-MM-DD` form.
+- **Decimals.** A decimal is read from its YAML text, never through binary floating point. Before it's recorded, hashed, or compared, it is normalized: trailing zeros after the decimal point are removed, so `0.250` and `0.25` are the same setting. It is sent as a JSON number with exactly those digits. A number written as a string is rejected.
+- **Dates.** `end_date` is later than `start_date`.
+- **Formulas.** Formulas are the user's strategy definition. They're sent and saved, but never logged. Write them in single quotes. Portfolio123 formulas often contain double quotes, which single quotes keep as they are. YAML processes no escapes inside single quotes, and a single quote inside one is written twice (`''`).
+- **Descriptions.** `title` and `purpose` describe the run. They are recorded in the plan and the run manifest with `user_supplied` provenance ([plans and approval](#plans-and-approval), R01-T04). They're never sent, and they aren't part of the resolved settings that identify a case.
 
 **Sent on every request.** Trial Folio adds three fixed values, which 0.1.0's scope doesn't let the configuration change. R01-T01 verified each one.
 
@@ -138,42 +155,41 @@ R01-T01 verified one value for each sent key. It used universe `SP500`, one rule
 - `screen.method`: `long`
 - `screen.currency`: `USD`
 
-Trial Folio sends nothing else. The documented parameters it leaves out are `riskStatsPeriod`, `maxPosPct`, `rankTolerance`, `carryCost`, `longWeight`, and `shortWeight`. The settings below record their effect.
+Trial Folio sends nothing else. The documented parameters it leaves out are `riskStatsPeriod`, `maxPosPct`, `rankTolerance`, `carryCost`, `longWeight`, and `shortWeight`. The settings below record each one.
 
 #### Screen settings
 
-`settings.csv` has these rows for a screen run, in this order. Rows 1–21 are the setting names a review configuration's `intended_changes` accepts.
+`settings.csv` has these rows for a screen run, in this order. Every category here except `other` is critical. A review configuration's `intended_changes` accepts only the settings marked declarable: the ones a screen configuration can set to different values.
 
-| # | `setting` | `category` | Critical | Unit | Value and provenance |
+| # | `setting` | `category` | Declarable | Unit | Value and provenance |
 |---|---|---|---|---|---|
 | 1 | `universe` | `universe` | Yes | | From `universe`; `verified`. Flagged `not_snapshotted`. |
-| 2 | `screen_type` | `universe` | Yes | | `stock`; `verified` |
-| 3 | `rules` | `strategy` | No | | From `rules`, as a JSON array of strings; `verified` |
-| 4 | `ranking_formula` | `strategy` | No | | From `ranking.formula`; `verified` |
-| 5 | `ranking_lower_is_better` | `strategy` | No | | From `ranking.lower_is_better`; `verified` |
-| 6 | `ranking_name` | `strategy` | No | | From `ranking.name`; `verified`. Flagged `not_snapshotted`. |
-| 7 | `ranking_id` | `strategy` | No | | From `ranking.id`; `verified`. Flagged `not_snapshotted`. |
-| 8 | `max_holdings` | `strategy` | No | `count` | From `max_holdings`; `verified` |
-| 9 | `position_method` | `strategy` | No | | `long`; `verified` |
-| 10 | `benchmark` | `benchmark` | Yes | | From `benchmark`; `verified` |
-| 11 | `currency` | `currency` | Yes | | `USD`; `verified` |
-| 12 | `start_date` | `dates` | Yes | | From `start_date`; `verified` |
-| 13 | `end_date` | `dates` | Yes | | From `end_date`; `verified` |
-| 14 | `rebalance_weeks` | `execution` | Yes | `weeks` | From `rebalance_weeks`; `verified` |
-| 15 | `transaction_price` | `execution` | Yes | | From `transaction_price`; `verified` |
-| 16 | `slippage_percent` | `costs` | Yes | `percent` | From `slippage_percent`; `verified` |
-| 17 | `commission` | `costs` | Yes | | `not_modeled`; `inferred`. The API documents no commission parameter, and slippage is its only trading-cost input. Never zero. |
-| 18 | `pit_method` | `data_source` | Yes | | From `pit_method`; `verified` |
-| 19 | `data_vendor` | `data_source` | Yes | | `FactSet`; `inferred`, whether the key is omitted or given, because it is never sent and the response doesn't report it ([D-16](spec.md#decisions)). Flagged `inferred_default`. |
-| 20 | `precision` | `other` | No | | From `precision`; `verified` |
-| 21 | `risk_stats_period` | `other` | No | | `monthly`; `inferred` from the [documented default](#p123api-screen-backtest-version-1). Flagged `inferred_default`. |
-| 22 | `maxPosPct` | `strategy` | No | | Empty; `unknown`, because it isn't sent and its default isn't documented. `not_interpreted`. |
-| 23 | `rankTolerance` | `strategy` | No | | Empty; `unknown`, as row 22 |
-| 24 | `carryCost` | `costs` | Yes | | Empty; `unknown`, as row 22 |
+| 2 | `screen_type` | `universe` | No | | `stock`; `verified` |
+| 3 | `rules` | `strategy` | Yes | | From `rules`, as a JSON array of strings; `verified` |
+| 4 | `ranking` | `strategy` | Yes | | From `ranking`, as a JSON object with the configuration's keys, for example `{"formula": "EarnYield", "lower_is_better": false}`; `verified`. A ranking by name or ID is flagged `not_snapshotted`. |
+| 5 | `max_holdings` | `strategy` | Yes | `count` | From `max_holdings`; `verified` |
+| 6 | `position_method` | `strategy` | No | | `long`; `verified` |
+| 7 | `benchmark` | `benchmark` | Yes | | From `benchmark`; `verified` |
+| 8 | `currency` | `currency` | No | | `USD`; `verified` |
+| 9 | `start_date` | `dates` | Yes | | From `start_date`; `verified` |
+| 10 | `end_date` | `dates` | Yes | | From `end_date`; `verified` |
+| 11 | `rebalance_weeks` | `execution` | Yes | `weeks` | From `rebalance_weeks`; `verified` |
+| 12 | `transaction_price` | `execution` | Yes | | From `transaction_price`; `verified` |
+| 13 | `slippage_percent` | `costs` | Yes | `percent` | From `slippage_percent`, normalized; `verified` |
+| 14 | `commission` | `costs` | No | | `not_modeled`; `inferred`. The API documents no commission parameter, and slippage is its only trading-cost input. Never zero. |
+| 15 | `pit_method` | `data_source` | Yes | | From `pit_method`; `verified` |
+| 16 | `data_vendor` | `data_source` | No | | `FactSet`; `inferred` from [D-16](spec.md#decisions), whether the key is omitted or given, because it is never sent and the response doesn't report it. Flagged `inferred_default`. |
+| 17 | `precision` | `other` | Yes | | From `precision`; `verified` |
+| 18 | `risk_stats_period` | `other` | No | | `monthly`; `inferred` from the [documented default](#p123api-screen-backtest-version-1). Flagged `inferred_default`. |
+| 19 | `max_pos_pct` | `strategy` | No | | `not_sent`; `unknown`. `maxPosPct` isn't sent, and its default isn't documented. |
+| 20 | `rank_tolerance` | `strategy` | No | | `not_sent`; `unknown`, as row 19, for `rankTolerance` |
+| 21 | `carry_cost` | `costs` | No | | `not_sent`; `unknown`, as row 19, for `carryCost` |
+| 22 | `long_weight` | `strategy` | No | | `not_sent`; `unknown`, as row 19, for `longWeight` |
+| 23 | `short_weight` | `strategy` | No | | `not_sent`; `unknown`, as row 19, for `shortWeight` |
 
-- **Ranking rows.** Only the rows for the ranking form in use appear: rows 4 and 5, row 6, or row 7.
-- **Omitted rows.** `longWeight` and `shortWeight` have no row. The API doesn't explain them, but their names point to weighting long against short positions, which only the excluded long/short and hedged methods have.
-- **Other columns.** `original_key` and `original_value` come from the configuration, and are empty for rows that no key supplies. For row 19 they're filled only when the configuration gives `data_vendor`. `inference_rule` cites the documentation and the date it was checked. `critical` follows the category.
+- **No empty values.** A setting with no value from the request uses a token instead, `not_modeled` or `not_sent`. So no screen-run row has an empty `value`. Two runs that both leave a parameter unsent compare as `same`, and the report still lists its default as unknown.
+- **Interpretation.** Rows 19–23 are `not_interpreted`, and every other row is `interpreted`.
+- **Other columns.** `original_key` and `original_value` come from the configuration, and are empty for rows that no key supplies. For row 16 they're filled only when the configuration gives `data_vendor`. `inference_rule` cites the decision or documentation and the date the documentation was checked.
 - **Coverage.** `start_date` and `end_date` also carry `coverage_mismatch` when the response's coverage differs from them ([coverage](#p123api-screen-backtest-version-1)).
 
 #### Example
@@ -185,9 +201,9 @@ title: Earnings yield with a liquidity floor
 purpose: Reference backtest for the 0.1.0 response layout.
 universe: SP500
 rules:
-  - "AvgDailyTot(30) > 1000000"
+  - 'AvgDailyTot(30) > 1000000'
 ranking:
-  formula: "EarnYield"
+  formula: 'EarnYield'
   lower_is_better: false
 max_holdings: 25
 benchmark: SPY
@@ -235,7 +251,7 @@ Schema version 1.0.0, introduced in 0.2.0. It names saved runs written by `trial
 
 | Key | Type | Required | Rules |
 |---|---|---|---|
-| `setting` | string | Yes | A setting name from rows 1–21 of the [screen settings](#screen-settings). An unknown name fails with `config.invalid`, and the message lists the valid names. A result may list each setting at most once. |
+| `setting` | string | Yes | A setting marked declarable in the [screen settings](#screen-settings). An unknown name fails with `config.invalid`, and the message lists the valid names. A result may list each setting at most once. |
 | `reason` | string | Yes | 1–500 characters, shown in the report |
 
 **Rules that span keys:**
@@ -410,7 +426,7 @@ Each setting in each non-baseline result is classified against the baseline:
 | `unexplained_mismatch` | Differs, and no intended change declares it |
 | `unknown` | Missing or uninterpretable in at least one of the two results |
 
-Settings in these categories are critical: dates, benchmark, currency, costs (commission and slippage), execution (price convention, rebalance timing, and similar), universe, and data source (data vendor and point-in-time method). An `unexplained_mismatch` or `unknown` in a critical category is flagged prominently in the report and the normalized output. An intended change to a critical setting is shown, but not as a defect.
+Settings in these categories are critical: dates, benchmark, currency, costs (commission and slippage), execution (price convention, rebalance timing, and similar), universe, data source (data vendor and point-in-time method), and strategy (the screen's rules, ranking, and holdings). An `unexplained_mismatch` or `unknown` in a critical category is flagged prominently in the report and the normalized output. An intended change to a critical setting is shown, but not as a defect.
 
 Metric differences are computed only between comparable values: the same unit, the same definition, and compatible contexts. A difference is `candidate − baseline` in the metric's unit, and a difference between `percent` values is expressed in percentage points (`pp`). Relative differences are not reported unless a release specifies and labels them. When contexts differ, for example different benchmarks or periods, Trial Folio shows both values, does not report a difference, and explains why.
 
@@ -459,10 +475,10 @@ One row for each setting of each result. This includes documented settings that 
 | Column | Meaning |
 |---|---|
 | `label` | Result label |
-| `setting` | Normalized setting name. For a setting Trial Folio doesn't interpret, the original key path. |
+| `setting` | Normalized setting name, in snake_case. A provider parameter that Trial Folio doesn't send gets its snake_case name, for example `rank_tolerance`. |
 | `category` | `dates`, `benchmark`, `currency`, `costs`, `execution`, `universe`, `data_source`, `strategy` (the screen's own definition, such as its rules, ranking, and holdings), or `other` |
 | `critical` | `true` for the critical categories in [settings and differences](#settings-and-differences) |
-| `value` | Normalized value. Lists, such as screen rules, are JSON arrays. Empty when unknown. |
+| `value` | Normalized value. Lists, such as screen rules, are JSON arrays, and mappings, such as a ranking, are JSON objects. A setting with no value from the request uses a token instead: `not_sent` for a provider parameter that isn't sent, or `not_modeled` for a cost the provider path doesn't model. Never empty. |
 | `unit` | Unit for numeric values. Empty otherwise. |
 | `interpretation` | `interpreted` or `not_interpreted` |
 | `provenance` | `verified` for a value sent in the request, `inferred` for a documented default or rule, or `unknown` |
@@ -502,7 +518,7 @@ One row for each setting and each metric of each non-baseline result, compared w
 | `critical_unexplained_mismatch` | A critical setting differs, and the configuration doesn't declare the change |
 | `critical_unknown` | A critical setting is missing or can't be interpreted in at least one of the two results |
 | `intended_change_not_observed` | A declared change isn't present; the values are equal |
-| `inferred_default` | The value is a documented default the source tool applied |
+| `inferred_default` | The value is a default the provider applies to an omitted setting. It's inferred from the provider's documentation or an owner decision, such as [D-16](spec.md#decisions), and not reported by the provider. |
 | `time_dependent_default` | An absent setting whose default depends on when the tool ran, such as an End Date of "today". The value is `unknown` unless the data establishes it. |
 | `unsupported_value` | The value is recorded, but it is unsupported and unverified, for example a data vendor other than FactSet ([D-16](spec.md#decisions)) |
 | `not_snapshotted` | The setting names a mutable object in the provider account, such as a ranking system or universe, whose definition wasn't captured. Reproducibility is incomplete. |
