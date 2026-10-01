@@ -57,7 +57,7 @@ A missing value is shown as unavailable, never as zero. Release 0.2.0 adds `tria
 
 - Trial Folio contacts Portfolio123 only for requests you approve.
 - Re-rendering reports, the demo, and (from 0.2.0) reviews run offline.
-- Logs stay local and never contain credentials, strategy definitions, configuration values, or results. They will be written to `logs/` inside each output directory. Commands without an output directory, such as `trialfolio license`, and an internal error before the output directory is ready, write to a per-user log directory instead. Delete those directories to delete the logs.
+- Logs stay local and never contain credentials, strategy definitions, configuration values, or results. They will be written to `logs/` inside each output directory. Commands without an output directory, such as `trialfolio license`, and an internal error before the output directory is ready, write to a per-user log directory instead: `~/.local/state/trialfolio/logs` on Linux (or under `$XDG_STATE_HOME`), `~/Library/Logs/trialfolio` on macOS, and `%LOCALAPPDATA%\trialfolio\logs` on Windows, unless `TRIALFOLIO_LOG_DIR` names another. Delete those directories to delete the logs.
 - Optional LLM features are planned for a later increment. They will be off by default, and remote model providers will process data under their own terms.
 
 ## License
