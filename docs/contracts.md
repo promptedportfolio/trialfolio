@@ -141,10 +141,10 @@ Either one fails with `config.invalid`, and the message names the supported form
 **Rules that span keys and values:**
 
 - **YAML types.** Trial Folio accepts only unambiguous YAML values, and rejects forms that a YAML 1.1 safe loader would quietly convert:
-  - **Integers** are plain decimal digits, with no leading zero, underscore, sign, or base prefix. So `010`, `1_000`, `+5`, and `0x10` are rejected.
+  - **Integers** are plain decimal digits, with no leading zero, underscore, sign, or base prefix. So `010`, `1_000`, `+5`, and `0x10` are rejected. An integer is at most 9007199254740991 (2^53 − 1), the largest a JSON number keeps exactly, so canonical hashing stays exact. A larger one fails with `config.invalid`.
   - **Booleans** are `true` or `false`, and are never accepted where a number is expected, or the reverse.
   - **Dates** have no time part. So `2016-01-01 09:30:00` is rejected. A date may be a YAML date or a string in exactly `YYYY-MM-DD` form.
-- **Decimals.** A decimal is read from its YAML text, never through binary floating point. Before it's recorded, hashed, or compared, it is normalized: trailing zeros after the decimal point are removed, so `0.250` and `0.25` are the same setting. It has at most 15 significant digits, the most a binary floating-point number keeps exactly, so it is sent as a JSON number with exactly those digits. A number written as a string is rejected.
+- **Decimals.** A decimal is read from its YAML text, never through binary floating point. Before it's recorded, hashed, or compared, it is normalized: trailing zeros after the decimal point are removed, so `0.250` and `0.25` are the same setting. It has at most 15 significant digits, the most a binary floating-point number keeps exactly, so it is sent as a JSON number with exactly those digits. More digits fail with `config.invalid`. A number written as a string is rejected.
 - **Dates.** `end_date` is later than `start_date`.
 - **Formulas.** Formulas are the user's strategy definition. They're sent and saved, but never logged. Write them in single quotes. Portfolio123 formulas often contain double quotes, which single quotes keep as they are. YAML processes no escapes inside single quotes, and a single quote inside one is written twice (`''`).
 - **Descriptions.** `title` and `purpose` describe the run. They are recorded in the plan and the run manifest with `user_supplied` provenance ([plan contents](#plan-contents)). They're never sent, and they aren't part of the resolved settings that identify a case.
@@ -559,6 +559,7 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T04). A 1.0.0 plan has exact
 | `schema_version` | `1.0.0` |
 | `trialfolio_version` | The version that built the plan |
 | `canonicalization_version` | `1`: the [canonical hashing](#canonical-hashing) rules behind `plan_hash` and `case_id` |
+| `provider_wrapper` | `p123api` and its installed version, which will send the requests. The retry policy describes that version's behavior. |
 | `title`, `purpose` | From the configuration, with `user_supplied` provenance. `purpose` is `null` when the configuration has none. Neither is sent. |
 | `cases` | The cases, in order. Exactly one in 1.0.0. |
 | `budget` | The request budget, [below](#budget-and-retries) |
@@ -579,6 +580,7 @@ Each case holds:
 **Settings in the plan.**
 
 - **Values keep their JSON types.** Integers are numbers, decimals are normalized decimal strings, dates are `YYYY-MM-DD` strings, lists are arrays, mappings are objects, and tokens such as `not_sent` are strings. `flags` is an array of codes. A column that `settings.csv` leaves empty is `null`.
+- **Provenance once sent.** A value records the provenance it has once the request is sent, so values in the request are `verified`. If the request is never sent or is rejected, the plan still shows what was approved, and the attempt records what happened.
 - **Flags known before execution.** These are `inferred_default` and `not_snapshotted`. `coverage_mismatch` needs the response, so it appears only in `settings.csv`.
 - **No trace of how the file was written.** The four columns left out depend on how the configuration file is written. So two files that resolve to the same settings give the same plan, for example an omitted `data_vendor` and an explicit `FactSet` ([D-16](spec.md#decisions)), or `0.250` and `0.25`.
 
@@ -620,8 +622,8 @@ These are categories of data, not the setting categories of `settings.csv`. Noth
 
 - **The plan hash** is `sha256:` plus the hex SHA-256 of the [canonical form](#canonical-hashing) of the plan without its `plan_hash` field.
 - **The case ID** is `case-` plus the first 16 hex digits of the SHA-256 of the canonical form of the case's `settings`, with each row reduced to `setting`, `value`, and `unit`. Changing any resolved setting changes it. The title, the purpose, and how the file is written don't.
-- **Nothing varies between invocations.** The plan holds no timestamps, output directory, file paths, attempt IDs, credentials, account information, or wrapper version; the attempt records the wrapper version. So the same configuration and Trial Folio version give the same plan and hash on any machine, at any time, and for any output directory. That's what lets a user review a plan in one command and approve it in the next.
-- **Any change needs a new approval.** That includes a changed setting, title, purpose, budget, or Trial Folio version. So after upgrading Trial Folio, the same configuration needs approving again.
+- **Nothing varies between invocations.** The plan holds no timestamps, output directory, file paths, attempt IDs, credentials, or account information. So the same configuration, Trial Folio version, and wrapper version give the same plan and hash on any machine, at any time, and for any output directory. That's what lets a user review a plan in one command and approve it in the next.
+- **Any change needs a new approval.** That includes a changed setting, title, purpose, budget, Trial Folio version, or wrapper version. So after upgrading Trial Folio or `p123api`, the same configuration needs approving again.
 - **Saved plans are checked.** A reader recomputes the hash of a saved `plan.json`. If it differs from `plan_hash`, the run is invalid (`input.not_a_run`).
 
 ### Approval
@@ -631,7 +633,7 @@ The core executes a plan only when it's given a hash equal to its `plan_hash`. O
 - **`--approve <plan-hash>`, for non-interactive use.** The value must be the full hash exactly as shown: `sha256:` and 64 lowercase hex digits. An abbreviated, malformed, or different hash doesn't match. With `--approve`, the CLI never prompts.
 - **Interactive confirmation.** Without `--approve`, when stdin and stderr are both terminals, the CLI shows the plan and asks the user to type `approve`. It then passes the hash of the plan it showed. Any other answer, an empty line, or the end of input is a refusal.
 
-Without a match, the command fails with `plan.approval_required`, exit 2, and writes nothing. The plan and its hash have been shown, and the message gives the exact option that approves this plan. So running without `--approve` from a script shows the plan without sending anything, and with `--json`, the summary's `ids` carry the `plan_hash`.
+Without a match, the command fails with `plan.approval_required`, exit 2, and creates no output. The plan and its hash have been shown, and the message gives the exact option that approves this plan. So running without `--approve` from a script shows the plan without sending anything, and with `--json`, the summary's `ids` carry the `plan_hash`.
 
 **The plan display.** The CLI writes it to stderr directly, never through logging, because it contains configuration values and formulas ([logging](#logging-and-local-diagnostics)). It shows:
 
@@ -651,7 +653,7 @@ Without a match, the command fails with `plan.approval_required`, exit 2, and wr
 4. Build the plan and show it.
 5. Check the approval (`plan.approval_required`).
 6. Check that credentials are present (`provider.auth_failed`).
-7. Create the output directory, checking again that it's empty, write `configuration.yaml` and `plan.json`, write the `running` attempt record, and send the request.
+7. Create the output directory, checking again that it's empty. Write `configuration.yaml`, from the bytes read in step 2, and `plan.json`. Then write the `running` attempt record and send the request.
 
 **Records.**
 
@@ -694,7 +696,7 @@ The manifest records:
 
 - `schema_version`, `artifact_type` (`review`, `run`, or `experiment`), `trialfolio_version`, and the creation time in UTC.
 - The command and its non-secret options.
-- The `plan_hash`, and how the plan was approved: `interactive` or `option` ([approval](#approval)).
+- For a run or an experiment, the `plan_hash` and how the plan was approved: `interactive` or `option` ([approval](#approval)).
 - Every input and output artifact with its `artifact_id`.
 - Parser versions, `license_id`, and `notice_version`.
 - A capability statement of what the artifact does and does not contain. For example, it says whether return series are present, and states `statistical_validation: not_assessed` and `trading_readiness: not_assessed`.
@@ -707,7 +709,7 @@ Raw files and JSON metadata come first, and normalized tables are CSV. Parquet M
 Proposed default:
 
 - Canonical JSON follows [RFC 8785, JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785.html), applied to the model's serialized form.
-- Decimal values are strings carrying their declared precision. The exception is a provider request recorded as it's sent, such as a plan's `params`: its numbers stay JSON numbers, and RFC 8785 writes them in their shortest form.
+- Decimal values are strings: a configuration decimal in its normalized form ([screen configuration](#screen-configuration)), and a metric value with its source precision. The exception is a provider request recorded as it's sent, such as a plan's `params`: its numbers stay JSON numbers, and RFC 8785 writes them in their shortest form.
 - Dates use `YYYY-MM-DD`. Datetimes are UTC ISO 8601 with a `Z` suffix.
 - Secrets are excluded by construction. Models that hold credentials are never serialized or hashed.
 - Hashes are SHA-256.
@@ -765,7 +767,7 @@ The command is `trialfolio`. Commands are introduced by release:
 | `trialfolio license [--accept]` | 0.1.0 | Print the license, the full notice, and the acknowledgment status; `--accept` records the acknowledgment |
 
 - **stdout** carries the command's result: a short human summary, or with `--json` the [JSON summary](#json-summary).
-- **stderr** carries progress, warnings, and errors, which come from the same events as the log file.
+- **stderr** carries progress, warnings, and errors, which come from the same events as the log file. It also carries the [plan display](#approval) and the confirmation prompts, which are written directly and never logged, because they show configuration values.
 - **Output directory.** `review` and `run` create the output directory. They refuse to write into a directory that exists and is not empty (`output.not_empty`). There is no overwrite option in 0.1.0. `experiment` reuses an existing directory only to resume the same plan, as release 0.3.0 specifies.
 - **Validation first.** All inputs are validated before the output directory is created, so an invalid or unsupported input writes nothing.
 - **Partial success.** A command that finishes with some cases failed, skipped, or uncertain writes complete accounting and exits with code 6.
@@ -899,7 +901,7 @@ Development credentials are handled as [AGENTS.md](../AGENTS.md#credentials-and-
 - **Levels.** ERROR for a failed operation, WARNING for a degraded condition the command continues through, INFO for lifecycle milestones, and DEBUG for diagnostic detail.
 - **Tracing.** Start and end events carry duration and outcome for each command, case, attempt, and provider request, linked by IDs, and this serves as the trace. OpenTelemetry is adopted only through an ADR, with local file exporters only.
 - **Metrics.** There is no metrics system. Per-run counts and durations go in the manifest.
-- **Storage.** Logs go to `logs/` inside the output directory, or to a per-user local log directory for commands without one. Log size is bounded by rotation. The README documents the locations and how to delete them.
+- **Storage.** Logs go to `logs/` inside the output directory, or to a per-user local log directory for commands without one. A command with an output directory holds its events in memory until it creates the directory. If it stops before then, it writes no log file, and its messages appear only on stderr. Log size is bounded by rotation. The README documents the locations and how to delete them.
 
 Initial event names: `cli.command.started`, `cli.command.completed`, `review.input.loaded`, `artifact.write.completed`, `report.render.completed`, `plan.created`, `plan.approved`, `attempt.started`, `attempt.completed`, `provider.request.started`, `provider.request.completed`, `provider.request.failed`, `case.completed`, `experiment.resumed`.
 
