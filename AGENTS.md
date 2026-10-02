@@ -2,7 +2,7 @@
 
 Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and eventually evaluating Portfolio123 strategy evidence with scientific discipline. This file is the entry point for coding agents. It links to the documents that own each requirement; it does not repeat them.
 
-**Current state (2026-10-01):** Specifications only. No application code, models, schemas, fixtures, or working commands exist. The next implementable release is [0.1.0](docs/releases/0.1.0-api-execution.md). Its status is Ready: the owner signed off on 2026-10-01, so implementation starts with R01-T06.
+**Current state (2026-10-02):** Release [0.1.0](docs/releases/0.1.0-api-execution.md) is Ready and being implemented. R01-T06 scaffolded the project: the `uv` project, the pinned dependencies, pytest with its markers and the network guard, `scripts/setup`, and `scripts/check`. No application code, models, schemas, or fixtures exist yet. The next task is R01-T07.
 
 ## Reading order
 
@@ -39,18 +39,18 @@ Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and event
 
 ## Development commands
 
-These commands are intended and do not work yet, because there is no project scaffold. They are set up in R01-T06, and this section is updated when they have been verified. [0.1.0's verification commands](docs/releases/0.1.0-api-execution.md#verification-commands-and-expected-evidence) say what each one checks.
+R01-T06 set these up. The status column says which have been verified, and when. [0.1.0's verification commands](docs/releases/0.1.0-api-execution.md#verification-commands-and-expected-evidence) say what each one checks.
 
-| Command (intended) | Purpose |
-|---|---|
-| `scripts/setup` | Once per clone: enable the Git hooks |
-| `uv sync` | Create the environment |
-| `scripts/check` | Every check that needs no credentials or reference data; the `pre-push` hook runs it |
-| `uv run pytest` | Default suite; network access blocked; no live calls |
-| `scripts/schemas` | Regenerate the JSON Schemas under `schemas/`; `--check` is the drift check |
-| `uv run pytest -m packaging` | Build the wheel, inspect it, and run the demo from a clean install |
-| `TRIALFOLIO_REFERENCE_DIR=reference uv run pytest -m reference` | Conformance against local reference data (opt-in) |
-| `uv run pytest -m live` | Live Portfolio123 checks (opt-in, with credentials and a budget in `TRIALFOLIO_LIVE_BUDGET_CREDITS`) |
+| Command | Purpose | Status |
+|---|---|---|
+| `scripts/setup` | Once per clone: enable the Git hooks | Verified 2026-10-02 |
+| `uv sync` | Create the environment | Verified 2026-10-02 |
+| `scripts/check` | Every check that needs no credentials or reference data; the `pre-push` hook runs it | Verified 2026-10-02. The schema drift check joins it in R01-T07. Until R01-T16, a pytest step that collects no tests passes. |
+| `uv run pytest` | Default suite; network access blocked; no live calls | Verified 2026-10-02 |
+| `scripts/schemas` | Regenerate the JSON Schemas under `schemas/`; `--check` is the drift check | Intended; R01-T07 adds it |
+| `uv run pytest -m packaging` | Build the wheel, inspect it, and run the demo from a clean install | Marker verified 2026-10-02, and the offline build and clean install by hand; the tests arrive in R01-T16 |
+| `TRIALFOLIO_REFERENCE_DIR=reference uv run pytest -m reference` | Conformance against local reference data (opt-in) | Marker verified 2026-10-02; the tests arrive in R01-T16 |
+| `uv run pytest -m live` | Live Portfolio123 checks (opt-in, with credentials and a budget in `TRIALFOLIO_LIVE_BUDGET_CREDITS`) | Marker verified 2026-10-02; the test arrives in R01-T16 |
 
 Tooling: Python 3.12 or later, with `uv` for environments and dependencies ([D-02](docs/spec.md#decisions)). Add dependencies with `uv add`, and record each one in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), together with every package it brings in. A test checks that the file names every locked runtime package.
 
@@ -58,13 +58,13 @@ Tooling: Python 3.12 or later, with `uv` for environments and dependencies ([D-0
 
 - **Trace every test.** Each test traces to a requirement, an acceptance criterion, or a corrected defect.
 - **Test through public entry points.** Test through core functions and CLI commands, not private helpers. Use test doubles only at real boundaries: the provider client, the network below `urllib3` (a local server on localhost, or a socket-level fake, so the real `requests` and `urllib3` code runs through Trial Folio's own transport adapter, [ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)), the clock, injected storage failures, and the installed package versions.
-- **Keep the default suite offline.** It blocks network access. Live checks are opt-in and never run in default CI.
+- **Keep the default suite offline.** It blocks network access. Live checks are opt-in and never run in default CI. The network guard enforces this. [Its row in 0.1.0's test pairing](docs/releases/0.1.0-api-execution.md#test-pairing) says what it covers, and what a test must do to keep it: read it before writing a test that starts a subprocess, sets proxy variables, or provokes a refusal.
 - **Check the report and the logs.** Report tests confirm the notices are present, that there are no scripts or external references, and that unavailable values are labeled. Log tests seed canary values and confirm none of them appears.
 - **Test the project's own behavior only.** Do not test third-party behavior such as Pydantic's type checks or `p123api`'s retries. Test Trial Folio's use of them.
 
 ## Git workflow
 
-This workflow is [D-11](docs/spec.md#decisions). Hooks in `.githooks/` enforce it. Git runs them when `core.hooksPath` is `.githooks`. Set that once per clone with `git config core.hooksPath .githooks`; `scripts/setup` will do it once R01-T06 adds that script. The hooks enforce the following:
+This workflow is [D-11](docs/spec.md#decisions). Hooks in `.githooks/` enforce it. Git runs them when `core.hooksPath` is `.githooks`, which `scripts/setup` sets once per clone. The hooks enforce the following:
 
 - **`commit-msg`:** a Conventional Commits subject, and removal of AI attribution lines.
 - **`pre-commit`:**
@@ -75,7 +75,7 @@ This workflow is [D-11](docs/spec.md#decisions). Hooks in `.githooks/` enforce i
 - **`pre-push`:**
   - no pushes to `main`
   - branch names of the form `<type>/<short-name>`
-  - `scripts/check` before any push that changes more than docs, Markdown, `LICENSE`, or `reference/`, once `scripts/check` exists
+  - `scripts/check` before any push that changes more than docs, Markdown, `LICENSE`, or `reference/`
 
 The workflow:
 

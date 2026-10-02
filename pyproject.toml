@@ -1,0 +1,69 @@
+[project]
+name = "trialfolio"
+version = "0.1.0"
+description = "Plan, record, and compare Portfolio123 strategy evidence. Source available under a custom license."
+readme = "README.md"
+# LIC-01 and LIC-11 (docs/licensing-policy.md): the custom license's identifier, never MIT or
+# an OSI classifier, and the license and notices in every copy.
+license = "LicenseRef-NSPRL-1.0"
+license-files = ["LICENSE", "CONTACT.md", "THIRD_PARTY_NOTICES.md", "docs/disclaimers.md"]
+authors = [{ name = "Nathan Slaughter", email = "nathan@nathanslaughter.com" }]
+requires-python = ">=3.12"
+# PyPI rejects any upload with this classifier. No distribution channel is chosen yet (LIC-15).
+classifiers = ["Private :: Do Not Upload"]
+dependencies = [
+    "p123api==3.1.0",
+    "requests==2.34.2",
+    "urllib3==2.8.0",
+]
+
+[build-system]
+# Pinned exactly, so the packaging tests can build the wheel offline from uv's cache.
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trialfolio"]
+
+[dependency-groups]
+# Not an extra, so it never ships with the package. `uv run` installs it by default.
+# pyright's nodejs extra gives it a Node runtime from PyPI, pinned in uv.lock, so pyright never
+# downloads one.
+dev = [
+    "pyright[nodejs]>=1.1.414",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The network guard's module, imported by the same name here and in subprocesses.
+pythonpath = ["tests/support/network_guard"]
+# -p loads the network guard's plugin before any conftest or installed plugin; pytest 9.1 applies
+# pythonpath first. The default run leaves out the opt-in suites. A later -m on the command line
+# replaces this one, so `uv run pytest -m live` selects only the live tests (release 0.1.0,
+# verification).
+addopts = [
+    "-p", "trialfolio_network_guard_plugin",
+    "--strict-markers",
+    "--strict-config",
+    "-m", "not packaging and not reference and not live",
+]
+markers = [
+    "packaging: builds the wheel and runs it from a clean install",
+    "reference: conformance against the owner's local reference data, in TRIALFOLIO_REFERENCE_DIR",
+    "live: real Portfolio123 requests; needs credentials, a budget, and the owner present",
+]
+xfail_strict = true
+# A refusal by the network guard in a background thread reaches pytest only as this warning.
+filterwarnings = ["error::pytest.PytestUnhandledThreadExceptionWarning"]
+
+[tool.ruff]
+line-length = 100
+# The specifications are read by people; keep the formatter out of their code blocks.
+extend-exclude = ["*.md"]
+
+[tool.pyright]
+include = ["src", "tests", "conftest.py"]
+strict = ["src/trialfolio"]
+extraPaths = ["tests/support/network_guard"]

@@ -1,0 +1,18 @@
+#!/bin/sh
+# One-time setup for a clone (AGENTS.md, Development commands). Safe to re-run.
+# Turns on the Git hooks in .githooks/, which enforce the workflow (D-11) and run
+# scripts/check before a push.
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+
+echo "== Git hooks"
+git config core.hooksPath .githooks
+echo "on (.githooks)"
+
+echo "== Tools"
+if command -v uv >/dev/null 2>&1; then
+  echo "uv: $(uv --version)"
+  echo "Next: uv sync, then scripts/check"
+else
+  echo "uv isn't installed. Install it (https://docs.astral.sh/uv/), then run uv sync." >&2
+fi

@@ -1,0 +1,55 @@
+#!/bin/sh
+# Runs every check that needs no credentials or reference data, in order, and stops at the
+# first failure (release 0.1.0, verification commands). The pre-push hook runs it.
+# The reference and live tests aren't run here: they need the owner's local data, or the
+# owner's credentials and presence.
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+
+step() {
+  printf '\n== %s\n' "$1"
+}
+
+command -v uv >/dev/null 2>&1 || {
+  echo "check: uv not found. Install it (https://docs.astral.sh/uv/)." >&2
+  exit 1
+}
+
+# Without the hooks, nothing runs these checks before a push. A CI job runs the checks
+# itself and pushes nothing.
+if [ -z "${CI:-}" ] && [ "$(git config core.hooksPath)" != .githooks ]; then
+  echo "check: the Git hooks are off. Run scripts/setup (AGENTS.md)." >&2
+  exit 1
+fi
+
+# Until R01-T16 writes the tests, a pytest step that collects none (exit 5) passes.
+run_pytest() {
+  status=0
+  uv run pytest "$@" || status=$?
+  if [ "$status" -eq 5 ]; then
+    echo "no tests collected; allowed until R01-T16"
+  elif [ "$status" -ne 0 ]; then
+    exit "$status"
+  fi
+}
+
+step "Lock file matches pyproject.toml"
+uv lock --check
+
+step "Format"
+uv run ruff format --check .
+
+step "Lint"
+uv run ruff check .
+
+step "Types"
+# Without this, the pyright wrapper asks PyPI for its latest version on every run.
+PYRIGHT_PYTHON_IGNORE_WARNINGS=1 uv run pyright
+
+step "Tests"
+run_pytest
+
+step "Packaging tests"
+run_pytest -m packaging
+
+printf '\nAll checks passed.\n'

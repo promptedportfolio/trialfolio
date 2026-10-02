@@ -5,3 +5,20 @@ reference/*/payloads/
 # Local credential files, such as secret-manager references (AGENTS.md)
 *.env
 .env*
+
+# Python environments, caches, and builds
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# Trial Folio output directories, as the documented examples name them. Anchored, so the
+# committed fixture runs under tests/fixtures/ stay tracked.
+/runs/
+/reports/
+/demo/
