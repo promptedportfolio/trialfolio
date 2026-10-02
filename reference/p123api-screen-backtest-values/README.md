@@ -30,7 +30,7 @@ Each check used a new client, set to one HTTP attempt per call. A minimal transp
 | 2 | The same | Succeeded | 0.8 seconds | 139,309 bytes, `payloads/response-ranking-name.json` | 5, as reported |
 | 3 | The same | Succeeded | 0.6 seconds | 139,309 bytes, `payloads/response-ranking-id.json` | 5, as reported |
 
-In total, the checks used 15 credits, within the budget.
+In total, the three requests used 15 credits, as reported, within the budget. That total leaves out authentication: the second and third authentications cost nothing, as below, and the first wasn't measured.
 
 **Authentication's cost.** Between consecutive checks, `quotaRemaining` dropped by exactly 5: from check 1's response to check 2's, and again from check 2's to check 3's. Each drop covers the later check's authentication and its request, and Portfolio123 reported a cost of 5 for each request. So the second and third authentications cost 0 credits. The first check's authentication had no earlier reading to compare with, so it wasn't measured. That assumes nothing else used the account's credits during the 19-second run. The absolute `quotaRemaining` values are account information, so they aren't recorded here.
 
@@ -51,10 +51,11 @@ These checks compare each response with [`p123api-screen-backtest` version 1](..
 | `Turn` equals `Sold Pos` divided by `#Pos`, times 100, within 0.005. `Excess%` equals `Ret%` minus `Bench%`, within 0.0001. | Passed | Passed | Passed |
 | `chart` holds 2,609 points in parallel arrays, from 2016-01-01 to 2025-12-31. Both levels start at 100, and each last level minus 100 equals its `total_return` exactly. | Passed | Passed | Passed |
 | `stats.bench` and `chart.benchReturns` equal R01-T01's | Passed | Passed | Passed |
+| The weekly period with a `Bench%` of `0` has the same benchmark level at its `Tran Dt` and `End Dt` | Passed | — | — |
 | `stats.port` differs from R01-T01's, so the changed setting took effect | Passed | Passed | Passed |
 | Checks 2 and 3 return identical responses, apart from `quotaRemaining` | — | Passed | Passed |
 
-**A benchmark return of zero.** One weekly period has a `Bench%` of exactly `0` at 4 decimal places. It's counted in `upMarkets`, and the up-market mean of `Ret%` reproduces only with it included. Its unrounded return isn't in the response: it may be slightly above zero or exactly zero, or Portfolio123 may compare rounded values. So the rule for a return at or near zero is still unverified.
+**A benchmark return of zero.** One weekly period has a `Bench%` of `0`: the first, from 2016-01-01, a market holiday, to 2016-01-04. Its benchmark level in `chart` is the same on both dates, so its return is zero. It's counted in `upMarkets`, and the up-market mean of `Ret%` reproduces only with it included. So a period whose benchmark return is zero counts as an up market.
 
 ## Findings for R01-T05
 

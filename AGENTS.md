@@ -52,7 +52,7 @@ These commands are intended and do not work yet, because there is no project sca
 | `TRIALFOLIO_REFERENCE_DIR=reference uv run pytest -m reference` | Conformance against local reference data (opt-in) |
 | `uv run pytest -m live` | Live Portfolio123 checks (opt-in, with credentials and a budget in `TRIALFOLIO_LIVE_BUDGET_CREDITS`) |
 
-Tooling: Python 3.12 or later, with `uv` for environments and dependencies ([D-02](docs/spec.md#decisions)). Add dependencies with `uv add`, and record each one in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Tooling: Python 3.12 or later, with `uv` for environments and dependencies ([D-02](docs/spec.md#decisions)). Add dependencies with `uv add`, and record each one in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), together with every package it brings in. A test checks that the file names every locked runtime package.
 
 ## Verification expectations
 

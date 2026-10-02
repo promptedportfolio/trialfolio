@@ -16,7 +16,7 @@ The first draft of the plan specification inferred which request failed from the
 
 ## Decision
 
-1. **Record each exchange at the transport layer.** Trial Folio mounts its own transport adapter, a subclass of `requests`' `HTTPAdapter`, on the wrapper's HTTP session, for both `https://` and `http://`. Every request the wrapper makes passes through it.
+1. **Record each exchange at the transport layer.** Trial Folio mounts its own transport adapter, a subclass of `requests`' `HTTPAdapter`, on the wrapper's HTTP session, for both `https://` and `http://`. Every request the wrapper makes passes through it. Trial Folio also sets the session's `trust_env` to `False`, so no proxy, certificate-bundle, or `.netrc` setting in the environment applies ([contracts.md, credentials](../contracts.md#credentials)).
 2. **What it records.** For each exchange, in memory and in order: the method and path, and the result, which is one of these:
    - `response`, with the HTTP status
    - `not_connected`
