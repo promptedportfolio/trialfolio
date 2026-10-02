@@ -43,7 +43,8 @@ step "Lint"
 uv run ruff check .
 
 step "Types"
-uv run pyright
+# Without this, the pyright wrapper asks PyPI for its latest version on every run.
+PYRIGHT_PYTHON_IGNORE_WARNINGS=1 uv run pyright
 
 step "Tests"
 run_pytest

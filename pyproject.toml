@@ -38,6 +38,8 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The network guard's module, imported by the same name here and in subprocesses.
+pythonpath = ["tests/support/network_guard"]
 # The default run leaves out the opt-in suites. A later -m on the command line replaces this
 # one, so `uv run pytest -m live` selects only the live tests (release 0.1.0, verification).
 addopts = ["--strict-markers", "--strict-config", "-m", "not packaging and not reference and not live"]
@@ -56,5 +58,4 @@ extend-exclude = ["*.md"]
 [tool.pyright]
 include = ["src", "tests"]
 strict = ["src/trialfolio"]
-venvPath = "."
-venv = ".venv"
+extraPaths = ["tests/support/network_guard"]
