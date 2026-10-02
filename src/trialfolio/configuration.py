@@ -40,7 +40,7 @@ from yaml.events import (
 )
 from yaml.nodes import Node, ScalarNode
 
-from trialfolio.contracts.common import MAX_SAFE_INTEGER, NOT_BLANK
+from trialfolio.contracts.common import DATE_PATTERN, INTEGER_PATTERN, NOT_BLANK
 from trialfolio.contracts.screen_configuration import SCREEN_SCHEMA_VERSIONS, ScreenConfiguration
 from trialfolio.errors import TrialFolioError
 
@@ -62,14 +62,17 @@ CREDENTIAL_WORDS: Final = (
 """A key whose name contains one of these, ignoring case and reading `-` as `_`, is
 credential-like, and is rejected wherever it appears."""
 
+MAX_DIGITS: Final = 16
+"""The most digits a whole number can have and be accepted: 2^53 - 1 and 10^16 - 1 have 16."""
+
 MAX_DEPTH: Final = 16
 """The deepest a value may be nested. A screen configuration needs 2 levels."""
 
 _TAG = "tag:yaml.org,2002:"
 _STR = f"{_TAG}str"
-_INTEGER = re.compile(r"0|[1-9][0-9]*")
+_INTEGER = re.compile(INTEGER_PATTERN)
 _DECIMAL = re.compile(r"(0|[1-9][0-9]*)\.[0-9]+")
-_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_DATE = re.compile(DATE_PATTERN)
 
 
 class _Invalid(Exception):
@@ -104,7 +107,19 @@ def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfigu
     try:
         return ScreenConfiguration.model_validate(document)
     except ValidationError as error:
-        _fail(source_name, [_describe(detail) for detail in error.errors(include_input=False)])
+        details = error.errors(include_input=False)
+        _fail(
+            source_name, [_describe(detail) for detail in details if not _follows(detail, details)]
+        )
+
+
+def _follows(detail: ErrorDetails, details: list[ErrorDetails]) -> bool:
+    """A list that's too short only because its items failed: `rules: [5]` holds one rule."""
+    location = detail["loc"]
+    return detail["type"] == "too_short" and any(
+        other["loc"][: len(location)] == location and len(other["loc"]) > len(location)
+        for other in details
+    )
 
 
 def _fail(source_name: str, problems: Sequence[str]) -> NoReturn:
@@ -117,7 +132,11 @@ def _fail(source_name: str, problems: Sequence[str]) -> NoReturn:
 def _format_path(path: KeyPath) -> str:
     text = ""
     for part in path:
-        text += f"[{part}]" if isinstance(part, int) else f".{part}" if text else part
+        if isinstance(part, int):
+            text += f"[{part}]"
+        else:
+            name = part or "''"
+            text += f".{name}" if text else name
     return text
 
 
@@ -125,14 +144,18 @@ def _describe(detail: ErrorDetails) -> str:
     key = _format_path(detail["loc"])
     kind = detail["type"]
     message = detail["msg"].removeprefix("Value error, ").rstrip(".")
-    if not key:
+    if not detail["loc"]:
         return f"{message}."
     if kind == "missing":
         return f"`{key}` is required."
     if kind == "extra_forbidden":
         return f"`{key}` isn't a key this configuration accepts. Check its spelling."
-    if kind == "string_pattern_mismatch" and detail.get("ctx", {}).get("pattern") == NOT_BLANK:
+    context = detail.get("ctx", {})
+    if kind == "string_pattern_mismatch" and context.get("pattern") == NOT_BLANK:
         return f"`{key}` is blank. Give it text that isn't only whitespace."
+    if kind == "too_short":
+        least = context.get("min_length")
+        return f"`{key}` must hold at least {least} item{'' if least == 1 else 's'}."
     return f"`{key}` {message[0].lower()}{message[1:]}."
 
 
@@ -149,7 +172,8 @@ def _read_yaml(content: bytes, source_name: str) -> object:
     except yaml.MarkedYAMLError as error:
         mark = error.problem_mark
         place = f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
-        _fail(source_name, [f"The file isn't valid YAML{place}: {error.problem or error.context}."])
+        # PyYAML's own wording can quote characters of a value, so it's left out.
+        _fail(source_name, [f"The file isn't valid YAML{place}."])
     except yaml.YAMLError:
         _fail(source_name, ["The file isn't valid YAML."])
 
@@ -266,11 +290,10 @@ class _Builder:
                     "underscore, a sign, a base prefix, or a colon. Write plain decimal digits, "
                     "or quote it if it's text.",
                 )
-            # Compare lengths first: Python won't convert text of more than 4300 digits.
-            if len(text) > len(str(MAX_SAFE_INTEGER)) or int(text) > MAX_SAFE_INTEGER:
-                raise _Invalid(
-                    path, f"is larger than {MAX_SAFE_INTEGER}, the largest integer accepted."
-                )
+            # The models check each key's limit. This one keeps int() from text it can't
+            # convert: Python refuses more than 4300 digits.
+            if len(text) > MAX_DIGITS:
+                raise _Invalid(path, f"has more than {MAX_DIGITS} digits, more than any key takes.")
             return int(text)
         if tag == f"{_TAG}float":
             if not _DECIMAL.fullmatch(text):

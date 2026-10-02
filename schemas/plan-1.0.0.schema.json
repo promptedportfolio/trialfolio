@@ -87,7 +87,7 @@
       "properties": {
         "title": {
           "minLength": 1,
-          "pattern": "\\S",
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "title": "Title",
           "type": "string"
         },
@@ -116,7 +116,7 @@
       "properties": {
         "formula": {
           "minLength": 1,
-          "pattern": "\\S",
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "title": "Formula",
           "type": "string"
         },
@@ -138,7 +138,7 @@
       "properties": {
         "formula": {
           "minLength": 1,
-          "pattern": "\\S",
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "title": "Formula",
           "type": "string"
         },
@@ -177,7 +177,7 @@
       "properties": {
         "name": {
           "minLength": 1,
-          "pattern": "\\S",
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "title": "Name",
           "type": "string"
         }
@@ -313,7 +313,7 @@
           "anyOf": [
             {
               "minLength": 1,
-              "pattern": "\\S",
+              "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
               "type": "string"
             },
             {
@@ -409,7 +409,6 @@
           "type": "integer"
         },
         "slippage": {
-          "minimum": 0,
           "title": "Slippage",
           "type": "number"
         },
@@ -446,7 +445,7 @@
         },
         "universe": {
           "minLength": 1,
-          "pattern": "\\S",
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "title": "Universe",
           "type": "string"
         },
@@ -468,7 +467,7 @@
         },
         "benchmark": {
           "minLength": 1,
-          "pattern": "\\S",
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "title": "Benchmark",
           "type": "string"
         },
@@ -479,7 +478,7 @@
             },
             {
               "minLength": 1,
-              "pattern": "\\S",
+              "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
               "type": "string"
             },
             {
@@ -518,7 +517,7 @@
       "properties": {
         "formula": {
           "minLength": 1,
-          "pattern": "\\S",
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "title": "Formula",
           "type": "string"
         }
@@ -538,13 +537,13 @@
         },
         {
           "minLength": 1,
-          "pattern": "\\S",
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "type": "string"
         },
         {
           "items": {
             "minLength": 1,
-            "pattern": "\\S",
+            "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
             "type": "string"
           },
           "type": "array"
@@ -626,7 +625,7 @@
     "title": {
       "maxLength": 200,
       "minLength": 1,
-      "pattern": "\\S",
+      "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
       "title": "Title",
       "type": "string"
     },

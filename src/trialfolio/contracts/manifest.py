@@ -9,6 +9,7 @@ from pydantic import Field, model_validator
 from trialfolio.contracts.common import (
     CommandOutcome,
     ContractModel,
+    Count,
     ErrorDetail,
     LicenseId,
     NonEmptyText,
@@ -22,8 +23,6 @@ from trialfolio.contracts.common import (
     check_outcome,
     require_unique,
 )
-
-Count = Annotated[int, Field(ge=0)]
 
 ArtifactRole = Literal[
     "plan",

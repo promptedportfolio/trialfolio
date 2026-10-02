@@ -4,13 +4,14 @@ summary).
 
 from typing import Annotated, Literal, Self, TypedDict
 
-from pydantic import ConfigDict, Field, model_validator, with_config
+from pydantic import ConfigDict, model_validator, with_config
 
 from trialfolio.contracts.common import (
     AttemptId,
     CaseId,
     CommandOutcome,
     ContractModel,
+    Count,
     ErrorDetail,
     IntegerOnly,
     NonEmptyText,
@@ -21,8 +22,6 @@ from trialfolio.contracts.common import (
     check_outcome,
 )
 from trialfolio.errors import EXIT_CODES
-
-Count = Annotated[int, Field(ge=0)]
 
 
 @with_config(ConfigDict(strict=True, extra="forbid"))

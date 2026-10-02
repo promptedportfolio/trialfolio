@@ -1,23 +1,36 @@
 """The screen settings: the rows `settings.csv` and a plan's case hold for a screen run, in order
 (docs/contracts.md, screen settings).
+
+A value is checked with the same Pydantic types the configuration uses, so the configuration, the
+plan, and `settings.csv` agree on what's valid.
 """
 
 import json
 import re
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Final, Literal, cast
+from typing import Annotated, Final, Literal, cast
 
-from pydantic import ValidationError
+from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 
 from trialfolio.contracts.common import (
+    CRITICAL_CATEGORIES,
+    INTEGER_PATTERN,
     MAX_SAFE_INTEGER,
+    DateText,
+    FlagCode,
     Interpretation,
+    NonEmptyText,
+    Provenance,
     SettingCategory,
     SettingUnit,
-    valid_date_text,
 )
-from trialfolio.contracts.screen_configuration import normalize_decimal, read_ranking
+from trialfolio.contracts.screen_configuration import (
+    IdRanking,
+    NameRanking,
+    normalize_decimal,
+    read_ranking,
+)
 
 SettingKind = Literal["text", "integer", "decimal", "date", "text_list", "ranking"]
 """How a setting's value is written: as text, an integer, a normalized decimal, a date, a list of
@@ -36,10 +49,37 @@ class ScreenSetting:
     allowed: tuple[str | int, ...] = ()
     """The only values the row takes in this release; empty when any value of its kind does."""
     interpretation: Interpretation = "interpreted"
+    provenance: Provenance = "verified"
+    """The provenance the value will have once the request is sent, which a plan records."""
+    flags: tuple[FlagCode, ...] = ()
+    """The flags the row always carries. A ranking by name or ID adds `not_snapshotted`, and a
+    date in `settings.csv` may add `coverage_mismatch`."""
+
+
+def _not_sent(name: str, category: SettingCategory) -> ScreenSetting:
+    """A provider parameter that isn't sent, and whose default isn't documented (rows 19-23)."""
+    return ScreenSetting(
+        name, category, False, None, "text", ("not_sent",), "not_interpreted", "unknown"
+    )
+
+
+def _inferred_default(name: str, category: SettingCategory, value: str) -> ScreenSetting:
+    """A value inferred from a documented default or a decision, and flagged so."""
+    return ScreenSetting(
+        name,
+        category,
+        False,
+        None,
+        "text",
+        (value,),
+        "interpreted",
+        "inferred",
+        ("inferred_default",),
+    )
 
 
 SCREEN_SETTINGS: Final = (
-    ScreenSetting("universe", "universe", True, None, "text"),
+    ScreenSetting("universe", "universe", True, None, "text", flags=("not_snapshotted",)),
     ScreenSetting("screen_type", "universe", False, None, "text", ("stock",)),
     ScreenSetting("rules", "strategy", True, None, "text_list"),
     ScreenSetting("ranking", "strategy", True, None, "ranking"),
@@ -52,20 +92,18 @@ SCREEN_SETTINGS: Final = (
     ScreenSetting("rebalance_weeks", "execution", True, "weeks", "integer", (1, 4)),
     ScreenSetting("transaction_price", "execution", True, None, "text", ("open",)),
     ScreenSetting("slippage_percent", "costs", True, "percent", "decimal"),
-    ScreenSetting("commission", "costs", False, None, "text", ("not_modeled",)),
+    ScreenSetting(
+        "commission", "costs", False, None, "text", ("not_modeled",), provenance="inferred"
+    ),
     ScreenSetting("pit_method", "data_source", True, None, "text", ("complete",)),
-    ScreenSetting("data_vendor", "data_source", False, None, "text", ("FactSet",)),
+    _inferred_default("data_vendor", "data_source", "FactSet"),
     ScreenSetting("precision", "other", True, None, "integer", (4,)),
-    ScreenSetting("risk_stats_period", "other", False, None, "text", ("monthly",)),
-    ScreenSetting("max_pos_pct", "strategy", False, None, "text", ("not_sent",), "not_interpreted"),
-    ScreenSetting(
-        "rank_tolerance", "strategy", False, None, "text", ("not_sent",), "not_interpreted"
-    ),
-    ScreenSetting("carry_cost", "costs", False, None, "text", ("not_sent",), "not_interpreted"),
-    ScreenSetting("long_weight", "strategy", False, None, "text", ("not_sent",), "not_interpreted"),
-    ScreenSetting(
-        "short_weight", "strategy", False, None, "text", ("not_sent",), "not_interpreted"
-    ),
+    _inferred_default("risk_stats_period", "other", "monthly"),
+    _not_sent("max_pos_pct", "strategy"),
+    _not_sent("rank_tolerance", "strategy"),
+    _not_sent("carry_cost", "costs"),
+    _not_sent("long_weight", "strategy"),
+    _not_sent("short_weight", "strategy"),
 )
 """The 23 screen settings, in `settings.csv`'s order."""
 
@@ -76,15 +114,41 @@ DECLARABLE_SETTINGS: Final = tuple(
 )
 """The settings a review configuration's `intended_changes` may name (0.2.0)."""
 
-_INTEGER = re.compile(r"0|[1-9][0-9]*")
-_DECIMAL = re.compile(r"(0|[1-9][0-9]*)(\.[0-9]*[1-9])?")
-_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
-_NOT_BLANK = re.compile(r"\S")
+_STRICT = ConfigDict(strict=True)
+_TEXT: TypeAdapter[str] = TypeAdapter(NonEmptyText, config=_STRICT)
+_INTEGER: TypeAdapter[int] = TypeAdapter(
+    Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)], config=_STRICT
+)
+_DATE: TypeAdapter[str] = TypeAdapter(DateText, config=_STRICT)
+_TEXT_LIST: TypeAdapter[tuple[str, ...]] = TypeAdapter(
+    Annotated[tuple[NonEmptyText, ...], Field(min_length=1)], config=_STRICT
+)
+_NORMALIZED_DECIMAL = re.compile(r"(0|[1-9][0-9]*)(\.[0-9]*[1-9])?")
+_INTEGER_TEXT = re.compile(INTEGER_PATTERN)
+
+_EXPECTED: Final[dict[SettingKind, str]] = {
+    "text": "non-blank text",
+    "integer": f"an integer from 1 to {MAX_SAFE_INTEGER}",
+    "decimal": "a normalized decimal within the configuration's limits",
+    "date": "a calendar date written YYYY-MM-DD",
+    "text_list": "a non-empty list of non-blank text",
+    "ranking": "one ranking form, with valid fields",
+}
 
 
-def check_row(name: str, category: str, unit: str | None, interpretation: str) -> ScreenSetting:
-    """Returns the documented setting `name`, or raises `ValueError` when there's none, or when
-    its category, unit, or interpretation differs from the documented row."""
+def check_row(
+    name: str,
+    category: str,
+    critical: bool,
+    unit: str | None,
+    interpretation: str,
+    provenance: Provenance,
+    inference_rule: str | None,
+) -> ScreenSetting:
+    """Returns the documented setting `name`. Raises `ValueError` when there's none; when the
+    row's category, unit, or interpretation differs from the documented row; when `critical`
+    doesn't follow the category; or when an inference rule is given for a value that isn't
+    inferred, or missing for one that is."""
     setting = SCREEN_SETTINGS_BY_NAME.get(name)
     if setting is None:
         raise ValueError(f"{name} isn't one of the screen settings")
@@ -92,66 +156,68 @@ def check_row(name: str, category: str, unit: str | None, interpretation: str) -
         raise ValueError(f"{name} must have its documented category and unit")
     if interpretation != setting.interpretation:
         raise ValueError(f"{name} must be {setting.interpretation}")
+    if critical != (setting.category in CRITICAL_CATEGORIES):
+        raise ValueError("critical must be true exactly for the critical categories")
+    if (inference_rule is None) == (provenance == "inferred"):
+        raise ValueError("inference_rule must be given exactly for inferred values")
     return setting
 
 
 def check_value(setting: ScreenSetting, value: object) -> None:
     """Raises `ValueError` unless `value` is a valid value of the setting in its JSON type, as a
-    plan holds it: an integer from 1 to 2^53 - 1, a normalized decimal or a date as text, a
-    non-empty list of non-blank text, a ranking mapping, or non-blank text. A value must also be
-    one of the setting's `allowed` values, when it has any."""
-    name = setting.name
-    match setting.kind:
-        case "integer":
-            if isinstance(value, bool) or not isinstance(value, int):
-                raise ValueError(f"{name}'s value must be an integer")
-            if not 1 <= value <= MAX_SAFE_INTEGER:
-                raise ValueError(f"{name}'s value must be from 1 to {MAX_SAFE_INTEGER}")
-        case "decimal":
-            if not isinstance(value, str) or not _DECIMAL.fullmatch(value):
-                raise ValueError(f"{name}'s value must be a normalized decimal")
-            try:
-                normalize_decimal(Decimal(value))
-            except ValueError as error:
-                raise ValueError(f"{name}'s value {error}") from None
-        case "date":
-            if not isinstance(value, str) or not _DATE.fullmatch(value):
-                raise ValueError(f"{name}'s value must be a date written YYYY-MM-DD")
-            try:
-                valid_date_text(value)
-            except ValueError:
-                raise ValueError(f"{name}'s value isn't a calendar date") from None
-        case "text_list":
-            items = cast("list[object]", value) if isinstance(value, list | tuple) else []
-            if not items or not all(isinstance(i, str) and _NOT_BLANK.search(i) for i in items):
-                raise ValueError(f"{name}'s value must be a non-empty list of non-blank text")
-        case "ranking":
-            try:
+    plan holds it, and one of its `allowed` values when it has any."""
+    try:
+        match setting.kind:
+            case "text":
+                _TEXT.validate_python(value)
+            case "integer":
+                _INTEGER.validate_python(value)
+            case "date":
+                _DATE.validate_python(value)
+            case "text_list":
+                items = tuple(cast("list[object]", value)) if isinstance(value, list) else value
+                _TEXT_LIST.validate_python(items)
+            case "ranking":
                 read_ranking(value)
-            except ValidationError:
-                raise ValueError(
-                    f"{name}'s value must be one ranking form, with valid fields"
-                ) from None
-        case "text":
-            if not isinstance(value, str) or not _NOT_BLANK.search(value):
-                raise ValueError(f"{name}'s value must be non-blank text")
+            case "decimal":
+                if not isinstance(value, str) or not _NORMALIZED_DECIMAL.fullmatch(value):
+                    raise ValueError
+                normalize_decimal(Decimal(value))
+    except (ValidationError, ValueError):
+        raise ValueError(f"{setting.name}'s value must be {_EXPECTED[setting.kind]}") from None
     if setting.allowed and value not in setting.allowed:
         allowed = ", ".join(str(item) for item in setting.allowed)
-        raise ValueError(f"{name}'s value must be one of: {allowed}")
+        raise ValueError(f"{setting.name}'s value must be one of: {allowed}")
 
 
-def check_value_text(setting: ScreenSetting, text: str) -> None:
+def check_value_text(setting: ScreenSetting, text: str) -> object:
     """Raises `ValueError` unless `text` is how `settings.csv` writes a valid value of the
     setting: an integer in decimal digits, a list or a ranking as JSON, and anything else as is.
-    """
+    Returns the value it read."""
     value: object = text
     if setting.kind == "integer":
-        if not _INTEGER.fullmatch(text) or len(text) > len(str(MAX_SAFE_INTEGER)):
-            raise ValueError(f"{setting.name}'s value must be an integer")
+        if not _INTEGER_TEXT.fullmatch(text) or len(text) > len(str(MAX_SAFE_INTEGER)):
+            raise ValueError(f"{setting.name}'s value must be {_EXPECTED['integer']}")
         value = int(text)
     elif setting.kind in ("text_list", "ranking"):
         try:
             value = json.loads(text)
-        except ValueError:
+        except (ValueError, RecursionError):
             raise ValueError(f"{setting.name}'s value must be JSON") from None
     check_value(setting, value)
+    return value
+
+
+def check_flags(
+    setting: ScreenSetting, value: object, flags: tuple[str, ...], *, executed: bool
+) -> None:
+    """Raises `ValueError` unless `flags` are the row's documented flags: its own, and
+    `not_snapshotted` for a ranking by name or ID. With `executed`, as in `settings.csv`, a date
+    may also carry `coverage_mismatch`. `value` must already be valid."""
+    expected = set[str](setting.flags)
+    if setting.kind == "ranking" and isinstance(read_ranking(value), NameRanking | IdRanking):
+        expected.add("not_snapshotted")
+    optional = {"coverage_mismatch"} if executed and setting.kind == "date" else set[str]()
+    if not expected <= set(flags) <= expected | optional:
+        documented = ", ".join(sorted(expected)) or "none"
+        raise ValueError(f"{setting.name}'s flags must be its documented ones: {documented}")

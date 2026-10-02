@@ -6,10 +6,9 @@ configuration).
 rest. A decimal reaches it as a `Decimal` or an `int`, and a date as a `date` or as text.
 """
 
-import re
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Final, Literal, Self, cast
+from typing import Annotated, Final, Literal, Self, cast, get_args
 
 from pydantic import (
     AfterValidator,
@@ -28,9 +27,12 @@ from trialfolio.contracts.common import (
     NonEmptyText,
     Purpose,
     Title,
+    valid_date_text,
 )
 
-SCREEN_SCHEMA_VERSIONS: Final = ("1.0.0",)
+ScreenSchemaVersion = Literal["1.0.0"]
+
+SCREEN_SCHEMA_VERSIONS: Final = get_args(ScreenSchemaVersion)
 """The screen configuration versions this release reads."""
 
 RANKING_FORMS: Final = ("formula", "name", "id")
@@ -39,8 +41,6 @@ RANKING_FORMS: Final = ("formula", "name", "id")
 RANKING_FORMS_MESSAGE: Final = (
     "The supported forms are {formula, lower_is_better}, {name}, and {id}."
 )
-
-_DATE_TEXT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
 def _optional_key(schema: JsonDict) -> None:
@@ -69,9 +69,7 @@ def _date_from_yaml(value: object) -> object:
     if isinstance(value, datetime):
         raise ValueError("must be a date with no time part, written YYYY-MM-DD")
     if isinstance(value, str):
-        if not _DATE_TEXT.fullmatch(value):
-            raise ValueError("must be a date written YYYY-MM-DD")
-        return date.fromisoformat(value)
+        return date.fromisoformat(valid_date_text(value))
     return value
 
 
@@ -190,7 +188,7 @@ class ScreenConfiguration(ContractModel):
     """
 
     kind: Literal["screen"]
-    schema_version: Literal["1.0.0"]
+    schema_version: ScreenSchemaVersion
     title: Title
     purpose: Annotated[
         Purpose | None,

@@ -83,7 +83,7 @@
         "options": {
           "description": "The command-line options as given, by name, such as `out` and `approve`.",
           "patternProperties": {
-            "\\S": {
+            "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]": {
               "anyOf": [
                 {
                   "type": "string"
@@ -150,7 +150,7 @@
         },
         "message": {
           "minLength": 1,
-          "pattern": "\\S",
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "title": "Message",
           "type": "string"
         }
@@ -313,7 +313,7 @@
       "properties": {
         "layout": {
           "minLength": 1,
-          "pattern": "\\S",
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "title": "Layout",
           "type": "string"
         },
@@ -375,13 +375,13 @@
         "format": {
           "description": "The source format, such as `screen-configuration` or `p123api-screen-backtest`.",
           "minLength": 1,
-          "pattern": "\\S",
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "title": "Format",
           "type": "string"
         },
         "format_version": {
           "minLength": 1,
-          "pattern": "\\S",
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "title": "Format Version",
           "type": "string"
         },
@@ -520,7 +520,7 @@
     },
     "notice_version": {
       "minLength": 1,
-      "pattern": "\\S",
+      "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
       "title": "Notice Version",
       "type": "string"
     },

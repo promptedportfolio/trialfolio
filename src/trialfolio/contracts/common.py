@@ -10,6 +10,7 @@ from pydantic import (
     BaseModel,
     BeforeValidator,
     ConfigDict,
+    Field,
     StringConstraints,
 )
 
@@ -83,8 +84,18 @@ PackageVersion = Annotated[str, StringConstraints(pattern=r"^[0-9][0-9A-Za-z.+!_
 LicenseId = Annotated[str, StringConstraints(pattern=r"^LicenseRef-[A-Za-z0-9.-]+$")]
 """An SPDX license reference, such as `LicenseRef-NSPRL-1.0`."""
 
-NOT_BLANK: Final = r"\S"
-"""The pattern of text that isn't blank: it has a character that isn't whitespace."""
+NOT_BLANK: Final = r"[^\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]"
+"""The pattern of text that isn't blank: a character that isn't whitespace, meaning Unicode's
+White_Space characters. They're listed rather than written `\\S`, which Pydantic's Rust regex,
+Python's `re`, and a JSON Schema validator's ECMAScript regex each read differently."""
+
+DATE_PATTERN: Final = r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
+"""`YYYY-MM-DD` in form. `valid_date_text` checks it's a calendar date."""
+
+INTEGER_PATTERN: Final = r"0|[1-9][0-9]*"
+"""An integer in plain decimal digits, with no sign or leading zero."""
+
+Count = Annotated[int, Field(ge=0)]
 
 NonEmptyText = Annotated[str, StringConstraints(min_length=1, pattern=NOT_BLANK)]
 """Non-empty text: at least one character that isn't whitespace."""
@@ -97,14 +108,20 @@ Purpose = Annotated[str, StringConstraints(max_length=2000)]
 
 
 def valid_date_text(value: str) -> str:
-    """Raises `ValueError` unless `value`, already `YYYY-MM-DD` in form, is a calendar date."""
-    date.fromisoformat(value)
+    """Raises `ValueError` unless `value` is a calendar date written `YYYY-MM-DD`. The message
+    never quotes the value."""
+    if not re.fullmatch(DATE_PATTERN, value):
+        raise ValueError("must be a date written YYYY-MM-DD")
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        raise ValueError("isn't a calendar date") from None
     return value
 
 
 DateText = Annotated[
     str,
-    StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
+    StringConstraints(pattern=f"^{DATE_PATTERN}$"),
     AfterValidator(valid_date_text),
 ]
 """A calendar date as `YYYY-MM-DD` text."""

@@ -4,13 +4,14 @@ The model describes a plan. Building one, and computing `case_id` and `plan_hash
 planner's job (R01-T10); the model doesn't recompute either.
 """
 
+import math
+from collections.abc import Mapping
 from datetime import date
-from typing import Annotated, Literal, Self
+from typing import Annotated, Final, Literal, Self, cast
 
-from pydantic import Field, StringConstraints, model_validator
+from pydantic import AfterValidator, BeforeValidator, Field, StringConstraints, model_validator
 
 from trialfolio.contracts.common import (
-    CRITICAL_CATEGORIES,
     MAX_SAFE_INTEGER,
     CaseId,
     ContractModel,
@@ -30,10 +31,17 @@ from trialfolio.contracts.common import (
     WrapperVersions,
     require_unique,
 )
-from trialfolio.contracts.screen_configuration import FormulaRanking, IdRanking, NameRanking
+from trialfolio.contracts.screen_configuration import (
+    FormulaRanking,
+    IdRanking,
+    NameRanking,
+    Ranking,
+    read_ranking,
+)
 from trialfolio.contracts.screen_settings import (
     SCREEN_SETTINGS,
     SCREEN_SETTINGS_BY_NAME,
+    check_flags,
     check_row,
     check_value,
 )
@@ -67,6 +75,18 @@ class ScreenParams(ContractModel):
     rules: Annotated[tuple[ScreenRuleParams, ...], Field(min_length=1)]
 
 
+def _float_only(value: object) -> object:
+    if not isinstance(value, float):
+        raise ValueError("must be a JSON float, such as 1.0, never an integer")
+    return value
+
+
+def _unsigned(value: float) -> float:
+    if math.copysign(1.0, value) < 0:
+        raise ValueError("must not be negative, not even -0.0")
+    return value
+
+
 class ScreenBacktestParams(ContractModel):
     """The JSON object passed to p123api's `screen_backtest`, exactly as it will be sent.
 
@@ -79,7 +99,9 @@ class ScreenBacktestParams(ContractModel):
     pitMethod: Literal["Complete"]
     precision: Annotated[Literal[4], IntegerOnly]
     transPrice: Annotated[Literal[1], IntegerOnly]
-    slippage: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+    slippage: Annotated[
+        float, BeforeValidator(_float_only), Field(allow_inf_nan=False), AfterValidator(_unsigned)
+    ]
     rebalFreq: Literal["Every Week", "Every 4 Weeks"]
 
     @model_validator(mode="after")
@@ -124,13 +146,76 @@ class PlanSetting(ContractModel):
     flags: tuple[Literal["inferred_default", "not_snapshotted"], ...]
 
     @model_validator(mode="after")
-    def _consistent(self) -> Self:
-        if self.critical != (self.category in CRITICAL_CATEGORIES):
-            raise ValueError("critical must be true exactly for the critical categories")
-        if (self.inference_rule is None) == (self.expected_provenance == "inferred"):
-            raise ValueError("inference_rule must be given exactly for inferred values")
+    def _documented(self) -> Self:
+        setting = check_row(
+            self.setting,
+            self.category,
+            self.critical,
+            self.unit,
+            self.interpretation,
+            self.expected_provenance,
+            self.inference_rule,
+        )
+        check_value(setting, self.value)
+        if self.expected_provenance != setting.provenance:
+            raise ValueError(f"{self.setting} must expect {setting.provenance} provenance")
         require_unique(self.flags, "flags")
+        check_flags(setting, self.value, self.flags, executed=False)
         return self
+
+
+TRANSACTION_PRICES: Final = {"open": 1}
+"""`transaction_price` to `transPrice`."""
+
+PIT_METHODS: Final = {"complete": "Complete"}
+"""`pit_method` to `pitMethod`."""
+
+REBALANCE_FREQUENCIES: Final = {1: "Every Week", 4: "Every 4 Weeks"}
+"""`rebalance_weeks` to `rebalFreq`."""
+
+
+def screen_backtest_params(values: Mapping[str, object]) -> ScreenBacktestParams:
+    """Builds the request the resolved settings send, by the screen configuration's "Sent as"
+    mapping (docs/contracts.md). `values` holds each sent setting's value as a plan holds it,
+    by setting name, already valid."""
+
+    def text(name: str) -> str:
+        return cast("str", values[name])
+
+    def integer(name: str) -> int:
+        return cast("int", values[name])
+
+    ranking: Ranking = read_ranking(values["ranking"])
+    sent: object
+    match ranking:
+        case FormulaRanking():
+            sent = {"formula": ranking.formula, "lowerIsBetter": ranking.lower_is_better}
+        case NameRanking():
+            sent = ranking.name
+        case IdRanking():
+            sent = ranking.id
+    rules = cast("tuple[str, ...]", values["rules"])
+    return ScreenBacktestParams.model_validate(
+        {
+            "screen": {
+                "type": text("screen_type"),
+                "universe": text("universe"),
+                "maxNumHoldings": integer("max_holdings"),
+                "method": text("position_method"),
+                "currency": text("currency"),
+                "benchmark": text("benchmark"),
+                "ranking": sent,
+                "rules": tuple({"formula": rule} for rule in rules),
+            },
+            "startDt": text("start_date"),
+            "endDt": text("end_date"),
+            "pitMethod": PIT_METHODS[text("pit_method")],
+            "precision": integer("precision"),
+            "transPrice": TRANSACTION_PRICES[text("transaction_price")],
+            "slippage": float(text("slippage_percent")),
+            "rebalFreq": REBALANCE_FREQUENCIES[integer("rebalance_weeks")],
+        }
+    )
 
 
 class PlanCase(ContractModel):
@@ -145,9 +230,9 @@ class PlanCase(ContractModel):
         names = tuple(row.setting for row in self.settings)
         if names != tuple(setting.name for setting in SCREEN_SETTINGS):
             raise ValueError("settings must be the screen settings, in their documented order")
-        for row in self.settings:
-            setting = check_row(row.setting, row.category, row.unit, row.interpretation)
-            check_value(setting, row.value)
+        values = {row.setting: row.value for row in self.settings}
+        if self.requests[0].params != screen_backtest_params(values):
+            raise ValueError("the request's params must be what the settings send")
         return self
 
 

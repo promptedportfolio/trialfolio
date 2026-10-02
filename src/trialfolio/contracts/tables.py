@@ -13,7 +13,7 @@ from typing import Annotated, Final, Literal, Self
 from pydantic import Field, model_validator
 
 from trialfolio.contracts.common import (
-    CRITICAL_CATEGORIES,
+    INTEGER_PATTERN,
     ContractModel,
     FlagCode,
     Interpretation,
@@ -27,15 +27,15 @@ from trialfolio.contracts.common import (
     Sha256Digest,
     UnavailableReason,
     require_unique,
+    valid_date_text,
 )
-from trialfolio.contracts.screen_settings import check_row, check_value_text
+from trialfolio.contracts.screen_settings import check_flags, check_row, check_value_text
 
 TABLES_SCHEMA_VERSION: Final = "1.0.0"
 """The schema version of both tables. The manifest records it, because a CSV can't."""
 
 _DECIMAL = re.compile(r"-?(0|[1-9][0-9]*)(\.(?P<fraction>[0-9]+))?")
-_COUNT = re.compile(r"0|[1-9][0-9]*")
-_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_COUNT = re.compile(INTEGER_PATTERN)
 
 
 class MetricsRow(ContractModel):
@@ -87,9 +87,7 @@ class MetricsRow(ContractModel):
             if self.source_decimals is not None:
                 raise ValueError("source_decimals must be null for dates and counts")
             if self.unit == "date":
-                if not _DATE.fullmatch(value):
-                    raise ValueError("a date must be written YYYY-MM-DD")
-                date.fromisoformat(value)
+                valid_date_text(value)
             elif not _COUNT.fullmatch(value):
                 raise ValueError("a count must be a whole number")
             return
@@ -122,15 +120,20 @@ class SettingsRow(ContractModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        setting = check_row(self.setting, self.category, self.unit, self.interpretation)
-        if self.critical != (self.category in CRITICAL_CATEGORIES):
-            raise ValueError("critical must be true exactly for the critical categories")
-        check_value_text(setting, self.value)
-        if (self.inference_rule is None) == (self.provenance == "inferred"):
-            raise ValueError("inference_rule must be given exactly for inferred values")
+        setting = check_row(
+            self.setting,
+            self.category,
+            self.critical,
+            self.unit,
+            self.interpretation,
+            self.provenance,
+            self.inference_rule,
+        )
+        value = check_value_text(setting, self.value)
         if (self.original_key is None) != (self.original_value is None):
             raise ValueError("original_key and original_value must be given together")
         require_unique(self.flags, "flags")
+        check_flags(setting, value, self.flags, executed=True)
         return self
 
 

@@ -22,6 +22,7 @@ from trialfolio.contracts.screen_configuration import (
     NameRanking,
     ScreenConfiguration,
 )
+from trialfolio.contracts.screen_settings import SCREEN_SETTINGS_BY_NAME, check_value
 from trialfolio.errors import TrialFolioError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -180,6 +181,24 @@ def test_trailing_zeros_of_a_whole_number_are_not_significant(
     assert str(read_screen_configuration(content, "screen.yaml").slippage_percent) == normalized
 
 
+@pytest.mark.parametrize("written", ["9100000000000000", "9100000000000000.0"])
+def test_whole_decimal_reads_the_same_with_or_without_a_point(written: str) -> None:
+    """`1.0` and `1` are the same setting, up to the 10^16 limit."""
+    content = with_line("slippage_percent: 0.25", f"slippage_percent: {written}")
+
+    assert str(read_screen_configuration(content, "screen.yaml").slippage_percent) == (
+        "9100000000000000"
+    )
+
+
+def test_integer_above_2_to_the_53_is_rejected() -> None:
+    content = with_line("max_holdings: 25", "max_holdings: 9007199254740992")
+
+    assert "`max_holdings` input should be less than or equal to 9007199254740991" in rejection(
+        content
+    )
+
+
 def test_decimal_of_10_to_the_16_is_rejected() -> None:
     content = with_line("slippage_percent: 0.25", "slippage_percent: 10000000000000000.0")
 
@@ -190,7 +209,7 @@ def test_integer_too_long_to_convert_is_rejected() -> None:
     """Python won't convert more than 4300 digits; the reader must still say config.invalid."""
     content = with_line("max_holdings: 25", "max_holdings: " + "9" * 5000)
 
-    assert "`max_holdings` is larger than 9007199254740991" in rejection(content)
+    assert "`max_holdings` has more than 16 digits" in rejection(content)
 
 
 def test_deep_nesting_is_rejected() -> None:
@@ -218,6 +237,61 @@ def test_yaml_boolean_in_a_text_key_says_to_quote_it() -> None:
 
     assert "`benchmark` is a YAML 1.1 boolean" in message
     assert "quote it if it's text" in message
+
+
+@pytest.mark.parametrize(
+    ("line", "fragment"),
+    [
+        ('universe: "SP\\q500"', "'q'"),
+        ("slippage_percent: @x", "'@'"),
+        ("end_date: '0000-01-01'", "year 0"),
+    ],
+)
+def test_messages_quote_no_part_of_a_value(line: str, fragment: str) -> None:
+    key = line.split(":", 1)[0]
+    old = next(
+        existing for existing in documented_example().splitlines() if existing.startswith(key)
+    )
+
+    assert fragment not in rejection(with_line(old, line))
+
+
+def test_a_rule_of_the_wrong_type_is_one_error() -> None:
+    message = rejection(with_line("  - 'AvgDailyTot(30) > 1000000'", "  - 5"))
+
+    assert message.count("\n- ") == 1
+    assert "`rules[0]` input should be a valid string." in message
+
+
+def test_no_rules_needs_at_least_one() -> None:
+    content = with_line("rules:\n  - 'AvgDailyTot(30) > 1000000'\n", "rules: []\n")
+
+    assert "`rules` must hold at least 1 item." in rejection(content)
+
+
+def test_an_empty_key_is_named() -> None:
+    content = documented_example().encode() + b"'': 1\n"
+
+    assert "`''` isn't a key this configuration accepts." in rejection(content)
+
+
+@pytest.mark.parametrize(
+    ("text", "blank"),
+    [("\x1c", False), ("\ufeff", False), ("\u3000", True), ("\u0085", True), (" \t", True)],
+    ids=["file-separator", "byte-order-mark", "ideographic-space", "next-line", "space-and-tab"],
+)
+def test_blank_means_unicode_white_space(text: str, blank: bool) -> None:
+    """The reader and the plan's setting check agree on what's blank."""
+    escaped = text.encode("unicode_escape").decode()
+    content = with_line("universe: SP500", f'universe: "{escaped}"')
+
+    if blank:
+        assert "`universe` is blank." in rejection(content)
+        with pytest.raises(ValueError):
+            check_value(SCREEN_SETTINGS_BY_NAME["universe"], text)
+    else:
+        assert read_screen_configuration(content, "screen.yaml").universe == text
+        check_value(SCREEN_SETTINGS_BY_NAME["universe"], text)
 
 
 def test_byte_order_mark_is_ignored() -> None:

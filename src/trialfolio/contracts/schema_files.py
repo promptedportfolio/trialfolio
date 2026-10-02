@@ -13,9 +13,11 @@ removes a subdirectory: the check lists it as extra, and writing refuses to run.
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final
 
 from pydantic import BaseModel
@@ -75,9 +77,13 @@ def render(schema_file: SchemaFile) -> str:
     return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
 
 
-def generate() -> dict[str, bytes]:
-    """Returns every schema file's bytes, by file name."""
-    return {schema_file.name: render(schema_file).encode() for schema_file in SCHEMA_FILES}
+@cache
+def generate() -> Mapping[str, bytes]:
+    """Returns every schema file's bytes, by file name. The models don't change while the process
+    runs, so they're generated once."""
+    return MappingProxyType(
+        {schema_file.name: render(schema_file).encode() for schema_file in SCHEMA_FILES}
+    )
 
 
 def _entries(directory: Path) -> dict[str, Path]:

@@ -125,7 +125,7 @@ def plan() -> Document:
                             "pitMethod": "Complete",
                             "precision": 4,
                             "transPrice": 1,
-                            "slippage": 1.0,
+                            "slippage": 0.25,
                             "rebalFreq": "Every 4 Weeks",
                         },
                     }
@@ -380,11 +380,37 @@ def test_unknown_fields_are_rejected(model: type[BaseModel], build: Callable[[],
     rejects(model, build() | {"unexpected": 1})
 
 
+def params_of(document: Document) -> Document:
+    return document["cases"][0]["requests"][0]["params"]
+
+
+def whole_slippage(document: Document) -> None:
+    settings_of(document)[12]["value"] = "1"
+    params_of(document)["slippage"] = 1.0
+
+
 def test_slippage_is_sent_as_a_float() -> None:
     """Plan contents: `slippage` is a JSON float, `1.0` for a whole number, never `1`."""
-    written = Plan.model_validate_json(json.dumps(plan())).model_dump_json()
+    written = Plan.model_validate_json(json.dumps(changed(plan, whole_slippage))).model_dump_json()
 
     assert '"slippage":1.0' in written
+
+
+@pytest.mark.parametrize(
+    "ranking",
+    [{"name": "Synthetic Value Composite"}, {"id": 424242}],
+    ids=["name", "id"],
+)
+def test_plan_sends_a_ranking_system_by_name_or_id(ranking: Document) -> None:
+    """Ranking forms: a name is sent as a string and an ID as an integer, flagged
+    not_snapshotted."""
+
+    def by_system(document: Document) -> None:
+        row = settings_of(document)[3]
+        row.update(value=ranking, flags=["not_snapshotted"])
+        params_of(document)["screen"]["ranking"] = next(iter(ranking.values()))
+
+    Plan.model_validate_json(json.dumps(changed(plan, by_system)))
 
 
 def test_datetimes_are_written_in_utc_with_z() -> None:
@@ -430,6 +456,24 @@ PLAN_CHANGES: dict[str, Change] = {
     "a value not accepted": lambda d: settings_of(d)[1].update(value="etf"),
     "blank text": lambda d: settings_of(d)[0].update(value="  "),
     "not sent but interpreted": lambda d: settings_of(d)[18].update(interpretation="interpreted"),
+    "params not what the settings send": lambda d: params_of(d)["screen"].update(maxNumHoldings=30),
+    "slippage sent as an integer": lambda d: (whole_slippage(d), params_of(d).update(slippage=1)),
+    "slippage of -0.0": lambda d: (
+        settings_of(d)[12].update(value="0"),
+        params_of(d).update(slippage=-0.0),
+    ),
+    "inferred value expected verified": lambda d: settings_of(d)[13].update(
+        expected_provenance="verified", inference_rule=None
+    ),
+    "unsent parameter expected verified": lambda d: settings_of(d)[18].update(
+        expected_provenance="verified"
+    ),
+    "universe not flagged not_snapshotted": lambda d: settings_of(d)[0].update(flags=[]),
+    "data_vendor not flagged inferred_default": lambda d: settings_of(d)[15].update(flags=[]),
+    "ranking by name not flagged": lambda d: (
+        settings_of(d)[3].update(value={"name": "Synthetic Value Composite"}),
+        params_of(d)["screen"].update(ranking="Synthetic Value Composite"),
+    ),
 }
 
 
@@ -539,6 +583,41 @@ ATTEMPT_CHANGES: dict[str, Change] = {
         d["exchanges"][0].update(note="completed_from_saved_response"),
     ),
     "attempt id without hyphens": lambda d: d.update(attempt_id=ATTEMPT_ID.replace("-", "")),
+    "unknown with a saved response": lambda d: (
+        interrupted_backtest(d),
+        d.update(
+            outcome="unknown",
+            error={"code": "provider.outcome_unknown", "message": "x"},
+        ),
+    ),
+    "note on the authentication exchange": lambda d: d["exchanges"][0].update(
+        note="completed_from_saved_response"
+    ),
+    "note on an attempt that didn't succeed": lambda d: (
+        unknown_outcome(d),
+        d["exchanges"][1].update(
+            result="response", status=200, note="completed_from_saved_response"
+        ),
+    ),
+    "failed though the send was interrupted": lambda d: (
+        unknown_outcome(d),
+        d.update(outcome="failed", possibly_charged=True),
+    ),
+    "failed after a 503": lambda d: (
+        d["exchanges"][1].update(status=503),
+        d.update(
+            outcome="failed", error={"code": "provider.unavailable", "message": "x"}, response=None
+        ),
+    ),
+    "unknown after a 404": lambda d: (
+        d["exchanges"][1].update(status=404),
+        d.update(
+            outcome="unknown",
+            error={"code": "provider.outcome_unknown", "message": "x"},
+            response=None,
+        ),
+    ),
+    "request sent twice": lambda d: d["exchanges"].append(d["exchanges"][1]),
 }
 
 
@@ -547,9 +626,23 @@ def test_attempt_record_rejects(change: Change) -> None:
     rejects(AttemptRecord, changed(attempt_record, change))
 
 
-def test_start_record_exchanges_carry_no_note() -> None:
+@pytest.mark.parametrize(
+    "exchange",
+    [
+        {
+            "request": "POST /auth",
+            "result": "response",
+            "status": 200,
+            "note": "completed_from_saved_response",
+        },
+        {"request": "POST /screen/backtest", "result": "response", "status": 200, "note": None},
+    ],
+    ids=["a note", "the request's exchange"],
+)
+def test_start_record_holds_only_authentication(exchange: Document) -> None:
+    """The start record is written before the request is sent."""
     document = start_record()
-    document["exchanges"][0]["note"] = "completed_from_saved_response"
+    document["exchanges"][0] = exchange
 
     rejects(StartRecord, document)
 
@@ -628,6 +721,23 @@ def test_table_columns_are_in_the_documented_order() -> None:
         "source_artifact",
         "flags",
     )
+
+
+def test_settings_row_takes_coverage_mismatch_on_a_date() -> None:
+    """A date setting may carry coverage_mismatch in settings.csv, once there's a response."""
+
+    def mismatched_start(document: Document) -> None:
+        document.update(
+            setting="start_date",
+            category="dates",
+            unit=None,
+            value="2016-01-01",
+            original_key="start_date",
+            original_value="2016-01-01",
+            flags=["coverage_mismatch"],
+        )
+
+    SettingsRow.model_validate_json(json.dumps(changed(settings_row, mismatched_start)))
 
 
 def unavailable(document: Document) -> None:
@@ -711,6 +821,15 @@ SETTINGS_CHANGES: dict[str, Change] = {
     "blank": lambda d: d.update(value=" "),
     "not sent but interpreted": lambda d: d.update(
         setting="max_pos_pct", category="strategy", unit=None, value="not_sent"
+    ),
+    "deeply nested JSON": lambda d: d.update(
+        setting="rules", category="strategy", unit=None, value="[" * 100_000
+    ),
+    "universe not flagged not_snapshotted": lambda d: d.update(
+        setting="universe", category="universe", unit=None, value="SP500"
+    ),
+    "coverage_mismatch on a setting that isn't a date": lambda d: d.update(
+        flags=["coverage_mismatch"]
     ),
 }
 
