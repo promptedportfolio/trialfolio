@@ -7,9 +7,9 @@ readme = "README.md"
 # an OSI classifier, and the license and notices in every copy.
 license = "LicenseRef-NSPRL-1.0"
 license-files = ["LICENSE", "CONTACT.md", "THIRD_PARTY_NOTICES.md", "docs/disclaimers.md"]
-authors = [{ name = "Nathan Slaughter", email = "nathan@nathanslaughter.com" }]
+authors = [{ name = "Nathan Slaughter", email = "git@nathanslaughter.com" }]
 requires-python = ">=3.12"
-# PyPI rejects any upload with this classifier. No distribution channel is chosen yet (LIC-15).
+# PyPI rejects any upload with this classifier. Trial Folio isn't published on PyPI (D-22, LIC-15).
 classifiers = ["Private :: Do Not Upload"]
 dependencies = [
     "p123api==3.1.0",

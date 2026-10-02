@@ -1,6 +1,6 @@
 # Licensing policy
 
-**Status:** Draft. The license text is **Draft — not yet adopted**.
+**Status:** Draft. The license text was **adopted on 2026-10-02**.
 **Controlling document:** [LICENSE](../LICENSE), the Nathan Slaughter Personal Research License, version 1.0, identifier `LicenseRef-NSPRL-1.0`.
 **Owner decisions:** D-03 to D-08 in the [product specification](spec.md). **Related invariant:** INV-13.
 
@@ -28,7 +28,7 @@ This policy is not legal advice or a legal determination. Nathan Slaughter may s
 | [LIC-12](#lic-12-acceptance-and-acknowledgment) | Acceptance is lightweight, local, and automation-compatible | Requirement; mechanism D-17 |
 | [LIC-13](#lic-13-third-party-components) | Third-party material keeps its own license; no GPL or unlicensed upstream code | Requirement |
 | [LIC-14](#lic-14-contributions) | No outside contributions without terms that let the licensor distribute them | Requirement |
-| [LIC-15](#lic-15-distribution-channel) | Public distribution waits for a channel consistent with the restrictions | Requirement (D-08); channel Open question |
+| [LIC-15](#lic-15-distribution-channel) | Public distribution uses a channel consistent with the restrictions | Requirement (D-08, D-22) |
 | [LIC-16](#lic-16-bundled-builds-and-container-images) | Bundled builds and images meet third-party and reserved-distribution rules | Requirement |
 | [LIC-17](#lic-17-other-interfaces) | Desktop, local web, and hosted interfaces are resolved before they ship | Requirement; local serving Open question |
 | [LIC-18](#lic-18-regulatory-boundaries) | The license authorizes no regulated activity; new activities need separate analysis | Requirement |
@@ -47,20 +47,19 @@ Trial Folio's own material is licensed under the Nathan Slaughter Personal Resea
 
 ### LIC-02 Licensor and contact
 
-Nathan Slaughter is the author of Trial Folio and licensor of the material he has the right to license. All licensing and permission requests go to nathan@nathanslaughter.com, as described in [CONTACT.md](../CONTACT.md).
+Nathan Slaughter is the author of Trial Folio and licensor of the material he has the right to license. All licensing and permission requests go to git@nathanslaughter.com, as described in [CONTACT.md](../CONTACT.md).
 
 The license covers only material Nathan Slaughter can license. It claims no exclusive ownership of users' inputs, numerical findings, or third-party data.
 
 ### LIC-03 Adoption
 
-LICENSE is a draft until Nathan Slaughter adopts it. He adopts it himself (D-03). To adopt:
+Nathan Slaughter adopted LICENSE on 2026-10-02. He adopts it himself (D-03). Adoption took these steps, and a future license version repeats them:
 
 1. Resolve the decisions marked "before adoption" under [Outstanding decisions](#outstanding-decisions).
 2. Delete the drafting-notes block at the top of LICENSE.
 3. Change the LICENSE status line to `Status: Adopted YYYY-MM-DD`.
 4. Record the same status and date in [ADR 0004](adrs/0004-custom-personal-research-license.md).
 
-Until then, every document refers to the license as "draft, not yet adopted".
 
 ## Who may use Trial Folio
 
@@ -90,7 +89,7 @@ Portfolio123's High-Net-Worth Investor account type uses a similar threshold: "m
 | Primary source of income | A source that provides more than half of the individual's total income | Requirement (D-06), resolved |
 | Family members | The members of an individual's family; the license adds no list | Requirement (D-06), resolved |
 | Resell research | To provide research about stocks to other persons for compensation, whether the individual produced it or obtained it from others | Requirement (D-13) |
-| Personal research | Private analysis for the individual's own purposes, including investment decisions concerning themselves and their family members; excludes work for an employer or other organization, client services, and redistribution | Proposed default; see [Outstanding decisions](#outstanding-decisions) |
+| Personal research | Private analysis for the individual's own purposes, including investment decisions concerning themselves and their family members; excludes work for an employer or other organization, client services, and redistribution | Requirement, confirmed as drafted 2026-10-02 |
 
 Trial Folio MUST NOT ask users to provide account balances, statements, income records, or family identities in order to run. Eligibility is the user's responsibility under the license (see [LIC-12](#lic-12-acceptance-and-acknowledgment)).
 
@@ -133,12 +132,14 @@ No person may incorporate Trial Folio's code, a portion of it, or a modification
 
 Private modifications for personal research carry no right to publish them. Nathan Slaughter's own right to publish Trial Folio doesn't authorize recipients to republish it.
 
+LICENSE section 5.4 makes one narrow exception, for the rights GitHub's terms grant in a public repository: viewing it, and forking it on GitHub ([LIC-15](#lic-15-distribution-channel)). It permits nothing more. Publishing modifications, even in a public fork, still needs permission.
+
 ### LIC-09 Reserved distribution and hosted services
 
 These uses are reserved and need prior express written permission, whether or not the code is modified:
 
 - publishing, redistributing, sublicensing, selling, lending, or otherwise supplying copies
-- public forks and other public copies of the source
+- public forks and other public copies of the source, except forks on GitHub within LICENSE section 5.4
 - vendored source
 - packages, and binaries, executables, or archives containing the code
 - container images and virtual-machine images containing the code
@@ -195,7 +196,7 @@ Third-party components keep their own licenses, which govern them. Trial Folio's
 
 ### LIC-14 Contributions
 
-Nathan Slaughter must hold enough rights to distribute any accepted contribution under this policy. A public pull request doesn't automatically supply those rights. Trial Folio accepts no outside contributions until contributor terms exist that grant them.
+Nathan Slaughter must hold enough rights to distribute any accepted contribution under this policy. A public pull request doesn't automatically supply those rights: GitHub's terms license a contribution under the repository's own license, and that license grants no right to distribute, so the contribution couldn't be distributed with Trial Folio. Trial Folio accepts no outside contributions until contributor terms exist that grant them. [CONTRIBUTING.md](../CONTRIBUTING.md) tells visitors so, and outside pull requests are closed without being merged or copied.
 
 ## Distribution channel and bundled builds
 
@@ -206,17 +207,23 @@ Public distribution ("Released" status) requires both of the following (D-08):
 1. The license adopted by Nathan Slaughter (LIC-03).
 2. His recorded decision on a distribution channel consistent with the no-publication restriction.
 
-**The repository stays private until then.**
+Both exist. He adopted the license and decided the channel on 2026-10-02 ([ADR 0007](adrs/0007-host-the-source-publicly-on-github.md), D-22):
 
-Public GitHub repositories grant users on-platform viewing and forking rights under [GitHub's terms](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service#d-user-generated-content). A custom notice can't pretend those platform grants don't exist. The restriction must not be silently weakened to suit a preferred host.
+- **Source: a public GitHub repository.** Public GitHub repositories grant users on-platform viewing and forking rights under [GitHub's terms](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service#d-user-generated-content). A custom notice can't pretend those platform grants don't exist, so LICENSE section 5.4 states a narrow exception that goes no further than they do.
+- **Packages: downloaded from the author's site,** delivered with LICENSE.
+- **Not PyPI.** Its terms either require a license that lets anyone redistribute the package, or grant every user an irrevocable license to redistribute it (verified observation, checked 2026-10-02).
+- **Homebrew, perhaps later:** a personal tap whose formula points at the archive on the author's site, without prebuilt bottles. Homebrew's main repository accepts only free-software licenses.
 
-| Option | Consistency with the restrictions | Notes |
+A public repository isn't a release. A release is Released only when it's distributed through this channel.
+
+The restriction must not be silently weakened to suit a preferred host.
+
+| Option | Consistency with the restrictions | Outcome |
 |---|---|---|
-| Download controlled by the author, such as a release archive on his own site, delivered with LICENSE | Consistent | Gives no platform rights to third parties |
-| Private repository with access granted per request | Consistent | Suits Professional User and organization grants; limits reach for eligible individuals |
-| Public GitHub repository with an explicit, narrowly defined hosting exception | Weakens LIC-08 for on-platform forks | Requires Nathan Slaughter's express decision, recorded in LICENSE and an ADR |
-
-**Open question.** Recommended default: an author-controlled download. Resolve before the first "Released" status.
+| Download controlled by the author, such as a release archive on his own site, delivered with LICENSE | Consistent | Chosen for packages |
+| Private repository with access granted per request | Consistent | Not chosen; it limits reach for eligible individuals |
+| Public GitHub repository with an explicit, narrowly defined hosting exception | Weakens LIC-08 for on-platform forks only | Chosen for the source, with the exception in LICENSE section 5.4 |
+| PyPI | Inconsistent: its terms grant redistribution rights | Not used |
 
 ### LIC-16 Bundled builds and container images
 
@@ -271,6 +278,4 @@ A new license version applies to the Trial Folio versions distributed with it. I
 
 | Decision | Impact | Recommended default | Resolve by |
 |---|---|---|---|
-| Definition of "personal research" ([LIC-05](#lic-05-professional-users)) | Sets the boundary of the general grant | LICENSE 1.10 as drafted | Before adoption |
-| Distribution channel ([LIC-15](#lic-15-distribution-channel)) | Blocks any "Released" status | Author-controlled download | Before the first public release |
 | Contributor terms ([LIC-14](#lic-14-contributions)) | Blocks accepting outside contributions | Accept none until terms exist | Before accepting a contribution |

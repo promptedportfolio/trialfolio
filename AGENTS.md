@@ -25,7 +25,7 @@ Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and event
 - **Report verification honestly.** Keep actual verification separate from intended verification. Never describe a command as working, or a check as passing, unless you ran it.
 - **Never invent specifics.** Do not make up export layouts, endpoints, package versions, results, or completed releases. Mark unknowns as open questions with a recommended default.
 - **Preserve the custom license.** Never add an MIT license, an open-source classifier or badge, a public-fork workflow, or broader permissions without the owner's explicit instruction ([LIC-01](docs/licensing-policy.md#lic-01-license-identity)).
-- **Leave out the brand.** Do not name any publication, brand, or series in project materials ([D-10](docs/spec.md#decisions)). The repository's own URL is the one exception, where a link needs it.
+- **Leave out the brand.** Do not name any publication, brand, or series in project materials, except where [D-10](docs/spec.md#decisions) allows: the README's credit line, the brand site's address in installation and package links, and the repository's own URL.
 - **Leave a handoff.** End each task with a short note covering what changed, the evidence, the limitations, and the remaining work.
 
 ## Credentials and reference data
@@ -82,4 +82,4 @@ The workflow:
 - Start each change on a feature branch named `<type>/<short-description>`. Push it and open a pull request with `gh pr create`.
 - Nathan merges pull requests. Merge one only when Nathan explicitly approves merging that specific pull request in the current conversation. Pull requests are squash-merged, with a conventional-commit title.
 - Don't bypass the hooks, and don't edit `.githooks/` or `.claude/` unless Nathan asks.
-- The repository stays private until a distribution channel is chosen ([LIC-15](docs/licensing-policy.md#lic-15-distribution-channel)).
+- The repository is public ([ADR 0007](docs/adrs/0007-host-the-source-publicly-on-github.md)). Outside contributions aren't accepted ([LIC-14](docs/licensing-policy.md#lic-14-contributions)): don't merge, copy, or adapt changes from a pull request that Nathan didn't author.

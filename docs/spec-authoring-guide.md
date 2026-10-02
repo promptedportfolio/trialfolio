@@ -13,7 +13,7 @@ Prepared on October 1, 2026. Provider observations are documentation and source-
 - The product is **Trial Folio**. The repository and the CLI command are `trialfolio`.
 - Trial Folio builds on the Portfolio123 API only and does not integrate with DataMiner. Release 0.1.0 is API execution, 0.2.0 reviews saved runs, and 0.3.0 runs experiments ([ADR 0005](adrs/0005-build-on-the-portfolio123-api-only.md)). This supersedes sections 5 and 8 where they conflict.
 - No representative provider response exists yet. The owner keeps Portfolio123 API credentials in a secret manager. Reference data is procured with them when a release needs it, and the owner performs any Portfolio123 web-UI steps on request.
-- The project is the engine for reproducing published factor research. Project materials do not name any publication or brand.
+- The project is the engine for reproducing published factor research. Project materials do not name any publication or brand, except where [D-10](spec.md#decisions) allows.
 - Nathan Slaughter adopts the license himself. Counsel review is not a condition of adopting the license or of release.
 - Generated reports contain no scripts, count as output rather than covered code, and may be shared with the concise notice intact. Users remain responsible for data-provider terms.
 - Liquid assets exclude retirement accounts, with no further specification. "Primary source of income" means more than half of total income. "Family members" is used without a defined list.
@@ -23,7 +23,7 @@ Prepared on October 1, 2026. Provider observations are documentation and source-
 
 Build a configuration-driven CLI that helps investors collect, compare, reproduce, and eventually evaluate investment-strategy evidence with scientific discipline. Reuse Portfolio123's research engines and official Python wrapper. The project's contribution is controlled experimentation, durable evidence, transparent comparisons, and defensible evaluation.
 
-The author and licensing contact is Nathan Slaughter, nathan@nathanslaughter.com. Texas is the starting jurisdiction for legal review. Apply the custom licensing and publication policy in section 17; it supersedes the former MIT recommendation. Do not describe the project's own restricted license as open source.
+The author and licensing contact is Nathan Slaughter, git@nathanslaughter.com. Texas is the starting jurisdiction for legal review. Apply the custom licensing and publication policy in section 17; it supersedes the former MIT recommendation. Do not describe the project's own restricted license as open source.
 
 The owner wants independently useful public releases after approximately one, two, and three cumulative focused working days. Those days may be spread across two weeks. Further development may pause for months. Each release must remain useful without the next release. These are scope targets, not promises that a calendar deadline overrides verification.
 
@@ -758,7 +758,7 @@ No further substantive clarification is required to start authoring the initial 
 | Project/package name | Trial Folio; repository and CLI command `trialfolio`; proposed Python package `trialfolio` | Decided 2026-10-01, except the package name, before packaging |
 | Implementation language | Python; Pydantic v2 and appropriate protocols | Established direction |
 | Application license | Required custom source-available personal-research license; reserved uses need Nathan Slaughter's prior express written permission | Draft now; legal review and adoption before public release |
-| Licensing contact | Nathan Slaughter, nathan@nathanslaughter.com | Established direction |
+| Licensing contact | Nathan Slaughter, git@nathanslaughter.com | Established direction |
 | Legal jurisdiction | Texas as the review and proposed governing-law starting point, subject to mandatory applicable law | Legal review before adopting final terms |
 | Initial strategy scope | Long-only stock screen comparisons | 0.1.0 specification |
 | First export layout | One actual current ScreenBacktest CSV layout | Before importer compatibility is claimed |
@@ -785,7 +785,7 @@ The intended approach is a custom source-available personal-research license wit
 
 ### 17.1 Author, contact, and scope
 
-Identify Nathan Slaughter as author and licensor of the material he has rights to license. Use nathan@nathanslaughter.com for all licensing and permission requests. CONTACT.md must provide that address and state that sending a request does not grant permission.
+Identify Nathan Slaughter as author and licensor of the material he has rights to license. Use git@nathanslaughter.com for all licensing and permission requests. CONTACT.md must provide that address and state that sending a request does not grant permission.
 
 Use “Nathan Slaughter Personal Research License” as a proposed descriptive title. Clearly mark the initial text as a draft until adopted. Describe the project as source available under a custom license in the README, package metadata, documentation, and release announcements. Do not retain an MIT badge or permissive-license classifier for the project itself.
 

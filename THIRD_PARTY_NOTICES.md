@@ -1,6 +1,6 @@
 # Third-party notices
 
-Trial Folio's own material is licensed under the [Nathan Slaughter Personal Research License](LICENSE) (`LicenseRef-NSPRL-1.0`, draft, not yet adopted). Third-party components keep their own licenses. Nothing in Trial Folio's license restricts the rights those licenses grant, and its restrictions don't apply to any third-party file.
+Trial Folio's own material is licensed under the [Nathan Slaughter Personal Research License](LICENSE) (`LicenseRef-NSPRL-1.0`). Third-party components keep their own licenses. Nothing in Trial Folio's license restricts the rights those licenses grant, and its restrictions don't apply to any third-party file.
 
 ## Current status
 
