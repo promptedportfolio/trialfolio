@@ -14,7 +14,7 @@ On 2026-10-01 the owner approved three checks with a budget of 15 credits, and s
 | 2, ranking by name | `screen.ranking`: the name of an existing ranking system in the owner's account, as a string | [request-ranking-name.json](request-ranking-name.json) |
 | 3, ranking by ID | `screen.ranking`: the same system's ID, as a JSON integer | [request-ranking-id.json](request-ranking-id.json) |
 
-**Placeholders.** The ranking system's name and ID are account information, so the owner chose to keep them local. The committed requests for checks 2 and 3 show `"<ranking system name>"` and `"<ranking system ID>"` instead. The second placeholder stands for a JSON integer. The exact requests are in `payloads/`. The weekly request is committed exactly.
+**Placeholders.** The ranking system's name and ID are account information, so the owner chose to keep them local. The committed requests for checks 2 and 3 show `"<ranking system name>"` and `0` instead. The `0` keeps the type that was sent, a JSON integer. Trial Folio's configuration rejects it as an ID, so it can't be mistaken for a real one. The exact requests are in `payloads/`. The weekly request is committed exactly.
 
 Nothing in the account was created or changed.
 
@@ -54,7 +54,7 @@ These checks compare each response with [`p123api-screen-backtest` version 1](..
 | `stats.port` differs from R01-T01's, so the changed setting took effect | Passed | Passed | Passed |
 | Checks 2 and 3 return identical responses, apart from `quotaRemaining` | — | Passed | Passed |
 
-**A benchmark return of zero.** One weekly period has a `Bench%` of exactly `0` at 4 decimal places. It's counted in `upMarkets`, and the up-market mean of `Ret%` reproduces only with it included. Its unrounded return may not be zero, so whether Portfolio123 groups returns by "zero or above" or by "above zero" is still unverified.
+**A benchmark return of zero.** One weekly period has a `Bench%` of exactly `0` at 4 decimal places. It's counted in `upMarkets`, and the up-market mean of `Ret%` reproduces only with it included. Its unrounded return isn't in the response: it may be slightly above zero or exactly zero, or Portfolio123 may compare rounded values. So the rule for a return at or near zero is still unverified.
 
 ## Findings for R01-T05
 

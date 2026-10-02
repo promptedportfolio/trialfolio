@@ -6,7 +6,7 @@
     "method": "long",
     "currency": "USD",
     "benchmark": "SPY",
-    "ranking": "<ranking system ID>",
+    "ranking": 0,
     "rules": [
       {
         "formula": "AvgDailyTot(30) > 1000000"
