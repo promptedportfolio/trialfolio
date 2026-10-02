@@ -81,20 +81,22 @@
           "type": "string"
         },
         "options": {
-          "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "description": "The command-line options as given, by name, such as `out` and `approve`.",
+          "patternProperties": {
+            "\\S": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
           "propertyNames": {
             "minLength": 1
           },
@@ -148,6 +150,7 @@
         },
         "message": {
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Message",
           "type": "string"
         }
@@ -310,6 +313,7 @@
       "properties": {
         "layout": {
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Layout",
           "type": "string"
         },
@@ -371,11 +375,13 @@
         "format": {
           "description": "The source format, such as `screen-configuration` or `p123api-screen-backtest`.",
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Format",
           "type": "string"
         },
         "format_version": {
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Format Version",
           "type": "string"
         },
@@ -491,7 +497,7 @@
           "type": "null"
         }
       ],
-      "description": "Null exactly when the outcome is `completed`."
+      "description": "Null exactly when the outcome is `completed`. `execution.partial` exactly when it's\n`partial`."
     },
     "artifacts": {
       "items": {
@@ -514,6 +520,7 @@
     },
     "notice_version": {
       "minLength": 1,
+      "pattern": "\\S",
       "title": "Notice Version",
       "type": "string"
     },

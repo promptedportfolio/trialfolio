@@ -48,6 +48,7 @@ A new rule needs a new file, and a row here. The test checks that this table and
 | `title-too-long.yaml` | `title` has 1–200 characters | `title` |
 | `purpose-too-long.yaml` | `purpose` has up to 2,000 characters | `purpose` |
 | `empty-universe.yaml` | `universe` is non-empty | `universe` |
+| `blank-universe.yaml` | Non-empty text has a character that isn't whitespace | `universe` |
 | `empty-benchmark.yaml` | `benchmark` is non-empty | `benchmark` |
 | `empty-rules.yaml` | `rules` has at least one formula | `rules` |
 | `empty-rule.yaml` | Each rule is a non-empty string | `rules[0]` |

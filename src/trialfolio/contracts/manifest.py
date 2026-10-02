@@ -7,6 +7,7 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, model_validator
 
 from trialfolio.contracts.common import (
+    CommandOutcome,
     ContractModel,
     ErrorDetail,
     LicenseId,
@@ -18,6 +19,7 @@ from trialfolio.contracts.common import (
     SettingName,
     Sha256Digest,
     UtcDatetime,
+    check_outcome,
     require_unique,
 )
 
@@ -160,9 +162,10 @@ class RunManifest(ContractModel):
     """True for the synthetic run `trialfolio demo` writes."""
     plan_hash: Sha256Digest
     approval: Literal["interactive", "option", "not_required"]
-    outcome: Literal["completed", "partial", "failed"]
+    outcome: CommandOutcome
     error: ErrorDetail | None
-    """Null exactly when the outcome is `completed`."""
+    """Null exactly when the outcome is `completed`. `execution.partial` exactly when it's
+    `partial`."""
     artifacts: tuple[ManifestArtifact, ...]
     parsers: tuple[ParserVersion, ...]
     license_id: LicenseId
@@ -177,7 +180,6 @@ class RunManifest(ContractModel):
             raise ValueError("synthetic must be true exactly for a run trialfolio demo wrote")
         if (self.approval == "not_required") != self.synthetic:
             raise ValueError("approval is not_required exactly for the synthetic run")
-        if (self.error is None) != (self.outcome == "completed"):
-            raise ValueError("error must be given exactly when the outcome isn't completed")
+        check_outcome(self.outcome, self.error)
         require_unique(tuple(artifact.path for artifact in self.artifacts), "artifact paths")
         return self

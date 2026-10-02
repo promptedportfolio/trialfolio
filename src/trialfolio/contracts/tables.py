@@ -28,7 +28,7 @@ from trialfolio.contracts.common import (
     UnavailableReason,
     require_unique,
 )
-from trialfolio.contracts.screen_settings import SCREEN_SETTINGS_BY_NAME, check_value_text
+from trialfolio.contracts.screen_settings import check_row, check_value_text
 
 TABLES_SCHEMA_VERSION: Final = "1.0.0"
 """The schema version of both tables. The manifest records it, because a CSV can't."""
@@ -73,8 +73,13 @@ class MetricsRow(ContractModel):
             self._check_value(self.value)
         elif self.source_decimals is not None:
             raise ValueError("source_decimals must be null for an unavailable value")
-        if self.origin == "calculated" and self.source_location is not None:
-            raise ValueError("source_location must be null for a calculated value")
+        if (self.source_location is None) != (self.origin == "calculated"):
+            raise ValueError("source_location must be given exactly for a reported value")
+        if self.origin == "reported" and self.source_label is None:
+            raise ValueError("a reported value has its source_label")
+        start, end = self.period_start, self.period_end
+        if start is not None and end is not None and start > end:
+            raise ValueError("period_start must not be after period_end")
         return self
 
     def _check_value(self, value: str) -> None:
@@ -117,11 +122,7 @@ class SettingsRow(ContractModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        setting = SCREEN_SETTINGS_BY_NAME.get(self.setting)
-        if setting is None:
-            raise ValueError("setting must be one of the screen settings")
-        if (self.category, self.unit) != (setting.category, setting.unit):
-            raise ValueError(f"{self.setting} must have its documented category and unit")
+        setting = check_row(self.setting, self.category, self.unit, self.interpretation)
         if self.critical != (self.category in CRITICAL_CATEGORIES):
             raise ValueError("critical must be true exactly for the critical categories")
         check_value_text(setting, self.value)

@@ -1,9 +1,17 @@
 """Types and rules the contract models share (docs/contracts.md)."""
 
+import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Final, Literal
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, StringConstraints
+from pydantic import (
+    UUID4,
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    StringConstraints,
+)
 
 from trialfolio.errors import ErrorCode
 
@@ -50,6 +58,19 @@ Sha256Digest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$"
 CaseId = Annotated[str, StringConstraints(pattern=r"^case-[0-9a-f]{16}$")]
 """`case-` and the first 16 hex digits of a SHA-256 (plan hashing)."""
 
+_UUID_TEXT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
+
+
+def _canonical_uuid(value: object) -> object:
+    # Pydantic reads a UUID from JSON in other forms too, such as without hyphens.
+    if isinstance(value, str) and not _UUID_TEXT.fullmatch(value):
+        raise ValueError("must be a version 4 UUID in canonical form: lowercase, with hyphens")
+    return value
+
+
+AttemptId = Annotated[UUID4, BeforeValidator(_canonical_uuid)]
+"""A random version 4 UUID, written in canonical form (identity)."""
+
 ResultLabel = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")]
 """A result label (identity)."""
 
@@ -62,16 +83,21 @@ PackageVersion = Annotated[str, StringConstraints(pattern=r"^[0-9][0-9A-Za-z.+!_
 LicenseId = Annotated[str, StringConstraints(pattern=r"^LicenseRef-[A-Za-z0-9.-]+$")]
 """An SPDX license reference, such as `LicenseRef-NSPRL-1.0`."""
 
-NonEmptyText = Annotated[str, StringConstraints(min_length=1)]
+NOT_BLANK: Final = r"\S"
+"""The pattern of text that isn't blank: it has a character that isn't whitespace."""
 
-Title = Annotated[str, StringConstraints(min_length=1, max_length=200)]
-"""A configuration's title: 1 to 200 characters."""
+NonEmptyText = Annotated[str, StringConstraints(min_length=1, pattern=NOT_BLANK)]
+"""Non-empty text: at least one character that isn't whitespace."""
+
+Title = Annotated[str, StringConstraints(min_length=1, max_length=200, pattern=NOT_BLANK)]
+"""A configuration's title: 1 to 200 characters, not all whitespace."""
 
 Purpose = Annotated[str, StringConstraints(max_length=2000)]
 """A configuration's declared purpose: up to 2,000 characters."""
 
 
-def _valid_date_text(value: str) -> str:
+def valid_date_text(value: str) -> str:
+    """Raises `ValueError` unless `value`, already `YYYY-MM-DD` in form, is a calendar date."""
     date.fromisoformat(value)
     return value
 
@@ -79,7 +105,7 @@ def _valid_date_text(value: str) -> str:
 DateText = Annotated[
     str,
     StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
-    AfterValidator(_valid_date_text),
+    AfterValidator(valid_date_text),
 ]
 """A calendar date as `YYYY-MM-DD` text."""
 
@@ -166,6 +192,8 @@ CRITICAL_CATEGORIES: Final[frozenset[SettingCategory]] = frozenset(
 
 Interpretation = Literal["interpreted", "not_interpreted"]
 
+CommandOutcome = Literal["completed", "partial", "failed"]
+
 NotAssessed = Literal["not_assessed"]
 
 AUTHENTICATION_REQUEST: Final = "POST /auth"
@@ -183,6 +211,15 @@ class ErrorDetail(ContractModel):
 
     code: ErrorCode
     message: NonEmptyText
+
+
+def check_outcome(outcome: CommandOutcome, error: ErrorDetail | None) -> None:
+    """Raises `ValueError` unless `error` is null exactly when the outcome is `completed`, and
+    the outcome is `partial` exactly for `execution.partial` (JSON summary)."""
+    if (error is None) != (outcome == "completed"):
+        raise ValueError("error must be given exactly when the outcome isn't completed")
+    if error is not None and (outcome == "partial") != (error.code == "execution.partial"):
+        raise ValueError("the outcome is partial exactly for execution.partial")
 
 
 class WrapperVersions(ContractModel):

@@ -36,6 +36,7 @@
     "value": {
       "description": "The normalized value, as text: lists and mappings as JSON, and `not_sent` or\n`not_modeled` when the request gives none. Never empty.",
       "minLength": 1,
+      "pattern": "\\S",
       "title": "Value",
       "type": "string"
     },
@@ -77,6 +78,7 @@
       "anyOf": [
         {
           "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         {
@@ -89,6 +91,7 @@
       "anyOf": [
         {
           "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         {

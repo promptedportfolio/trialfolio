@@ -14,9 +14,7 @@ from typing import Annotated, Final, Literal, Self, cast
 from pydantic import (
     AfterValidator,
     BeforeValidator,
-    Discriminator,
     Field,
-    Tag,
     WithJsonSchema,
     field_validator,
     model_validator,
@@ -104,10 +102,12 @@ def normalize_decimal(value: Decimal) -> Decimal:
     whole, _, fraction = text.partition(".")
     if len(fraction) > 4:
         raise ValueError("has more than 4 digits after the decimal point")
-    # Counting a whole number's trailing zeros, 15 significant digits also keep a value below
-    # 10^16, the third limit.
-    if len((whole + fraction).lstrip("0")) > 15:
+    # Leading zeros, and a whole number's trailing zeros, aren't significant: 1000 has one
+    # significant digit. A fraction has no trailing zeros once normalized.
+    if len((whole + fraction).strip("0")) > 15:
         raise ValueError("has more than 15 significant digits")
+    if len(whole) > 16:
+        raise ValueError("must be less than 10^16")
     return Decimal(text)
 
 
@@ -151,32 +151,37 @@ class IdRanking(ContractModel):
     id: Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)]
 
 
-def _ranking_form(value: object) -> str | None:
-    if isinstance(value, FormulaRanking):
-        return "formula"
-    if isinstance(value, NameRanking):
-        return "name"
-    if isinstance(value, IdRanking):
-        return "id"
-    if isinstance(value, dict):
-        keys = cast("dict[object, object]", value).keys()
-        forms = [form for form in RANKING_FORMS if form in keys]
-        return forms[0] if len(forms) == 1 else None
-    return None
-
-
-Ranking = Annotated[
-    Annotated[FormulaRanking, Tag("formula")]
-    | Annotated[NameRanking, Tag("name")]
-    | Annotated[IdRanking, Tag("id")],
-    Discriminator(
-        _ranking_form,
-        custom_error_type="ranking_form",
-        custom_error_message=f"must hold exactly one of formula, name, or id. "
-        f"{RANKING_FORMS_MESSAGE}",
-    ),
-]
+type Ranking = FormulaRanking | NameRanking | IdRanking
 """Exactly one of the ranking forms (screen configuration, ranking forms)."""
+
+_RANKING_MODELS: Final = {"formula": FormulaRanking, "name": NameRanking, "id": IdRanking}
+
+
+def read_ranking(value: object) -> Ranking:
+    """Validates a ranking mapping as the one form its keys name.
+
+    Raises `ValueError` when the mapping names no single supported form, and a
+    `ValidationError`, located within the mapping, when that form's fields are invalid.
+    """
+    if isinstance(value, FormulaRanking | NameRanking | IdRanking):
+        return value
+    if not isinstance(value, dict):
+        raise ValueError(f"must be a mapping. {RANKING_FORMS_MESSAGE}")
+    mapping = cast("dict[object, object]", value)
+    keys = mapping.keys()
+    if "method" in keys:
+        raise ValueError(f"can't override the ranking method. {RANKING_FORMS_MESSAGE}")
+    if "nodes" in keys or "xml" in keys:
+        raise ValueError(
+            f"can't be given as nodes or XML, which would change the account's "
+            f"APIRankingSystem. {RANKING_FORMS_MESSAGE}"
+        )
+    forms = [form for form in RANKING_FORMS if form in keys]
+    if len(forms) != 1:
+        raise ValueError(f"must hold exactly one of formula, name, or id. {RANKING_FORMS_MESSAGE}")
+    if "lower_is_better" in keys and forms != ["formula"]:
+        raise ValueError(f"allows lower_is_better only with formula. {RANKING_FORMS_MESSAGE}")
+    return _RANKING_MODELS[forms[0]].model_validate(mapping)
 
 
 class ScreenConfiguration(ContractModel):
@@ -212,28 +217,8 @@ class ScreenConfiguration(ContractModel):
 
     @field_validator("ranking", mode="before")
     @classmethod
-    def _one_ranking_form(cls, value: object) -> object:
-        if isinstance(value, FormulaRanking | NameRanking | IdRanking):
-            return value
-        if not isinstance(value, dict):
-            raise ValueError(f"must be a mapping. {RANKING_FORMS_MESSAGE}")
-        mapping = cast("dict[object, object]", value)
-        keys = mapping.keys()
-        if "method" in keys:
-            raise ValueError(f"can't override the ranking method. {RANKING_FORMS_MESSAGE}")
-        if "nodes" in keys or "xml" in keys:
-            raise ValueError(
-                f"can't be given as nodes or XML, which would change the account's "
-                f"APIRankingSystem. {RANKING_FORMS_MESSAGE}"
-            )
-        forms = [form for form in RANKING_FORMS if form in keys]
-        if len(forms) != 1:
-            raise ValueError(
-                f"must hold exactly one of formula, name, or id. {RANKING_FORMS_MESSAGE}"
-            )
-        if "lower_is_better" in keys and forms != ["formula"]:
-            raise ValueError(f"allows lower_is_better only with formula. {RANKING_FORMS_MESSAGE}")
-        return mapping
+    def _one_ranking_form(cls, value: object) -> Ranking:
+        return read_ranking(value)
 
     @model_validator(mode="after")
     def _end_after_start(self) -> Self:

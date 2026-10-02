@@ -55,7 +55,7 @@ Identifiers are introduced with the release that can define their semantics.
 | `plan_hash` | 0.1.0 | Identity of a plan, which execution requires as approval | `sha256:` of the plan's canonical form ([plan hashing](#plan-hashing)) |
 | `case_id` | 0.1.0 | Stable identity of one fully resolved configuration | `case-` plus the first 16 hex digits of the SHA-256 of the canonical resolved settings ([plan hashing](#plan-hashing)) |
 | `case_key` | 0.3.0 | User-declared readable name for a planned case | Same pattern as `label` |
-| `attempt_id` | 0.1.0 | One execution attempt of a case | Random UUID, version 4 |
+| `attempt_id` | 0.1.0 | One execution attempt of a case | Random UUID, version 4, written in canonical form: lowercase, with hyphens |
 | `experiment_id` | 0.3.0 | One declared experiment | User-declared slug, same pattern as `label` |
 | `study_id`, `candidate_id`, `assessment_id` | Later | Defined when their increment is specified | — |
 
@@ -86,7 +86,8 @@ Configuration files are YAML documents owned by the user. The rules apply to eve
 - Configuration never contains credentials. A credential-like key is rejected, at any depth. A key is credential-like when its name, ignoring case and reading `-` as `_`, contains `password`, `passwd`, `secret`, `token`, `credential`, `authorization`, `bearer`, `api_key`, `apikey`, `api_id`, or `apiid`.
 - File paths inside a configuration are resolved relative to the configuration file.
 - Duplicate keys are rejected; a YAML loader must not silently keep the last one.
-- A file is UTF-8 text, with or without a byte-order mark, and holds one YAML document: a mapping whose keys are text. Null values, anchors, aliases, and explicit tags are rejected. To omit an optional key, leave it out; don't write it empty.
+- Non-empty text, wherever a configuration requires it, has a character that isn't whitespace.
+- A file is UTF-8 text, with or without a byte-order mark, and holds one YAML document: a mapping whose keys are text, with no value nested more than 16 levels deep. Null values, anchors, aliases, and explicit tags are rejected. To omit an optional key, leave it out; don't write it empty.
 - Error messages name each offending key, and never include its value, so they're safe to log.
 
 ### Screen configuration
@@ -151,7 +152,7 @@ Either one fails with `config.invalid`, and the message names the supported form
 - **Decimals.** A decimal is read from its YAML text, never through binary floating point.
   - **Form.** It's written in plain notation: digits, optionally followed by a decimal point and more digits. There's no sign, exponent, or leading zero before another digit, so `2.5e-1`, `-0.25`, `.25`, and `00.25` are rejected. A whole number such as `0` or `1` is accepted.
   - **Normalization.** Before it's recorded, hashed, or compared, trailing zeros after the decimal point are removed, and then the point if no digits follow it. So `0.250` and `0.25` are the same setting, and so are `1.0` and `1`.
-  - **Limits.** After normalization, it has at most 15 significant digits, at most 4 digits after the decimal point, and is less than 10^16. A value outside these limits fails with `config.invalid`.
+  - **Limits.** After normalization, it has at most 15 significant digits, at most 4 digits after the decimal point, and is less than 10^16. Leading zeros, and a whole number's trailing zeros, aren't significant: `1000000000000000` has one significant digit. A value outside these limits fails with `config.invalid`.
   - **On the wire.** Every decimal is sent as a JSON float, the type R01-T01 verified with `0.25`, never as an integer. `requests` writes the request body with Python's `json` module; Trial Folio refuses to run where `requests` would use `simplejson` instead ([plan contents](#plan-contents)). `json` writes a float in its shortest round-trip form. So the JSON text of a decimal is its normalized form, with `.0` added to a whole number:
     - **A whole number,** such as `1` (1%), is sent as `1.0`.
     - **Any other value,** such as `0.25` (0.25%, or 25 basis points), is sent with exactly its digits. Most values, such as `0.1`, have no exact binary form. But a value of up to 15 significant digits survives the round trip through binary floating point: its shortest round-trip form has exactly its digits.
@@ -562,9 +563,9 @@ An attempt with a start record and no attempt record is `running` ([uncertain co
 
 - **`outcome`** is `succeeded`, `failed`, or `unknown`. `running` is how a start record without an attempt record reads; it's never written.
 - **`error`** is `{"code": …, "message": …}`, and `null` exactly when the outcome is `succeeded`.
-- **`request` and `response`** reference files by `path`, relative to the output root, and `artifact_id`. `response.form` is `decoded` for `response.json`, or `undecoded` for `response.raw`. A `succeeded` attempt always references its response.
+- **`request` and `response`** reference files by `path`, relative to the output root, and `artifact_id`. `response.form` is `decoded` for `response.json`, or `undecoded` for `response.raw`. A `succeeded` attempt has a 200 on its request's exchange, and references its saved response, decoded or not: a 200 the wrapper couldn't decode is `succeeded` for capture.
 - **`provider_metadata`** holds `cost` and `quota_remaining`, Portfolio123's `quotaRemaining`. Each is `null` when the response doesn't carry it.
-- **`possibly_charged`** is true exactly when an exchange other than Trial Folio's `POST /auth` has a result other than `not_connected` ([possibly charged](#http-exchanges)). An `unknown` attempt is always possibly charged.
+- **`possibly_charged`** is true exactly when the attempt is `unknown`, or an exchange other than Trial Folio's `POST /auth` has a result other than `not_connected` ([possibly charged](#http-exchanges)). An attempt restarted without a saved response is `unknown` with only its start record's exchanges ([uncertain completion](#uncertain-completion)).
 
 `schemas/start-record-1.0.0.schema.json` and `schemas/attempt-record-1.0.0.schema.json` give every field.
 
@@ -579,6 +580,7 @@ Trial Folio mounts its own transport adapter on the wrapper's HTTP session, for 
 | `request` | The method and path, for example `POST /auth` or `POST /screen/backtest` |
 | `result` | `response`: a complete response arrived. `not_connected`: the connection provably never opened, so nothing was sent. `interrupted`: no complete response arrived, and the connection can't be shown never to have opened, so the request may have reached Portfolio123. |
 | `status` | The HTTP status of a `response`. `null` otherwise. |
+| `note` | `completed_from_saved_response` on the request's exchange of an attempt restarted with a saved response, recorded as a `response` with status 200 ([uncertain completion](#uncertain-completion)). `null` otherwise, and always in a start record. |
 
 - **Not connected means provably not sent.** An exchange is `not_connected` only when the `requests` error wraps a `urllib3` `MaxRetryError` whose `reason`, after unwrapping a `urllib3` `ProxyError` to its `original_error`, is a `ConnectTimeoutError`. That class covers a failed name lookup (`NameResolutionError`), a refused or unreachable connection (`NewConnectionError`), and a connect timeout. 0.1.0 uses no proxy ([credentials](#credentials)); unwrapping a `ProxyError` keeps the rule right if a later release adds one. It's the test `urllib3`'s `Retry` applies, in `_is_connection_error`, to decide that a request is safe to retry because the server didn't receive it. Every other ending without a complete response is `interrupted`, including a reset, a read timeout, a TLS failure, and an interrupt during the name lookup. So an unclear case counts as possibly sent.
 - **Recorded before sending.** The adapter adds each exchange to the list before it sends, and fills in the result afterwards. An exchange still without a result when the attempt record is written, for example after Ctrl-C, is `interrupted`. An exchange that already has a result keeps it.
@@ -599,8 +601,8 @@ Trial Folio authenticates first, when it [needs to](#http-exchanges), then write
 
 - **Authentication fails.** There's no start record. The attempt record is written as `failed`, because the request wasn't sent. Authentication isn't counted in the budget's credits ([budget](#budget-and-retries)).
 - **A start record without an attempt record** is `running`. Its request is sent at most once, so a reader counts it as one possible send: `possibly_charged`, and one provider request. On restart, as in 0.3.0's resume, Trial Folio writes its attempt record, and rewrites nothing:
-  - **With a saved response.** A `response.json` or `response.raw` in the attempt's directory is complete, because it's published atomically ([atomic writes](#artifact-storage)), and either is saved only after a 200. So the attempt record is written as `succeeded`, with the request's exchange recorded as a `response` with status 200 and a note that it was completed from the saved response. A `response.raw` is flagged `provider.response_invalid`, as it would have been.
-  - **Without one.** The attempt record is written as `unknown`, possibly charged, with one provider request.
+  - **With a saved response.** A `response.json` or `response.raw` in the attempt's directory is complete, because it's published atomically ([atomic writes](#artifact-storage)), and either is saved only after a 200. So the attempt record is written as `succeeded`, with the request's exchange recorded as a `response` with status 200 and the note `completed_from_saved_response`. A `response.raw` is flagged `provider.response_invalid`, as it would have been.
+  - **Without one.** The attempt record is written as `unknown`, possibly charged, with one provider request. Its exchanges are the start record's: the request's exchange was never recorded.
 - **An `unknown` attempt** is never retried automatically, because the original request may have been charged or may have changed provider state. `unknown` always means that no response was durably recorded.
 
 ### Endings that decide the error code
@@ -1069,7 +1071,7 @@ Expected outputs change only with a stated reason. Reference responses procured 
 
 JSON Schemas are generated from the models, never maintained by hand, and committed under `schemas/`, one file for each contract and each schema version that has a reader. The generation mode, validation or serialization, is stated wherever the two differ. `scripts/schemas` writes them. `scripts/schemas --check` is the drift check: it generates every schema in memory, compares the result with `schemas/`, lists each file that differs, is missing, or is extra, and fails if there's any. `scripts/check` runs it. Schemas do not encode every semantic validator, so the runtime semantics are tested separately.
 
-`scripts/schemas` writes these files, and removes any other file from `schemas/`. Each one's `$comment` names its model and mode, and says whether the other mode differs. A configuration is input, so its schema is in validation mode. Every other contract is written by Trial Folio, so its schema is in serialization mode; for each of those, the two modes give the same schema.
+`scripts/schemas` writes these files, and removes any other file from `schemas/`. Both it and the check ignore hidden files, such as macOS's `.DS_Store`, and neither removes a subdirectory. `scripts/check` also fails when a file under `schemas/` isn't tracked by git, because the check reads the working tree. Each one's `$comment` names its model and mode, and says whether the other mode differs. A configuration is input, so its schema is in validation mode. Every other contract is written by Trial Folio, so its schema is in serialization mode; for each of those, the two modes give the same schema.
 
 | File | Contract |
 |---|---|

@@ -8,6 +8,7 @@
       "properties": {
         "formula": {
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Formula",
           "type": "string"
         },
@@ -46,6 +47,7 @@
       "properties": {
         "name": {
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Name",
           "type": "string"
         }
@@ -55,6 +57,19 @@
       ],
       "title": "NameRanking",
       "type": "object"
+    },
+    "Ranking": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FormulaRanking"
+        },
+        {
+          "$ref": "#/$defs/NameRanking"
+        },
+        {
+          "$ref": "#/$defs/IdRanking"
+        }
+      ]
     }
   },
   "additionalProperties": false,
@@ -73,6 +88,7 @@
     "title": {
       "maxLength": 200,
       "minLength": 1,
+      "pattern": "\\S",
       "title": "Title",
       "type": "string"
     },
@@ -83,12 +99,14 @@
     },
     "universe": {
       "minLength": 1,
+      "pattern": "\\S",
       "title": "Universe",
       "type": "string"
     },
     "rules": {
       "items": {
         "minLength": 1,
+        "pattern": "\\S",
         "type": "string"
       },
       "minItems": 1,
@@ -96,18 +114,7 @@
       "type": "array"
     },
     "ranking": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/FormulaRanking"
-        },
-        {
-          "$ref": "#/$defs/NameRanking"
-        },
-        {
-          "$ref": "#/$defs/IdRanking"
-        }
-      ],
-      "title": "Ranking"
+      "$ref": "#/$defs/Ranking"
     },
     "max_holdings": {
       "maximum": 9007199254740991,
@@ -117,6 +124,7 @@
     },
     "benchmark": {
       "minLength": 1,
+      "pattern": "\\S",
       "title": "Benchmark",
       "type": "string"
     },

@@ -71,3 +71,8 @@ class TrialFolioError(Exception):
         super().__init__(message)
         self.code: ErrorCode = code
         self.message = message
+
+    def __reduce__(self) -> tuple[type["TrialFolioError"], tuple[ErrorCode, str]]:
+        # Pickling and copying rebuild an exception from its arguments, which hold only the
+        # message here.
+        return (type(self), (self.code, self.message))

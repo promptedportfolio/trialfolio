@@ -85,3 +85,24 @@ def test_main_exits_1_on_drift_and_writes_nothing(
 def test_main_writes_then_checks_clean(tmp_path: Path) -> None:
     assert main(["--dir", str(tmp_path)]) == 0
     assert main(["--check", "--dir", str(tmp_path)]) == 0
+
+
+def test_hidden_files_are_ignored(tmp_path: Path) -> None:
+    """A Finder .DS_Store, for example, is neither drift nor removed."""
+    write(tmp_path)
+    (tmp_path / ".DS_Store").write_bytes(b"\0")
+
+    assert check(tmp_path) == []
+    write(tmp_path)
+    assert (tmp_path / ".DS_Store").exists()
+
+
+def test_a_subdirectory_is_extra_and_stops_writing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "old").mkdir()
+
+    assert check(tmp_path)[-1] == "extra: old/"
+    assert main(["--dir", str(tmp_path)]) == 1
+    assert [path.name for path in tmp_path.iterdir()] == ["old"]
+    assert "holds directories: old" in capsys.readouterr().err

@@ -11,6 +11,7 @@
     },
     "notice_version": {
       "minLength": 1,
+      "pattern": "\\S",
       "title": "Notice Version",
       "type": "string"
     },

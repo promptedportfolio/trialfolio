@@ -40,12 +40,8 @@ from yaml.events import (
 )
 from yaml.nodes import Node, ScalarNode
 
-from trialfolio.contracts.common import MAX_SAFE_INTEGER
-from trialfolio.contracts.screen_configuration import (
-    RANKING_FORMS,
-    SCREEN_SCHEMA_VERSIONS,
-    ScreenConfiguration,
-)
+from trialfolio.contracts.common import MAX_SAFE_INTEGER, NOT_BLANK
+from trialfolio.contracts.screen_configuration import SCREEN_SCHEMA_VERSIONS, ScreenConfiguration
 from trialfolio.errors import TrialFolioError
 
 type KeyPath = tuple[str | int, ...]
@@ -65,6 +61,9 @@ CREDENTIAL_WORDS: Final = (
 )
 """A key whose name contains one of these, ignoring case and reading `-` as `_`, is
 credential-like, and is rejected wherever it appears."""
+
+MAX_DEPTH: Final = 16
+"""The deepest a value may be nested. A screen configuration needs 2 levels."""
 
 _TAG = "tag:yaml.org,2002:"
 _STR = f"{_TAG}str"
@@ -123,11 +122,7 @@ def _format_path(path: KeyPath) -> str:
 
 
 def _describe(detail: ErrorDetails) -> str:
-    location = list(detail["loc"])
-    # A ranking's form is a tag of the discriminated union, not a key: drop it.
-    if len(location) > 2 and location[0] == "ranking" and location[1] in RANKING_FORMS:
-        del location[1]
-    key = _format_path(tuple(location))
+    key = _format_path(detail["loc"])
     kind = detail["type"]
     message = detail["msg"].removeprefix("Value error, ").rstrip(".")
     if not key:
@@ -136,6 +131,8 @@ def _describe(detail: ErrorDetails) -> str:
         return f"`{key}` is required."
     if kind == "extra_forbidden":
         return f"`{key}` isn't a key this configuration accepts. Check its spelling."
+    if kind == "string_pattern_mismatch" and detail.get("ctx", {}).get("pattern") == NOT_BLANK:
+        return f"`{key}` is blank. Give it text that isn't only whitespace."
     return f"`{key}` {message[0].lower()}{message[1:]}."
 
 
@@ -192,6 +189,8 @@ class _Builder:
             raise _Invalid((), "isn't valid YAML.")
 
     def _value(self, path: KeyPath) -> object:
+        if len(path) > MAX_DEPTH:
+            raise _Invalid(path[:1], f"is nested more than {MAX_DEPTH} levels deep.")
         event = self._loader.get_event()
         if isinstance(event, AliasEvent):
             raise _Invalid(path, "is an alias. Write the value out instead.")
@@ -255,7 +254,9 @@ class _Builder:
             if text in ("true", "false"):
                 return text == "true"
             raise _Invalid(
-                path, "is a YAML 1.1 boolean other than true or false. Write true or false."
+                path,
+                "is a YAML 1.1 boolean other than true or false. Write true or false, or quote "
+                "it if it's text.",
             )
         if tag == f"{_TAG}int":
             if not _INTEGER.fullmatch(text):
@@ -265,12 +266,12 @@ class _Builder:
                     "underscore, a sign, a base prefix, or a colon. Write plain decimal digits, "
                     "or quote it if it's text.",
                 )
-            number = int(text)
-            if number > MAX_SAFE_INTEGER:
+            # Compare lengths first: Python won't convert text of more than 4300 digits.
+            if len(text) > len(str(MAX_SAFE_INTEGER)) or int(text) > MAX_SAFE_INTEGER:
                 raise _Invalid(
                     path, f"is larger than {MAX_SAFE_INTEGER}, the largest integer accepted."
                 )
-            return number
+            return int(text)
         if tag == f"{_TAG}float":
             if not _DECIMAL.fullmatch(text):
                 raise _Invalid(

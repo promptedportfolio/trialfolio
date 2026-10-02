@@ -34,10 +34,8 @@ from trialfolio.contracts.screen_configuration import FormulaRanking, IdRanking,
 from trialfolio.contracts.screen_settings import (
     SCREEN_SETTINGS,
     SCREEN_SETTINGS_BY_NAME,
-    ScreenSetting,
-    check_ranking,
-    check_text_list,
-    check_value_text,
+    check_row,
+    check_value,
 )
 
 # The request's parameters keep Portfolio123's own names, so the model reads like the request.
@@ -84,6 +82,12 @@ class ScreenBacktestParams(ContractModel):
     slippage: Annotated[float, Field(ge=0, allow_inf_nan=False)]
     rebalFreq: Literal["Every Week", "Every 4 Weeks"]
 
+    @model_validator(mode="after")
+    def _end_after_start(self) -> Self:
+        if self.endDt <= self.startDt:
+            raise ValueError("endDt must be later than startDt")
+        return self
+
 
 class PlanRequest(ContractModel):
     """One provider request a case needs."""
@@ -129,22 +133,6 @@ class PlanSetting(ContractModel):
         return self
 
 
-def _check_plan_value(setting: ScreenSetting, value: object) -> None:
-    match setting.kind:
-        case "integer":
-            if not isinstance(value, int):
-                raise ValueError(f"{setting.name}'s value must be an integer")
-        case "text_list":
-            check_text_list(setting, value)
-        case "ranking":
-            ranking = value.model_dump() if isinstance(value, ContractModel) else value
-            check_ranking(setting, ranking)
-        case _:
-            if not isinstance(value, str):
-                raise ValueError(f"{setting.name}'s value must be text")
-            check_value_text(setting, value)
-
-
 class PlanCase(ContractModel):
     """One fully resolved case. A 1.0.0 plan has exactly one."""
 
@@ -158,10 +146,8 @@ class PlanCase(ContractModel):
         if names != tuple(setting.name for setting in SCREEN_SETTINGS):
             raise ValueError("settings must be the screen settings, in their documented order")
         for row in self.settings:
-            setting = SCREEN_SETTINGS_BY_NAME[row.setting]
-            if (row.category, row.unit) != (setting.category, setting.unit):
-                raise ValueError(f"{row.setting} must have its documented category and unit")
-            _check_plan_value(setting, row.value)
+            setting = check_row(row.setting, row.category, row.unit, row.interpretation)
+            check_value(setting, row.value)
         return self
 
 

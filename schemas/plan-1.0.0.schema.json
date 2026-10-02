@@ -87,6 +87,7 @@
       "properties": {
         "title": {
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Title",
           "type": "string"
         },
@@ -115,6 +116,7 @@
       "properties": {
         "formula": {
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Formula",
           "type": "string"
         },
@@ -136,6 +138,7 @@
       "properties": {
         "formula": {
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Formula",
           "type": "string"
         },
@@ -174,6 +177,7 @@
       "properties": {
         "name": {
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Name",
           "type": "string"
         }
@@ -309,6 +313,7 @@
           "anyOf": [
             {
               "minLength": 1,
+              "pattern": "\\S",
               "type": "string"
             },
             {
@@ -441,6 +446,7 @@
         },
         "universe": {
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Universe",
           "type": "string"
         },
@@ -462,6 +468,7 @@
         },
         "benchmark": {
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Benchmark",
           "type": "string"
         },
@@ -472,6 +479,7 @@
             },
             {
               "minLength": 1,
+              "pattern": "\\S",
               "type": "string"
             },
             {
@@ -510,6 +518,7 @@
       "properties": {
         "formula": {
           "minLength": 1,
+          "pattern": "\\S",
           "title": "Formula",
           "type": "string"
         }
@@ -529,11 +538,13 @@
         },
         {
           "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         {
           "items": {
             "minLength": 1,
+            "pattern": "\\S",
             "type": "string"
           },
           "type": "array"
@@ -615,6 +626,7 @@
     "title": {
       "maxLength": 200,
       "minLength": 1,
+      "pattern": "\\S",
       "title": "Title",
       "type": "string"
     },

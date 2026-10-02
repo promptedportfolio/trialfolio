@@ -34,12 +34,26 @@
           ],
           "description": "The HTTP status of a `response`; null otherwise.",
           "title": "Status"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "const": "completed_from_saved_response",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set only on a restarted attempt's request exchange, recorded as a 200 because its response\nwas found saved (uncertain completion); null otherwise.",
+          "title": "Note"
         }
       },
       "required": [
         "request",
         "result",
-        "status"
+        "status",
+        "note"
       ],
       "title": "Exchange",
       "type": "object"

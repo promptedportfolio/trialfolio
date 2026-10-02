@@ -167,6 +167,59 @@ def test_slippage_is_normalized(written: str, normalized: str) -> None:
     assert str(read_screen_configuration(content, "screen.yaml").slippage_percent) == normalized
 
 
+@pytest.mark.parametrize(
+    ("written", "normalized"),
+    [("1000000000000000", "1000000000000000"), ("1000000000000000.0", "1000000000000000")],
+)
+def test_trailing_zeros_of_a_whole_number_are_not_significant(
+    written: str, normalized: str
+) -> None:
+    """10^15 has one significant digit, and is below 10^16."""
+    content = with_line("slippage_percent: 0.25", f"slippage_percent: {written}")
+
+    assert str(read_screen_configuration(content, "screen.yaml").slippage_percent) == normalized
+
+
+def test_decimal_of_10_to_the_16_is_rejected() -> None:
+    content = with_line("slippage_percent: 0.25", "slippage_percent: 10000000000000000.0")
+
+    assert "`slippage_percent` must be less than 10^16." in rejection(content)
+
+
+def test_integer_too_long_to_convert_is_rejected() -> None:
+    """Python won't convert more than 4300 digits; the reader must still say config.invalid."""
+    content = with_line("max_holdings: 25", "max_holdings: " + "9" * 5000)
+
+    assert "`max_holdings` is larger than 9007199254740991" in rejection(content)
+
+
+def test_deep_nesting_is_rejected() -> None:
+    content = with_line("universe: SP500", "universe: " + "[" * 3000 + "]" * 3000)
+
+    assert "`universe` is nested more than 16 levels deep." in rejection(content)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "key"),
+    [
+        ("title: Earnings yield with a liquidity floor", "title: ' '", "title"),
+        ("benchmark: SPY", "benchmark: '\t'", "benchmark"),
+        ("  - 'AvgDailyTot(30) > 1000000'", "  - '  '", "rules[0]"),
+        ("  formula: 'EarnYield'", "  formula: ' '", "ranking.formula"),
+    ],
+)
+def test_blank_text_is_rejected(old: str, new: str, key: str) -> None:
+    """Non-empty text has a character that isn't whitespace."""
+    assert f"`{key}` is blank." in rejection(with_line(old, new))
+
+
+def test_yaml_boolean_in_a_text_key_says_to_quote_it() -> None:
+    message = rejection(with_line("benchmark: SPY", "benchmark: ON"))
+
+    assert "`benchmark` is a YAML 1.1 boolean" in message
+    assert "quote it if it's text" in message
+
+
 def test_byte_order_mark_is_ignored() -> None:
     content = b"\xef\xbb\xbf" + documented_example().encode()
 

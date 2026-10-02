@@ -4,10 +4,12 @@ summary).
 
 from typing import Annotated, Literal, Self, TypedDict
 
-from pydantic import UUID4, ConfigDict, Field, model_validator, with_config
+from pydantic import ConfigDict, Field, model_validator, with_config
 
 from trialfolio.contracts.common import (
+    AttemptId,
     CaseId,
+    CommandOutcome,
     ContractModel,
     ErrorDetail,
     IntegerOnly,
@@ -16,22 +18,23 @@ from trialfolio.contracts.common import (
     RelativePath,
     SemanticVersion,
     Sha256Digest,
+    check_outcome,
 )
 from trialfolio.errors import EXIT_CODES
 
 Count = Annotated[int, Field(ge=0)]
 
 
-@with_config(ConfigDict(extra="forbid"))
+@with_config(ConfigDict(strict=True, extra="forbid"))
 class SummaryIds(TypedDict, total=False):
     """The identifiers the command created. A key is left out until its identifier exists."""
 
     plan_hash: Sha256Digest
     case_id: CaseId
-    attempt_id: UUID4
+    attempt_id: AttemptId
 
 
-@with_config(ConfigDict(extra="forbid"))
+@with_config(ConfigDict(strict=True, extra="forbid"))
 class SummaryOutputs(TypedDict, total=False):
     """The output files, relative to `output_dir`, by role. A key is left out for a file the
     command didn't write."""
@@ -67,7 +70,7 @@ class JsonSummary(ContractModel):
     schema_version: Literal["1.0.0"]
     command: Literal["run", "report", "demo", "license"]
     trialfolio_version: SemanticVersion
-    outcome: Literal["completed", "partial", "failed"]
+    outcome: CommandOutcome
     exit_code: Annotated[Literal[0, 1, 2, 3, 4, 5, 6, 130], IntegerOnly]
     ids: SummaryIds
     output_dir: NonEmptyText | None
@@ -80,15 +83,10 @@ class JsonSummary(ContractModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        if self.outcome == "completed":
-            if self.error is not None or self.exit_code != 0:
-                raise ValueError("a completed command has exit_code 0 and no error")
-        elif self.error is None:
-            raise ValueError("a command that didn't complete has an error")
-        elif self.exit_code != EXIT_CODES[self.error.code]:
-            raise ValueError("exit_code must be the exit code of the error's code")
-        elif (self.outcome == "partial") != (self.error.code == "execution.partial"):
-            raise ValueError("the outcome is partial exactly for execution.partial")
+        check_outcome(self.outcome, self.error)
+        expected_exit = 0 if self.error is None else EXIT_CODES[self.error.code]
+        if self.exit_code != expected_exit:
+            raise ValueError("exit_code must be 0 when completed, or the exit code of the error")
         if isinstance(self.counts, RunCounts) != (self.command in ("run", "demo")):
             raise ValueError("counts are given exactly for run and demo")
         if self.output_dir is None and self.outputs:

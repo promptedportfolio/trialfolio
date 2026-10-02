@@ -6,7 +6,8 @@
 Without `--check`, it writes every schema and removes any other file from the directory, since
 the schemas are never written by hand. With `--check`, it writes nothing: it compares the
 directory with the schemas it generates, lists each file that differs, is missing, or is extra,
-and exits 1 if there's any.
+and exits 1 if there's any. Both ignore hidden entries, such as macOS's `.DS_Store`. Neither
+removes a subdirectory: the check lists it as extra, and writing refuses to run.
 """
 
 import argparse
@@ -79,27 +80,40 @@ def generate() -> dict[str, bytes]:
     return {schema_file.name: render(schema_file).encode() for schema_file in SCHEMA_FILES}
 
 
+def _entries(directory: Path) -> dict[str, Path]:
+    if not directory.is_dir():
+        return {}
+    return {path.name: path for path in directory.iterdir() if not path.name.startswith(".")}
+
+
 def check(directory: Path) -> list[str]:
     """Compares `directory` with the generated schemas, and returns one line for each file that
     differs, is missing, or is extra. An empty list means no drift."""
     expected = generate()
-    present = {path.name for path in directory.iterdir()} if directory.is_dir() else set[str]()
+    present = _entries(directory)
     problems: list[str] = []
     for name, content in expected.items():
-        if name not in present:
+        path = present.get(name)
+        if path is None:
             problems.append(f"missing: {name}")
-        elif (directory / name).read_bytes() != content:
+        elif not path.is_file() or path.read_bytes() != content:
             problems.append(f"differs: {name}")
-    problems.extend(f"extra: {name}" for name in sorted(present - expected.keys()))
+    for name in sorted(present.keys() - expected.keys()):
+        problems.append(f"extra: {name}/" if present[name].is_dir() else f"extra: {name}")
     return problems
 
 
 def write(directory: Path) -> None:
-    """Writes every schema into `directory`, and removes every other file from it."""
+    """Writes every schema into `directory`, and removes every other file from it. Raises
+    `IsADirectoryError`, before writing anything, if the directory holds a subdirectory."""
     expected = generate()
+    present = _entries(directory)
+    folders = sorted(name for name, path in present.items() if path.is_dir())
+    if folders:
+        raise IsADirectoryError(f"{directory} holds directories: {', '.join(folders)}")
     directory.mkdir(parents=True, exist_ok=True)
-    for path in directory.iterdir():
-        if path.name not in expected:
+    for name, path in present.items():
+        if name not in expected:
             path.unlink()
     for name, content in expected.items():
         (directory / name).write_bytes(content)
@@ -124,7 +138,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         print(f"The {len(SCHEMA_FILES)} schemas in {directory} match the models.")
         return 0
-    write(directory)
+    try:
+        write(directory)
+    except IsADirectoryError as error:
+        print(f"schemas: {error}. Remove them; schemas/ holds only schema files.", file=sys.stderr)
+        return 1
     print(f"Wrote {len(SCHEMA_FILES)} schemas to {directory}.")
     return 0
 

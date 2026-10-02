@@ -177,7 +177,7 @@ def start_record() -> Document:
         "started_at": "2026-10-02T15:04:05Z",
         "provider_wrapper": {"p123api": "3.1.0"},
         "transport": TRANSPORT,
-        "exchanges": [{"request": "POST /auth", "result": "response", "status": 200}],
+        "exchanges": [{"request": "POST /auth", "result": "response", "status": 200, "note": None}],
     }
 
 
@@ -187,8 +187,8 @@ def attempt_record() -> Document:
         "outcome": "succeeded",
         "error": None,
         "exchanges": [
-            {"request": "POST /auth", "result": "response", "status": 200},
-            {"request": "POST /screen/backtest", "result": "response", "status": 200},
+            {"request": "POST /auth", "result": "response", "status": 200, "note": None},
+            {"request": "POST /screen/backtest", "result": "response", "status": 200, "note": None},
         ],
         "possibly_charged": True,
         "request": {
@@ -423,6 +423,13 @@ PLAN_CHANGES: dict[str, Change] = {
     "category twice": lambda d: d["data_sent"].append(d["data_sent"][1]),
     "uppercase hash": lambda d: d.update(plan_hash=PLAN_HASH.upper()),
     "prefixed version": lambda d: d.update(trialfolio_version="v0.1.0"),
+    "end before start": lambda d: d["cases"][0]["requests"][0]["params"].update(endDt="2015-12-31"),
+    "holdings 0": lambda d: settings_of(d)[4].update(value=0),
+    "impossible date": lambda d: settings_of(d)[8].update(value="2016-13-45"),
+    "too many decimals": lambda d: settings_of(d)[12].update(value="0.123456"),
+    "a value not accepted": lambda d: settings_of(d)[1].update(value="etf"),
+    "blank text": lambda d: settings_of(d)[0].update(value="  "),
+    "not sent but interpreted": lambda d: settings_of(d)[18].update(interpretation="interpreted"),
 }
 
 
@@ -436,6 +443,7 @@ def interrupted_backtest(document: Document) -> None:
         "request": "POST /screen/backtest",
         "result": "interrupted",
         "status": None,
+        "note": None,
     }
 
 
@@ -443,7 +451,7 @@ def failed_authentication(document: Document) -> None:
     document.update(
         outcome="failed",
         error={"code": "provider.auth_failed", "message": "Check the API ID and key."},
-        exchanges=[{"request": "POST /auth", "result": "response", "status": 401}],
+        exchanges=[{"request": "POST /auth", "result": "response", "status": 401, "note": None}],
         possibly_charged=False,
         request=None,
         response=None,
@@ -460,7 +468,41 @@ def unknown_outcome(document: Document) -> None:
     )
 
 
-@pytest.mark.parametrize("change", [failed_authentication, unknown_outcome])
+def restarted_without_response(document: Document) -> None:
+    """Uncertain completion: a running attempt restarted with nothing saved is unknown, possibly
+    charged, though its start record holds only the authentication exchange."""
+    document.update(
+        outcome="unknown",
+        error={"code": "provider.outcome_unknown", "message": "Not retried."},
+        exchanges=[document["exchanges"][0]],
+        possibly_charged=True,
+        response=None,
+    )
+
+
+def restarted_with_saved_response(document: Document) -> None:
+    document["exchanges"][1]["note"] = "completed_from_saved_response"
+
+
+def undecoded_capture(document: Document) -> None:
+    """A 200 the wrapper couldn't decode is succeeded for capture; the run's result is flagged."""
+    document["response"] = {
+        "path": f"cases/{CASE_ID}/attempts/{ATTEMPT_ID}/response.raw",
+        "artifact_id": ARTIFACT_ID,
+        "form": "undecoded",
+    }
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        failed_authentication,
+        unknown_outcome,
+        restarted_without_response,
+        restarted_with_saved_response,
+        undecoded_capture,
+    ],
+)
 def test_attempt_record_accepts_other_endings(change: Change) -> None:
     AttemptRecord.model_validate_json(json.dumps(changed(attempt_record, change)))
 
@@ -485,12 +527,31 @@ ATTEMPT_CHANGES: dict[str, Change] = {
     "absolute path": lambda d: d["request"].update(path="/tmp/request.json"),
     "path leaving the run": lambda d: d["request"].update(path="cases/../../request.json"),
     "running is not an ending": lambda d: d.update(outcome="running"),
+    "decoded saved as response.raw": lambda d: (
+        undecoded_capture(d),
+        d["response"].update(form="decoded"),
+    ),
+    "undecoded saved as response.json": lambda d: d["response"].update(form="undecoded"),
+    "request not request.json": lambda d: d["request"].update(path="cases/request.yaml"),
+    "succeeded without a 200": lambda d: d["exchanges"][1].update(status=204),
+    "note on a 401": lambda d: (
+        failed_authentication(d),
+        d["exchanges"][0].update(note="completed_from_saved_response"),
+    ),
+    "attempt id without hyphens": lambda d: d.update(attempt_id=ATTEMPT_ID.replace("-", "")),
 }
 
 
 @pytest.mark.parametrize("change", ATTEMPT_CHANGES.values(), ids=ATTEMPT_CHANGES.keys())
 def test_attempt_record_rejects(change: Change) -> None:
     rejects(AttemptRecord, changed(attempt_record, change))
+
+
+def test_start_record_exchanges_carry_no_note() -> None:
+    document = start_record()
+    document["exchanges"][0]["note"] = "completed_from_saved_response"
+
+    rejects(StartRecord, document)
 
 
 def demo(document: Document) -> None:
@@ -519,6 +580,12 @@ MANIFEST_CHANGES: dict[str, Change] = {
         status="complete"
     ),
     "assessed": lambda d: d["capabilities"].update(trading_readiness="ready"),
+    "partial with another code": lambda d: d.update(
+        outcome="partial", error={"code": "provider.auth_failed", "message": "x"}
+    ),
+    "failed with execution.partial": lambda d: d.update(
+        outcome="failed", error={"code": "execution.partial", "message": "x"}
+    ),
 }
 
 
@@ -607,6 +674,9 @@ METRICS_CHANGES: dict[str, Change] = {
     ),
     "unknown unit": lambda d: d.update(unit="basis_points"),
     "bad label": lambda d: d.update(label="Baseline"),
+    "reported without a location": lambda d: d.update(source_location=None),
+    "reported without a label": lambda d: d.update(source_label=None),
+    "period reversed": lambda d: d.update(period_start="2026-01-01"),
 }
 
 
@@ -627,6 +697,20 @@ SETTINGS_CHANGES: dict[str, Change] = {
     "unknown flag": lambda d: d.update(flags=["looks_fine"]),
     "ranking not JSON": lambda d: d.update(
         setting="ranking", category="strategy", unit=None, value="EarnYield"
+    ),
+    "ranking with wrong types": lambda d: d.update(
+        setting="ranking",
+        category="strategy",
+        unit=None,
+        value='{"formula": 5, "lower_is_better": "x"}',
+    ),
+    "impossible date": lambda d: d.update(
+        setting="start_date", category="dates", unit=None, value="2016-13-45"
+    ),
+    "too many decimals": lambda d: d.update(value="0.123456"),
+    "blank": lambda d: d.update(value=" "),
+    "not sent but interpreted": lambda d: d.update(
+        setting="max_pos_pct", category="strategy", unit=None, value="not_sent"
     ),
 }
 
@@ -688,6 +772,7 @@ SUMMARY_CHANGES: dict[str, Change] = {
     "unknown output role": lambda d: d["outputs"].update(log="logs/x.jsonl"),
     "quota in counts": lambda d: d["counts"].update(quota_remaining=1000),
     "assessed": lambda d: d.update(statistical_validation="passed"),
+    "attempt id without hyphens": lambda d: d["ids"].update(attempt_id=ATTEMPT_ID.replace("-", "")),
 }
 
 
