@@ -25,7 +25,7 @@ Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and event
 - **Report verification honestly.** Keep actual verification separate from intended verification. Never describe a command as working, or a check as passing, unless you ran it.
 - **Never invent specifics.** Do not make up export layouts, endpoints, package versions, results, or completed releases. Mark unknowns as open questions with a recommended default.
 - **Preserve the custom license.** Never add an MIT license, an open-source classifier or badge, a public-fork workflow, or broader permissions without the owner's explicit instruction ([LIC-01](docs/licensing-policy.md#lic-01-license-identity)).
-- **Leave out the brand.** Do not name any publication, brand, or series in project materials ([D-10](docs/spec.md#decisions)).
+- **Leave out the brand.** Do not name any publication, brand, or series in project materials ([D-10](docs/spec.md#decisions)). The repository's own URL is the one exception, where a link needs it.
 - **Leave a handoff.** End each task with a short note covering what changed, the evidence, the limitations, and the remaining work.
 
 ## Credentials and reference data
@@ -59,7 +59,7 @@ Tooling: Python 3.12 or later, with `uv` for environments and dependencies ([D-0
 - **Trace every test.** Each test traces to a requirement, an acceptance criterion, or a corrected defect.
 - **Test through public entry points.** Test through core functions and CLI commands, not private helpers. Use test doubles only at real boundaries: the provider client, the network below `urllib3` (a local server on localhost, or a socket-level fake, so the real `requests` and `urllib3` code runs through Trial Folio's own transport adapter, [ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)), the clock, injected storage failures, and the installed package versions.
 - **Keep the default suite offline.** It blocks network access. Live checks are opt-in and never run in default CI. The network guard enforces this. [Its row in 0.1.0's test pairing](docs/releases/0.1.0-api-execution.md#test-pairing) says what it covers, and what a test must do to keep it: read it before writing a test that starts a subprocess, sets proxy variables, or provokes a refusal.
-- **Check the report and the logs.** Report tests confirm the notices are present, that there are no scripts or external references, and that unavailable values are labeled. Log tests seed canary values and confirm none of them appears.
+- **Check the report and the logs.** Report tests confirm the notices and the Portfolio123 data statement are present, that there are no scripts or external resources, that the only outside links are the two [D-21](docs/spec.md#decisions) allows, and that unavailable values are labeled. Log tests seed canary values and confirm none of them appears.
 - **Test the project's own behavior only.** Do not test third-party behavior such as Pydantic's type checks or `p123api`'s retries. Test Trial Folio's use of them.
 
 ## Git workflow

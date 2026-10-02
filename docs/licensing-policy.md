@@ -274,4 +274,3 @@ A new license version applies to the Trial Folio versions distributed with it. I
 | Definition of "personal research" ([LIC-05](#lic-05-professional-users)) | Sets the boundary of the general grant | LICENSE 1.10 as drafted | Before adoption |
 | Distribution channel ([LIC-15](#lic-15-distribution-channel)) | Blocks any "Released" status | Author-controlled download | Before the first public release |
 | Contributor terms ([LIC-14](#lic-14-contributions)) | Blocks accepting outside contributions | Accept none until terms exist | Before accepting a contribution |
-| Report link target for the full license ([disclaimers.md](disclaimers.md#dsc-03-where-notices-appear)) | Decides whether reports can link to a public license page | Embed the full notice in each report; add a URL once a public channel exists | With the distribution-channel decision |

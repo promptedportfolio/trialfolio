@@ -819,8 +819,12 @@ Defined before 0.1.0 ships:
 
 **Requirements (REQ-08, REQ-13, D-07).** A human-facing report is one self-contained HTML file:
 
-- It uses inline CSS and inline SVG only. It contains no `<script>` elements, event-handler attributes, or references to external resources such as fonts, stylesheets, images, or links that load content. Its only links are `<a href>` navigation: an in-page fragment (`#…`), or a relative path to one of the run's artifacts. No link has a scheme or a host, or starts with `/`.
-- The concise financial-result notice from [disclaimers.md](disclaimers.md) appears near the top, before any results, with an in-page link (`href="#…"`) to the full notice. The full notice appears at the end, in a `<details>` element, which needs no script, together with the license name, `license_id`, and `notice_version` ([DSC-03](disclaimers.md#dsc-03-where-notices-appear)).
+- It uses inline CSS and inline SVG only. It contains no `<script>` elements, event-handler attributes, or references to external resources such as fonts, stylesheets, images, or links that load content. Its only links are `<a href>` navigation: an in-page fragment (`#…`), a relative path to one of the run's artifacts, or one of the two outside links below. No other link has a scheme or a host, or starts with `/`.
+- It has exactly two outside links ([D-21](spec.md#decisions)), each an `https` URL that loads nothing:
+  - **The license:** `https://github.com/promptedportfolio/trialfolio/blob/v<version>/LICENSE`, where `<version>` is the Trial Folio version that rendered the report, so the link names that version's [release tag](#versioning). It works once the repository is public and the version is tagged.
+  - **Portfolio123's terms:** `https://www.portfolio123.com/legal`, the page [DSC-10](disclaimers.md#dsc-10-portfolio123-terms-that-bear-on-users) cites.
+- The concise financial-result notice from [disclaimers.md](disclaimers.md) appears near the top, before any results, with an in-page link (`href="#…"`) to the full notice. The full notice appears at the end, in a `<details>` element, which needs no script, together with the license name, `license_id`, `notice_version`, and the license link ([DSC-03](disclaimers.md#dsc-03-where-notices-appear)).
+- The Portfolio123 data statement from [DSC-06](disclaimers.md#dsc-06-portfolio123-notices), with its link to Portfolio123's terms, appears in the closing section, before the `<details>` element, so it shows without being expanded. It isn't part of the versioned notices, so it doesn't change `notice_version`.
 - It includes the sections below. A section the evidence cannot support is shown as unavailable, with the reason, and is never filled with invented content.
   1. Objective, declared purpose, benchmark, and research status.
   2. Definitions, and what changed from the baseline, with intended changes separated from unexplained mismatches.
