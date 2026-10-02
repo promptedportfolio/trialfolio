@@ -137,7 +137,17 @@ UtcDatetime = Annotated[datetime, AfterValidator(_in_utc)]
 """A UTC time. It's written in ISO 8601 with a `Z` suffix (canonical hashing)."""
 
 
-def _relative_path(value: str) -> str:
+RELATIVE_PATH_PATTERN: Final = r"[^/\\:]+(/[^/\\:]+)*"
+"""Segments separated by `/`, none empty, and no `\\` or `:`, so the path is relative on Windows
+too. `valid_relative_path` also rejects `.` and `..` segments."""
+
+
+def valid_relative_path(value: str) -> str:
+    """Raises `ValueError` unless `value` is a path relative to the output root: segments
+    separated by `/`, none of them empty, `.`, or `..`. The `ArtifactStore` and the models check
+    paths with this one rule."""
+    if not re.fullmatch(RELATIVE_PATH_PATTERN, value):
+        raise ValueError("must be a relative path with / separators, and no \\ or :")
     if any(part in (".", "..") for part in value.split("/")):
         raise ValueError("must stay inside the output directory, with no . or .. segments")
     return value
@@ -145,8 +155,8 @@ def _relative_path(value: str) -> str:
 
 RelativePath = Annotated[
     str,
-    StringConstraints(pattern=r"^[^/\\:]+(/[^/\\:]+)*$"),
-    AfterValidator(_relative_path),
+    StringConstraints(pattern=f"^{RELATIVE_PATH_PATTERN}$"),
+    AfterValidator(valid_relative_path),
 ]
 """A path relative to the output root, with `/` separators. Never absolute (artifact storage)."""
 
