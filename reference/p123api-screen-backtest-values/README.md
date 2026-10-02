@@ -32,7 +32,7 @@ Each check used a new client, set to one HTTP attempt per call. A minimal transp
 
 In total, the checks used 15 credits, within the budget.
 
-**Authentication's cost.** Between consecutive checks, `quotaRemaining` dropped by exactly 5: from check 1's response to check 2's, and again from check 2's to check 3's. Each drop covers the later check's authentication and its request, and Portfolio123 reported a cost of 5 for each request. So each authentication cost 0 credits. That assumes nothing else used the account's credits during the 19-second run. The absolute `quotaRemaining` values are account information, so they aren't recorded here.
+**Authentication's cost.** Between consecutive checks, `quotaRemaining` dropped by exactly 5: from check 1's response to check 2's, and again from check 2's to check 3's. Each drop covers the later check's authentication and its request, and Portfolio123 reported a cost of 5 for each request. So the second and third authentications cost 0 credits. The first check's authentication had no earlier reading to compare with, so it wasn't measured. That assumes nothing else used the account's credits during the 19-second run. The absolute `quotaRemaining` values are account information, so they aren't recorded here.
 
 ## Checks against the response layout
 
@@ -61,5 +61,5 @@ These checks compare each response with [`p123api-screen-backtest` version 1](..
 - **Weekly rebalancing is verified.** Portfolio123 accepted `rebalFreq` `"Every Week"` and returned one period per week.
 - **Ranking by name and by ID are verified.** Portfolio123 accepted a ranking system's name as a string, and its ID as a JSON integer. Both gave the same response, so they resolved to the same system.
 - **Layout version 1 covers all three responses.** None of them has a key that R01-T01's lacks, or lacks one that it has, so no parser change is needed.
-- **Authentication cost no credits** in these checks.
+- **Authentication cost no credits** in the two cases that could be measured, the second and third checks.
 - **Whether failed requests are charged is still unknown,** because no request failed.

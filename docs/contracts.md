@@ -97,11 +97,11 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 | `schema_version` | string | Yes | A supported version (`1.0.0`). Any other value fails with `config.invalid`, and the message names the supported versions. | Not sent |
 | `title` | string | Yes | 1–200 characters. Used as the report heading. | Not sent |
 | `purpose` | string | No | Up to 2,000 characters. If it's absent, the report says no purpose was declared. | Not sent |
-| `universe` | string | Yes | A Portfolio123 universe name, for example `SP500` | `screen.universe` |
+| `universe` | string | Yes | A non-empty Portfolio123 universe name, for example `SP500` | `screen.universe` |
 | `rules` | list of strings | Yes | At least one screening formula. Each one is a non-empty string, and their order is kept. | `screen.rules`, each as `{"formula": "…"}`. It has no `type` field, because Portfolio123 rejects one (R01-T01). |
 | `ranking` | mapping | Yes | Exactly one of the [ranking forms](#ranking-forms) | `screen.ranking` |
 | `max_holdings` | integer | Yes | 1 or more | `screen.maxNumHoldings` |
-| `benchmark` | string | Yes | A Portfolio123 benchmark symbol, for example `SPY` | `screen.benchmark` |
+| `benchmark` | string | Yes | A non-empty Portfolio123 benchmark symbol, for example `SPY` | `screen.benchmark` |
 | `start_date` | date | Yes | `YYYY-MM-DD` | `startDt` |
 | `end_date` | date | Yes | `YYYY-MM-DD`, later than `start_date`. There is no default of today. | `endDt` |
 | `rebalance_weeks` | integer | Yes | 1 or 4 | `rebalFreq`: `Every Week` for 1, or `Every 4 Weeks` for 4 |
@@ -663,7 +663,7 @@ Each case holds:
 
 - **What counts.** Every send that may have reached Portfolio123 counts, whatever its status or outcome, because whether failed requests are charged is unverified. A send that's `not_connected` didn't reach it, and doesn't count ([possibly charged](#http-exchanges)).
 - **Within budget.** A run or experiment is within its budget when its `provider_requests` count, the sends that may have reached Portfolio123 ([JSON summary](#json-summary)), is at most the budget's `provider_requests`. Execution never starts a send that would exceed it, and never makes more authentication calls than `authentication_calls`.
-- **Authentication's cost.** Trial Folio authenticates through the wrapper's `POST /auth` before the first request, and again only after a 401 or 403. Portfolio123's [API credits](https://portfolio123.customerly.help/en/articles/13766-api-credits) page doesn't say whether that costs credits (checked 2026-10-01). It cost none in R01-T05's live checks ([run record](../reference/p123api-screen-backtest-values/README.md)). That's an observation, not a documented price, so `credits` leaves authentication out, and the budget states the most authentication calls instead. The plan display says that authentication's cost isn't documented, and that it cost no credits when last checked.
+- **Authentication's cost.** Trial Folio authenticates through the wrapper's `POST /auth` before the first request, and again only after a 401 or 403. Portfolio123's [API credits](https://portfolio123.customerly.help/en/articles/13766-api-credits) page doesn't say whether that costs credits (checked 2026-10-01). The two authentications that R01-T05's live checks could measure, the second and third, cost none ([run record](../reference/p123api-screen-backtest-values/README.md)). That's an observation, not a documented price, so `credits` leaves authentication out, and the budget states the most authentication calls instead. The plan display says that authentication's cost isn't documented, and that it cost no credits when last measured.
 - **The documented cost, not the charge.** The budget uses the documented cost. The attempt records the `cost` Portfolio123 reports.
 
 **Retry policy.**
@@ -986,7 +986,7 @@ There is no universal provider interface, plugin registry, or service framework.
 The CLI reads the variables and passes a credential object to the provider client. Credential objects are never serialized, hashed, logged, or written to artifacts. The CLI sends the credentials only to the wrapper's default endpoint, Portfolio123's API. No Trial Folio option, configuration key, or environment variable changes that endpoint. Two things can still route them elsewhere, and neither is a Trial Folio setting:
 
 - **The standard variables `requests` honors.** The wrapper's session trusts the environment. So proxy variables such as `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` decide whether the requests go through a proxy, and `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` decide which certificates are trusted. A proxy whose certificate the user trusts can read the API key. Trial Folio keeps this behavior, because users behind a proxy need it, and the user's own environment controls it. The README will say so ([R01-T17](releases/0.1.0-api-execution.md#implementation-tasks-only-after-ready)).
-- **The CLI's entry function** takes the endpoint and the request timeout as parameters, for tests ([0.1.0's test doubles](releases/0.1.0-api-execution.md#test-pairing)). It's internal ([public contract boundary](#public-contract-boundary)), and the installed command never passes them.
+- **The CLI's entry function** takes parameters for tests only: the endpoint, the request timeout, the clock, and the factory that makes the output directory's `ArtifactStore` ([0.1.0's test doubles](releases/0.1.0-api-execution.md#test-pairing)). It's internal ([public contract boundary](#public-contract-boundary)), and the installed command never passes them.
 
 The wrapper's error objects need the same care. The response attached to a `p123api` `ClientException` carries the `Authorization` header, and for authentication failures its request body contains the API key. The client's token accessor exposes the bearer token. Trial Folio never logs, serializes, or saves these objects. From an error it keeps only the status code and a sanitized message. Redaction tests seed canary values and check that they appear nowhere in the outputs or logs, including after an authentication failure.
 
