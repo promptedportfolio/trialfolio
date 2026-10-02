@@ -48,7 +48,7 @@ These are never distributed. The `dev` dependency group in `pyproject.toml` inst
 | pytest 9.1.1, with iniconfig 2.3.0, packaging 26.3, pluggy 1.6.0, Pygments 2.21.0, and, on Windows only, colorama 0.4.6 | Test runner | pytest, iniconfig, and pluggy MIT; packaging Apache-2.0 OR BSD-2-Clause; Pygments BSD-2-Clause; colorama BSD, by its classifier |
 | ruff 0.16.10 | Formatter and linter | MIT |
 | pyright 1.1.414, with nodeenv 1.11.0 | Type checker | pyright MIT; nodeenv BSD |
-| nodejs-wheel-binaries 24.19.0 | The Node.js runtime pyright runs on, so pyright never downloads one | MIT, with Node.js's own license file in its `.dist-info/licenses` |
+| nodejs-wheel-binaries 24.19.0, through pyright's `nodejs` extra | The Node.js runtime pyright runs on, so pyright never downloads one | MIT, with Node.js's own license file in its `.dist-info/licenses` |
 | hatchling 1.32.4, pinned exactly in `[build-system]` | Build backend | MIT. Its build-time dependencies, resolved when a wheel is built, include pathspec (MPL-2.0), tomlkit (MIT), and trove-classifiers (Apache-2.0), checked at their current versions. |
 
 ## What each distribution form carries

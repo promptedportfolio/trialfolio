@@ -1,4 +1,7 @@
-"""Suite-wide setup: the network guard, here and in every Python subprocess (P-12)."""
+"""Suite-wide setup: the network guard, here and in every Python subprocess (P-12).
+
+At the repository's root, so that any pytest run in it is guarded, whichever paths it collects.
+"""
 
 import os
 from collections.abc import Callable
@@ -19,6 +22,9 @@ def pytest_configure(config: pytest.Config) -> None:
     # Before collection, so importing a test module is guarded too. A pytest run under another
     # one shares its guard, and leaves it on.
     installed = network_guard.install()
+    # A run under another one inherits a guard that would end the process after a refusal.
+    # Here pytest reports refusals, including those its tests provoke on purpose.
+    exited = network_guard.exit_after_refusal(False)
     env = pytest.MonkeyPatch()
     # Subprocesses inherit this, so their sitecustomize installs the guard.
     env.setenv("PYTHONPATH", network_guard.with_guard_path(os.environ)["PYTHONPATH"])
@@ -35,6 +41,8 @@ def pytest_configure(config: pytest.Config) -> None:
         env.undo()
         if installed:
             network_guard.uninstall()
+        else:
+            network_guard.exit_after_refusal(exited)
 
     config.stash[_RESTORE] = restore
 

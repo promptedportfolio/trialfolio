@@ -15,7 +15,8 @@ try:
     import trialfolio_network_guard
 
     trialfolio_network_guard.install(
-        os.environ.get(trialfolio_network_guard.ALLOW_ENV, "").split(",")
+        os.environ.get(trialfolio_network_guard.ALLOW_ENV, "").split(","),
+        exit_on_refusal=True,
     )
 except BaseException as error:  # noqa: BLE001 - any failure stops the process.
     sys.stderr.write(f"network guard: not installed, so this process stops: {error!r}\n")

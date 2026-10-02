@@ -8,6 +8,7 @@ broken guard would reach no real service.
 import email.utils
 import inspect
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -17,7 +18,12 @@ from pathlib import Path
 
 import pytest
 import requests
-from trialfolio_network_guard import ALLOW_ENV, GUARD_DIR, NetworkAccessRefused
+from trialfolio_network_guard import (
+    ALLOW_ENV,
+    GUARD_DIR,
+    REFUSED_EXIT_STATUS,
+    NetworkAccessRefused,
+)
 
 OTHER_NAME = "example.invalid"
 OTHER_ADDRESS = "192.0.2.1"
@@ -43,6 +49,18 @@ def run_python(
         env=env,
         check=False,
     )
+
+
+def probe(tmp_path: Path, test_body: str) -> list[str]:
+    """pytest arguments that run one test, written outside the repository, with its settings.
+
+    Collecting src/ too makes pytest load the repository's root conftest, as it does for any
+    path in the repository.
+    """
+    path = tmp_path / "test_probe.py"
+    path.write_text(f"def test_probe():\n{test_body}", encoding="utf-8")
+    pyproject = str(REPO_ROOT / "pyproject.toml")
+    return ["-c", pyproject, "--rootdir", str(REPO_ROOT), str(REPO_ROOT / "src"), str(path)]
 
 
 def run_pytest(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -131,32 +149,45 @@ def test_a_proxy_on_localhost_cannot_relay_a_request(
         listener.accept()
 
 
-def test_a_proxy_test_can_turn_the_proxy_bypass_off(
-    listener: socket.socket, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # What a test of proxy handling, such as R01-AC32's, does so that its check means something.
-    proxy = f"http://127.0.0.1:{listener.getsockname()[1]}"
-    monkeypatch.setenv("HTTPS_PROXY", proxy)
-    monkeypatch.delenv("NO_PROXY", raising=False)
-    monkeypatch.delenv("no_proxy", raising=False)
-    assert requests.utils.get_environ_proxies(f"https://{OTHER_NAME}/") == {"https": proxy}
-
-
 def test_a_refusal_in_a_background_thread_fails_the_test(tmp_path: Path) -> None:
-    probe = tmp_path / "test_probe.py"
-    probe.write_text(
-        "import socket, threading\n"
-        "def test_probe():\n"
-        "    thread = threading.Thread(target=socket.getaddrinfo, args=('example.invalid', 443))\n"
-        "    thread.start()\n"
-        "    thread.join()\n",
-        encoding="utf-8",
-    )
     result = run_pytest(
-        "-c", str(REPO_ROOT / "pyproject.toml"), "--rootdir", str(REPO_ROOT), str(probe)
+        *probe(
+            tmp_path,
+            "    import socket, threading\n"
+            "    thread = threading.Thread(target=socket.getaddrinfo, args=('example.invalid', 1))\n"
+            "    thread.start()\n"
+            "    thread.join()\n",
+        )
     )
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == pytest.ExitCode.TESTS_FAILED, result.stdout + result.stderr
     assert "NetworkAccessRefused" in result.stdout
+
+
+def test_any_pytest_run_in_the_repository_is_guarded(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    # A run that collects nothing under tests/, such as one over src/, still loads the guard.
+    # os.spawnve starts it without subprocess.Popen, so no inherited guard is involved.
+    env = {name: value for name, value in os.environ.items() if name != "PYTHONPATH"}
+    status = os.spawnve(
+        os.P_WAIT,
+        sys.executable,
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            *probe(
+                tmp_path,
+                "    import socket\n    assert hasattr(socket.getaddrinfo, '__wrapped__')\n",
+            ),
+        ],
+        env,
+    )
+    out, err = capfd.readouterr()
+    assert status == 0, out + err
 
 
 def test_local_name_lookups_degrade_instead_of_failing() -> None:
@@ -188,8 +219,27 @@ def test_subprocess_refuses_another_host() -> None:
     result = run_python(
         "import socket, sys; socket.create_connection((sys.argv[1], 443), timeout=1)", OTHER_NAME
     )
-    assert result.returncode != 0
+    assert result.returncode == REFUSED_EXIT_STATUS
     assert "NetworkAccessRefused" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        (
+            "import threading\n"
+            "thread = threading.Thread(target=socket.getaddrinfo, args=('example.invalid', 1))\n"
+            "thread.start()\n"
+            "thread.join()\n"
+        ),
+        "try:\n    socket.getaddrinfo('example.invalid', 1)\nexcept BaseException:\n    pass\n",
+    ],
+    ids=["in a thread", "caught"],
+)
+def test_subprocess_refused_anything_exits_with_the_refusal_status(code: str) -> None:
+    result = run_python("import socket\n" + code + "print('carried on')\n")
+    assert result.stdout.split() == ["carried", "on"], result.stderr
+    assert result.returncode == REFUSED_EXIT_STATUS, result.stderr
 
 
 def test_subprocess_reaches_localhost(listener: socket.socket) -> None:
@@ -205,6 +255,26 @@ def test_subprocess_reaches_localhost(listener: socket.socket) -> None:
 def test_subprocess_with_its_own_environment_is_still_guarded() -> None:
     result = run_python(REACH_OTHER_HOST, env={"PATH": os.environ.get("PATH", "")})
     assert result.stdout.split() == ["NetworkAccessRefused"], result.stderr
+
+
+PRINT_PROXY_SETTINGS = (
+    "import os\nprint([os.environ.get(name) for name in ('NO_PROXY', 'no_proxy', 'HTTPS_PROXY')])"
+)
+
+
+def test_a_child_environment_without_proxy_settings_turns_proxies_off() -> None:
+    # Otherwise requests would read macOS's system proxies, which may be on localhost.
+    result = run_python(PRINT_PROXY_SETTINGS, env={"PATH": os.environ.get("PATH", "")})
+    expected = ["*", None if os.name == "nt" else "*", None]
+    assert result.stdout.strip() == repr(expected), result.stderr
+
+
+def test_a_child_environment_with_proxy_settings_keeps_them() -> None:
+    # A test of proxy handling, such as R01-AC32's, sets what it means to test.
+    proxy = "http://127.0.0.1:9"
+    env = {"PATH": os.environ.get("PATH", ""), "HTTPS_PROXY": proxy}
+    result = run_python(PRINT_PROXY_SETTINGS, env=env)
+    assert result.stdout.strip() == repr([None, None, proxy]), result.stderr
 
 
 def test_subprocess_inheriting_a_replaced_pythonpath_is_still_guarded(
@@ -279,6 +349,35 @@ def test_other_interpreter_names_are_checked_too(command: list[str]) -> None:
     # Refused before the program is looked for, so none of these needs to exist.
     with pytest.raises(NetworkAccessRefused):
         subprocess.run([*command, "-c", "pass"], check=False)
+
+
+PYTHON = shlex.quote(sys.executable)
+
+
+@pytest.mark.parametrize(
+    "start",
+    [
+        lambda: subprocess.run(f"{PYTHON} -I -c pass", shell=True, check=False),
+        lambda: subprocess.run([f"cd . && {PYTHON} -S -c pass"], shell=True, check=False),
+        lambda: os.popen(f"{PYTHON} -E -c pass").close(),
+    ],
+    ids=["string", "list", "os.popen"],
+)
+def test_shell_commands_without_the_guard_are_refused(start: Callable[[], object]) -> None:
+    with pytest.raises(NetworkAccessRefused):
+        start()
+
+
+def test_shell_commands_that_keep_the_guard_run() -> None:
+    result = subprocess.run(
+        f"{PYTHON} -c {shlex.quote(REACH_OTHER_HOST)}",
+        shell=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.stdout.split() == ["NetworkAccessRefused"], result.stderr
 
 
 @pytest.mark.parametrize(
