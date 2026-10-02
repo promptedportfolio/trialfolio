@@ -16,6 +16,8 @@ A store serves one output directory, its root, and takes paths relative to it.
   so a new directory's entry is durable too. On macOS, a sync is `fcntl.F_FULLFSYNC`, because
   `fsync` doesn't flush the drive's cache there. Windows syncs files only: Python can't open a
   directory there.
+- **Interrupts.** Each step records what it may create before it creates it, so an interrupt at
+  any point leaves a record to clean up from.
 
 R01-T08 checked what each platform reports, on macOS 26.6.2 with Python 3.12.13:
 
@@ -37,11 +39,12 @@ import hashlib
 import logging
 import os
 import secrets
+import stat
 import sys
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final, NoReturn, Protocol
+from typing import Final, Literal, NoReturn, Protocol
 
 from trialfolio.contracts.common import valid_relative_path
 from trialfolio.errors import TrialFolioError
@@ -54,9 +57,14 @@ _logger = logging.getLogger(__name__)
 _NO_FULL_SYNC: Final = frozenset({errno.ENOTSUP, errno.ENODEV})
 """How macOS reports a file system without `F_FULLFSYNC`. Any other error is a failed sync."""
 
-_NO_HARD_LINKS: Final = frozenset({errno.ENOTSUP, errno.EPERM})
-"""How `os.link` reports a file system without hard links: `ENOTSUP` on macOS, and `EPERM` on
-Linux, as link(2) documents."""
+_NO_DIRECTORY_SYNC: Final = frozenset({errno.EBADF, errno.EINVAL})
+"""How a system that can't sync a directory reports it. PostgreSQL's `fsync_fname_ext` ignores the
+same two for a directory."""
+
+_NO_HARD_LINKS: Final = frozenset({errno.ENOTSUP, errno.EPERM, errno.ENOSYS})
+"""How `os.link` reports a file system without hard links: `ENOTSUP` on macOS; `EPERM` on Linux,
+as link(2) documents; and `ENOSYS`, which libfuse returns for a file system without a link
+operation."""
 
 _APPLE_DOUBLE: Final = "._"
 """The prefix of the file that holds another file's extended attributes on macOS, where the file
@@ -67,6 +75,16 @@ _MODE: Final = 0o666
 
 _BINARY: Final[int] = getattr(os, "O_BINARY", 0)
 """Windows translates line endings without this flag."""
+
+_NO_FULL_SYNC_WARNING: Final = (
+    "The output directory's file system doesn't support a full sync (F_FULLFSYNC), so Trial"
+    " Folio syncs with fsync, which doesn't flush the drive's cache. The files written there are"
+    " less durable after a power loss."
+)
+_NO_DIRECTORY_SYNC_WARNING: Final = (
+    "The output directory's file system can't sync a directory, so the entries of the files"
+    " written there may be lost after a power loss."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,23 +111,25 @@ class ArtifactStore(Protocol):
         """Checks, without creating anything, that the root is absent or an empty directory.
 
         Raises `TrialFolioError` with `output.not_empty` if it holds anything, hidden files
-        included, or isn't a directory, and with `storage.write_failed` if it can't be read.
+        included, or exists and isn't a directory; and with `storage.write_failed` if it can't be
+        created, because a parent isn't a directory or none exists, or can't be read.
         """
         ...
 
     def claim(self, path: str, data: bytes) -> StoredFile:
         """Claims the root for this store with its first file, and returns it.
 
-        Creates the root, and any missing parent directories, one at a time. Then creates the
-        file, which must be directly in the root, under its final name with an exclusive create,
-        writes and syncs it, and lists the root. On success, the file and the directories'
-        entries are durable, and the store can `write`.
+        First checks the root as `check_empty` does, apart from listing it. Then creates the
+        root, and any missing parent directories, one at a time. Then creates the file, which
+        must be directly in the root, under its final name with an exclusive create, writes and
+        syncs it, and lists the root. On success, the file and the directories' entries are
+        durable, and the store can `write`.
 
         Raises `TrialFolioError` with `output.not_empty` if the file existed already, the root
-        holds anything else or isn't a directory, or the root disappeared; and with
-        `storage.write_failed` if a write or sync fails. On any failure, an interrupt included,
-        it removes what it created: its file, then the directories it created, deepest first,
-        each only while it's empty.
+        holds anything else, or the root or a parent disappeared; and with `storage.write_failed`
+        if the root can't be created, or a write or sync fails. On any failure, an interrupt
+        included, it removes what it created: its file, then the directories it created, deepest
+        first, each only while it's empty.
         """
         ...
 
@@ -123,8 +143,9 @@ class ArtifactStore(Protocol):
         Raises `RuntimeError` before the store has claimed its root, and `TrialFolioError` with
         `storage.write_failed` if the name exists, the file system can't take an atomic write
         that never replaces a file, or any write or sync fails. A failed write leaves no
-        temporary file. It publishes nothing, unless only the syncs after publishing failed: the
-        file is then complete, but may not survive a power loss.
+        temporary file, unless removing it failed too. It publishes nothing, unless only the
+        steps after publishing failed: the file is then complete, but may not survive a power
+        loss.
         """
         ...
 
@@ -143,11 +164,13 @@ class LocalArtifactStore:
     """
 
     def __init__(self, root: str | os.PathLike[str]) -> None:
-        self._root = Path(root).absolute()
+        # abspath also resolves `..` segments, so a claim never creates a directory that's only
+        # on the way to `..`.
+        self._root = Path(os.path.abspath(root))
         self._claimed = False
-        self._unsynced: set[Path] = set()
-        """Directories this store created whose entry in their parent isn't synced yet."""
-        self._warned_degraded = False
+        self._unsynced: list[Path] = []
+        """Directories this store may have created whose entry in their parent isn't synced."""
+        self._warned: set[str] = set()
 
     @property
     def root(self) -> Path:
@@ -155,13 +178,13 @@ class LocalArtifactStore:
         return self._root
 
     def check_empty(self) -> None:
+        if not self._check_root():
+            return
         try:
             with os.scandir(self._root) as entries:
                 occupied = next(entries, None) is not None
         except FileNotFoundError:
             return
-        except NotADirectoryError:
-            _not_empty("The output path exists and isn't a directory.")
         except OSError as error:
             raise TrialFolioError(
                 "storage.write_failed",
@@ -175,48 +198,18 @@ class LocalArtifactStore:
             raise ValueError("the file that claims a directory must be directly in it")
         if self._claimed:
             raise RuntimeError("this store has already claimed its directory")
-        created: list[Path] = []
-        file = self._root / path
-        made_file = False
+        self._check_root()
+        claim = _Claim(self._root / path)
         try:
-            try:
-                _make_directories(self._root, created.append)
-            except FileNotFoundError:
-                # A parent disappeared, because a competing claim that created it removed it.
-                _not_empty("The output directory disappeared while Trial Folio claimed it.")
-            except OSError as error:
-                _claim_failed(path, error)
-            try:
-                descriptor = os.open(file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, _MODE)
-            except (FileExistsError, FileNotFoundError, NotADirectoryError):
-                # Another file has the name, the root disappeared because a competing claim
-                # removed it, or the root isn't a directory.
-                _not_empty("The output directory isn't empty, or another process is using it.")
-            except OSError as error:
-                _claim_failed(path, error)
-            made_file = True
-            try:
-                self._write_all(descriptor, data)
-            except OSError as error:
-                _claim_failed(path, error)
-            finally:
-                os.close(descriptor)
-            try:
-                names = os.listdir(self._root)
-            except (FileNotFoundError, NotADirectoryError):
-                _not_empty("The output directory disappeared while Trial Folio claimed it.")
-            except OSError as error:
-                _claim_failed(path, error)
-            if any(not _part_of(name, path) for name in names):
-                _not_empty(
-                    "Another process wrote to the output directory while Trial Folio claimed it."
-                )
-            try:
-                self._sync_directories([self._root, *(directory.parent for directory in created)])
-            except OSError as error:
-                _claim_failed(path, error)
-        except BaseException:
-            _remove_claim(file if made_file else None, created)
+            self._claim(claim, data)
+        except BaseException as error:
+            claim.undo()
+            if isinstance(error, OSError):
+                raise TrialFolioError(
+                    "storage.write_failed",
+                    f"Couldn't claim the output directory with {path}: {_reason(error)}. Check"
+                    " its free space and permissions.",
+                ) from error
             raise
         self._claimed = True
         return _stored(path, data)
@@ -227,30 +220,16 @@ class LocalArtifactStore:
             raise RuntimeError("claim the output directory before writing to it")
         directory = self._root.joinpath(*parts[:-1])
         final = directory / parts[-1]
+        # Unique, so that it's safe to remove whatever has this name; hidden, so that a crash
+        # leaves a name no artifact has.
+        temporary: Path | None = directory / f".{parts[-1]}.{secrets.token_hex(8)}.tmp"
         try:
-            _make_directories(directory, self._unsynced.add, stop=self._root)
-            temporary = self._write_temporary(directory, parts[-1], data)
-            try:
-                _publish(temporary, final)
-            except FileExistsError as error:
-                raise TrialFolioError(
-                    "storage.write_failed",
-                    f"Couldn't write {path}: a file with that name already exists in the output"
-                    " directory, and Trial Folio never replaces a file.",
-                ) from error
-            except OSError as error:
-                if sys.platform == "win32" or error.errno not in _NO_HARD_LINKS:
-                    raise
-                raise TrialFolioError(
-                    "storage.write_failed",
-                    f"Couldn't write {path}: the output directory's file system doesn't support"
-                    f" hard links ({_reason(error)}). FAT and exFAT don't. Trial Folio publishes"
-                    " each file with a hard link, so that it never replaces one. Choose an output"
-                    " directory on another file system.",
-                ) from error
-            finally:
-                if sys.platform != "win32":
-                    _remove(temporary)
+            _make_directories(directory, self._unsynced, stop=self._root)
+            self._write_new(temporary, data)
+            _publish(temporary, final, path)
+            if sys.platform != "win32":
+                os.unlink(temporary)
+            temporary = None
             self._sync_new_entries(final)
         except OSError as error:
             raise TrialFolioError(
@@ -258,6 +237,9 @@ class LocalArtifactStore:
                 f"Couldn't write {path} durably: {_reason(error)}. Check the output directory's"
                 " free space and permissions.",
             ) from error
+        finally:
+            if temporary is not None:
+                _remove(temporary)
         stored = _stored(path, data)
         _logger.debug(
             "Wrote %s (%s).",
@@ -272,18 +254,75 @@ class LocalArtifactStore:
         # store, detect a file that changed.
         return self._root.joinpath(*valid_relative_path(path).split("/")).read_bytes()
 
-    def _write_temporary(self, directory: Path, name: str, data: bytes) -> Path:
-        # Hidden, and unique, so that a crash leaves a name no artifact has.
-        temporary = directory / f".{name}.{secrets.token_hex(8)}.tmp"
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, _MODE)
+    def _check_root(self) -> bool:
+        """Raises unless the root is a directory, or can be created as one. Returns whether it
+        exists."""
+        if os.path.lexists(self._root):
+            if not os.path.isdir(self._root):
+                # Including a symbolic link to nothing.
+                _not_empty("The output path exists and isn't a directory.")
+            return True
+        for parent in self._root.parents:
+            if os.path.lexists(parent):
+                if os.path.isdir(parent):
+                    return False
+                raise TrialFolioError(
+                    "storage.write_failed",
+                    "The output directory can't be created: a parent of it isn't a directory."
+                    " Choose another output directory.",
+                )
+        raise TrialFolioError(
+            "storage.write_failed",
+            "The output directory can't be created: none of its parent directories exists."
+            " Check the drive or share it's on.",
+        )
+
+    def _claim(self, claim: "_Claim", data: bytes) -> None:
+        try:
+            new = _make_directories(self._root, claim.directories)
+        except FileNotFoundError:
+            # _check_root found a parent, so it disappeared, because a competing claim that
+            # created it failed and removed it.
+            _not_empty("The output directory disappeared while Trial Folio claimed it.")
+        claim.file = "unsure"
+        try:
+            descriptor = os.open(claim.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, _MODE)
+        except FileExistsError:
+            claim.file = "absent"
+            _not_empty("The output directory isn't empty.")
+        except FileNotFoundError:
+            claim.file = "absent"
+            _not_empty("The output directory disappeared while Trial Folio claimed it.")
+        except OSError:
+            claim.file = "absent"
+            raise
+        claim.file = "created"
         try:
             self._write_all(descriptor, data)
-        except BaseException:
+        finally:
             os.close(descriptor)
-            _remove(temporary)
-            raise
-        os.close(descriptor)
-        return temporary
+        try:
+            names = os.listdir(self._root)
+        except FileNotFoundError:
+            _not_empty("The output directory disappeared while Trial Folio claimed it.")
+        if claim.path.name not in names:
+            _not_empty("The output directory changed while Trial Folio claimed it.")
+        if any(not _part_of(name, claim.path.name) for name in names):
+            _not_empty(
+                "Another process wrote to the output directory while Trial Folio claimed it."
+            )
+        # The root's parent too: a competing claim may have created the root, and failed before
+        # syncing it.
+        self._sync_directories(
+            [self._root, self._root.parent, *(directory.parent for directory in new)]
+        )
+
+    def _write_new(self, path: Path, data: bytes) -> None:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, _MODE)
+        try:
+            self._write_all(descriptor, data)
+        finally:
+            os.close(descriptor)
 
     def _write_all(self, descriptor: int, data: bytes) -> None:
         view = memoryview(data)
@@ -293,7 +332,7 @@ class LocalArtifactStore:
 
     def _sync_new_entries(self, file: Path) -> None:
         """Syncs the directory holding `file`, and the parent of each directory on the way to it
-        that the store created and hasn't synced."""
+        that the store may have created and hasn't synced."""
         directories = [file.parent]
         for directory in file.parents:
             if directory in self._unsynced:
@@ -301,7 +340,8 @@ class LocalArtifactStore:
             if directory == self._root:
                 break
         self._sync_directories(directories)
-        self._unsynced.difference_update(file.parents)
+        synced = set(file.parents)
+        self._unsynced = [directory for directory in self._unsynced if directory not in synced]
 
     def _sync_directories(self, directories: Iterable[Path]) -> None:
         if sys.platform == "win32":
@@ -311,6 +351,10 @@ class LocalArtifactStore:
             descriptor = os.open(directory, os.O_RDONLY)
             try:
                 self._sync(descriptor)
+            except OSError as error:
+                if error.errno not in _NO_DIRECTORY_SYNC:
+                    raise
+                self._warn(_NO_DIRECTORY_SYNC_WARNING)
             finally:
                 os.close(descriptor)
 
@@ -321,53 +365,90 @@ class LocalArtifactStore:
             except OSError as error:
                 if error.errno not in _NO_FULL_SYNC:
                     raise
-                self._warn_degraded()
+                self._warn(_NO_FULL_SYNC_WARNING)
             else:
                 return
         os.fsync(descriptor)
 
-    def _warn_degraded(self) -> None:
-        if not self._warned_degraded:
-            self._warned_degraded = True
-            _logger.warning(
-                "The output directory's file system doesn't support a full sync (F_FULLFSYNC),"
-                " so Trial Folio syncs with fsync, which doesn't flush the drive's cache. The"
-                " files written there are less durable after a power loss.",
-                extra={"event": "artifact.sync.degraded"},
-            )
+    def _warn(self, message: str) -> None:
+        """Logs that the store's writes are less durable, once for each reason."""
+        if message not in self._warned:
+            self._warned.add(message)
+            _logger.warning(message, extra={"event": "artifact.sync.degraded"})
 
 
-def _make_directories(
-    directory: Path, record: Callable[[Path], object], stop: Path | None = None
-) -> None:
-    """Creates `directory` and its missing parents, one at a time, outermost first, and records
-    each one it creates as it creates it, so a failure partway still leaves a full record. A
-    directory that another process creates first is used as it is, and not recorded. With
-    `stop`, it creates nothing at or above it."""
+@dataclass
+class _Claim:
+    """What a claim may have created, recorded before it creates it."""
+
+    path: Path
+    file: Literal["absent", "unsure", "created"] = "absent"
+    """Whether the claim created its file. While it's `unsure`, the claim was interrupted as it
+    opened the file, and an empty file there is taken to be its own."""
+    directories: list[Path] = field(default_factory=list[Path])
+    """Outermost first."""
+
+    def undo(self) -> None:
+        if self.file == "created" or (self.file == "unsure" and _is_empty_file(self.path)):
+            _remove(self.path)
+        for directory in reversed(self.directories):
+            try:
+                os.rmdir(directory)
+            except FileNotFoundError:
+                continue  # Never created, or already removed by a competing claim.
+            except OSError:
+                return  # Another process wrote there; leave it and its parents as they are.
+
+
+def _make_directories(directory: Path, made: list[Path], stop: Path | None = None) -> list[Path]:
+    """Creates `directory` and its missing parents, one at a time, outermost first, and returns
+    those that were missing. A directory that another process creates first is used as it is.
+    With `stop`, it creates nothing at or above it.
+
+    Each directory is added to `made` before it's created, and removed again if it can't be, so
+    an interrupt never leaves one it created out of `made`.
+    """
     missing: list[Path] = []
     for candidate in (directory, *directory.parents):
         if candidate == stop or os.path.lexists(candidate):
             break
         missing.append(candidate)
-    for candidate in reversed(missing):
+    missing.reverse()
+    for candidate in missing:
+        made.append(candidate)
         try:
             os.mkdir(candidate)
         except FileExistsError:
-            continue  # If it isn't a directory, the next step fails with NotADirectoryError.
-        record(candidate)
-
-
-def _publish(temporary: Path, final: Path) -> None:
-    """Gives the temporary file its final name, never replacing a file. Raises
-    `FileExistsError` if the name exists."""
-    if sys.platform == "win32":
-        try:
-            os.rename(temporary, final)
-        except BaseException:
-            _remove(temporary)
+            made.pop()  # If it isn't a directory, the next step fails with NotADirectoryError.
+        except OSError:
+            made.pop()
             raise
-    else:
-        os.link(temporary, final)
+    return missing
+
+
+def _publish(temporary: Path, final: Path, path: str) -> None:
+    """Gives the temporary file its final name, never replacing a file."""
+    try:
+        if sys.platform == "win32":
+            os.rename(temporary, final)
+        else:
+            os.link(temporary, final)
+    except FileExistsError as error:
+        raise TrialFolioError(
+            "storage.write_failed",
+            f"Couldn't write {path}: a file with that name already exists in the output"
+            " directory, and Trial Folio never replaces a file.",
+        ) from error
+    except OSError as error:
+        if sys.platform == "win32" or error.errno not in _NO_HARD_LINKS:
+            raise
+        raise TrialFolioError(
+            "storage.write_failed",
+            f"Couldn't write {path}: the output directory's file system doesn't support hard"
+            f" links ({_reason(error)}). FAT and exFAT don't. Trial Folio publishes each file"
+            " with a hard link, so that it never replaces one. Choose an output directory on"
+            " another file system.",
+        ) from error
 
 
 def _part_of(name: str, claimed: str) -> bool:
@@ -378,16 +459,12 @@ def _part_of(name: str, claimed: str) -> bool:
     return name == claimed
 
 
-def _remove_claim(file: Path | None, created: list[Path]) -> None:
-    if file is not None:
-        _remove(file)
-    for directory in reversed(created):
-        try:
-            os.rmdir(directory)
-        except FileNotFoundError:
-            continue
-        except OSError:
-            return  # Another process wrote there; leave it and its parents as they are.
+def _is_empty_file(path: Path) -> bool:
+    try:
+        status = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISREG(status.st_mode) and status.st_size == 0
 
 
 def _remove(path: Path) -> None:
@@ -414,11 +491,3 @@ def _not_empty(problem: str) -> NoReturn:
         f"{problem} Trial Folio writes only into a new or empty directory, and never into one it"
         " hasn't claimed. Choose a new or empty output directory.",
     )
-
-
-def _claim_failed(path: str, error: OSError) -> NoReturn:
-    raise TrialFolioError(
-        "storage.write_failed",
-        f"Couldn't claim the output directory with {path}: {_reason(error)}. Check its free space"
-        " and permissions.",
-    ) from error

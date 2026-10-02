@@ -208,6 +208,111 @@ def test_a_failed_claim_leaves_a_directory_another_process_created(
     assert snapshot(tmp_path) == {"runs": None, "runs/baseline": None}
 
 
+def test_an_interrupt_as_the_claim_creates_its_file_leaves_nothing(
+    tmp_path: Path, faults: Faults
+) -> None:
+    # The interrupt arrives as os.open returns, before the store has the descriptor.
+    faults.after_open("plan.json", raises(KeyboardInterrupt()))
+
+    with pytest.raises(KeyboardInterrupt):
+        LocalArtifactStore(tmp_path / "runs" / "baseline").claim("plan.json", PLAN)
+
+    assert snapshot(tmp_path) == {}
+
+
+def test_an_interrupt_as_the_claim_creates_a_directory_leaves_nothing(
+    tmp_path: Path, faults: Faults
+) -> None:
+    faults.after_mkdir("baseline", raises(KeyboardInterrupt()))
+
+    with pytest.raises(KeyboardInterrupt):
+        LocalArtifactStore(tmp_path / "runs" / "baseline").claim("plan.json", PLAN)
+
+    assert snapshot(tmp_path) == {}
+
+
+def test_an_interrupt_before_the_claim_opens_its_file_leaves_another_processs_file(
+    tmp_path: Path, faults: Faults
+) -> None:
+    # The claim can't tell whether it created the file, so it removes it only if it's empty.
+    def theirs_then_interrupt() -> None:
+        (tmp_path / "plan.json").write_bytes(b"theirs\n")
+        raise KeyboardInterrupt
+
+    faults.on_open("plan.json", theirs_then_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        LocalArtifactStore(tmp_path).claim("plan.json", PLAN)
+
+    assert snapshot(tmp_path) == {"plan.json": b"theirs\n"}
+
+
+def test_a_failed_close_fails_the_claim_and_leaves_nothing(tmp_path: Path, faults: Faults) -> None:
+    faults.after_close("plan.json", raises(OSError(errno.EIO, "Input/output error")))
+
+    message = claim_fails_with(
+        "storage.write_failed", LocalArtifactStore(tmp_path / "runs" / "baseline")
+    ).message
+
+    assert "Input/output error" in message
+    assert snapshot(tmp_path) == {}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Linux and macOS behavior")
+def test_claim_syncs_the_parent_of_a_directory_it_didnt_create(
+    tmp_path: Path, sync_log: SyncLog
+) -> None:
+    # A competing claim may have created the directory and failed before syncing its entry.
+    (tmp_path / "out").mkdir()
+
+    LocalArtifactStore(tmp_path / "out").claim("plan.json", PLAN)
+
+    assert identity(tmp_path) in sync_log.take()
+
+
+def test_dot_dot_in_the_output_path_creates_nothing_outside_it(tmp_path: Path) -> None:
+    LocalArtifactStore(tmp_path / "missing" / ".." / "out").claim("plan.json", PLAN)
+
+    assert snapshot(tmp_path) == {"out": None, "out/plan.json": PLAN}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symbolic links need privileges on Windows")
+def test_a_link_to_nothing_as_the_output_directory_is_not_a_directory(tmp_path: Path) -> None:
+    (tmp_path / "out").symlink_to(tmp_path / "nowhere")
+    store = LocalArtifactStore(tmp_path / "out")
+
+    with pytest.raises(TrialFolioError) as raised:
+        store.check_empty()
+    message = claim_fails_with("output.not_empty", store).message
+
+    assert raised.value.code == "output.not_empty"
+    assert "isn't a directory" in raised.value.message
+    assert "isn't a directory" in message
+    assert sorted(os.listdir(tmp_path)) == ["out"]
+
+
+@pytest.mark.parametrize("parent", ["file", "link-to-nothing"])
+def test_a_parent_that_isnt_a_directory_fails_the_check_and_the_claim_alike(
+    tmp_path: Path, parent: str
+) -> None:
+    if parent == "file":
+        (tmp_path / "parent").write_bytes(b"kept\n")
+    elif sys.platform == "win32":
+        pytest.skip("symbolic links need privileges on Windows")
+    else:
+        (tmp_path / "parent").symlink_to(tmp_path / "nowhere")
+    store = LocalArtifactStore(tmp_path / "parent" / "out")
+
+    with pytest.raises(TrialFolioError) as raised:
+        store.check_empty()
+    message = claim_fails_with("storage.write_failed", store).message
+
+    assert raised.value.code == "storage.write_failed"
+    assert "a parent of it isn't a directory" in raised.value.message
+    assert "a parent of it isn't a directory" in message
+    assert sorted(os.listdir(tmp_path)) == ["parent"]
+
+
 def test_claim_needs_its_file_directly_in_the_directory(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="directly"):
         LocalArtifactStore(tmp_path).claim("cases/plan.json", PLAN)
