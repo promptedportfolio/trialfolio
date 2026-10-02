@@ -1,5 +1,7 @@
 # Trial Folio
 
+Brought to you by [The Prompted Portfolio](https://promptedportfolio.com).
+
 > **Requires a Portfolio123 subscription.** This project works with the Portfolio123 API, which requires a Portfolio123 subscription with the appropriate access.
 
 Trial Folio is a command-line tool for investors who research strategies in [Portfolio123](https://www.portfolio123.com/). It helps you:
@@ -27,7 +29,7 @@ Statistical validation and trading readiness are **not assessed** by any planned
 
 ## Installation
 
-No installation is available yet. When 0.1.0 is implemented, this section will give the verified installation steps. How the software is distributed has not been decided.
+No installation is available yet. When 0.1.0 is released, this section will give the verified installation steps. Releases will be downloaded from [promptedportfolio.com](https://promptedportfolio.com), not from PyPI, and installed with `uv` or `pipx`.
 
 ## Example
 
@@ -60,13 +62,18 @@ A missing value is shown as unavailable, never as zero. Release 0.2.0 adds `tria
 - Logs stay local and never contain credentials, strategy definitions, configuration values, or results. They will be written to `logs/` inside each output directory. Commands without an output directory, such as `trialfolio license`, and an internal error before the output directory is ready, write to a per-user log directory instead: `~/.local/state/trialfolio/logs` on Linux (or under `$XDG_STATE_HOME`), `~/Library/Logs/trialfolio` on macOS, and `%LOCALAPPDATA%\trialfolio\logs` on Windows, unless `TRIALFOLIO_LOG_DIR` names another. Delete those directories to delete the logs.
 - Optional LLM features are planned for a later increment. They will be off by default, and remote model providers will process data under their own terms.
 
+## How it's built
+
+Trial Folio is written with the help of AI coding tools, working from the specifications in [docs/](docs/README.md) and the instructions in [AGENTS.md](AGENTS.md). Every change is proposed separately and waits until I've reviewed and approved it, after the automated checks pass. The current versions of Trial Folio use no AI when they run. [How I use AI to build Trial Folio](docs/ai-development.md) explains the details.
+
 ## License
 
-Trial Folio is source available under a custom license, the Nathan Slaughter Personal Research License (`LicenseRef-NSPRL-1.0`, draft, not yet adopted). It is not open source.
+Trial Folio is source available under a custom license, the Nathan Slaughter Personal Research License (`LicenseRef-NSPRL-1.0`). It is not open source.
 
 - Individuals may use it for private research on investment decisions for themselves and their family members.
 - Professional Users and organizations need Nathan Slaughter's prior written permission.
 - No one may publish, redistribute, or put its code into a public project without that permission.
+- You may view and fork this repository on GitHub, as GitHub's terms allow. LICENSE section 5.4 sets the limits: a fork carries no right to publish changes.
 - You may share reports Trial Folio generates for you with their notice intact. Portfolio123's terms still govern any Portfolio123 data they contain.
 
 See [LICENSE](LICENSE), the [licensing policy](docs/licensing-policy.md), and [CONTACT.md](CONTACT.md). Third-party components keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
@@ -81,10 +88,12 @@ The full notice is in [docs/disclaimers.md](docs/disclaimers.md).
 
 - [docs/README.md](docs/README.md): a map of the specifications.
 - [AGENTS.md](AGENTS.md): instructions for coding agents.
+- [docs/ai-development.md](docs/ai-development.md): how AI is used to build Trial Folio.
+- [CONTRIBUTING.md](CONTRIBUTING.md): why outside changes aren't accepted yet, and how to help instead.
 
 ## Contact
 
-Licensing and permission requests: Nathan Slaughter, nathan@nathanslaughter.com. See [CONTACT.md](CONTACT.md). Sending a request does not grant permission.
+Bugs, feature requests, questions, and documentation problems: [CONTACT.md](CONTACT.md) links to a form for each. Licensing and permission requests: Nathan Slaughter, git@nathanslaughter.com. Sending a request does not grant permission.
 
 ---
 
