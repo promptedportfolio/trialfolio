@@ -1,0 +1,23 @@
+{
+  "screen": {
+    "type": "stock",
+    "universe": "SP500",
+    "maxNumHoldings": 25,
+    "method": "long",
+    "currency": "USD",
+    "benchmark": "SPY",
+    "ranking": "<ranking system name>",
+    "rules": [
+      {
+        "formula": "AvgDailyTot(30) > 1000000"
+      }
+    ]
+  },
+  "startDt": "2016-01-01",
+  "endDt": "2025-12-31",
+  "pitMethod": "Complete",
+  "precision": 4,
+  "transPrice": 1,
+  "slippage": 0.25,
+  "rebalFreq": "Every 4 Weeks"
+}

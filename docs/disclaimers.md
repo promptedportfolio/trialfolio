@@ -55,7 +55,7 @@ A user may share or publish a report they generated only while this notice stays
 |---|---|---|
 | README.md | The Portfolio123 subscription notice near the top, before installation; a short statement that Trial Folio is research software whose results don't represent achievable returns, with links to this document and LICENSE; the non-affiliation notice at the end | Requirement |
 | Every human-facing report, including any results screen in a later interface | The concise notice (DSC-02), and access to the full notice (DSC-01) | Requirement |
-| Every human-facing report | The concise notice near the top, before any results. The full notice in a closing section, reached by an in-page link from the concise notice. The license name, `license_id`, and `notice_version` stated alongside | Proposed default |
+| Every human-facing report | The concise notice near the top, before any results. The full notice in a closing section, reached by an in-page link from the concise notice. The license name, `license_id`, and `notice_version` stated alongside | Requirement since 0.1.0's sign-off (2026-10-01) |
 | Machine-readable assessments and report manifests | `license_id` and `notice_version` recorded as fields, with no notice prose inserted into numeric fields; field definitions are in [contracts.md](contracts.md) | Requirement |
 | CLI | The license identifier and notices available to the user; the release specification defines how | Requirement |
 | Package metadata and description | License identity per [LIC-01](licensing-policy.md#lic-01-license-identity); Portfolio123 notices consistent with DSC-06 | Requirement |
@@ -102,7 +102,7 @@ The README MUST end with this notice:
 - Don't name a Portfolio123 plan, price, or entitlement level unless it has been verified. Link to Portfolio123's own information instead.
 - The README MAY note that the offline synthetic demo runs without a subscription, for as long as that remains true.
 - Don't use Portfolio123 logos or styling that suggests an official relationship.
-- **Proposed default:** the README and the report-sharing guidance also tell users that Trial Folio's license doesn't grant any Portfolio123 right. A report containing Portfolio123 data may need Portfolio123's consent before it is shared publicly (DSC-10).
+- **Requirement since 0.1.0's sign-off (2026-10-01):** the README and the report-sharing guidance also tell users that Trial Folio's license doesn't grant any Portfolio123 right. A report containing Portfolio123 data may need Portfolio123's consent before it is shared publicly (DSC-10).
 
 ### DSC-10 Portfolio123 terms that bear on users
 
