@@ -11,7 +11,9 @@ which leaves nothing behind.
 import errno
 import multiprocessing
 import os
+import signal
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from multiprocessing.queues import Queue
 from multiprocessing.synchronize import Barrier
 from pathlib import Path
@@ -209,21 +211,44 @@ def test_a_failed_claim_leaves_a_directory_another_process_created(
 
 
 def test_an_interrupt_as_the_claim_creates_its_file_leaves_nothing(
-    tmp_path: Path, faults: Faults
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The interrupt arrives as os.open returns, before the store has the descriptor.
-    faults.after_open("plan.json", raises(KeyboardInterrupt()))
+    # Send a real SIGINT after creation: it must be deferred until ownership is recorded.
+    # Unlike Faults.after_open, this wrapper never closes the store's descriptor for it.
+    real_open = os.open
+    opened: list[int] = []
+    original_handler = signal.getsignal(signal.SIGINT)
 
-    with pytest.raises(KeyboardInterrupt):
-        LocalArtifactStore(tmp_path / "runs" / "baseline").claim("plan.json", PLAN)
+    def open_(path: str | os.PathLike[str], flags: int, mode: int = 0o777) -> int:
+        descriptor = real_open(path, flags, mode)
+        if Path(path).name == "plan.json":
+            opened.append(descriptor)
+            signal.raise_signal(signal.SIGINT)
+        return descriptor
 
-    assert snapshot(tmp_path) == {}
+    monkeypatch.setattr(os, "open", open_)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            LocalArtifactStore(tmp_path / "runs" / "baseline").claim("plan.json", PLAN)
+
+        assert snapshot(tmp_path) == {}
+        assert signal.getsignal(signal.SIGINT) is original_handler
+        assert len(opened) == 1
+        with pytest.raises(OSError) as raised:
+            os.fstat(opened[0])
+        assert raised.value.errno == errno.EBADF
+    finally:
+        for descriptor in opened:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
 
 def test_an_interrupt_as_the_claim_creates_a_directory_leaves_nothing(
     tmp_path: Path, faults: Faults
 ) -> None:
-    faults.after_mkdir("baseline", raises(KeyboardInterrupt()))
+    faults.after_mkdir("baseline", lambda: signal.raise_signal(signal.SIGINT))
 
     with pytest.raises(KeyboardInterrupt):
         LocalArtifactStore(tmp_path / "runs" / "baseline").claim("plan.json", PLAN)
@@ -231,12 +256,31 @@ def test_an_interrupt_as_the_claim_creates_a_directory_leaves_nothing(
     assert snapshot(tmp_path) == {}
 
 
-def test_an_interrupt_before_the_claim_opens_its_file_leaves_another_processs_file(
-    tmp_path: Path, faults: Faults
+def test_an_interrupted_claim_does_not_remove_a_competitors_empty_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The claim can't tell whether it created the file, so it removes it only if it's empty.
+    # Ownership cannot be recorded before mkdir: a competitor can win before an interrupt.
+    root = tmp_path / "out"
+    real_mkdir = os.mkdir
+
+    def mkdir(path: str | os.PathLike[str], mode: int = 0o777) -> None:
+        real_mkdir(path, mode)  # The competitor creates it before our syscall starts.
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "mkdir", mkdir)
+    with pytest.raises(KeyboardInterrupt):
+        LocalArtifactStore(root).claim("plan.json", PLAN)
+
+    assert snapshot(tmp_path) == {"out": None}
+
+
+@pytest.mark.parametrize("contents", [b"", b"theirs\n"], ids=["empty", "written"])
+def test_an_interrupt_before_the_claim_opens_its_file_leaves_another_processs_file(
+    tmp_path: Path, faults: Faults, contents: bytes
+) -> None:
+    # PR #11: an empty file is not evidence that the interrupted claim owns it.
     def theirs_then_interrupt() -> None:
-        (tmp_path / "plan.json").write_bytes(b"theirs\n")
+        (tmp_path / "plan.json").write_bytes(contents)
         raise KeyboardInterrupt
 
     faults.on_open("plan.json", theirs_then_interrupt)
@@ -244,7 +288,104 @@ def test_an_interrupt_before_the_claim_opens_its_file_leaves_another_processs_fi
     with pytest.raises(KeyboardInterrupt):
         LocalArtifactStore(tmp_path).claim("plan.json", PLAN)
 
-    assert snapshot(tmp_path) == {"plan.json": b"theirs\n"}
+    assert snapshot(tmp_path) == {"plan.json": contents}
+
+
+def test_an_interrupted_competitor_does_not_allow_two_claims(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # R01-AC27 / PR #11: A pauses after open, B is interrupted before open, then C
+    # tries the same name before A resumes. All filesystem operations are real.
+    first, interrupted, third = (LocalArtifactStore(tmp_path) for _ in range(3))
+    real_open = os.open
+    stage = "first"
+    successes: list[bytes] = []
+
+    def open_(path: str | os.PathLike[str], flags: int, mode: int = 0o777) -> int:
+        nonlocal stage
+        if Path(path).name == "plan.json":
+            if stage == "interrupted":
+                raise KeyboardInterrupt
+            if stage == "first":
+                descriptor = real_open(path, flags, mode)
+                stage = "interrupted"
+                with pytest.raises(KeyboardInterrupt):
+                    interrupted.claim("plan.json", b"B")
+                stage = "third"
+                try:
+                    third.claim("plan.json", b"C")
+                except TrialFolioError as error:
+                    assert error.code == "output.not_empty"
+                else:
+                    successes.append(b"C")
+                stage = "done"
+                return descriptor
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", open_)
+    first.claim("plan.json", b"A")
+    successes.append(b"A")
+
+    assert successes == [b"A"]
+    assert first.read("plan.json") == b"A"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows disallows unlinking the open file")
+def test_a_recreated_claim_path_is_not_mistaken_for_the_original_file(
+    tmp_path: Path, faults: Faults
+) -> None:
+    # PR #11: the listing must identify our file, not merely find the same name.
+    replacement = b"another claimant's plan\n"
+
+    def replace_plan() -> None:
+        (tmp_path / "plan.json").unlink()
+        (tmp_path / "plan.json").write_bytes(replacement)
+
+    faults.on_write("plan.json", replace_plan)
+
+    claim_fails_with("output.not_empty", LocalArtifactStore(tmp_path))
+
+    assert snapshot(tmp_path) == {"plan.json": replacement}
+
+
+def test_a_pending_sigint_wins_over_an_open_failure_and_keeps_the_other_file(
+    tmp_path: Path, faults: Faults
+) -> None:
+    # The original interrupt contract gives Ctrl-C precedence over storage errors.
+    original_handler = signal.getsignal(signal.SIGINT)
+    (tmp_path / "plan.json").touch()
+    faults.on_open("plan.json", lambda: signal.raise_signal(signal.SIGINT))
+
+    with pytest.raises(KeyboardInterrupt):
+        LocalArtifactStore(tmp_path).claim("plan.json", PLAN)
+
+    assert snapshot(tmp_path) == {"plan.json": b""}
+    assert signal.getsignal(signal.SIGINT) is original_handler
+
+
+def test_a_claim_in_a_worker_thread_leaves_the_signal_handler_alone(tmp_path: Path) -> None:
+    # REQ-03: the core works outside the CLI's main thread too.
+    original_handler = signal.getsignal(signal.SIGINT)
+    store = LocalArtifactStore(tmp_path / "out")
+
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        stored = worker.submit(store.claim, "plan.json", PLAN).result(timeout=10)
+
+    assert store.read(stored.path) == PLAN
+    assert signal.getsignal(signal.SIGINT) is original_handler
+
+
+def test_a_claim_preserves_an_ignored_sigint(tmp_path: Path, faults: Faults) -> None:
+    # An embedding caller that ignores SIGINT must not acquire KeyboardInterrupt behavior.
+    original_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    faults.after_open("plan.json", lambda: signal.raise_signal(signal.SIGINT))
+    try:
+        LocalArtifactStore(tmp_path).claim("plan.json", PLAN)
+
+        assert signal.getsignal(signal.SIGINT) == signal.SIG_IGN
+        assert snapshot(tmp_path) == {"plan.json": PLAN}
+    finally:
+        signal.signal(signal.SIGINT, original_handler)
 
 
 def test_a_failed_close_fails_the_claim_and_leaves_nothing(tmp_path: Path, faults: Faults) -> None:

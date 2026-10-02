@@ -11,6 +11,7 @@ import errno
 import hashlib
 import logging
 import os
+import signal
 import stat
 import sys
 from pathlib import Path
@@ -291,7 +292,8 @@ def test_a_directory_whose_creation_was_interrupted_is_synced_by_the_next_write(
 ) -> None:
     attempt = "1b4e28ba-2fa1-4d2b-883f-0016d3cca427"
     relative = f"cases/case-0123456789abcdef/attempts/{attempt}"
-    faults.after_mkdir(attempt, once(raises(KeyboardInterrupt())))
+    # A real SIGINT must wait until the new directory is recorded for the next write's syncs.
+    faults.after_mkdir(attempt, once(lambda: signal.raise_signal(signal.SIGINT)))
     with pytest.raises(KeyboardInterrupt):
         store.write(f"{relative}/started.json", b"{}\n")
     sync_log.take()

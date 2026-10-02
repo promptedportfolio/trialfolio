@@ -16,8 +16,8 @@ A store serves one output directory, its root, and takes paths relative to it.
   so a new directory's entry is durable too. On macOS, a sync is `fcntl.F_FULLFSYNC`, because
   `fsync` doesn't flush the drive's cache there. Windows syncs files only: Python can't open a
   directory there.
-- **Interrupts.** Each step records what it may create before it creates it, so an interrupt at
-  any point leaves a record to clean up from.
+- **Interrupts.** SIGINT is deferred during creation and ownership bookkeeping. Cleanup uses
+  successful exclusive creation and file identity, never an empty file as a guess at ownership.
 
 R01-T08 checked what each platform reports, on macOS 26.6.2 with Python 3.12.13:
 
@@ -39,12 +39,15 @@ import hashlib
 import logging
 import os
 import secrets
-import stat
+import signal
 import sys
-from collections.abc import Iterable
+import threading
+from collections.abc import Generator, Iterable
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final, Literal, NoReturn, Protocol
+from types import FrameType
+from typing import Final, NoReturn, Protocol
 
 from trialfolio.contracts.common import valid_relative_path
 from trialfolio.errors import TrialFolioError
@@ -169,7 +172,7 @@ class LocalArtifactStore:
         self._root = Path(os.path.abspath(root))
         self._claimed = False
         self._unsynced: list[Path] = []
-        """Directories this store may have created whose entry in their parent isn't synced."""
+        """Directories this store created whose entry in their parent isn't synced."""
         self._warned: set[str] = set()
 
     @property
@@ -284,28 +287,27 @@ class LocalArtifactStore:
             # _check_root found a parent, so it disappeared, because a competing claim that
             # created it failed and removed it.
             _not_empty("The output directory disappeared while Trial Folio claimed it.")
-        claim.file = "unsure"
+        descriptor: int | None = None
         try:
-            descriptor = os.open(claim.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, _MODE)
-        except FileExistsError:
-            claim.file = "absent"
-            _not_empty("The output directory isn't empty.")
-        except FileNotFoundError:
-            claim.file = "absent"
-            _not_empty("The output directory disappeared while Trial Folio claimed it.")
-        except OSError:
-            claim.file = "absent"
-            raise
-        claim.file = "created"
-        try:
+            try:
+                with _defer_sigint():
+                    descriptor = os.open(
+                        claim.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, _MODE
+                    )
+                    claim.file = os.fstat(descriptor)
+            except FileExistsError:
+                _not_empty("The output directory isn't empty.")
+            except FileNotFoundError:
+                _not_empty("The output directory disappeared while Trial Folio claimed it.")
             self._write_all(descriptor, data)
         finally:
-            os.close(descriptor)
+            if descriptor is not None:
+                os.close(descriptor)
         try:
             names = os.listdir(self._root)
         except FileNotFoundError:
             _not_empty("The output directory disappeared while Trial Folio claimed it.")
-        if claim.path.name not in names:
+        if claim.path.name not in names or not claim.owns_file():
             _not_empty("The output directory changed while Trial Folio claimed it.")
         if any(not _part_of(name, claim.path.name) for name in names):
             _not_empty(
@@ -379,17 +381,16 @@ class LocalArtifactStore:
 
 @dataclass
 class _Claim:
-    """What a claim may have created, recorded before it creates it."""
+    """What a claim created, recorded while SIGINT delivery is deferred."""
 
     path: Path
-    file: Literal["absent", "unsure", "created"] = "absent"
-    """Whether the claim created its file. While it's `unsure`, the claim was interrupted as it
-    opened the file, and an empty file there is taken to be its own."""
+    file: os.stat_result | None = None
+    """The identity read from the descriptor returned by a successful exclusive create."""
     directories: list[Path] = field(default_factory=list[Path])
     """Outermost first."""
 
     def undo(self) -> None:
-        if self.file == "created" or (self.file == "unsure" and _is_empty_file(self.path)):
+        if self.owns_file():
             _remove(self.path)
         for directory in reversed(self.directories):
             try:
@@ -399,14 +400,21 @@ class _Claim:
             except OSError:
                 return  # Another process wrote there; leave it and its parents as they are.
 
+    def owns_file(self) -> bool:
+        if self.file is None:
+            return False
+        try:
+            return os.path.samestat(self.file, os.lstat(self.path))
+        except OSError:
+            return False  # Missing, or ownership can't be checked; don't remove someone else's.
+
 
 def _make_directories(directory: Path, made: list[Path], stop: Path | None = None) -> list[Path]:
     """Creates `directory` and its missing parents, one at a time, outermost first, and returns
     those that were missing. A directory that another process creates first is used as it is.
     With `stop`, it creates nothing at or above it.
 
-    Each directory is added to `made` before it's created, and removed again if it can't be, so
-    an interrupt never leaves one it created out of `made`.
+    SIGINT is deferred until each successful creation is recorded in `made`.
     """
     missing: list[Path] = []
     for candidate in (directory, *directory.parents):
@@ -415,14 +423,13 @@ def _make_directories(directory: Path, made: list[Path], stop: Path | None = Non
         missing.append(candidate)
     missing.reverse()
     for candidate in missing:
-        made.append(candidate)
-        try:
-            os.mkdir(candidate)
-        except FileExistsError:
-            made.pop()  # If it isn't a directory, the next step fails with NotADirectoryError.
-        except OSError:
-            made.pop()
-            raise
+        with _defer_sigint():
+            try:
+                os.mkdir(candidate)
+            except FileExistsError:
+                pass  # If it isn't a directory, the next step fails with NotADirectoryError.
+            else:
+                made.append(candidate)
     return missing
 
 
@@ -459,12 +466,34 @@ def _part_of(name: str, claimed: str) -> bool:
     return name == claimed
 
 
-def _is_empty_file(path: Path) -> bool:
+@contextmanager
+def _defer_sigint() -> Generator[None, None, None]:
+    """Delays a callable SIGINT handler until a creation's ownership has been recorded.
+
+    Python delivers signal handlers only in the main thread. Workers therefore need no handler
+    changes; ignored or default OS dispositions are left alone too. Restore the caller's handler
+    before delivering a pending interrupt, including when the protected operation failed.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = signal.getsignal(signal.SIGINT)
+    if not callable(previous):
+        yield
+        return
+    pending: tuple[int, FrameType | None] | None = None
+
+    def defer(signum: int, frame: FrameType | None) -> None:
+        nonlocal pending
+        pending = (signum, frame)
+
     try:
-        status = os.lstat(path)
-    except OSError:
-        return False
-    return stat.S_ISREG(status.st_mode) and status.st_size == 0
+        signal.signal(signal.SIGINT, defer)
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous)
+        if pending is not None:
+            previous(*pending)
 
 
 def _remove(path: Path) -> None:
