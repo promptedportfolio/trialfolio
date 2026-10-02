@@ -15,13 +15,14 @@ At each release, regenerate the component tables from the resolved dependency se
 | p123api | Portfolio123 API wrapper; the only Portfolio123 code dependency. Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | Declared since R01-T06: 3.1.0 | MIT |
 | requests | HTTP client under p123api. Trial Folio's transport adapter subclasses its `HTTPAdapter` ([ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)). Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | Declared since R01-T06: 2.34.2 | Apache-2.0 |
 | urllib3 | HTTP library under requests. The adapter reads its connection errors ([ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)). Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | Declared since R01-T06: 2.8.0 | MIT |
-| pydantic | Contracts: validation and serialization | Planned for 0.1.0 (R01-T07) | MIT |
+| pydantic | Contracts: validation, serialization, and the generated JSON Schemas ([ADR 0002](docs/adrs/0002-pydantic-contracts-and-protocols.md)). Constrained to major version 2 (`>=2.13,<3`). | Declared since R01-T07: 2.13.5 | MIT |
+| PyYAML | Reads configuration files. Trial Folio builds values from its parse events, not its constructors (`src/trialfolio/configuration.py`). Constrained to `>=6,<7`. | Declared since R01-T07: 6.0.3 | MIT |
 
-Record any other dependency here when it's added, for example a YAML parser or a templating library, together with every package it brings in.
+Record any other dependency here when it's added, for example a templating library, together with every package it brings in.
 
-**The locked runtime set** (`uv export --frozen --no-dev --no-emit-project`, checked 2026-10-02): p123api 3.1.0, requests 2.34.2, urllib3 2.8.0, certifi 2026.7.22, charset-normalizer 3.5.2, idna 3.20, and typing_extensions 4.16.0. Each is the version whose license the next table records.
+**The locked runtime set** (`uv export --frozen --no-dev --no-emit-project`, checked 2026-10-02): p123api 3.1.0, pydantic 2.13.5, PyYAML 6.0.3, requests 2.34.2, urllib3 2.8.0, annotated-types 0.8.0, certifi 2026.7.22, charset-normalizer 3.5.2, idna 3.20, pydantic-core 2.46.5, typing-inspection 0.4.4, and typing_extensions 4.16.0. Each is the version whose license the next table records.
 
-Verified observation, checked 2026-10-01: p123api 3.1.0 (MIT, released 2026-08-25) depends on `requests` and `typing_extensions`, and has an optional pandas extra. `requests` in turn brings in `urllib3`, `charset-normalizer`, `idna`, and `certifi`.
+Verified observation, checked 2026-10-01: p123api 3.1.0 (MIT, released 2026-08-25) depends on `requests` and `typing_extensions`, and has an optional pandas extra. `requests` in turn brings in `urllib3`, `charset-normalizer`, `idna`, and `certifi`. Checked 2026-10-02 from package metadata: pydantic 2.13.5 depends on `pydantic-core`, `annotated-types`, `typing-inspection`, and `typing_extensions`, and PyYAML 6.0.3 depends on nothing.
 
 ## Licenses observed for the dependency set
 
@@ -29,7 +30,7 @@ Verified observation, checked 2026-10-01 against the versions listed. The table 
 
 | Component (version checked) | License | Requirement when bundled |
 |---|---|---|
-| p123api 3.1.0, pydantic 2.13.5, pydantic-core 2.46.5, annotated-types 0.8.0, typing-inspection 0.4.4, urllib3 2.8.0, charset-normalizer 3.5.2 | MIT | Include each copyright notice and permission notice |
+| p123api 3.1.0, pydantic 2.13.5, pydantic-core 2.46.5, annotated-types 0.8.0, typing-inspection 0.4.4, urllib3 2.8.0, charset-normalizer 3.5.2, PyYAML 6.0.3 (checked 2026-10-02) | MIT | Include each copyright notice and permission notice |
 | idna 3.20 | BSD-3-Clause | Reproduce the copyright notice, conditions, and disclaimer; don't use the copyright holders' or contributors' names to endorse or promote Trial Folio without permission |
 | requests 2.34.2 | Apache-2.0 | Provide the license text and carry the contents of its NOTICE file, currently "Requests / Copyright 2019 Kenneth Reitz"; mark any modified files as changed |
 | typing_extensions 4.16.0 | PSF-2.0 | Retain the PSF license agreement and copyright notice; include a summary of changes if modified |
@@ -47,6 +48,7 @@ These are never distributed. The `dev` dependency group in `pyproject.toml` inst
 |---|---|---|
 | pytest 9.1.1, with iniconfig 2.3.0, packaging 26.3, pluggy 1.6.0, Pygments 2.21.0, and, on Windows only, colorama 0.4.6 | Test runner | pytest, iniconfig, and pluggy MIT; packaging Apache-2.0 OR BSD-2-Clause; Pygments BSD-2-Clause; colorama BSD, by its classifier |
 | ruff 0.16.10 | Formatter and linter | MIT |
+| types-PyYAML 6.0.12.20260906 | Type stubs for PyYAML, for pyright | Apache-2.0 |
 | pyright 1.1.414, with nodeenv 1.11.0 | Type checker | pyright MIT; nodeenv BSD |
 | nodejs-wheel-binaries 24.19.0, through pyright's `nodejs` extra | The Node.js runtime pyright runs on, so pyright never downloads one | MIT, with Node.js's own license file in its `.dist-info/licenses` |
 | hatchling 1.32.4, pinned exactly in `[build-system]` | Build backend | MIT. Its build-time dependencies, resolved when a wheel is built, include pathspec (MPL-2.0), tomlkit (MIT), and trove-classifiers (Apache-2.0), checked at their current versions. |

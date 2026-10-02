@@ -1,0 +1,20 @@
+kind: screen
+schema_version: 1.0.0
+title: 'canary-title-5e1d0b7c'
+purpose: 'canary-purpose-9a42f6e1'
+universe: 'canary-universe-3c8b2d40'
+rules:
+  - 'canary-rule-one-71f0a9d3'
+  - 'canary-rule-two-0b6e4c52'
+ranking:
+  formula: 'canary-formula-d29a1e87'
+  lower_is_better: false
+max_holdings: 25
+benchmark: 'canary-benchmark-46c3f0b9'
+start_date: 2016-01-01
+end_date: 2025-12-31
+rebalance_weeks: 4
+transaction_price: open
+slippage_percent: 0.25
+pit_method: complete
+precision: 4

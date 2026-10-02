@@ -1,0 +1,300 @@
+"""Reading a screen configuration enforces docs/contracts.md's screen configuration rules.
+
+Traces to R01-AC02, R01-AC09, and R01-AC11 (Compustat) in release 0.1.0's test pairing, and to
+the configuration file rules in docs/contracts.md. The fixtures are in
+tests/fixtures/screen-configs/. `test_documented_example_resolves_to_reference_request` needs the
+planner, which maps a configuration to its request, so it arrives with R01-T10.
+"""
+
+import re
+from datetime import date
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+import pytest
+from pydantic import ValidationError
+
+from trialfolio.configuration import read_screen_configuration
+from trialfolio.contracts.screen_configuration import (
+    FormulaRanking,
+    IdRanking,
+    NameRanking,
+    ScreenConfiguration,
+)
+from trialfolio.errors import TrialFolioError
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FIXTURES = REPO_ROOT / "tests" / "fixtures" / "screen-configs"
+INVALID = FIXTURES / "invalid"
+
+
+def documented_example() -> str:
+    contracts = (REPO_ROOT / "docs" / "contracts.md").read_text(encoding="utf-8")
+    found = re.search(r"#### Example\n\n```yaml\n(.*?)```", contracts, re.DOTALL)
+    assert found, "docs/contracts.md has no screen configuration example"
+    return found.group(1)
+
+
+def read_fixture(name: str) -> ScreenConfiguration:
+    path = FIXTURES / name
+    return read_screen_configuration(path.read_bytes(), path.name)
+
+
+def rejection(content: bytes, source_name: str = "screen.yaml") -> str:
+    """Reads `content`, expects `config.invalid`, and returns the message."""
+    with pytest.raises(TrialFolioError) as caught:
+        read_screen_configuration(content, source_name)
+    assert caught.value.code == "config.invalid"
+    return caught.value.message
+
+
+def with_line(old: str, new: str) -> bytes:
+    """The documented example, with one line replaced."""
+    example = documented_example()
+    assert old in example
+    return example.replace(old, new, 1).encode()
+
+
+def test_documented_example_reads_as_documented() -> None:
+    configuration = read_screen_configuration(documented_example().encode(), "example.yaml")
+
+    assert configuration == ScreenConfiguration(
+        kind="screen",
+        schema_version="1.0.0",
+        title="Earnings yield with a liquidity floor",
+        purpose="Reference backtest for the 0.1.0 response layout.",
+        universe="SP500",
+        rules=("AvgDailyTot(30) > 1000000",),
+        ranking=FormulaRanking(formula="EarnYield", lower_is_better=False),
+        max_holdings=25,
+        benchmark="SPY",
+        start_date=date(2016, 1, 1),
+        end_date=date(2025, 12, 31),
+        rebalance_weeks=4,
+        transaction_price="open",
+        slippage_percent=Decimal("0.25"),
+        pit_method="complete",
+        precision=4,
+    )
+    assert configuration.data_vendor is None
+
+
+def test_formula_fixture_is_the_documented_example() -> None:
+    assert (FIXTURES / "formula.yaml").read_text(encoding="utf-8") == documented_example()
+
+
+@pytest.mark.parametrize("path", sorted(INVALID.glob("*.yaml")), ids=lambda path: path.stem)
+def test_invalid_configuration_is_rejected_naming_its_key(path: Path) -> None:
+    content = path.read_bytes()
+    key = re.search(r"^# Key: (.+)$", content.decode(), re.MULTILINE)
+    assert key, f"{path.name} has no '# Key:' line"
+
+    message = rejection(content, path.name)
+
+    assert message.startswith(f"{path.name} isn't a valid configuration:")
+    if key.group(1) != "-":
+        assert f"`{key.group(1)}`" in message
+
+
+def test_every_invalid_case_is_in_its_readme() -> None:
+    readme = (INVALID / "README.md").read_text(encoding="utf-8")
+    listed = set(re.findall(r"^\| `([a-z0-9-]+)\.yaml` \|", readme, re.MULTILINE))
+
+    assert listed == {path.stem for path in INVALID.glob("*.yaml")}
+
+
+@pytest.mark.parametrize(
+    "name", ["missing-start-date", "missing-end-date", "missing-slippage-percent"]
+)
+def test_dates_and_slippage_have_no_default(name: str) -> None:
+    """R01-AC09: never today, and never zero."""
+    path = INVALID / f"{name}.yaml"
+    key = name.removeprefix("missing-").replace("-", "_")
+
+    assert f"`{key}` is required." in rejection(path.read_bytes(), path.name)
+
+
+def test_written_differently_reads_the_same() -> None:
+    """Key order, `0.250`, and quoted dates don't change the configuration (R01-AC25's input)."""
+    assert read_fixture("written-differently.yaml") == read_fixture("vendor-factset.yaml")
+
+
+def test_factset_is_the_only_vendor() -> None:
+    """R01-AC11: an explicit FactSet is accepted; Compustat is rejected."""
+    assert read_fixture("vendor-factset.yaml").data_vendor == "FactSet"
+    path = INVALID / "vendor-compustat.yaml"
+    assert "`data_vendor` must be FactSet" in rejection(path.read_bytes())
+
+
+@pytest.mark.parametrize(
+    ("name", "ranking"),
+    [
+        ("formula.yaml", FormulaRanking(formula="EarnYield", lower_is_better=False)),
+        ("ranking-name.yaml", NameRanking(name="Synthetic Value Composite")),
+        ("ranking-id.yaml", IdRanking(id=424242)),
+    ],
+)
+def test_each_ranking_form_reads(name: str, ranking: object) -> None:
+    assert read_fixture(name).ranking == ranking
+
+
+def test_non_ascii_title_is_kept() -> None:
+    assert read_fixture("title-non-ascii.yaml").title.startswith("Café screen")
+
+
+def test_canaries_fixture_is_valid() -> None:
+    assert read_fixture("canaries.yaml").universe == "canary-universe-3c8b2d40"
+
+
+@pytest.mark.parametrize(
+    ("written", "normalized"),
+    [
+        ("0.25", "0.25"),
+        ("0.250", "0.25"),
+        ("1", "1"),
+        ("1.0", "1"),
+        ("100", "100"),
+        ("0", "0"),
+        ("0.0001", "0.0001"),
+        ("123456789012345", "123456789012345"),
+    ],
+)
+def test_slippage_is_normalized(written: str, normalized: str) -> None:
+    """Decimals are read from their text and normalized: trailing zeros go, then the point."""
+    content = with_line("slippage_percent: 0.25", f"slippage_percent: {written}")
+
+    assert str(read_screen_configuration(content, "screen.yaml").slippage_percent) == normalized
+
+
+def test_byte_order_mark_is_ignored() -> None:
+    content = b"\xef\xbb\xbf" + documented_example().encode()
+
+    assert read_screen_configuration(content, "screen.yaml").title.startswith("Earnings")
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (b"", "The file is empty."),
+        (b"\xff\xfekind: screen\n", "The file isn't UTF-8 text."),
+        (b"kind: [screen\n", "The file isn't valid YAML at line"),
+    ],
+    ids=["empty", "not-utf-8", "not-yaml"],
+)
+def test_file_level_problems_are_rejected(content: bytes, expected: str) -> None:
+    assert expected in rejection(content)
+
+
+def test_alias_is_rejected() -> None:
+    content = with_line("title: Earnings yield with a liquidity floor", "title: *name")
+
+    assert "`title` is an alias." in rejection(content)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "key"),
+    [
+        ("benchmark: SPY", "benchmark: SPY\npassword: hunter2", "password"),
+        ("benchmark: SPY", "benchmark: SPY\nAPI-Key: hunter2", "API-Key"),
+        ("benchmark: SPY", "benchmark: SPY\np123_token: hunter2", "p123_token"),
+        (
+            "  lower_is_better: false",
+            "  lower_is_better: false\n  secret: hunter2",
+            "ranking.secret",
+        ),
+    ],
+)
+def test_credential_like_keys_are_rejected(old: str, new: str, key: str) -> None:
+    message = rejection(with_line(old, new))
+
+    assert f"`{key}` looks like a credential." in message
+    assert "hunter2" not in message
+
+
+def test_messages_never_include_values() -> None:
+    """Errors are logged without input values (Pydantic conventions; REQ-06)."""
+    canary = "canary-7e3f19ab"
+    content = f"""\
+kind: screen
+schema_version: 1.0.0
+title: '{canary * 20}'
+purpose: '{canary}'
+universe: ['{canary}']
+rules: '{canary}'
+ranking:
+  formula: '{canary}'
+  lower_is_better: '{canary}'
+max_holdings: '{canary}'
+benchmark: ['{canary}']
+start_date: '{canary}'
+end_date: 2015-01-01
+rebalance_weeks: '{canary}'
+transaction_price: '{canary}'
+slippage_percent: '{canary}'
+pit_method: '{canary}'
+precision: '{canary}'
+data_vendor: '{canary}'
+""".encode()
+
+    message = rejection(content)
+
+    for key in (
+        "title",
+        "universe",
+        "rules",
+        "ranking.lower_is_better",
+        "max_holdings",
+        "benchmark",
+        "start_date",
+        "rebalance_weeks",
+        "transaction_price",
+        "slippage_percent",
+        "pit_method",
+        "precision",
+        "data_vendor",
+    ):
+        assert f"`{key}`" in message
+    assert canary not in message
+
+
+VALID: dict[str, Any] = {
+    "kind": "screen",
+    "schema_version": "1.0.0",
+    "title": "A title",
+    "universe": "SP500",
+    "rules": ["AvgDailyTot(30) > 1000000"],
+    "ranking": {"formula": "EarnYield", "lower_is_better": False},
+    "max_holdings": 25,
+    "benchmark": "SPY",
+    "start_date": date(2016, 1, 1),
+    "end_date": date(2025, 12, 31),
+    "rebalance_weeks": 4,
+    "transaction_price": "open",
+    "slippage_percent": Decimal("0.25"),
+    "pit_method": "complete",
+    "precision": 4,
+}
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("purpose", None),
+        ("data_vendor", None),
+        ("slippage_percent", 0.25),
+        ("slippage_percent", True),
+        ("slippage_percent", Decimal("-0.25")),
+        ("slippage_percent", Decimal("NaN")),
+        ("rebalance_weeks", True),
+        ("precision", Decimal(4)),
+        ("start_date", "2016-1-1"),
+        ("max_holdings", 2**53),
+    ],
+)
+def test_model_rejects_what_the_contract_calls_invalid(key: str, value: object) -> None:
+    """A model that accepts something docs/contracts.md calls invalid has a defect, whatever
+    the reader does first."""
+    ScreenConfiguration.model_validate(VALID)
+    with pytest.raises(ValidationError):
+        ScreenConfiguration.model_validate({**VALID, key: value})

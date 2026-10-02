@@ -1,0 +1,4 @@
+# Invalid: A file is a mapping of keys to values.
+# Key: -
+- kind: screen
+- schema_version: 1.0.0

@@ -1,9 +1,9 @@
 # Trial Folio contracts
 
-**Status:** Draft. Nothing here is implemented; no models, schemas, or fixtures exist yet.
+**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures. Nothing else here is implemented yet.
 **Date:** 2026-10-01
 
-This document owns the meaning of Trial Folio's interfaces and artifacts: configuration files, saved artifacts, identifiers, metric values, errors, CLI behavior, reports, and logs. When implemented, Pydantic models under `src/trialfolio/contracts/` will define the executable structures, JSON Schemas generated from them under `schemas/` will publish those structures, and tests with fixtures under `tests/fixtures/` will provide conformance evidence. This prose stays authoritative for meaning. If a model accepts something this document says is invalid, the model has a defect.
+This document owns the meaning of Trial Folio's interfaces and artifacts: configuration files, saved artifacts, identifiers, metric values, errors, CLI behavior, reports, and logs. Pydantic models under `src/trialfolio/contracts/` define the executable structures, JSON Schemas generated from them under `schemas/` publish those structures, and tests with fixtures under `tests/fixtures/` provide conformance evidence. This prose stays authoritative for meaning. If a model accepts something this document says is invalid, the model has a defect.
 
 Structures appear here as lists of concepts, not field-by-field schemas. Each release specification states which concepts it introduces and which schema versions it ships. Examples are illustrative until an implementation validates them.
 
@@ -83,9 +83,11 @@ Configuration files are YAML documents owned by the user. The rules apply to eve
 - Each file declares `kind` (`screen` from 0.1.0, `review` from 0.2.0, `experiment` from 0.3.0) and `schema_version`.
 - Unknown keys are rejected, so misspellings fail instead of being ignored.
 - YAML is loaded with a safe loader. Values are not coerced: a percentage is written as a number with a declared unit, not as `"5%"`; dates use `YYYY-MM-DD`; booleans are `true` or `false` only.
-- Configuration never contains credentials. A credential-like key is rejected.
+- Configuration never contains credentials. A credential-like key is rejected, at any depth. A key is credential-like when its name, ignoring case and reading `-` as `_`, contains `password`, `passwd`, `secret`, `token`, `credential`, `authorization`, `bearer`, `api_key`, `apikey`, `api_id`, or `apiid`.
 - File paths inside a configuration are resolved relative to the configuration file.
 - Duplicate keys are rejected; a YAML loader must not silently keep the last one.
+- A file is UTF-8 text, with or without a byte-order mark, and holds one YAML document: a mapping whose keys are text. Null values, anchors, aliases, and explicit tags are rejected. To omit an optional key, leave it out; don't write it empty.
+- Error messages name each offending key, and never include its value, so they're safe to log.
 
 ### Screen configuration
 
@@ -455,6 +457,7 @@ Schema version 1.0.0. `metrics.csv` and `settings.csv` are introduced in 0.1.0, 
 - **Empty cells.** A cell is empty only where a column allows it. An empty value always comes with a reason in the row's reason column.
 - **Row order.** Results appear in the order the configuration lists them. Within a result, rows follow the layout mapping's order, so the output is deterministic.
 - **Compatibility.** New columns are appended only, and adding one is a schema change under [artifact compatibility](#artifact-compatibility).
+- **Schemas.** `schemas/metrics-row-1.0.0.schema.json` and `schemas/settings-row-1.0.0.schema.json` each describe one row, after a CSV adapter step has read its cells: an empty cell is `null`, `critical` is a boolean, `source_decimals` is an integer, the period dates are dates, and `flags` is an array of codes. A property's position is its column's.
 
 ### `metrics.csv`
 
@@ -555,6 +558,16 @@ An attempt has two records in its directory, `cases/<case_id>/attempts/<attempt_
 
 An attempt with a start record and no attempt record is `running` ([uncertain completion](#uncertain-completion)).
 
+**Field shapes.** Both records name the installed versions as the plan does, in `provider_wrapper` and `transport` ([plan contents](#plan-contents)). In the attempt record:
+
+- **`outcome`** is `succeeded`, `failed`, or `unknown`. `running` is how a start record without an attempt record reads; it's never written.
+- **`error`** is `{"code": …, "message": …}`, and `null` exactly when the outcome is `succeeded`.
+- **`request` and `response`** reference files by `path`, relative to the output root, and `artifact_id`. `response.form` is `decoded` for `response.json`, or `undecoded` for `response.raw`. A `succeeded` attempt always references its response.
+- **`provider_metadata`** holds `cost` and `quota_remaining`, Portfolio123's `quotaRemaining`. Each is `null` when the response doesn't carry it.
+- **`possibly_charged`** is true exactly when an exchange other than Trial Folio's `POST /auth` has a result other than `not_connected` ([possibly charged](#http-exchanges)). An `unknown` attempt is always possibly charged.
+
+`schemas/start-record-1.0.0.schema.json` and `schemas/attempt-record-1.0.0.schema.json` give every field.
+
 Trial Folio saves decoded provider payloads, which is what the wrapper exposes, and labels them as decoded payloads. It doesn't capture HTTP headers, and it keeps a raw body only in one case: a 200 the wrapper can't decode, which it saves as `response.raw`, labeled undecoded ([HTTP exchanges](#http-exchanges)). Trial Folio configures the wrapper for a single HTTP attempt per call, and its adapter allows one exchange per call, as below. So the request is sent at most once, and running the command again is a new attempt.
 
 ### HTTP exchanges
@@ -651,6 +664,8 @@ Each case holds:
 - **Expected provenance.** Nothing in a plan has been sent yet, so no value in it is `verified` ([provenance](#provenance)). Instead, each row records `expected_provenance`: the provenance the value will have once the request is sent. Values in the request expect `verified`. `settings.csv` records the actual provenance after the attempt.
 - **Flags known before execution.** These are `inferred_default` and `not_snapshotted`. `coverage_mismatch` needs the response, so it appears only in `settings.csv`.
 - **No trace of how the file was written.** The four columns left out depend on how the configuration file is written. So two files that resolve to the same settings give the same plan, for example an omitted `data_vendor` and an explicit `FactSet` ([D-16](spec.md#decisions)), or `0.250` and `0.25`.
+
+**Field shapes.** `provider_wrapper` is `{"p123api": "<version>"}`, and `transport` is `{"requests": "<version>", "urllib3": "<version>"}`. The budget records its documented cost's source in `credits_per_request_source`, with the page's `title`, its `url`, and the date it was `checked`. Each `data_sent` entry has a `category`, the `recipient`, `Portfolio123`, `via`, `p123api`, and `settings`, the names of the settings it carries, which is empty for `credentials`. `schemas/plan-1.0.0.schema.json` gives every field.
 
 ### Budget and retries
 
@@ -777,12 +792,17 @@ Release 0.2.0 defines the review layout. The proposal is `inputs/<label>/`, hold
 The manifest records:
 
 - `schema_version`, `artifact_type` (`review`, `run`, or `experiment`), `trialfolio_version`, and the creation time in UTC.
-- The command and its non-secret options.
+- The command, `run` or `demo`, its non-secret options, and when it started, so that the manifest gives the run's duration.
+- `synthetic`: true exactly for the run `trialfolio demo` writes.
+- The `outcome`, `completed`, `partial`, or `failed`, and the `error`, as the [JSON summary](#json-summary) gives them.
 - For a run or an experiment, the `plan_hash` and how the plan was approved: `interactive` or `option` ([approval](#approval)). The synthetic run `trialfolio demo` writes sends nothing, so its approval is `not_required`.
-- Every input and output artifact with its `artifact_id`.
-- Parser versions, `license_id`, and `notice_version`.
-- A capability statement of what the artifact does and does not contain. For example, it says whether return series are present, and states `statistical_validation: not_assessed` and `trading_readiness: not_assessed`.
-- Counts: results, cases, attempts by outcome, provider requests as the [JSON summary](#json-summary) counts them, retries, and returned cost or quota metadata.
+- Every input and output artifact with its path, `artifact_id`, size, role, and schema version when it has one. A source artifact also carries its [source record](#source-artifacts): when it was acquired, its format and version, the parser version, its provenance, and the provider operation. `logs/` isn't listed.
+- Parser versions, one for each provider layout, together with the layout's version; `license_id`; and `notice_version`.
+- A capability statement of what the artifact does and does not contain. `return_series` is `source_only` when a saved response holds per-period series, which 0.1.0 preserves but doesn't normalize, chart, or analyze, and `absent` otherwise. It states `statistical_validation: not_assessed` and `trading_readiness: not_assessed`.
+- Reproducibility: each external reference, by setting, and whether it was snapshotted. The status is `incomplete` when any wasn't, and `complete` otherwise.
+- Counts: results, cases, attempts by outcome, provider requests as the [JSON summary](#json-summary) counts them, retries, and the cost Portfolio123 reported. `quotaRemaining` is account information, and manifests may be shared ([D-14](spec.md#decisions)), so it stays in the attempt record.
+
+`schemas/run-manifest-1.0.0.schema.json` gives every field.
 
 Raw files and JSON metadata come first, and normalized tables are CSV. Parquet MAY be added for large tables when needed. SQLite MAY later index outputs, but it MUST NOT become a first-release prerequisite or the only copy of any evidence.
 
@@ -903,6 +923,8 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
 | `counts` | For `run`: `attempts`; `provider_requests`, the sends of the planned request that may have reached Portfolio123, never authentication ([HTTP exchanges](#http-exchanges)), which the [budget](#budget-and-retries) limits; `metrics_unavailable`; `warnings`; and the credit `cost` when the provider reports it. For `review` (0.2.0): `results`, `settings_flagged`, `metrics_unavailable`, `warnings`. |
 | `statistical_validation`, `trading_readiness` | `not_assessed` in every 0.x release that doesn't assess them |
 | `error` | `null`, or `{"code": …, "message": …}` using the codes in [errors](#errors) |
+
+`ids` and `outputs` leave out a key that has no value, rather than writing `null`. `counts` is `{}` for `report` and `license`. When `outcome` is `completed`, `exit_code` is 0 and `error` is `null`. Otherwise `exit_code` is the error code's exit code, and `outcome` is `partial` exactly for `execution.partial`. `schemas/json-summary-1.0.0.schema.json` gives every field.
 
 ### License acknowledgment
 
@@ -1040,11 +1062,24 @@ Expected outputs change only with a stated reason. Reference responses procured 
 - Cross-field rules are validators, for example date ordering, a baseline that names an existing result, and a benchmark-relative metric that requires a benchmark.
 - Large tables stay in CSV (later, possibly Parquet), not in per-row models.
 - Frozen models are used for plans and resolved configurations. Frozen models do not make nested mutable objects or saved files immutable; immutability on disk comes from the `ArtifactStore`.
+- A `Literal` of integers, such as `rebalance_weeks`' `1` or `4`, also requires an integer. A literal compares by equality, so without that, `true` would pass as 1, and `4.0` as 4.
 - Pydantic is constrained to major version 2, and the tested dependency resolution is recorded.
 
 ## Schema generation and drift
 
 JSON Schemas are generated from the models, never maintained by hand, and committed under `schemas/`, one file for each contract and each schema version that has a reader. The generation mode, validation or serialization, is stated wherever the two differ. `scripts/schemas` writes them. `scripts/schemas --check` is the drift check: it generates every schema in memory, compares the result with `schemas/`, lists each file that differs, is missing, or is extra, and fails if there's any. `scripts/check` runs it. Schemas do not encode every semantic validator, so the runtime semantics are tested separately.
+
+`scripts/schemas` writes these files, and removes any other file from `schemas/`. Each one's `$comment` names its model and mode, and says whether the other mode differs. A configuration is input, so its schema is in validation mode. Every other contract is written by Trial Folio, so its schema is in serialization mode; for each of those, the two modes give the same schema.
+
+| File | Contract |
+|---|---|
+| `screen-configuration-1.0.0.schema.json` | [Screen configuration](#screen-configuration) |
+| `plan-1.0.0.schema.json` | [Plan](#plan-contents) |
+| `start-record-1.0.0.schema.json`, `attempt-record-1.0.0.schema.json` | [Start and attempt records](#execution-outcomes-and-attempts) |
+| `run-manifest-1.0.0.schema.json` | [Run manifest](#artifact-storage) |
+| `metrics-row-1.0.0.schema.json`, `settings-row-1.0.0.schema.json` | One row of each [normalized table](#normalized-tables) |
+| `json-summary-1.0.0.schema.json` | [JSON summary](#json-summary) |
+| `license-acknowledgment.schema.json` | [License acknowledgment record](#license-acknowledgment), which has no schema version |
 
 ## Open questions
 

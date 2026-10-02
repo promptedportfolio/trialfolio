@@ -2,7 +2,7 @@
 
 Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and eventually evaluating Portfolio123 strategy evidence with scientific discipline. This file is the entry point for coding agents. It links to the documents that own each requirement; it does not repeat them.
 
-**Current state (2026-10-02):** Release [0.1.0](docs/releases/0.1.0-api-execution.md) is Ready and being implemented. R01-T06 scaffolded the project: the `uv` project, the pinned dependencies, pytest with its markers and the network guard, `scripts/setup`, and `scripts/check`. No application code, models, schemas, or fixtures exist yet. The next task is R01-T07.
+**Current state (2026-10-02):** Release [0.1.0](docs/releases/0.1.0-api-execution.md) is Ready and being implemented. R01-T06 scaffolded the project: the `uv` project, the pinned dependencies, pytest with its markers and the network guard, `scripts/setup`, and `scripts/check`. R01-T07 built the contracts: the Pydantic models in `src/trialfolio/contracts/`, the configuration reader in `src/trialfolio/configuration.py`, the schemas under `schemas/` with `scripts/schemas`, and the screen configuration fixtures. No other application code exists yet. The next task is R01-T08.
 
 ## Reading order
 
@@ -45,9 +45,9 @@ R01-T06 set these up. The status column says which have been verified, and when.
 |---|---|---|
 | `scripts/setup` | Once per clone: enable the Git hooks | Verified 2026-10-02 |
 | `uv sync` | Create the environment | Verified 2026-10-02 |
-| `scripts/check` | Every check that needs no credentials or reference data; the `pre-push` hook runs it | Verified 2026-10-02. The schema drift check joins it in R01-T07. Until R01-T16, a pytest step that collects no tests passes. |
+| `scripts/check` | Every check that needs no credentials or reference data; the `pre-push` hook runs it | Verified 2026-10-02, with the schema drift check since R01-T07. Until R01-T16, a pytest step that collects no tests passes. |
 | `uv run pytest` | Default suite; network access blocked; no live calls | Verified 2026-10-02 |
-| `scripts/schemas` | Regenerate the JSON Schemas under `schemas/`; `--check` is the drift check | Intended; R01-T07 adds it |
+| `scripts/schemas` | Regenerate the JSON Schemas under `schemas/`; `--check` is the drift check | Verified 2026-10-02 |
 | `uv run pytest -m packaging` | Build the wheel, inspect it, and run the demo from a clean install | Marker verified 2026-10-02, and the offline build and clean install by hand; the tests arrive in R01-T16 |
 | `TRIALFOLIO_REFERENCE_DIR=reference uv run pytest -m reference` | Conformance against local reference data (opt-in) | Marker verified 2026-10-02; the tests arrive in R01-T16 |
 | `uv run pytest -m live` | Live Portfolio123 checks (opt-in, with credentials and a budget in `TRIALFOLIO_LIVE_BUDGET_CREDITS`) | Marker verified 2026-10-02; the test arrives in R01-T16 |

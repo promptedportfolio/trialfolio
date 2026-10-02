@@ -4,7 +4,7 @@
 **Date:** 2026-10-01
 **Owner:** Nathan Slaughter
 
-This document owns Trial Folio's purpose, vocabulary, enduring invariants, enduring product requirements, and the record of owner decisions. Release scope lives in [releases/](releases/), interface semantics in [contracts.md](contracts.md), research design in [methodology.md](methodology.md), and legal terms in [../LICENSE](../LICENSE) and [licensing-policy.md](licensing-policy.md). Nothing described here is implemented yet.
+This document owns Trial Folio's purpose, vocabulary, enduring invariants, enduring product requirements, and the record of owner decisions. Release scope lives in [releases/](releases/), interface semantics in [contracts.md](contracts.md), research design in [methodology.md](methodology.md), and legal terms in [../LICENSE](../LICENSE) and [licensing-policy.md](licensing-policy.md). Release 0.1.0 is being implemented; [AGENTS.md](../AGENTS.md) gives its current state.
 
 Requirement keywords follow the [spec authoring guide](spec-authoring-guide.md#2-interpret-requirements-and-uncertainty-consistently): MUST for required behavior, SHOULD for a default whose exceptions need a documented reason, MAY for optional behavior.
 

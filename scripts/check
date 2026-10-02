@@ -46,6 +46,9 @@ step "Types"
 # Without this, the pyright wrapper asks PyPI for its latest version on every run.
 PYRIGHT_PYTHON_IGNORE_WARNINGS=1 uv run pyright
 
+step "Schemas"
+scripts/schemas --check
+
 step "Tests"
 run_pytest
 

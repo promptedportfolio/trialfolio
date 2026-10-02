@@ -1,6 +1,6 @@
 # Trial Folio documentation
 
-These are the specifications for Trial Folio. Nothing in them is implemented yet. Each document owns one kind of requirement. The other documents reference it instead of copying it, and a contradiction between documents is a defect to fix.
+These are the specifications for Trial Folio. Release 0.1.0 is being implemented; [AGENTS.md](../AGENTS.md) gives its current state. Each document owns one kind of requirement. The other documents reference it instead of copying it, and a contradiction between documents is a defect to fix.
 
 ## Where to start
 
@@ -40,7 +40,7 @@ At the repository root:
 
 ## How the documents fit together
 
-- **Meanings and structures.** The product spec defines enduring obligations, and methodology defines what scientific assessments mean. Release specs define each increment, and contract prose defines interface meaning. Once implemented, Pydantic models define structure, and the JSON Schemas generated from them publish it.
+- **Meanings and structures.** The product spec defines enduring obligations, and methodology defines what scientific assessments mean. Release specs define each increment, and contract prose defines interface meaning. Pydantic models define structure, and the JSON Schemas generated from them publish it.
 - **Evidence and history.** Tests provide conformance evidence, and ADRs record decisions and their history.
 - **Legal documents.** LICENSE, adopted on 2026-10-02, controls the legal grant. Other documents summarize it and never expand it.
 - **Release status.** Each release file's **Status** line is the only progress record: Draft, Ready, Implemented, or Released. Implemented means the release works and is used privately. Released means it is distributed through the chosen channel under the adopted license ([D-08](spec.md#decisions), [D-22](spec.md#decisions)). The public repository isn't a release.
