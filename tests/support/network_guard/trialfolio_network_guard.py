@@ -12,22 +12,31 @@ back a name the guard won't look up, as it does when a lookup fails.
 
 A refusal raises ``NetworkAccessRefused``. It derives from ``BaseException``, so no
 ``except Exception`` or ``except OSError`` handler, in Trial Folio, ``requests``, or ``urllib3``,
-can mistake it for a provider failure and carry on. A test that reaches another host fails. In
-the test process, pytest's warning about an exception in a background thread is an error. A
-subprocess refused anything, in any thread, exits with status 70 when it ends, even if the
-refusal was caught.
+can mistake it for a provider failure and carry on. The guard also records each refusal, so that
+one that is caught, or left in a future nobody reads, still counts: the root conftest fails the
+test it happened in, and a subprocess refused anything, in any thread, exits with status 70 when
+it ends. A test that provokes a refusal on purpose takes it with ``take_refusals()``.
 
 The guard also keeps itself in subprocesses that ``subprocess`` starts, including shell commands
 and ``os.popen``. A child's environment, whether passed or inherited, gets this directory first on
-PYTHONPATH. If it names no proxy variable at all, it also gets ``NO_PROXY=*``, so a proxy on
-localhost, such as one from macOS's system settings, can't relay its requests; an environment
-that names one, as a test of proxy handling does, keeps exactly what it says. Python started with
-``-I``, ``-E``, or ``-S``, which skip ``sitecustomize``, is refused. A child started another way,
-such as with ``os.system`` or ``os.execve``, must keep PYTHONPATH and its proxy settings itself.
+PYTHONPATH. If it sets no proxy variable to a value, it also loses any empty one and gets
+``NO_PROXY=*``, so a proxy on localhost, such as one from macOS's system settings, can't relay its
+requests; an environment that sets one, as a test of proxy handling does, keeps exactly what it
+says. A command that would start Python without the guard is refused: with ``-I``, ``-E``, or
+``-S``, which skip ``sitecustomize``, even behind a wrapper such as ``env`` or ``uv run``; or after
+changing PYTHONPATH, or clearing the environment with ``env -i``, before it. A test that needs
+another PYTHONPATH passes ``env``. What the guard can't see, a child must keep itself: one started
+another way, such as with ``os.system`` or ``os.execve``; a wrapper that clears the environment
+on its own, such as ``sudo``; and a command inside another, such as a shell's ``-c`` string.
+
+On Windows, asyncio's default event loop connects and sends through the system's overlapped
+calls, not through ``socket``. So its connections to an address, rather than a name, aren't
+refused there. Trial Folio and its dependencies don't use asyncio.
 
 Only the live check lifts the guard, and only partly: it names Portfolio123's API host in
 ``TRIALFOLIO_TEST_NETWORK_ALLOW``, in the environment of its one ``trialfolio run`` subprocess.
-That process may then look the host up, and reach the addresses the lookup returned.
+That process may then look the host up, and reach the addresses the lookup returned. Its
+``sitecustomize`` removes the variable from its environment, so nothing it starts inherits it.
 """
 
 from __future__ import annotations
@@ -60,6 +69,11 @@ _ADDRESS_ARGUMENT = {"connect": 0, "connect_ex": 0, "sendto": -1, "sendmsg": 3}
 # ...).
 _POPEN_POSITION = {"args": 0, "executable": 2, "shell": 8, "env": 10}
 
+# The characters that join, group, or redirect commands in a shell. A run of them is a word of its
+# own, as in `true;python`. Those without a redirection end one command and start another.
+_SHELL_PUNCTUATION = ";&|()`\n<>"
+_SEPARATORS = frozenset(";&|()`\n")
+
 # The status a subprocess exits with, when it ends, after any refusal.
 REFUSED_EXIT_STATUS = 70
 
@@ -71,9 +85,10 @@ _originals: dict[tuple[Any, str], tuple[Any, bool]] = {}
 _allowed_names: set[str] = set()
 _allowed_addresses: set[str] = set()
 
-# Whether this process exits with REFUSED_EXIT_STATUS after a refusal, and whether one happened.
+# Whether this process exits with REFUSED_EXIT_STATUS after a refusal, and the refusals that
+# take_refusals() hasn't taken.
 _exit_after_refusal = False
-_refused = False
+_refusals: list[str] = []
 
 
 class NetworkAccessRefused(BaseException):
@@ -81,19 +96,25 @@ class NetworkAccessRefused(BaseException):
 
 
 def _refuse(what: str) -> NoReturn:
-    global _refused
-    _refused = True
-    raise NetworkAccessRefused(
-        f"network guard: refused {what}; tests may reach only localhost (P-12)"
-    )
+    message = f"network guard: refused {what}; tests may reach only localhost (P-12)"
+    _refusals.append(message)
+    raise NetworkAccessRefused(message)
+
+
+def take_refusals() -> list[str]:
+    """The refusals since the last call, which no longer count. A test that provokes one on
+    purpose takes it, so that the root conftest doesn't fail the test for it."""
+    taken = _refusals[:]
+    del _refusals[: len(taken)]  # Without any a thread has just added.
+    return taken
 
 
 def exit_after_refusal(enabled: bool) -> bool:
-    """Set whether this process, once refused anything, exits with REFUSED_EXIT_STATUS when it
-    ends, counting refusals from now on. Returns the previous setting. A pytest process turns it
-    off, because pytest reports refusals, and turns it back on after its run."""
-    global _exit_after_refusal, _refused
-    previous, _exit_after_refusal, _refused = _exit_after_refusal, enabled, False
+    """Set whether this process exits with REFUSED_EXIT_STATUS when it ends, if any refusal is
+    left that nothing took. Returns the previous setting. The root conftest turns it off, because
+    it reports refusals itself, and back on after the run if the guard stays."""
+    global _exit_after_refusal
+    previous, _exit_after_refusal = _exit_after_refusal, enabled
     atexit.unregister(_exit_if_refused)
     if enabled:
         atexit.register(_exit_if_refused)
@@ -101,7 +122,7 @@ def exit_after_refusal(enabled: bool) -> bool:
 
 
 def _exit_if_refused() -> None:
-    if not (_exit_after_refusal and _refused):
+    if not (_exit_after_refusal and _refusals):
         return
     for stream in (sys.stdout, sys.stderr):
         stream.flush()
@@ -226,46 +247,115 @@ def _set(env: dict[Any, Any], name: str, value: str) -> None:
         env[name] = value
 
 
+def _is_proxy_variable(key: object) -> bool:
+    return _variable(key).lower().endswith("_proxy")
+
+
+def without_proxies(env: Mapping[Any, Any]) -> dict[Any, Any]:
+    """A copy of env in which no proxy applies: without its proxy variables, and with NO_PROXY=*,
+    which also turns off the system's proxies.
+
+    Where variable names are case-sensitive, it sets no_proxy=* too, which requests reads first.
+    A test of proxy handling in the test process removes both.
+    """
+    copy = {key: value for key, value in env.items() if not _is_proxy_variable(key)}
+    for name in ("NO_PROXY",) if os.name == "nt" else ("NO_PROXY", "no_proxy"):
+        _set(copy, name, "*")
+    return copy
+
+
 def child_environment(env: Mapping[Any, Any]) -> dict[Any, Any]:
-    """The environment a child gets: env with the guard first on PYTHONPATH and, if env names
-    no proxy variable at all, NO_PROXY=* so that no system proxy applies."""
+    """The environment a child gets: env with the guard first on PYTHONPATH, and without_proxies()
+    unless env sets a proxy variable to a value. urllib ignores empty ones, and with none left,
+    falls back to the system's proxies."""
     copy = with_guard_path(env)
-    if not any(_variable(key).lower().endswith("_proxy") for key in copy):
-        for name in ("NO_PROXY",) if os.name == "nt" else ("NO_PROXY", "no_proxy"):
-            _set(copy, name, "*")
+    if not any(value for key, value in copy.items() if _is_proxy_variable(key)):
+        copy = without_proxies(copy)
     return copy
 
 
 def _python_kind(program: str) -> str | None:
-    """'python' for a Python interpreter, 'py' for the Windows launcher, otherwise None."""
+    """'python' for a Python interpreter, such as python3.13t or pypy3, 'py' for the Windows
+    launcher, otherwise None."""
+    import re
+
     name = os.path.basename(program).lower().removesuffix(".exe")
     if name in ("py", "pyw"):
         return "py"
-    return "python" if name.startswith(("python", "pypy")) else None
+    return "python" if re.fullmatch(r"(python|pypy)[\d.]*[a-z]?(-\w+)?", name) else None
 
 
-def _check_shell_command(command: str) -> None:
-    """Refuse a shell command that starts Python with an option that skips sitecustomize."""
+def _shell_words(command: str) -> list[str]:
+    """A shell command's words, and its punctuation, such as `;` or `&&`, as words of its own."""
     import shlex
 
+    posix = os.name != "nt"
+    lexer = shlex.shlex(command, posix=posix, punctuation_chars=_SHELL_PUNCTUATION)
+    lexer.whitespace = " \t\r"  # A newline ends a command.
+    lexer.whitespace_split = True
+    lexer.commenters = ""
     try:
-        words = shlex.split(command, posix=os.name != "nt")
+        words = list(lexer)
     except ValueError:
-        return  # The shell rejects unbalanced quotes itself.
+        return []  # The shell rejects unbalanced quotes itself.
+    # On Windows the words keep their quotes.
+    return words if posix else [word.strip("\"'") for word in words]
+
+
+def _check_command(words: list[str]) -> None:
+    """Refuse a command that would start Python without the guard.
+
+    A shell command's words may hold several commands, split by its separators. The words after
+    one naming Python are its own arguments, such as a -c program, so only its options are
+    checked there. Any program may be Python, such as an installed command, so a command that
+    changes PYTHONPATH or clears the environment is refused whatever it runs.
+    """
+    import re
+
+    pythonpath = re.compile(r"(?<![$%{])PYTHONPATH\b", re.IGNORECASE if os.name == "nt" else 0)
+    in_python = False
     for index, word in enumerate(words):
-        if _python_kind(word.strip("\"'")):
-            _check_python_options(words[index:], None)
+        if word and set(word) <= _SEPARATORS:
+            in_python = False
+        elif in_python:
+            continue
+        elif pythonpath.search(word):  # $PYTHONPATH only reads it.
+            _refuse(
+                "a command that changes PYTHONPATH, which would run any Python in it without the"
+                " guard; pass env instead"
+            )
+        elif kind := _python_kind(word):
+            _check_python_options(kind, words[index + 1 :])
+            in_python = True
+        elif os.path.basename(word) == "env" and _clears_environment(words[index + 1 :]):
+            _refuse("env -i, which would run any Python in it without the guard")
 
 
-def _check_python_options(argv: list[str], executable: Any) -> None:
-    """Refuse to start Python with an option that skips sitecustomize."""
-    program = os.fsdecode(executable) if executable is not None else argv[0] if argv else ""
-    kind = _python_kind(program)
-    if kind is None:
-        return
-    rest = iter(argv[1:])
+def _clears_environment(args: list[str]) -> bool:
+    """Whether env's options, which start args, clear the environment."""
+    rest = iter(args)
     for arg in rest:
-        if kind == "py" and (arg[1:2].isdigit() or arg.startswith("-V:")):
+        if arg in ("-", "-i", "--ignore-environment"):
+            return True
+        if arg == "--" or not arg.startswith("-"):
+            return False  # A variable or the program follows.
+        if arg.startswith("--"):
+            continue
+        for position, flag in enumerate(arg[1:]):
+            if flag == "i":
+                return True
+            if flag in "uCS":
+                if position == len(arg) - 2:
+                    next(rest, None)  # Its value is the next argument.
+                break  # Its value is the rest of this one.
+    return False
+
+
+def _check_python_options(kind: str, args: list[str]) -> None:
+    """Refuse to start Python with an option that skips sitecustomize. args follow the program."""
+    rest = iter(args)
+    for arg in rest:
+        if kind == "py" and arg.startswith("-") and (arg[1:2].isdigit() or arg.startswith("-V:")):
             continue  # The launcher's choice of Python, such as -3.12.
         if arg in ("-", "--") or not arg.startswith("-"):
             return  # The script, or standard input, and its own arguments follow.
@@ -301,20 +391,24 @@ def _guard_popen(attribute: str, original: Callable[..., None]) -> Callable[...,
             else:
                 kwargs[parameter] = value
 
-        command = get("args")
+        command, executable, shell = get("args"), get("executable"), get("shell")
         if isinstance(command, (str, bytes, os.PathLike)):
-            if get("shell"):
-                _check_shell_command(os.fsdecode(command))
+            if shell or os.name == "nt":  # On Windows, a string is a whole command line.
+                _check_command(_shell_words(os.fsdecode(command)))
         elif isinstance(command, Iterable):
-            command = list(command)  # A generator can be read only once.
-            put("args", command)
+            if not isinstance(command, (list, tuple)):
+                command = list(command)  # A generator can be read only once.
+                put("args", command)
             argv = [os.fsdecode(arg) for arg in command]
-            if not get("shell"):
-                _check_python_options(argv, get("executable"))
+            if not shell:
+                # Given an executable, argv[0] is only the name the program sees.
+                program = [] if executable is None else [os.fsdecode(executable)]
+                _check_command([*program, *argv[len(program) :]])
             elif os.name == "nt":
-                _check_shell_command(subprocess.list2cmdline(argv))
+                _check_command(_shell_words(subprocess.list2cmdline(argv)))
             elif argv:
-                _check_shell_command(argv[0])  # The shell runs the first; the rest are its $0...
+                # The shell runs the first; the rest are its $0, $1, ...
+                _check_command(_shell_words(argv[0]))
         env = get("env")
         if env is not None:
             put("env", child_environment(env))
@@ -362,6 +456,7 @@ def uninstall() -> None:
     _originals.clear()
     _allowed_names.clear()
     _allowed_addresses.clear()
+    _refusals.clear()
     exit_after_refusal(False)
 
 

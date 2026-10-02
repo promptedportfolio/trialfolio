@@ -14,8 +14,10 @@ import sys
 try:
     import trialfolio_network_guard
 
+    # The live check's allowance is for this process only. Removed from its environment, it
+    # reaches no process this one starts, however it starts it.
     trialfolio_network_guard.install(
-        os.environ.get(trialfolio_network_guard.ALLOW_ENV, "").split(","),
+        os.environ.pop(trialfolio_network_guard.ALLOW_ENV, "").split(","),
         exit_on_refusal=True,
     )
 except BaseException as error:  # noqa: BLE001 - any failure stops the process.

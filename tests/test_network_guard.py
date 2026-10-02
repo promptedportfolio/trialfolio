@@ -5,6 +5,7 @@ other host is a reserved name and a documentation address (RFC 6761, RFC 5737), 
 broken guard would reach no real service.
 """
 
+import contextlib
 import email.utils
 import inspect
 import os
@@ -23,6 +24,7 @@ from trialfolio_network_guard import (
     GUARD_DIR,
     REFUSED_EXIT_STATUS,
     NetworkAccessRefused,
+    take_refusals,
 )
 
 OTHER_NAME = "example.invalid"
@@ -36,6 +38,15 @@ REACH_OTHER_HOST = (
     "except BaseException as error:\n"
     "    print(type(error).__name__)\n"
 )
+
+
+@contextlib.contextmanager
+def refused() -> Iterator[None]:
+    """Expects the guard to refuse the block, and takes the refusal, which would otherwise fail
+    the test though the block caught it."""
+    with pytest.raises(NetworkAccessRefused):
+        yield
+    take_refusals()
 
 
 def run_python(
@@ -128,7 +139,7 @@ def get_with_requests() -> None:
     ],
 )
 def test_test_process_refuses_another_host(reach: Callable[[], None]) -> None:
-    with pytest.raises(NetworkAccessRefused):
+    with refused():
         reach()
 
 
@@ -143,7 +154,7 @@ def test_a_proxy_on_localhost_cannot_relay_a_request(
     proxy = f"http://127.0.0.1:{listener.getsockname()[1]}"
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
         monkeypatch.setenv(name, proxy)
-    with pytest.raises(NetworkAccessRefused):
+    with refused():
         requests.get(f"https://{OTHER_NAME}/", timeout=1)
     with pytest.raises(BlockingIOError):  # The proxy received no connection.
         listener.accept()
@@ -163,31 +174,85 @@ def test_a_refusal_in_a_background_thread_fails_the_test(tmp_path: Path) -> None
     assert "NetworkAccessRefused" in result.stdout
 
 
+@pytest.mark.parametrize(
+    "test_body",
+    [
+        (
+            "    import socket\n"
+            "    try:\n"
+            "        socket.getaddrinfo('example.invalid', 1)\n"
+            "    except BaseException:\n"
+            "        pass\n"
+        ),
+        (
+            "    import socket\n"
+            "    from concurrent.futures import ThreadPoolExecutor\n"
+            "    with ThreadPoolExecutor() as pool:\n"
+            "        pool.submit(socket.getaddrinfo, 'example.invalid', 1)\n"
+        ),
+    ],
+    ids=["caught", "in a future nobody read"],
+)
+def test_a_refusal_the_test_never_sees_still_fails_it(tmp_path: Path, test_body: str) -> None:
+    result = run_pytest(*probe(tmp_path, test_body))
+    assert result.returncode == pytest.ExitCode.TESTS_FAILED, result.stdout + result.stderr
+    assert "refused getaddrinfo for 'example.invalid'" in result.stdout
+
+
+def spawn_pytest(*args: str) -> int:
+    """Runs pytest as a top-level run, which installs the guard itself. os.spawnve starts it
+    without subprocess.Popen, which would put the guard first on its PYTHONPATH."""
+    env = {name: value for name, value in os.environ.items() if name != "PYTHONPATH"}
+    argv = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *args]
+    return os.spawnve(os.P_WAIT, sys.executable, argv, env)
+
+
 def test_any_pytest_run_in_the_repository_is_guarded(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
     # A run that collects nothing under tests/, such as one over src/, still loads the guard.
-    # os.spawnve starts it without subprocess.Popen, so no inherited guard is involved.
-    env = {name: value for name, value in os.environ.items() if name != "PYTHONPATH"}
-    status = os.spawnve(
-        os.P_WAIT,
-        sys.executable,
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            *probe(
-                tmp_path,
-                "    import socket\n    assert hasattr(socket.getaddrinfo, '__wrapped__')\n",
-            ),
-        ],
-        env,
+    status = spawn_pytest(
+        *probe(
+            tmp_path, "    import socket\n    assert hasattr(socket.getaddrinfo, '__wrapped__')\n"
+        )
     )
     out, err = capfd.readouterr()
     assert status == 0, out + err
+
+
+def test_a_conftest_is_guarded_from_its_import(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    # pytest imports the root conftest first, and the others before any hook runs.
+    (tmp_path / "conftest.py").write_text(
+        "import socket\nassert hasattr(socket.getaddrinfo, '__wrapped__')\n", encoding="utf-8"
+    )
+    status = spawn_pytest(*probe(tmp_path, "    pass\n"))
+    out, err = capfd.readouterr()
+    assert status == 0, out + err
+
+
+def test_a_refusal_after_the_run_ends_the_process(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    # A thread the test leaves running still runs under the guard once pytest has finished, and
+    # a refusal then, even a caught one, ends the process.
+    status = spawn_pytest(
+        *probe(
+            tmp_path,
+            "    import socket, threading, time\n"
+            "    def after_the_run():\n"
+            "        while threading.main_thread().is_alive():\n"
+            "            time.sleep(0.01)\n"
+            "        try:\n"
+            "            socket.getaddrinfo('example.invalid', 1)\n"
+            "        except BaseException:\n"
+            "            pass\n"
+            "    threading.Thread(target=after_the_run).start()\n",
+        )
+    )
+    out, err = capfd.readouterr()
+    assert status == REFUSED_EXIT_STATUS, out + err
 
 
 def test_local_name_lookups_degrade_instead_of_failing() -> None:
@@ -262,11 +327,14 @@ PRINT_PROXY_SETTINGS = (
 )
 
 
-def test_a_child_environment_without_proxy_settings_turns_proxies_off() -> None:
-    # Otherwise requests would read macOS's system proxies, which may be on localhost.
-    result = run_python(PRINT_PROXY_SETTINGS, env={"PATH": os.environ.get("PATH", "")})
-    expected = ["*", None if os.name == "nt" else "*", None]
-    assert result.stdout.strip() == repr(expected), result.stderr
+@pytest.mark.parametrize("settings", [{}, {"HTTPS_PROXY": ""}], ids=["none", "empty"])
+def test_a_child_environment_without_proxy_settings_turns_proxies_off(
+    settings: dict[str, str],
+) -> None:
+    # Otherwise requests would read macOS's system proxies, which may be on localhost. It reads
+    # them when every proxy variable is empty, too. On Windows, no_proxy is NO_PROXY.
+    result = run_python(PRINT_PROXY_SETTINGS, env={"PATH": os.environ.get("PATH", ""), **settings})
+    assert result.stdout.strip() == repr(["*", "*", None]), result.stderr
 
 
 def test_a_child_environment_with_proxy_settings_keeps_them() -> None:
@@ -275,6 +343,17 @@ def test_a_child_environment_with_proxy_settings_keeps_them() -> None:
     env = {"PATH": os.environ.get("PATH", ""), "HTTPS_PROXY": proxy}
     result = run_python(PRINT_PROXY_SETTINGS, env=env)
     assert result.stdout.strip() == repr([None, None, proxy]), result.stderr
+
+
+def test_the_suite_turns_off_the_proxy_settings_it_inherits(tmp_path: Path) -> None:
+    names = ("NO_PROXY", "no_proxy", "HTTPS_PROXY")
+    body = f"    import os\n    print([os.environ.get(name) for name in {names!r}])\n"
+    result = run_pytest(
+        "-s",
+        *probe(tmp_path, body),
+        env={**os.environ, "HTTPS_PROXY": "http://127.0.0.1:9", "NO_PROXY": "localhost"},
+    )
+    assert repr(["*", "*", None]) in result.stdout, result.stdout + result.stderr
 
 
 def test_subprocess_inheriting_a_replaced_pythonpath_is_still_guarded(
@@ -325,11 +404,17 @@ def test_subprocess_accepts_a_generator_of_arguments() -> None:
     assert result.returncode == 0
 
 
+def test_subprocess_keeps_its_arguments_as_given() -> None:
+    # A tuple stays a tuple in CompletedProcess.args and CalledProcessError.cmd.
+    command = (sys.executable, "-c", "pass")
+    assert subprocess.run(command, timeout=60, check=True).args == command
+
+
 @pytest.mark.parametrize(
     "options", [["-I"], ["-E"], ["-S"], ["-sE"], ["-W", "ignore", "-I"], ["-X", "dev", "-S"]]
 )
 def test_python_without_the_guard_is_refused(options: list[str]) -> None:
-    with pytest.raises(NetworkAccessRefused):
+    with refused():
         subprocess.run([sys.executable, *options, "-c", "pass"], check=False)
 
 
@@ -347,37 +432,80 @@ def test_python_without_the_guard_is_refused(options: list[str]) -> None:
 )
 def test_other_interpreter_names_are_checked_too(command: list[str]) -> None:
     # Refused before the program is looked for, so none of these needs to exist.
-    with pytest.raises(NetworkAccessRefused):
+    with refused():
         subprocess.run([*command, "-c", "pass"], check=False)
 
 
-PYTHON = shlex.quote(sys.executable)
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["env", sys.executable, "-I"],
+        ["uv", "run", "python", "-S"],
+        ["env", "-u", "PYTHONPATH", sys.executable],
+        ["env", "PYTHONPATH=", sys.executable],
+        ["env", "-i", sys.executable],
+    ],
+    ids=["env -I", "uv run -S", "env -u", "env assignment", "env -i"],
+)
+def test_python_behind_a_wrapper_is_checked_too(command: list[str]) -> None:
+    with refused():
+        subprocess.run([*command, "-c", "pass"], check=False)
+
+
+def test_a_script_the_launcher_runs_keeps_its_own_arguments() -> None:
+    # a1.py isn't a choice of Python, such as -3.12, so -I is the script's.
+    with contextlib.suppress(FileNotFoundError):  # Not refused, so the launcher is looked for.
+        subprocess.run(["py", "a1.py", "-I"], capture_output=True, timeout=60, check=False)
+
+
+# A command line for the platform's shell.
+command_line = subprocess.list2cmdline if os.name == "nt" else shlex.join
+PYTHON = command_line([sys.executable])
+
+
+def shell(command: str) -> Callable[[], object]:
+    return lambda: subprocess.run(command, shell=True, check=False)
 
 
 @pytest.mark.parametrize(
     "start",
     [
-        lambda: subprocess.run(f"{PYTHON} -I -c pass", shell=True, check=False),
-        lambda: subprocess.run([f"cd . && {PYTHON} -S -c pass"], shell=True, check=False),
-        lambda: os.popen(f"{PYTHON} -E -c pass").close(),
+        pytest.param(shell(f"{PYTHON} -I -c pass"), id="string"),
+        pytest.param(
+            lambda: subprocess.run([f"cd . && {PYTHON} -S -c pass"], shell=True, check=False),
+            id="list",
+        ),
+        pytest.param(lambda: os.popen(f"{PYTHON} -E -c pass").close(), id="os.popen"),
+        pytest.param(shell("true;python3 -I -c pass"), id="joined without spaces"),
+        pytest.param(shell(f"PYTHONPATH= {PYTHON} -c pass"), id="PYTHONPATH assigned"),
+        pytest.param(shell(f"unset PYTHONPATH; {PYTHON} -c pass"), id="PYTHONPATH unset"),
+        pytest.param(shell(f"env -i {PYTHON} -c pass"), id="env -i"),
+        pytest.param(shell('"py" -I -c pass'), id="quoted launcher"),
+        pytest.param(
+            lambda: subprocess.run(f"{PYTHON} -I -c pass", check=False),
+            id="command line",
+            marks=pytest.mark.skipif(os.name != "nt", reason="a command line only on Windows"),
+        ),
     ],
-    ids=["string", "list", "os.popen"],
 )
 def test_shell_commands_without_the_guard_are_refused(start: Callable[[], object]) -> None:
-    with pytest.raises(NetworkAccessRefused):
+    with refused():
         start()
 
 
 def test_shell_commands_that_keep_the_guard_run() -> None:
+    # Python's own arguments may name PYTHONPATH; only a command that changes it is refused.
+    code = "import os, socket; os.environ['PYTHONPATH']; socket.getaddrinfo('example.invalid', 1)"
     result = subprocess.run(
-        f"{PYTHON} -c {shlex.quote(REACH_OTHER_HOST)}",
+        f"cd . && {command_line([sys.executable, '-c', code])}",
         shell=True,
         capture_output=True,
         text=True,
         timeout=60,
         check=False,
     )
-    assert result.stdout.split() == ["NetworkAccessRefused"], result.stderr
+    assert result.returncode == REFUSED_EXIT_STATUS, result.stderr
+    assert "NetworkAccessRefused" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -480,6 +608,23 @@ def test_an_allowed_host_and_its_addresses_are_reachable_and_nothing_else() -> N
         "NetworkAccessRefused",
         "['192.0.2.1']",
     ], result.stderr
+
+
+ALLOWED_PROCESS = f"""\
+import os, shlex, subprocess, sys
+show = (
+    "import os, trialfolio_network_guard as guard;"
+    "print(os.environ.get({ALLOW_ENV!r}), sorted(guard.allowed_hosts()), flush=True)"
+)
+command = [sys.executable, "-c", show]
+subprocess.run(command, check=True)
+os.system(subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command))
+"""
+
+
+def test_the_allowance_reaches_no_process_the_allowed_one_starts() -> None:
+    result = run_python(ALLOWED_PROCESS, env={**os.environ, ALLOW_ENV: "api.example.invalid"})
+    assert result.stdout.splitlines() == ["None []", "None []"], result.stderr
 
 
 def test_the_suite_refuses_to_run_with_an_allowance() -> None:
