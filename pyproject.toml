@@ -49,6 +49,8 @@ markers = [
     "live: real Portfolio123 requests; needs credentials, a budget, and the owner present",
 ]
 xfail_strict = true
+# A refusal by the network guard in a background thread reaches pytest only as this warning.
+filterwarnings = ["error::pytest.PytestUnhandledThreadExceptionWarning"]
 
 [tool.ruff]
 line-length = 100
