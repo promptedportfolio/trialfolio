@@ -100,14 +100,14 @@ These hold in every release that touches the relevant data. Release specificatio
 
 ## Owner decisions and defaults
 
-Decisions are the owner's. Proposed defaults stand until changed before the implementation or study that depends on them. Change a row by editing it and noting the date; record significant reversals in an ADR.
+Decisions are the owner's. Proposed defaults stand until changed before the implementation or study that depends on them. A default that a release's sign-off confirms becomes a requirement, and its row says so. Change a row by editing it and noting the date; record significant reversals in an ADR.
 
 ### Decisions
 
 | ID | Decision | Label | Date |
 |---|---|---|---|
-| D-01 | The product is **Trial Folio**. The repository and CLI command are `trialfolio`. The Python distribution and import package are proposed as `trialfolio`; PyPI availability is unchecked. | Requirement; package name is a proposed default | 2026-10-01 |
-| D-02 | Python, Pydantic v2, and `typing.Protocol`. Tooling follows the owner's other repositories: Python 3.12 or later, `uv`, and pytest. | Requirement; tooling is a proposed default | 2026-10-01 |
+| D-01 | The product is **Trial Folio**. The repository and CLI command are `trialfolio`. The Python distribution and import package are `trialfolio`; PyPI availability is unchecked. | Requirement. The package name, proposed until then, was confirmed at 0.1.0's sign-off (2026-10-01). | 2026-10-01 |
+| D-02 | Python, Pydantic v2, and `typing.Protocol`. Tooling follows the owner's other repositories: Python 3.12 or later, `uv`, and pytest. | Requirement. The tooling, proposed until then, was confirmed at 0.1.0's sign-off (2026-10-01). | 2026-10-01 |
 | D-03 | The project's own material is licensed under the custom, source-available Nathan Slaughter Personal Research License. Nathan Slaughter adopts it himself; counsel review is not a condition of adoption or release. | Requirement | 2026-10-01 |
 | D-04 | Licensing contact: Nathan Slaughter, nathan@nathanslaughter.com. | Requirement | 2026-10-01 |
 | D-05 | Texas governing law, subject to mandatory applicable law. | Requirement | 2026-10-01 |
@@ -131,18 +131,18 @@ Decisions are the owner's. Proposed defaults stand until changed before the impl
 
 | ID | Topic | Default | Resolve by |
 |---|---|---|---|
-| P-01 | Initial strategy scope | Long-only stock screens | 0.1.0 |
-| P-02 | First provider response | One verified `p123api` screen-backtest response layout, procured under D-09 | Before 0.1.0 is Ready ([0.1.0](releases/0.1.0-api-execution.md)) |
-| P-03 | Schema maintenance | Pydantic models generate versioned JSON Schemas | First executable contracts |
-| P-04 | Storage | Local immutable source artifacts, JSON metadata, CSV normalized output | 0.1.0 |
+| P-01 | Initial strategy scope | Long-only stock screens | Requirement since 0.1.0's sign-off (2026-10-01) |
+| P-02 | First provider response | One verified `p123api` screen-backtest response layout, procured under D-09 | Met by R01-T01 and R01-T05 ([0.1.0](releases/0.1.0-api-execution.md)) |
+| P-03 | Schema maintenance | Pydantic models generate versioned JSON Schemas | Requirement since 0.1.0's sign-off (2026-10-01) |
+| P-04 | Storage | Local immutable source artifacts, JSON metadata, CSV normalized output | Requirement since 0.1.0's sign-off (2026-10-01) |
 | P-05 | Execution | Sequential, finite, explicit cases | 0.2.0 and 0.3.0 |
 | P-06 | Benchmark, capital, costs, risk limits | Explicit study inputs; no universal settings | Before the relevant assessment |
 | P-07 | Statistical threshold and method | Family-wise 5% level with a method justified in a methods ADR; not a product-wide constant | Methods ADR and study protocol |
 | P-08 | Historical split | Chronological, justified by data, horizon, prior exposure, and power | Before evaluation data is exposed |
 | P-09 | Runtime LLM use | Optional, deferred, bounded to development data | Optional discovery increment |
-| P-10 | Public sample data | Clearly labeled synthetic fixtures | 0.1.0 |
-| P-11 | Logging | Python's standard `logging`, JSON lines to a local file, human-readable messages on stderr | 0.1.0 |
-| P-12 | Test runner | pytest, with network access blocked in the default suite | 0.1.0 |
+| P-10 | Public sample data | Clearly labeled synthetic fixtures | Requirement since 0.1.0's sign-off (2026-10-01) |
+| P-11 | Logging | Python's standard `logging`, JSON lines to a local file, human-readable messages on stderr | Requirement since 0.1.0's sign-off (2026-10-01) |
+| P-12 | Test runner | pytest, with network access blocked in the default suite | Requirement since 0.1.0's sign-off (2026-10-01) |
 | P-13 | Default variant set | Applies to experiments and studies, except paper reproductions, which follow [METH-09.4](methodology.md#meth-09-reproducing-published-research). Periods of 1 week and 4 weeks for screen rebalancing (`rebalance_weeks`), rank performance, and simulation rebalancing. For simulations, sell rules at rank 99 and rank 95 (see the open question on their definition). Defaults apply per setting: values the configuration lists for a setting replace that setting's defaults, and an empty list turns them off. A default identical to the baseline is skipped, so it never adds a duplicate case. Every variant case is recorded in the research history. A variant whose outcome chooses a candidate is part of the search ([METH-03.3](methodology.md#meth-03-research-history-and-multiple-testing)). | 0.3.0 for screens; Robustness and rank diagnostics, and Simulation review, for the rest |
 
 ## Out of scope

@@ -22,7 +22,7 @@ These are **verified observations** from the guide's 2026-10-01 check; the [veri
 
 ## Decision
 
-1. **Python.** Trial Folio is implemented in Python, with Python 3.12 or later and `uv` for environments and dependencies (proposed defaults under [D-02](../spec.md#decisions)). The project does not use Go and does not require an LLM API for 0.1.0 to 0.3.0.
+1. **Python.** Trial Folio is implemented in Python, with Python 3.12 or later and `uv` for environments and dependencies (under [D-02](../spec.md#decisions)). The project does not use Go and does not require an LLM API for 0.1.0 to 0.3.0.
 2. **`p123api` is the only Portfolio123 code dependency.** Trial Folio calls it through the `ScreenBacktestClient` protocol and adds its own durable recording, plan approval, and bounded execution around it. The wrapper's version is recorded with every attempt.
 3. **DataMiner and FactorMiner are integrated only through their outputs.** Trial Folio reads DataMiner exports and user-supplied configurations as data, and matching their file layouts and key names is permitted. Their code is never imported, vendored, bundled, ported, or paraphrased, including in examples, notebooks, containers, and test utilities. Upstream source may be read to confirm behavior. That behavior is then described in original words and cited by link and pinned commit.
 4. **Full payloads before conversion.** Trial Folio saves the full decoded response the wrapper returns before any conversion. It does not rely on the wrapper's table conversions for evidence.

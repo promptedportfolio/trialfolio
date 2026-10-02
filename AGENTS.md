@@ -2,7 +2,7 @@
 
 Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and eventually evaluating Portfolio123 strategy evidence with scientific discipline. This file is the entry point for coding agents. It links to the documents that own each requirement; it does not repeat them.
 
-**Current state (2026-10-01):** Specifications only. No application code, models, schemas, fixtures, or working commands exist. The next implementable release is [0.1.0](docs/releases/0.1.0-api-execution.md). Its specification tasks, R01-T01 to R01-T05, are done. It becomes Ready when the owner signs off ([step 6](docs/releases/0.1.0-api-execution.md#completing-this-specification)).
+**Current state (2026-10-01):** Specifications only. No application code, models, schemas, fixtures, or working commands exist. The next implementable release is [0.1.0](docs/releases/0.1.0-api-execution.md). Its status is Ready: the owner signed off on 2026-10-01, so implementation starts with R01-T06.
 
 ## Reading order
 

@@ -1,6 +1,6 @@
 # ADR 0002: Pydantic contracts and protocols
 
-**Status:** Accepted, and amended by [ADR 0005](0005-build-on-the-portfolio123-api-only.md): `ResultImporter` is no longer planned. Pydantic v2 and `typing.Protocol` are owner requirements; the conventions in [contracts.md](../contracts.md) are proposed defaults until implemented.
+**Status:** Accepted, and amended by [ADR 0005](0005-build-on-the-portfolio123-api-only.md): `ResultImporter` is no longer planned. Pydantic v2 and `typing.Protocol` are owner requirements; the conventions in [contracts.md](../contracts.md#pydantic-conventions) are requirements since 0.1.0's sign-off (2026-10-01).
 **Date:** 2026-10-01
 
 ## Context

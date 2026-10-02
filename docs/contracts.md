@@ -16,7 +16,7 @@ For semantic versioning, Trial Folio's public contract is:
 - Machine-readable outputs: manifests, normalized CSV files, and `--json` summaries.
 - The documented ability to read artifacts written by earlier versions.
 
-Python functions are internal during 0.x.y development (proposed default). A core function becomes public only when this section names it, which will be required before any separately distributed interface calls it. Log event names and fields are documented below but are not public contract.
+Python functions are internal during 0.x.y development. A core function becomes public only when this section names it, which will be required before any separately distributed interface calls it. Log event names and fields are documented below but are not public contract.
 
 ## Versioning
 
@@ -47,7 +47,7 @@ A schema's version does not need to match the release that introduces it. Compat
 
 Identifiers are introduced with the release that can define their semantics.
 
-| Identifier | Introduced | Meaning | Proposed form |
+| Identifier | Introduced | Meaning | Form |
 |---|---|---|---|
 | `artifact_id` | 0.1.0 | Content address of one stored file | `sha256:<64 hex>` of the file's bytes |
 | `review_id` | 0.2.0 | One `trialfolio review` output | Random UUID, version 4 |
@@ -58,6 +58,8 @@ Identifiers are introduced with the release that can define their semantics.
 | `attempt_id` | 0.1.0 | One execution attempt of a case | Random UUID, version 4 |
 | `experiment_id` | 0.3.0 | One declared experiment | User-declared slug, same pattern as `label` |
 | `study_id`, `candidate_id`, `assessment_id` | Later | Defined when their increment is specified | — |
+
+The forms of the identifiers 0.1.0 introduces are requirements since 0.1.0's sign-off (2026-10-01). The others are proposed until their release is Ready.
 
 Configuration identity and attempt identity MUST stay separate. Re-running the same resolved configuration creates a new attempt of the same case. Changing any resolved setting creates a different case.
 
@@ -376,7 +378,7 @@ The reference response agrees: the standard deviations (rows 7 and 18) reproduce
 
 **Preserved but not interpreted in 0.1.0:**
 
-- **`cost` and `quotaRemaining`** are integers: the credits charged and the credits left. The attempt record keeps them as provider metadata. `quotaRemaining` is account information, so it's kept out of `metrics.csv`, the report, and the JSON summary (proposed default).
+- **`cost` and `quotaRemaining`** are integers: the credits charged and the credits left. The attempt record keeps them as provider metadata. `quotaRemaining` is account information, so it's kept out of `metrics.csv`, the report, and the JSON summary.
 - **`results.rows`,** apart from the two coverage dates. It has one row per rebalance period, with these columns:
 
   | Column | Type | Observed meaning |
@@ -786,7 +788,7 @@ Raw files and JSON metadata come first, and normalized tables are CSV. Parquet M
 
 ## Canonical hashing
 
-Proposed default until 0.1.0 is Ready. These rules then become `canonicalization_version` 1, which plan 1.0.0 and `case_id` use (R01-T04), and any later change makes a new version.
+These rules are `canonicalization_version` 1, a requirement since 0.1.0's sign-off (2026-10-01). Plan 1.0.0 and `case_id` use them (R01-T04), and any later change makes a new version.
 
 - Canonical JSON follows [RFC 8785, JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785.html), applied to the model's serialized form.
 - Decimal values are strings: a configuration decimal in its normalized form ([screen configuration](#screen-configuration)), and a metric value with exactly the digits its saved source carries. The exception is a provider request recorded as it's sent, such as a plan's `params`: its numbers stay JSON numbers ([ADR 0003](adrs/0003-versioned-research-artifacts.md), decision 6).
@@ -867,7 +869,7 @@ The command is `trialfolio`. Commands are introduced by release:
 - **Validation first.** All inputs are validated before the output directory is created, so an invalid or unsupported input creates no output. An interactive license acknowledgment, which comes first, still writes its own record.
 - **Partial success.** A command that finishes with some cases failed, skipped, or uncertain writes complete accounting and exits with code 6.
 
-Exit codes (proposed default):
+Exit codes:
 
 | Code | Meaning |
 |---|---|
@@ -976,7 +978,7 @@ There is no universal provider interface, plugin registry, or service framework.
 
 ## Credentials
 
-**Requirement (REQ-09, INV-11).** Credentials come from an injected source. For the CLI, the proposed default is these environment variables:
+**Requirement (REQ-09, INV-11).** Credentials come from an injected source. For the CLI, they come from these environment variables:
 
 | Variable | Contents |
 |---|---|
@@ -1001,7 +1003,7 @@ Development credentials are handled as [AGENTS.md](../AGENTS.md#credentials-and-
 
 - **Local only.** No log handler, trace or metrics exporter, crash reporter, analytics call, or update check sends anything off the machine. The only outbound traffic is provider requests the user invokes or explicitly enables. Telemetry built into dependencies is disabled.
 - **Content.** Logs never contain credentials, strategy definitions, formulas, configuration values, provider payloads, results, or input file contents, at any level. Artifacts are referenced by ID and hash instead. Validation errors are logged with `errors(include_input=False)`, or with `hide_input_in_errors` enabled, and logged tracebacks omit local variables.
-- **Mechanism (proposed default).** The standard `logging` module, with no added dependency. Core modules use `logging.getLogger(__name__)` and never configure handlers; the CLI configures them.
+- **Mechanism.** The standard `logging` module, with no added dependency. Core modules use `logging.getLogger(__name__)` and never configure handlers; the CLI configures them.
 - **Format.** Log files hold one JSON object per line with these snake_case fields: `timestamp` (UTC ISO 8601), `level`, `event` (a stable dotted name), `message`, `trialfolio_version`, `component`, and the applicable `review_id`, `plan_hash`, `case_id`, `attempt_id`, `request_id`, and `parent_id`. The terminal shows human-readable messages on stderr from the same events.
 - **Levels.** ERROR for a failed operation, WARNING for a degraded condition the command continues through, INFO for lifecycle milestones, and DEBUG for diagnostic detail. Log files record INFO and above. Setting `TRIALFOLIO_LOG_LEVEL` to `DEBUG`, `INFO`, `WARNING`, or `ERROR` changes that, for diagnosis. Any other value is ignored, with a warning on stderr. The content rules apply at every level.
 - **Tracing.** Start and end events carry duration and outcome for each command, case, attempt, and provider request, linked by IDs, and this serves as the trace. OpenTelemetry is adopted only through an ADR, with local file exporters only.
