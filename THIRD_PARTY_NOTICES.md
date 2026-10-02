@@ -4,24 +4,26 @@ Trial Folio's own material is licensed under the [Nathan Slaughter Personal Rese
 
 ## Current status
 
-No Trial Folio package, archive, executable, or image has been built or distributed. This repository contains no third-party code. This file records the planned components and the rules for keeping this record accurate.
+No Trial Folio package, archive, executable, or image has been distributed. This repository contains no third-party code. Since R01-T06, `pyproject.toml` declares the runtime dependencies, and `uv.lock` resolves them to exact versions. This file records them, the components still planned, the development tools, and the rules for keeping this record accurate.
 
 At each release, regenerate the component tables from the resolved dependency set, record the versions actually distributed, and reverify each license. Licenses and bundled contents can change between versions.
 
-## Planned direct dependencies
+## Direct dependencies
 
-| Component | Role | Planned from | License |
+| Component | Role | Status | License |
 |---|---|---|---|
-| pydantic | Contracts: validation and serialization | 0.1.0 | MIT |
-| p123api | Portfolio123 API wrapper; the only Portfolio123 code dependency. Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | 0.1.0 | MIT |
-| requests | HTTP client under p123api. Trial Folio's transport adapter subclasses its `HTTPAdapter` ([ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)). Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | 0.1.0 | Apache-2.0 |
-| urllib3 | HTTP library under requests. The adapter reads its connection errors ([ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)). Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | 0.1.0 | MIT |
+| p123api | Portfolio123 API wrapper; the only Portfolio123 code dependency. Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | Declared since R01-T06: 3.1.0 | MIT |
+| requests | HTTP client under p123api. Trial Folio's transport adapter subclasses its `HTTPAdapter` ([ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)). Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | Declared since R01-T06: 2.34.2 | Apache-2.0 |
+| urllib3 | HTTP library under requests. The adapter reads its connection errors ([ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)). Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | Declared since R01-T06: 2.8.0 | MIT |
+| pydantic | Contracts: validation and serialization | Planned for 0.1.0 (R01-T07) | MIT |
 
-Record any other dependency here when it's chosen, for example a YAML parser or a templating library.
+Record any other dependency here when it's added, for example a YAML parser or a templating library, together with every package it brings in.
+
+**The locked runtime set** (`uv export --frozen --no-dev --no-emit-project`, checked 2026-10-02): p123api 3.1.0, requests 2.34.2, urllib3 2.8.0, certifi 2026.7.22, charset-normalizer 3.5.2, idna 3.20, and typing_extensions 4.16.0. Each is the version whose license the next table records.
 
 Verified observation, checked 2026-10-01: p123api 3.1.0 (MIT, released 2026-08-25) depends on `requests` and `typing_extensions`, and has an optional pandas extra. `requests` in turn brings in `urllib3`, `charset-normalizer`, `idna`, and `certifi`.
 
-## Licenses observed for the planned dependency set
+## Licenses observed for the dependency set
 
 Verified observation, checked 2026-10-01 against the versions listed. The table includes the dependencies of pydantic and p123api.
 
@@ -36,6 +38,18 @@ Verified observation, checked 2026-10-01 against the versions listed. The table 
 **If the p123api pandas extra is adopted**, add pandas 3.0.6 (BSD-3-Clause, with vendored components listed in its license file), python-dateutil 2.9.0.post0 (Apache-2.0 for contributions after 2017-12-01 and BSD-3-Clause for all code; satisfy both), six 1.17.0 (MIT), and numpy 2.5.3 (BSD-3-Clause and other permissive licenses).
 
 Linux numpy wheels also bundle OpenBLAS and LAPACK (BSD-3-Clause variants), libgfortran (GPL-3.0-or-later with the GCC Runtime Library Exception), and libquadmath (LGPL-2.1-or-later). Keep numpy's bundled license file intact. When distributing those GCC libraries, make their corresponding source available as their licenses require. The runtime exception permits this combination without applying the GPL to Trial Folio's code.
+
+## Development tools
+
+These are never distributed. The `dev` dependency group in `pyproject.toml` installs them for development only, and a built wheel neither declares nor contains them. The build backend runs only while a wheel is built. Verified observation from each package's metadata, checked 2026-10-02, at the versions in `uv.lock`, and for hatchling at its pin:
+
+| Component (version) | Role | License |
+|---|---|---|
+| pytest 9.1.1, with iniconfig 2.3.0, packaging 26.3, pluggy 1.6.0, and Pygments 2.21.0 | Test runner | pytest, iniconfig, and pluggy MIT; packaging Apache-2.0 OR BSD-2-Clause; Pygments BSD-2-Clause |
+| ruff 0.16.10 | Formatter and linter | MIT |
+| pyright 1.1.414, with nodeenv 1.11.0 | Type checker | pyright MIT; nodeenv BSD |
+| nodejs-wheel-binaries 24.19.0 | The Node.js runtime pyright runs on, so pyright never downloads one | MIT, with Node.js's own license file in its `.dist-info/licenses` |
+| hatchling 1.32.4, pinned exactly in `[build-system]` | Build backend | MIT. Its build-time dependencies, resolved when a wheel is built, include pathspec (MPL-2.0), tomlkit (MIT), and trove-classifiers (Apache-2.0), checked at their current versions. |
 
 ## What each distribution form carries
 
