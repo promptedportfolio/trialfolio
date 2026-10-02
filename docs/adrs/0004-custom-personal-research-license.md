@@ -1,12 +1,12 @@
 # ADR 0004: Custom personal research license
 
-**Status:** Accepted: licensing approach (owner requirement)
-**License text status:** Draft — not yet adopted
+**Status:** Accepted: licensing approach (owner requirement). Decision 8 is superseded by [ADR 0007](0007-host-the-source-publicly-on-github.md): the source is public on GitHub, under a narrow hosting exception in LICENSE section 5.4.
+**License text status:** Adopted 2026-10-02
 **Date:** 2026-10-01
 **Decision owner:** Nathan Slaughter
 **Owner decisions:** D-03 to D-08 in the [product specification](../spec.md)
 
-When Nathan Slaughter adopts the license, record it here by changing the license text status to `Adopted YYYY-MM-DD`. Make the same change on the status line of [LICENSE](../../LICENSE).
+Nathan Slaughter adopted the license on 2026-10-02. The license text status above and the status line of [LICENSE](../../LICENSE) record it.
 
 ## Context
 
@@ -32,11 +32,11 @@ Other constraints shape the decision:
 1. License Trial Folio's own material under a custom source-available license, the **Nathan Slaughter Personal Research License**, version 1.0, identifier `LicenseRef-NSPRL-1.0`. The text is in [LICENSE](../../LICENSE) and the plain-language policy in [licensing-policy.md](../licensing-policy.md).
 2. Grant eligible natural persons use for private personal and family research only, including private copies and private modifications. Grant no distribution or sublicensing rights. Family members may use an interface the licensee runs on a machine they control, for personal research; access by anyone else is a hosted service that needs written permission (D-15).
 3. Require prior express written permission for Professional Users, organizations, public projects and published code, and every reserved distribution form: forks, vendored source, packages, binaries, containers, notebooks with copied code, and hosted services.
-4. Adopt the owner's definitions (D-06). Liquid assets exclude retirement accounts. "Primary source of income" means more than half of total income. "Family members" has no defined list. "Resell research" includes research the individual produced as well as research obtained from others (D-13, confirmed 2026-10-01). The definition of "personal research" remains proposed until he confirms it.
+4. Adopt the owner's definitions (D-06). Liquid assets exclude retirement accounts. "Primary source of income" means more than half of total income. "Family members" has no defined list. "Resell research" includes research the individual produced as well as research obtained from others (D-13, confirmed 2026-10-01). He confirmed the definition of "personal research" as drafted on 2026-10-02.
 5. Treat generated reports as outputs, not covered code (D-07). Reports contain no scripts. Users may share reports they generated with the concise notice intact, and they are responsible for data-provider terms. Outputs other than reports, such as normalized CSV files and manifests, may also be shared (D-14).
 6. **Nathan Slaughter adopts the license himself (D-03).** Legal review is not a condition of adoption or release. He may seek legal advice at any time.
 7. Govern the license by Texas law, subject to mandatory applicable law (D-05). Add no venue, entity, liability cap, arbitration clause, class-action waiver, or indemnity.
-8. Public distribution requires the adopted license and a recorded decision on a distribution channel consistent with the no-publication restriction (D-08). The repository stays private until then.
+8. Public distribution requires the adopted license and a recorded decision on a distribution channel consistent with the no-publication restriction (D-08). The repository stays private until then. *Superseded by [ADR 0007](0007-host-the-source-publicly-on-github.md), which decides the channel and makes the repository public.*
 9. Keep p123api as the only Portfolio123 code dependency. Include no DataMiner or FactorMiner code. Leave third-party components under their own licenses.
 
 ## Considered alternatives
@@ -53,14 +53,14 @@ Other constraints shape the decision:
 - Trial Folio is not open source, and no document may call it that. Package metadata uses `LicenseRef-NSPRL-1.0`.
 - Contributions need terms that give the licensor enough rights to distribute them. Until those exist, no outside contributions are accepted.
 - Dependencies are constrained. No GPL-licensed or unlicensed upstream code can be included. Any GUI toolkit needs a license review, recorded in its own ADR.
-- Public GitHub hosting conflicts with the no-publication rule unless the owner makes an explicit, narrowly defined hosting exception.
+- Public GitHub hosting conflicts with the no-publication rule unless the owner makes an explicit, narrowly defined hosting exception. [ADR 0007](0007-host-the-source-publicly-on-github.md) makes it, in LICENSE section 5.4.
 - Every human-facing report carries the concise notice and the full notice. Artifacts record `license_id` and `notice_version`.
 - The license text was drafted without legal review, by the owner's decision. Whether individual terms are enforceable in a given jurisdiction is unknown. The license preserves rights that applicable law doesn't allow to be restricted, and it claims no guaranteed enforceability or immunity.
 - The license authorizes no regulated activity. New activities, such as an author-hosted service for others, personalized advice, or brokerage connections, need separate legal analysis and the owner's decision before they are built.
 
 ## Follow-up conditions
 
-- **Adoption:** resolve the "before adoption" items in [licensing-policy.md](../licensing-policy.md#outstanding-decisions), remove the drafting notes from LICENSE, and record adoption here and in LICENSE.
-- **Distribution channel:** decide and record the channel before any "Released" status.
+- **Adoption:** done on 2026-10-02. The "before adoption" item was resolved, the drafting notes were removed from LICENSE, and adoption is recorded here and in LICENSE.
+- **Distribution channel:** decided on 2026-10-02 in [ADR 0007](0007-host-the-source-publicly-on-github.md).
 - **Revisit** this decision, through a superseding ADR, if any of these arise: a hosting exception, a desktop or web interface, contributor terms, an organizational licensing program, a change to the Professional User criteria, or a new license version.
 - **Earlier grants:** before changing the license of any distributed version, check which terms recipients already hold. A new version doesn't remove rights already granted.

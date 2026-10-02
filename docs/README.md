@@ -27,20 +27,23 @@ These are the specifications for Trial Folio. Nothing in them is implemented yet
 | [adrs/0004-custom-personal-research-license.md](adrs/0004-custom-personal-research-license.md) | The custom source-available license |
 | [adrs/0005-build-on-the-portfolio123-api-only.md](adrs/0005-build-on-the-portfolio123-api-only.md) | Building on the Portfolio123 API only, with no DataMiner integration, and the reordered releases |
 | [adrs/0006-observe-the-wrappers-http-exchanges.md](adrs/0006-observe-the-wrappers-http-exchanges.md) | Recording each HTTP exchange the `p123api` wrapper makes, so failures are classified by what was sent |
+| [adrs/0007-host-the-source-publicly-on-github.md](adrs/0007-host-the-source-publicly-on-github.md) | The public GitHub repository, its hosting exception, and where packages come from |
+| [ai-development.md](ai-development.md) | How AI is used to build Trial Folio, in plain language |
 | [spec-authoring-guide.md](spec-authoring-guide.md) | Bootstrap context used to write these documents. Superseded wherever an owning document says otherwise |
 
 At the repository root:
 - [../README.md](../README.md), the investor-facing overview.
 - [../LICENSE](../LICENSE), which controls the legal grant.
-- [../CONTACT.md](../CONTACT.md).
+- [../CONTACT.md](../CONTACT.md), which routes each kind of contact.
+- [../CONTRIBUTING.md](../CONTRIBUTING.md).
 - [../THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
 ## How the documents fit together
 
 - **Meanings and structures.** The product spec defines enduring obligations, and methodology defines what scientific assessments mean. Release specs define each increment, and contract prose defines interface meaning. Once implemented, Pydantic models define structure, and the JSON Schemas generated from them publish it.
 - **Evidence and history.** Tests provide conformance evidence, and ADRs record decisions and their history.
-- **Legal documents.** LICENSE, once adopted, controls the legal grant. Other documents summarize it and never expand it.
-- **Release status.** Each release file's **Status** line is the only progress record: Draft, Ready, Implemented, or Released. Implemented means the release works and is used privately. Released means it is publicly distributed, which requires the adopted license and a chosen distribution channel ([D-08](spec.md#decisions)).
+- **Legal documents.** LICENSE, adopted on 2026-10-02, controls the legal grant. Other documents summarize it and never expand it.
+- **Release status.** Each release file's **Status** line is the only progress record: Draft, Ready, Implemented, or Released. Implemented means the release works and is used privately. Released means it is distributed through the chosen channel under the adopted license ([D-08](spec.md#decisions), [D-22](spec.md#decisions)). The public repository isn't a release.
 
 ## Labels
 

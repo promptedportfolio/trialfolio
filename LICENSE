@@ -1,7 +1,7 @@
 Nathan Slaughter Personal Research License
 Version 1.0
 License identifier: LicenseRef-NSPRL-1.0
-Status: Draft — not yet adopted
+Status: Adopted 2026-10-02
 
 Copyright (c) 2026 Nathan Slaughter
 
@@ -9,12 +9,6 @@ This text has no effect until Nathan Slaughter adopts it. Adoption is
 recorded by changing the status line above to "Adopted" with the adoption
 date (for example, "Status: Adopted 2026-10-15") and making the same change
 in docs/adrs/0004-custom-personal-research-license.md.
-
-DRAFTING NOTES (delete this block when the license is adopted)
-- The definition of Personal Research (section 1.10) is proposed and
-  awaits the author's confirmation.
-- All other terms reflect the author's decisions recorded on 2026-10-01.
-- See docs/licensing-policy.md, "Outstanding decisions".
 
 
 0. About this license
@@ -176,7 +170,8 @@ section 2. They must obtain Written Permission before any use.
 
      (a) publishing, redistributing, sublicensing, selling, lending, or
          otherwise supplying copies to anyone else;
-     (b) public forks and other public copies of the source;
+     (b) public forks and other public copies of the source, except as
+         section 5.4 provides;
      (c) vendoring the source into other software;
      (d) packages, and binaries, executables, or archives that contain the
          code;
@@ -187,6 +182,22 @@ section 2. They must obtain Written Permission before any use.
 5.3  Written Permission to use the Covered Software as a Professional User
      or for an Organization does not include any right under this section
      unless it says so expressly.
+
+5.4  The Licensor makes the source of the Covered Software available in a
+     public repository on GitHub. GitHub's Terms of Service give GitHub
+     users a license to view public repositories and to reproduce them on
+     GitHub by forking, as GitHub's functionality permits. This license
+     does not restrict those rights, and sections 2.2, 2.3, 5.1, and
+     5.2(a) and (b) do not apply to a fork made and kept on GitHub in that
+     way. This exception goes no further than GitHub's terms:
+
+     (a) beyond what GitHub's terms grant, it gives no right to use the
+         Covered Software; section 2 or Written Permission governs any
+         other use;
+     (b) it does not permit publishing Modifications, including by
+         committing them to a public fork; and
+     (c) it does not permit copying the Covered Software from GitHub, or
+         from a fork, into any other Public Project or Published Code.
 
 
 6. Local operation
@@ -263,7 +274,7 @@ component, the component's own license controls.
 10.3 Written Permission grants only what it states. On any matter it does
      not address, this license applies.
 
-10.4 Send requests to nathan@nathanslaughter.com, as described in
+10.4 Send requests to git@nathanslaughter.com, as described in
      CONTACT.md.
 
 

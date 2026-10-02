@@ -1,0 +1,56 @@
+name: Bug report
+description: Something in Trial Folio doesn't work as its documentation says.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are public. **Never paste your Portfolio123 API ID or API key.** Don't attach Portfolio123 data either, such as responses, exports, or reports that contain it: Portfolio123's terms restrict sharing it. Trial Folio's logs are designed to leave out credentials and results, but read anything before you paste it.
+  - type: input
+    id: version
+    attributes:
+      label: Trial Folio version
+      description: The output of `trialfolio --version`.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Operating system
+      placeholder: macOS 15, Windows 11, Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: What you ran
+      description: The command. Leave out anything private, such as strategy details in your configuration.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: Include the error code and message, if there was one.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log lines
+      description: Any relevant lines from the log. The README says where logs are written.
+      render: text
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before you submit
+      options:
+        - label: This report contains no API ID, API key, or Portfolio123 data.
+          required: true

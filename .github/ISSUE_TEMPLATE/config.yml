@@ -1,0 +1,9 @@
+# Every issue starts from a template (CONTACT.md lists them). Private matters go by email.
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem
+    url: https://github.com/promptedportfolio/trialfolio/blob/main/CONTACT.md#security-problems
+    about: Report it privately by email, never in a public issue.
+  - name: Licensing question or permission request
+    url: https://github.com/promptedportfolio/trialfolio/blob/main/CONTACT.md#permission-requests
+    about: Ask by email. Requests involve personal circumstances that don't belong in a public issue.
