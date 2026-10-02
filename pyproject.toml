@@ -39,9 +39,16 @@ dev = [
 testpaths = ["tests"]
 # The network guard's module, imported by the same name here and in subprocesses.
 pythonpath = ["tests/support/network_guard"]
-# The default run leaves out the opt-in suites. A later -m on the command line replaces this
-# one, so `uv run pytest -m live` selects only the live tests (release 0.1.0, verification).
-addopts = ["--strict-markers", "--strict-config", "-m", "not packaging and not reference and not live"]
+# -p loads the network guard's plugin before any conftest or installed plugin; pytest 9.1 applies
+# pythonpath first. The default run leaves out the opt-in suites. A later -m on the command line
+# replaces this one, so `uv run pytest -m live` selects only the live tests (release 0.1.0,
+# verification).
+addopts = [
+    "-p", "trialfolio_network_guard_plugin",
+    "--strict-markers",
+    "--strict-config",
+    "-m", "not packaging and not reference and not live",
+]
 markers = [
     "packaging: builds the wheel and runs it from a clean install",
     "reference: conformance against the owner's local reference data, in TRIALFOLIO_REFERENCE_DIR",

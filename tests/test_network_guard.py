@@ -207,14 +207,21 @@ def spawn_pytest(*args: str) -> int:
     return os.spawnve(os.P_WAIT, sys.executable, argv, env)
 
 
+@pytest.mark.parametrize(
+    "options",
+    [[], ["--noconftest"], ["-o", "addopts="]],
+    ids=["default", "no conftest", "no addopts"],
+)
 def test_any_pytest_run_in_the_repository_is_guarded(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], options: list[str]
 ) -> None:
-    # A run that collects nothing under tests/, such as one over src/, still loads the guard.
+    # A run that collects nothing under tests/, such as one over src/, still loads the guard:
+    # through addopts, or else through the root conftest.
     status = spawn_pytest(
+        *options,
         *probe(
             tmp_path, "    import socket\n    assert hasattr(socket.getaddrinfo, '__wrapped__')\n"
-        )
+        ),
     )
     out, err = capfd.readouterr()
     assert status == 0, out + err
@@ -223,7 +230,7 @@ def test_any_pytest_run_in_the_repository_is_guarded(
 def test_a_conftest_is_guarded_from_its_import(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    # pytest imports the root conftest first, and the others before any hook runs.
+    # pytest imports the guard's plugin before any conftest.
     (tmp_path / "conftest.py").write_text(
         "import socket\nassert hasattr(socket.getaddrinfo, '__wrapped__')\n", encoding="utf-8"
     )
@@ -560,7 +567,7 @@ def test_subprocess_runs_the_sitecustomize_the_guard_shadows_once(tmp_path: Path
 
 def test_a_suite_run_under_the_guard_shares_it() -> None:
     # The environment any nested pytest run inherits: the guard is already installed, by
-    # sitecustomize, when the conftest installs it again. Wrapping each call once shows that
+    # sitecustomize, when the plugin installs it again. Wrapping each call once shows that
     # it's one guard.
     result = run_pytest(
         f"{__file__}::test_test_process_refuses_another_host",

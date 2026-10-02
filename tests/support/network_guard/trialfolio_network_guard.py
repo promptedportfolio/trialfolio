@@ -1,9 +1,10 @@
 """The network guard: tests may reach localhost and nothing else (P-12).
 
-The root conftest installs it in the test process. ``sitecustomize.py``, beside this module,
-installs it in every Python subprocess the suite starts, because the conftest puts this directory
-first on PYTHONPATH. Both import this module by the same name, so a process has one guard and
-one ``NetworkAccessRefused``, even when the suite runs under another copy of itself.
+Its pytest plugin, ``trialfolio_network_guard_plugin``, installs it in the test process.
+``sitecustomize.py``, beside this module, installs it in every Python subprocess the suite starts,
+because the plugin puts this directory first on PYTHONPATH. Both import this module by the same
+name, so a process has one guard and one ``NetworkAccessRefused``, even when the suite runs under
+another copy of itself.
 
 For any host but localhost, the guard refuses ``connect``, ``connect_ex``, ``sendto``, and
 ``sendmsg`` on a socket, and the ``socket`` module's name and address lookups, before anything
@@ -13,7 +14,7 @@ back a name the guard won't look up, as it does when a lookup fails.
 A refusal raises ``NetworkAccessRefused``. It derives from ``BaseException``, so no
 ``except Exception`` or ``except OSError`` handler, in Trial Folio, ``requests``, or ``urllib3``,
 can mistake it for a provider failure and carry on. The guard also records each refusal, so that
-one that is caught, or left in a future nobody reads, still counts: the root conftest fails the
+one that is caught, or left in a future nobody reads, still counts: the pytest plugin fails the
 test it happened in, and a subprocess refused anything, in any thread, exits with status 70 when
 it ends. A test that provokes a refusal on purpose takes it with ``take_refusals()``.
 
@@ -103,7 +104,7 @@ def _refuse(what: str) -> NoReturn:
 
 def take_refusals() -> list[str]:
     """The refusals since the last call, which no longer count. A test that provokes one on
-    purpose takes it, so that the root conftest doesn't fail the test for it."""
+    purpose takes it, so that the pytest plugin doesn't fail the test for it."""
     taken = _refusals[:]
     del _refusals[: len(taken)]  # Without any a thread has just added.
     return taken
@@ -111,7 +112,7 @@ def take_refusals() -> list[str]:
 
 def exit_after_refusal(enabled: bool) -> bool:
     """Set whether this process exits with REFUSED_EXIT_STATUS when it ends, if any refusal is
-    left that nothing took. Returns the previous setting. The root conftest turns it off, because
+    left that nothing took. Returns the previous setting. The pytest plugin turns it off, because
     it reports refusals itself, and back on after the run if the guard stays."""
     global _exit_after_refusal
     previous, _exit_after_refusal = _exit_after_refusal, enabled

@@ -1,9 +1,9 @@
 """Installs the network guard in each Python subprocess the test suite starts.
 
-The root conftest puts this directory first on PYTHONPATH, so Python imports this module at
-startup. If the guard can't be installed, the process stops: site.py would report the error and
-carry on without it. Python imports only the first sitecustomize it finds, so this one then runs
-the one it shadows, such as Homebrew's, passing over any other copy of the guard.
+The guard's pytest plugin puts this directory first on PYTHONPATH, so Python imports this module
+at startup. If the guard can't be installed, the process stops: site.py would report the error
+and carry on without it. Python imports only the first sitecustomize it finds, so this one then
+runs the one it shadows, such as Homebrew's, passing over any other copy of the guard.
 """
 
 import importlib.machinery
