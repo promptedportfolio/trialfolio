@@ -1,0 +1,24 @@
+name: Question
+description: Ask about using Trial Folio, or about how it's built.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are public, so leave out your Portfolio123 credentials and data. The [README](https://github.com/promptedportfolio/trialfolio/blob/main/README.md), the [documentation map](https://github.com/promptedportfolio/trialfolio/blob/main/docs/README.md), and [How I use AI to build Trial Folio](https://github.com/promptedportfolio/trialfolio/blob/main/docs/ai-development.md) may already answer it.
+  - type: dropdown
+    id: topic
+    attributes:
+      label: What it's about
+      options:
+        - Using Trial Folio
+        - How Trial Folio is built
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true

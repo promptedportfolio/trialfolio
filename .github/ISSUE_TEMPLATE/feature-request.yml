@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest something Trial Folio could do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are public, so leave out your Portfolio123 credentials and data. The [roadmap](https://github.com/promptedportfolio/trialfolio/blob/main/docs/roadmap.md) shows what's already planned. Outside pull requests aren't accepted yet ([CONTRIBUTING.md](https://github.com/promptedportfolio/trialfolio/blob/main/CONTRIBUTING.md)), so describe your idea here.
+  - type: textarea
+    id: goal
+    attributes:
+      label: What you're trying to do
+      description: The research task, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like Trial Folio to do
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do now instead
