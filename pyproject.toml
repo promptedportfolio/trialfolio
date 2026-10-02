@@ -13,6 +13,8 @@ requires-python = ">=3.12"
 classifiers = ["Private :: Do Not Upload"]
 dependencies = [
     "p123api==3.1.0",
+    "pydantic>=2.13,<3",
+    "pyyaml>=6,<7",
     "requests==2.34.2",
     "urllib3==2.8.0",
 ]
@@ -33,6 +35,7 @@ dev = [
     "pyright[nodejs]>=1.1.414",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
+    "types-pyyaml>=6.0.12.20260906",
 ]
 
 [tool.pytest.ini_options]
@@ -63,7 +66,12 @@ line-length = 100
 # The specifications are read by people; keep the formatter out of their code blocks.
 extend-exclude = ["*.md"]
 
+[tool.ruff.lint.per-file-ignores]
+# Pydantic reports a ValueError from a validator as a validation error. A TypeError would escape
+# validation, so the contracts' validators raise ValueError for a value of the wrong type too.
+"src/trialfolio/contracts/*.py" = ["TRY004"]
+
 [tool.pyright]
 include = ["src", "tests", "conftest.py"]
 strict = ["src/trialfolio"]
-extraPaths = ["tests/support/network_guard"]
+extraPaths = ["src", "tests/support/network_guard"]
