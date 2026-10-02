@@ -87,7 +87,7 @@ Configuration files are YAML documents owned by the user. The rules apply to eve
 - File paths inside a configuration are resolved relative to the configuration file.
 - Duplicate keys are rejected; a YAML loader must not silently keep the last one.
 - Non-empty text, wherever a configuration requires it, has a character that isn't whitespace: one of Unicode's White_Space characters.
-- A file is UTF-8 text, with or without a byte-order mark, and holds one YAML document: a mapping whose keys are text, with no value nested more than 16 levels deep. Null values, anchors, aliases, and explicit tags are rejected. To omit an optional key, leave it out; don't write it empty.
+- A file is UTF-8 text, with or without a byte-order mark, and holds one YAML document: a mapping whose keys are text, with no value nested more than 16 levels deep. Null values, anchors, aliases, and explicit tags are rejected. To omit an optional key, leave it out; don't write it empty. An optional text value, when present, must not be empty or all whitespace.
 - Error messages name each offending key, and never include its value, so they're safe to log.
 
 ### Screen configuration
@@ -101,9 +101,9 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 | `kind` | string | Yes | `screen` | Not sent |
 | `schema_version` | string | Yes | A supported version (`1.0.0`). Any other value fails with `config.invalid`, and the message names the supported versions. | Not sent |
 | `title` | string | Yes | 1–200 characters. Used as the report heading. | Not sent |
-| `purpose` | string | No | Up to 2,000 characters. If it's absent, the report says no purpose was declared. | Not sent |
+| `purpose` | string | No | 1–2,000 characters, not all whitespace. If it's absent, the report says no purpose was declared. | Not sent |
 | `universe` | string | Yes | A non-empty Portfolio123 universe name, for example `SP500` | `screen.universe` |
-| `rules` | list of strings | Yes | At least one screening formula. Each one is a non-empty string, and their order is kept. | `screen.rules`, each as `{"formula": "…"}`. It has no `type` field, because Portfolio123 rejects one (R01-T01). |
+| `rules` | list of strings | Yes | At least one screening formula. Each one is a non-empty string, and their order is kept. The model accepts ordered lists or tuples, never sets. | `screen.rules`, each as `{"formula": "…"}`. It has no `type` field, because Portfolio123 rejects one (R01-T01). |
 | `ranking` | mapping | Yes | Exactly one of the [ranking forms](#ranking-forms) | `screen.ranking` |
 | `max_holdings` | integer | Yes | 1 or more | `screen.maxNumHoldings` |
 | `benchmark` | string | Yes | A non-empty Portfolio123 benchmark symbol, for example `SPY` | `screen.benchmark` |
@@ -248,7 +248,7 @@ Schema version 1.0.0, introduced in 0.2.0. It names saved runs written by `trial
 | `kind` | string | Yes | `review` |
 | `schema_version` | string | Yes | A supported version (`1.0.0`). Any other value fails with `config.invalid`, and the message names the supported versions. |
 | `title` | string | Yes | 1–200 characters. Used as the report heading. |
-| `purpose` | string | No | Up to 2,000 characters. If it's absent, the report says no purpose was declared. |
+| `purpose` | string | No | 1–2,000 characters, not all whitespace. If it's absent, the report says no purpose was declared. |
 | `baseline` | string | Yes | Must equal the `label` of one entry in `results` |
 | `results` | list | Yes | At least two entries |
 
@@ -499,7 +499,7 @@ One row for each setting of each result. This includes documented settings that 
 | `provenance` | `verified` for a value sent in the request, `inferred` for a documented default or rule, or `unknown` |
 | `inference_rule` | For `inferred` values, the rule and its source, for example Portfolio123's documented default and the date the documentation was checked. Empty otherwise. |
 | `original_key` | The key path in the screen configuration. Empty when the setting was omitted. |
-| `original_value` | The value exactly as written in the source. Empty when absent. |
+| `original_value` | The value exactly as written in the source. Empty when absent. In the row model, absent is `null`, never an empty string; `original_key` and `original_value` are present or absent together. |
 | `source_artifact` | `artifact_id` of the saved screen configuration |
 | `flags` | Flag codes, separated by semicolons. Empty when none apply. |
 
@@ -563,8 +563,9 @@ An attempt with a start record and no attempt record is `running` ([uncertain co
 **Field shapes.** Both records name the installed versions as the plan does, in `provider_wrapper` and `transport` ([plan contents](#plan-contents)). In the attempt record:
 
 - **`outcome`** is `succeeded`, `failed`, or `unknown`. `running` is how a start record without an attempt record reads; it's never written. The outcome follows the request's exchange, as [0.1.0's failure table](releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior) gives it: with no request exchange, `failed`, or `unknown` for a restart without a saved response; `not_connected`, `failed`; `interrupted` or a 5xx, `unknown`; a 200, `succeeded` when its response was saved and `unknown` otherwise; any other status, `failed`. The request is sent at most once, so it has at most one exchange, and a start record holds only the authentication exchange.
+- **Authentication in 0.1.0.** A start record holds exactly one successful authentication exchange (`response`, status 200). An attempt record holds at most one authentication exchange, before any request exchange. Failed authentication is valid only in a failed attempt with no request exchange. An attempt may fail before authentication starts, with no exchanges. Sending a request, or recording its uncertain completion on restart, requires successful authentication.
 - **`error`** is `{"code": …, "message": …}`, and `null` exactly when the outcome is `succeeded`.
-- **`request` and `response`** reference files by `path`, relative to the output root, and `artifact_id`. `response.form` is `decoded` for `response.json`, or `undecoded` for `response.raw`. A response is referenced exactly when the attempt is `succeeded`, decoded or not: a 200 the wrapper couldn't decode is `succeeded` for capture.
+- **`request` and `response`** reference files by `path`, relative to the output root, and `artifact_id`. A request exchange requires a reference to its saved `request.json`, including when the connection failed. `response.form` is `decoded` for `response.json`, or `undecoded` for `response.raw`. A response is referenced exactly when the attempt is `succeeded`, decoded or not: a 200 the wrapper couldn't decode is `succeeded` for capture.
 - **`provider_metadata`** holds `cost` and `quota_remaining`, Portfolio123's `quotaRemaining`. Each is `null` when the response doesn't carry it.
 - **`possibly_charged`** is true exactly when the attempt is `unknown`, or an exchange other than Trial Folio's `POST /auth` has a result other than `not_connected` ([possibly charged](#http-exchanges)). An attempt restarted without a saved response is `unknown` with only its start record's exchanges ([uncertain completion](#uncertain-completion)).
 
@@ -698,7 +699,7 @@ Each case holds:
 
 ### Data sent
 
-`data_sent` lists each category of data that leaves the machine. Each entry names its recipient, Portfolio123, through `p123api`, and the settings it carries, if any:
+`data_sent` lists each category of data that leaves the machine. All three categories below appear exactly once, each carrying exactly its documented settings, with no repeated setting names. Each entry names its recipient, Portfolio123, through `p123api`, and the settings it carries, if any:
 
 | Category | Contents |
 |---|---|
@@ -1087,7 +1088,9 @@ Expected outputs change only with a stated reason. Reference responses procured 
 
 JSON Schemas are generated from the models, never maintained by hand, and committed under `schemas/`, one file for each contract and each schema version that has a reader. The generation mode, validation or serialization, is stated wherever the two differ. `scripts/schemas` writes them. `scripts/schemas --check` is the drift check: it generates every schema in memory, compares the result with `schemas/`, lists each file that differs, is missing, or is extra, and fails if there's any. `scripts/check` runs it. Schemas do not encode every semantic validator, so the runtime semantics are tested separately.
 
-`scripts/schemas` writes these files, and removes any other file from `schemas/`. Both it and the check ignore hidden files, such as macOS's `.DS_Store`, and neither removes a subdirectory. `scripts/check` also fails when a file under `schemas/` isn't tracked by git, because the check reads the working tree. Each one's `$comment` names its model and mode, and says whether the other mode differs. A configuration is input, so its schema is in validation mode. Every other contract is written by Trial Folio, so its schema is in serialization mode; for each of those, the two modes give the same schema.
+`scripts/schemas` writes these files. Before writing anything, it refuses a directory containing unexpected files or subdirectories; it never deletes them. Remove obsolete schemas explicitly after checking them. Both generation and the drift check ignore hidden entries, such as macOS's `.DS_Store`. The default directory is the repository's `schemas/`; an explicit `--dir DIR` is relative to the directory where the command is invoked, unless absolute. Git attributes keep schema files at LF line endings even with `core.autocrlf=true`, so an unchanged checkout passes the byte comparison.
+
+`scripts/check` also fails when a file under `schemas/` isn't tracked by git, including ignored files, because the drift check reads the working tree. Each schema's `$comment` names its model and mode, and says whether the other mode differs. A configuration is input, so its schema is in validation mode. Every other contract is written by Trial Folio, so its schema is in serialization mode; for each of those, the two modes give the same schema.
 
 | File | Contract |
 |---|---|

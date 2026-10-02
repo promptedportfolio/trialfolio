@@ -3,8 +3,8 @@
 
     python -m trialfolio.contracts.schema_files [--check] [--dir DIR]
 
-Without `--check`, it writes every schema and removes any other file from the directory, since
-the schemas are never written by hand. With `--check`, it writes nothing: it compares the
+Without `--check`, it writes every schema, refusing a directory with unexpected files before
+writing anything. With `--check`, it writes nothing: it compares the
 directory with the schemas it generates, lists each file that differs, is missing, or is extra,
 and exits 1 if there's any. Both ignore hidden entries, such as macOS's `.DS_Store`. Neither
 removes a subdirectory: the check lists it as extra, and writing refuses to run.
@@ -110,17 +110,17 @@ def check(directory: Path) -> list[str]:
 
 
 def write(directory: Path) -> None:
-    """Writes every schema into `directory`, and removes every other file from it. Raises
-    `IsADirectoryError`, before writing anything, if the directory holds a subdirectory."""
+    """Writes every schema into `directory`. Refuses unexpected files or subdirectories before
+    writing anything, so a mistaken target never deletes unrelated files."""
     expected = generate()
     present = _entries(directory)
     folders = sorted(name for name, path in present.items() if path.is_dir())
     if folders:
         raise IsADirectoryError(f"{directory} holds directories: {', '.join(folders)}")
+    extra = sorted(present.keys() - expected.keys())
+    if extra:
+        raise ValueError(f"{directory} holds unexpected files: {', '.join(extra)}")
     directory.mkdir(parents=True, exist_ok=True)
-    for name, path in present.items():
-        if name not in expected:
-            path.unlink()
     for name, content in expected.items():
         (directory / name).write_bytes(content)
 
@@ -146,8 +146,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     try:
         write(directory)
-    except IsADirectoryError as error:
-        print(f"schemas: {error}. Remove them; schemas/ holds only schema files.", file=sys.stderr)
+    except (IsADirectoryError, ValueError) as error:
+        print(
+            f"schemas: {error}. Choose a directory holding only the expected schemas.",
+            file=sys.stderr,
+        )
         return 1
     print(f"Wrote {len(SCHEMA_FILES)} schemas to {directory}.")
     return 0

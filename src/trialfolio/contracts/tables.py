@@ -113,7 +113,7 @@ class SettingsRow(ContractModel):
     provenance: Provenance
     inference_rule: NonEmptyText | None
     original_key: NonEmptyText | None
-    original_value: str | None
+    original_value: Annotated[str, Field(min_length=1)] | None
     """The value exactly as written in the configuration; null when absent."""
     source_artifact: Sha256Digest
     flags: tuple[FlagCode, ...]
@@ -129,6 +129,8 @@ class SettingsRow(ContractModel):
             self.provenance,
             self.inference_rule,
         )
+        if self.provenance != setting.provenance:
+            raise ValueError(f"{self.setting} must have {setting.provenance} provenance")
         value = check_value_text(setting, self.value)
         if (self.original_key is None) != (self.original_value is None):
             raise ValueError("original_key and original_value must be given together")

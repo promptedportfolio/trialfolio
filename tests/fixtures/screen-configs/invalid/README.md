@@ -96,7 +96,7 @@ A new rule needs a new file, and a row here. The test checks that this table and
 |---|---|---|
 | `slippage-five-decimals.yaml` | At most 4 digits after the decimal point | `slippage_percent` |
 | `slippage-sixteen-digits.yaml` | At most 15 significant digits | `slippage_percent` |
-| `slippage-too-large.yaml` | Less than 10^16 | `slippage_percent` |
+| `slippage-too-large.yaml` | Less than 10^16; written with `.0` to reach the decimal limit rather than the YAML integer-length guard | `slippage_percent` |
 | `slippage-exponent.yaml` | Plain notation: no exponent | `slippage_percent` |
 | `slippage-negative.yaml` | Plain notation: no sign | `slippage_percent` |
 | `slippage-leading-point.yaml` | Plain notation: digits before the decimal point | `slippage_percent` |

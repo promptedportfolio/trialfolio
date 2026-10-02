@@ -138,10 +138,14 @@
       "$ref": "#/$defs/TransportVersions"
     },
     "exchanges": {
-      "description": "The exchanges completed before it: Trial Folio's authentication call, when the attempt\nstarted with one.",
-      "items": {
-        "$ref": "#/$defs/Exchange"
-      },
+      "description": "The successful authentication exchange completed before the request in 0.1.0.",
+      "maxItems": 1,
+      "minItems": 1,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/Exchange"
+        }
+      ],
       "title": "Exchanges",
       "type": "array"
     }

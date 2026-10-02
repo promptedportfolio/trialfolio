@@ -7,12 +7,12 @@
       "description": "The request budget (budget and retries).",
       "properties": {
         "provider_requests": {
-          "minimum": 1,
+          "const": 1,
           "title": "Provider Requests",
           "type": "integer"
         },
         "credits_per_request": {
-          "minimum": 0,
+          "const": 5,
           "title": "Credits Per Request",
           "type": "integer"
         },
@@ -20,12 +20,12 @@
           "$ref": "#/$defs/DocumentedSource"
         },
         "credits": {
-          "minimum": 0,
+          "const": 5,
           "title": "Credits",
           "type": "integer"
         },
         "authentication_calls": {
-          "minimum": 0,
+          "const": 1,
           "title": "Authentication Calls",
           "type": "integer"
         }
@@ -633,6 +633,8 @@
       "anyOf": [
         {
           "maxLength": 2000,
+          "minLength": 1,
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "type": "string"
         },
         {
@@ -662,6 +664,8 @@
       "items": {
         "$ref": "#/$defs/DataSent"
       },
+      "maxItems": 3,
+      "minItems": 3,
       "title": "Data Sent",
       "type": "array"
     },

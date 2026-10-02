@@ -6,6 +6,8 @@ these tests check the generator itself, in a temporary directory.
 """
 
 import json
+import os
+import subprocess
 import typing
 from pathlib import Path
 
@@ -63,14 +65,61 @@ def test_check_of_a_missing_directory_lists_every_schema(tmp_path: Path) -> None
     assert check(tmp_path / "absent") == [f"missing: {file.name}" for file in SCHEMA_FILES]
 
 
-def test_write_replaces_drifted_files_and_removes_others(tmp_path: Path) -> None:
+def test_write_replaces_drifted_files(tmp_path: Path) -> None:
     (tmp_path / SCHEMA_FILES[0].name).write_text("{}\n")
-    (tmp_path / "stale.schema.json").write_text("{}\n")
 
     write(tmp_path)
 
     assert sorted(path.name for path in tmp_path.iterdir()) == sorted(generate())
     assert check(tmp_path) == []
+
+
+@pytest.mark.parametrize("extra", ["notes.txt", "stale.schema.json"])
+def test_write_refuses_unexpected_files_without_changing_anything(
+    tmp_path: Path, extra: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression: --dir must never delete unrelated files or partially regenerate schemas."""
+    before = {SCHEMA_FILES[0].name: b"{}\n", extra: b"keep me\n"}
+    for name, content in before.items():
+        (tmp_path / name).write_bytes(content)
+
+    assert main(["--dir", str(tmp_path)]) == 1
+    assert "unexpected files" in capsys.readouterr().err
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
+
+
+def test_script_resolves_explicit_directory_from_the_callers_directory(tmp_path: Path) -> None:
+    """Regression: the shell wrapper must preserve the meaning of relative --dir arguments."""
+    write(tmp_path)
+    root = Path(__file__).resolve().parents[2]
+    cwd = root / "tests"
+    result = subprocess.run(
+        ["sh", str(root / "scripts/schemas"), "--check", "--dir", os.path.relpath(tmp_path, cwd)],
+        cwd=cwd,
+        env=os.environ | {"UV_NO_SYNC": "true", "UV_OFFLINE": "true", "UV_NO_ENV_FILE": "true"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_git_checkout_preserves_schema_bytes_with_autocrlf(tmp_path: Path) -> None:
+    """Regression: a Windows-style Git checkout must pass the byte-for-byte drift check."""
+    root = Path(__file__).resolve().parents[2]
+    (tmp_path / ".gitattributes").write_bytes((root / ".gitattributes").read_bytes())
+    write(tmp_path / "schemas")
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    for args in (
+        ["init", "--quiet"],
+        ["-c", "core.autocrlf=false", "add", ".gitattributes", "schemas"],
+        ["-c", "core.autocrlf=true", "checkout-index", "--all", f"--prefix={checkout}/"],
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    assert check(checkout / "schemas") == []
 
 
 def test_main_exits_1_on_drift_and_writes_nothing(

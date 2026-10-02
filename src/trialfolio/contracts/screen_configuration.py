@@ -213,6 +213,13 @@ class ScreenConfiguration(ContractModel):
         Field(json_schema_extra=_optional_key),
     ] = None
 
+    @field_validator("rules", mode="before")
+    @classmethod
+    def _ordered_rules(cls, value: object) -> object:
+        if not isinstance(value, list | tuple):
+            raise ValueError("must be an ordered list of formulas")
+        return cast("list[object] | tuple[object, ...]", value)
+
     @field_validator("ranking", mode="before")
     @classmethod
     def _one_ranking_form(cls, value: object) -> Ranking:

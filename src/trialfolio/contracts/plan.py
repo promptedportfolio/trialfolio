@@ -40,7 +40,6 @@ from trialfolio.contracts.screen_configuration import (
 )
 from trialfolio.contracts.screen_settings import (
     SCREEN_SETTINGS,
-    SCREEN_SETTINGS_BY_NAME,
     check_flags,
     check_row,
     check_value,
@@ -247,11 +246,11 @@ class DocumentedSource(ContractModel):
 class Budget(ContractModel):
     """The request budget (budget and retries)."""
 
-    provider_requests: Annotated[int, Field(ge=1)]
-    credits_per_request: Annotated[int, Field(ge=0)]
+    provider_requests: Annotated[Literal[1], IntegerOnly]
+    credits_per_request: Annotated[Literal[5], IntegerOnly]
     credits_per_request_source: DocumentedSource
-    credits: Annotated[int, Field(ge=0)]
-    authentication_calls: Annotated[int, Field(ge=0)]
+    credits: Annotated[Literal[5], IntegerOnly]
+    authentication_calls: Annotated[Literal[1], IntegerOnly]
 
     @model_validator(mode="after")
     def _credits(self) -> Self:
@@ -278,10 +277,26 @@ class DataSent(ContractModel):
 
     @model_validator(mode="after")
     def _known_settings(self) -> Self:
-        if self.category == "credentials" and self.settings:
-            raise ValueError("credentials carry no settings")
-        if any(name not in SCREEN_SETTINGS_BY_NAME for name in self.settings):
-            raise ValueError("settings must name screen settings")
+        expected = {
+            "credentials": (),
+            "strategy_definition": ("universe", "rules", "ranking"),
+            "backtest_settings": (
+                "max_holdings",
+                "benchmark",
+                "start_date",
+                "end_date",
+                "rebalance_weeks",
+                "transaction_price",
+                "slippage_percent",
+                "pit_method",
+                "precision",
+                "screen_type",
+                "position_method",
+                "currency",
+            ),
+        }
+        if set(self.settings) != set(expected[self.category]):
+            raise ValueError(f"{self.category} must carry exactly its documented settings")
         require_unique(self.settings, "settings")
         return self
 
@@ -301,7 +316,7 @@ class Plan(ContractModel):
     cases: tuple[PlanCase]
     budget: Budget
     retry_policy: RetryPolicy
-    data_sent: tuple[DataSent, ...]
+    data_sent: Annotated[tuple[DataSent, ...], Field(min_length=3, max_length=3)]
     plan_hash: Sha256Digest
 
     @model_validator(mode="after")
