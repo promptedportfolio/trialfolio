@@ -2,7 +2,7 @@
 
 Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and eventually evaluating Portfolio123 strategy evidence with scientific discipline. This file is the entry point for coding agents. It links to the documents that own each requirement; it does not repeat them.
 
-**Current state (2026-10-02):** Release [0.1.0](docs/releases/0.1.0-api-execution.md) is Ready and being implemented. R01-T06 scaffolded the project: the `uv` project, the pinned dependencies, pytest with its markers and the network guard, `scripts/setup`, and `scripts/check`. R01-T07 built the contracts: the Pydantic models in `src/trialfolio/contracts/`, the configuration reader in `src/trialfolio/configuration.py`, the schemas under `schemas/` with `scripts/schemas`, and the screen configuration fixtures. No other application code exists yet. The next task is R01-T08.
+**Current state (2026-10-02):** Release [0.1.0](docs/releases/0.1.0-api-execution.md) is Ready and being implemented. R01-T06 scaffolded the project: the `uv` project, the pinned dependencies, pytest with its markers and the network guard, `scripts/setup`, and `scripts/check`. R01-T07 built the contracts: the Pydantic models in `src/trialfolio/contracts/`, the configuration reader in `src/trialfolio/configuration.py`, the schemas under `schemas/` with `scripts/schemas`, and the screen configuration fixtures. R01-T08 wrote the `ArtifactStore` in `src/trialfolio/storage.py`: atomic writes that never replace a file, the syncs, and the output directory claim. No other application code exists yet. The next task is R01-T09.
 
 ## Reading order
 

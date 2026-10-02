@@ -1,0 +1,301 @@
+"""The local `ArtifactStore` writes atomically, never replaces a file, syncs what it creates, and
+takes only relative paths.
+
+Traces to docs/contracts.md, artifact storage (REQ-05): relative paths, immutability, atomic
+writes, never replacing, no hard links, and syncing, including new directories and macOS's
+fallback from `F_FULLFSYNC`. Also to R01-AC29: a file system without hard links fails the first
+atomic write with `storage.write_failed`. The claim has its own tests, in test_output_claim.py.
+"""
+
+import errno
+import hashlib
+import logging
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+from tests.core.conftest import Faults, SyncLog, identity, raises, snapshot
+from trialfolio.errors import TrialFolioError
+from trialfolio.storage import LocalArtifactStore, StoredFile
+
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Linux and macOS behavior")
+macos_only = pytest.mark.skipif(sys.platform != "darwin", reason="macOS behavior")
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> LocalArtifactStore:
+    """A store that has claimed `tmp_path / "out"` with `plan.json`."""
+    claimed = LocalArtifactStore(tmp_path / "out")
+    claimed.claim("plan.json", b"{}\n")
+    return claimed
+
+
+def test_write_publishes_the_file_and_returns_its_content_address(
+    store: LocalArtifactStore,
+) -> None:
+    data = b"metric,value\nannual_return,12.3\n"
+
+    stored = store.write("normalized/metrics.csv", data)
+
+    assert stored == StoredFile(
+        path="normalized/metrics.csv",
+        artifact_id="sha256:" + hashlib.sha256(data).hexdigest(),
+        size=len(data),
+    )
+    assert store.read("normalized/metrics.csv") == data
+    # No temporary file is left beside it.
+    assert os.listdir(store.root / "normalized") == ["metrics.csv"]
+
+
+def test_write_keeps_bytes_exactly(store: LocalArtifactStore) -> None:
+    # Line endings and non-ASCII text are never translated, on any platform.
+    data = "a\r\nb\nCafé\n".encode()
+
+    store.write("configuration.yaml", data)
+
+    assert (store.root / "configuration.yaml").read_bytes() == data
+
+
+@pytest.mark.parametrize("existing", ["plan.json", "configuration.yaml"])
+def test_write_never_replaces_a_file(store: LocalArtifactStore, existing: str) -> None:
+    # The claim's own file, and one another process created under the final name.
+    if existing != "plan.json":
+        (store.root / existing).write_bytes(b"another process's\n")
+    before = snapshot(store.root)
+
+    with pytest.raises(TrialFolioError) as raised:
+        store.write(existing, b"replacement\n")
+
+    assert raised.value.code == "storage.write_failed"
+    assert "already exists" in raised.value.message
+    assert "never replaces" in raised.value.message
+    assert snapshot(store.root) == before
+
+
+def test_write_needs_a_claimed_directory(tmp_path: Path) -> None:
+    store = LocalArtifactStore(tmp_path / "out")
+
+    with pytest.raises(RuntimeError, match="claim"):
+        store.write("configuration.yaml", b"kind: screen\n")
+
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "/etc/passwd",
+        "../outside.json",
+        "cases/../../outside.json",
+        "./plan.json",
+        "cases//attempt.json",
+        "cases/",
+        "cases\\attempt.json",
+        "C:attempt.json",
+    ],
+)
+def test_paths_must_be_relative_to_the_root(
+    store: LocalArtifactStore, tmp_path: Path, path: str
+) -> None:
+    before = snapshot(tmp_path)
+
+    with pytest.raises(ValueError, match="relative path|inside the output directory"):
+        store.write(path, b"x")
+    with pytest.raises(ValueError, match="relative path|inside the output directory"):
+        store.read(path)
+    with pytest.raises(ValueError, match="relative path|inside the output directory"):
+        LocalArtifactStore(tmp_path / "other").claim(path, b"x")
+
+    assert snapshot(tmp_path) == before
+
+
+def test_read_of_a_missing_file_raises_file_not_found(store: LocalArtifactStore) -> None:
+    with pytest.raises(FileNotFoundError):
+        store.read("cases/case-0123456789abcdef/attempts/missing/attempt.json")
+
+
+@posix_only
+@pytest.mark.parametrize("code", [errno.ENOTSUP, errno.EPERM])
+def test_a_file_system_without_hard_links_fails_the_write(
+    store: LocalArtifactStore, monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    # How os.link reports it: ENOTSUP on macOS, verified on exFAT and FAT32 disk images, and
+    # EPERM on Linux, as link(2) documents.
+    def link(source: object, destination: object) -> None:
+        raise OSError(code, os.strerror(code))
+
+    monkeypatch.setattr(os, "link", link)
+
+    with pytest.raises(TrialFolioError) as raised:
+        store.write("configuration.yaml", b"kind: screen\n")
+
+    assert raised.value.code == "storage.write_failed"
+    assert "configuration.yaml" in raised.value.message
+    assert "doesn't support hard links" in raised.value.message
+    # Nothing is published, and the temporary file is gone.
+    assert os.listdir(store.root) == ["plan.json"]
+
+
+@posix_only
+def test_permission_errors_are_not_reported_as_missing_hard_links(
+    store: LocalArtifactStore, faults: Faults
+) -> None:
+    # macOS reports EPERM when its privacy protection refuses a file, as link(2) does on Linux for
+    # a file system without hard links. Only os.link's error means that.
+    faults.on_open("configuration.yaml", raises(PermissionError(errno.EPERM, "Not permitted")))
+
+    with pytest.raises(TrialFolioError) as raised:
+        store.write("configuration.yaml", b"kind: screen\n")
+
+    assert raised.value.code == "storage.write_failed"
+    assert "hard links" not in raised.value.message
+    assert "Not permitted" in raised.value.message
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [OSError(errno.ENOSPC, "No space left on device"), KeyboardInterrupt()],
+    ids=["disk-full", "interrupt"],
+)
+def test_a_failed_write_publishes_nothing_and_leaves_no_temporary_file(
+    store: LocalArtifactStore, faults: Faults, failure: BaseException
+) -> None:
+    faults.on_write("response.json", raises(failure))
+    directory = "cases/case-0123456789abcdef/attempts/1b4e28ba-2fa1-4d2b-883f-0016d3cca427"
+
+    with pytest.raises(TrialFolioError if isinstance(failure, OSError) else KeyboardInterrupt) as e:
+        store.write(f"{directory}/response.json", b"{}\n")
+
+    if isinstance(e.value, TrialFolioError):
+        assert e.value.code == "storage.write_failed"
+        assert "No space left on device" in e.value.message
+    assert os.listdir(store.root / directory) == []
+
+
+@posix_only
+def test_writes_sync_each_new_directory_and_the_parent_of_the_first(
+    store: LocalArtifactStore, sync_log: SyncLog
+) -> None:
+    attempt = (
+        store.root / "cases/case-0123456789abcdef/attempts/1b4e28ba-2fa1-4d2b-883f-0016d3cca427"
+    )
+    relative = attempt.relative_to(store.root).as_posix()
+
+    store.write(f"{relative}/started.json", b"{}\n")
+
+    # The file, each directory created on the way, and the root, which holds the first.
+    created = [attempt, *attempt.parents][:4]
+    assert [path.name for path in created][-1] == "cases"
+    assert sync_log.take() == {
+        identity(attempt / "started.json"),
+        *(identity(directory) for directory in created),
+        identity(store.root),
+    }
+
+    store.write(f"{relative}/attempt.json", b"{}\n")
+
+    # Only the new file and the directory that holds it: the others are durable already.
+    assert sync_log.take() == {identity(attempt / "attempt.json"), identity(attempt)}
+
+
+@posix_only
+def test_a_directory_left_by_a_failed_write_is_synced_by_the_next_write_under_it(
+    store: LocalArtifactStore, sync_log: SyncLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_link = os.link
+
+    def failing_link(source: object, destination: object) -> None:
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(os, "link", failing_link)
+    with pytest.raises(TrialFolioError):
+        store.write("normalized/metrics.csv", b"metric\n")
+    monkeypatch.setattr(os, "link", real_link)
+    sync_log.take()
+
+    store.write("normalized/settings.csv", b"setting\n")
+
+    normalized = store.root / "normalized"
+    assert sync_log.take() == {
+        identity(normalized / "settings.csv"),
+        identity(normalized),
+        identity(store.root),
+    }
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows behavior")
+def test_windows_syncs_files_only(store: LocalArtifactStore, sync_log: SyncLog) -> None:
+    # Python can't open a directory on Windows (docs/contracts.md, syncing).
+    store.write("normalized/metrics.csv", b"metric\n")
+
+    assert sync_log.take() == {identity(store.root / "normalized/metrics.csv")}
+
+
+@macos_only
+@pytest.mark.parametrize("code", [errno.ENOTSUP, errno.ENODEV])
+def test_macos_falls_back_to_fsync_without_a_full_sync(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    code: int,
+) -> None:
+    # ENODEV is what devfs reports, verified on macOS 26.6.2, and ENOTSUP what Go's os package
+    # reports for SMB mounts.
+    import fcntl
+
+    real_fcntl = fcntl.fcntl
+
+    def no_full_sync(descriptor: int, command: int, argument: int = 0) -> int:
+        if command == fcntl.F_FULLFSYNC:
+            raise OSError(code, os.strerror(code))
+        return real_fcntl(descriptor, command, argument)
+
+    synced: list[int] = []
+    real_fsync = os.fsync
+
+    def fsync(descriptor: int) -> None:
+        synced.append(descriptor)
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(fcntl, "fcntl", no_full_sync)
+    monkeypatch.setattr(os, "fsync", fsync)
+    store = LocalArtifactStore(tmp_path / "out")
+
+    with caplog.at_level(logging.WARNING, logger="trialfolio.storage"):
+        store.claim("plan.json", b"{}\n")
+        store.write("normalized/metrics.csv", b"metric\n")
+        store.write("normalized/settings.csv", b"setting\n")
+
+    assert store.read("normalized/settings.csv") == b"setting\n"
+    assert synced  # Each sync fell back to fsync.
+    # One warning for the directory, not one for each write.
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert [getattr(record, "event", None) for record in warnings] == ["artifact.sync.degraded"]
+    assert "less durable" in warnings[0].getMessage()
+
+
+@macos_only
+def test_macos_fails_the_write_when_a_full_sync_fails_otherwise(
+    store: LocalArtifactStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An I/O error isn't a missing feature: a fallback fsync could hide it.
+    import fcntl
+
+    real_fcntl = fcntl.fcntl
+
+    def failing_full_sync(descriptor: int, command: int, argument: int = 0) -> int:
+        if command == fcntl.F_FULLFSYNC:
+            raise OSError(errno.EIO, "Input/output error")
+        return real_fcntl(descriptor, command, argument)
+
+    monkeypatch.setattr(fcntl, "fcntl", failing_full_sync)
+
+    with pytest.raises(TrialFolioError) as raised:
+        store.write("configuration.yaml", b"kind: screen\n")
+
+    assert raised.value.code == "storage.write_failed"
+    assert "Input/output error" in raised.value.message
+    assert os.listdir(store.root) == ["plan.json"]
