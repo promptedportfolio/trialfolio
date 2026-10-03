@@ -64,15 +64,22 @@ class TrialFolioError(Exception):
     """An error with a stable dotted code and an actionable message.
 
     Messages say what failed, why, and what to do next. They never include credentials, and
-    configuration errors never include the offending values, so a message is safe to log.
+    configuration errors never include the offending values. `message` is for the terminal and
+    the attempt record. `log_message` is safe to log: it's `message` without any text logs must
+    not hold, such as Portfolio123's own message in a provider error, and `message` itself when
+    there's none (docs/contracts.md, errors). It's also the error's `str()`, so a traceback is
+    safe to log too.
     """
 
-    def __init__(self, code: ErrorCode, message: str) -> None:
-        super().__init__(message)
+    def __init__(self, code: ErrorCode, message: str, log_message: str | None = None) -> None:
+        if log_message is None:
+            log_message = message
+        super().__init__(log_message)
         self.code: ErrorCode = code
         self.message = message
+        self.log_message = log_message
 
-    def __reduce__(self) -> tuple[type["TrialFolioError"], tuple[ErrorCode, str]]:
+    def __reduce__(self) -> tuple[type["TrialFolioError"], tuple[ErrorCode, str, str]]:
         # Pickling and copying rebuild an exception from its arguments, which hold only the
-        # message here.
-        return (type(self), (self.code, self.message))
+        # loggable message here.
+        return (type(self), (self.code, self.message, self.log_message))
