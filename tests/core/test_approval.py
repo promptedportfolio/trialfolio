@@ -9,6 +9,7 @@ hash and the budget are shown, never the formulas. The terminal is a real pseudo
 """
 
 import io
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -37,19 +38,20 @@ CANARIES = (
 )
 """The configuration values in `canaries.yaml`."""
 
+VERSIONS = Versions(
+    trialfolio="0.1.0",
+    p123api=VERIFIED_VERSIONS["p123api"][0],
+    requests=VERIFIED_VERSIONS["requests"][0],
+    urllib3=VERIFIED_VERSIONS["urllib3"][0],
+)
+
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows has no pseudo-terminals")
 
 
 @pytest.fixture
 def plan() -> Plan:
     path = FIXTURES / "canaries.yaml"
-    versions = Versions(
-        trialfolio="0.1.0",
-        p123api=VERIFIED_VERSIONS["p123api"][0],
-        requests=VERIFIED_VERSIONS["requests"][0],
-        urllib3=VERIFIED_VERSIONS["urllib3"][0],
-    )
-    return build_plan(read_screen_configuration(path.read_bytes(), path.name), versions)
+    return build_plan(read_screen_configuration(path.read_bytes(), path.name), VERSIONS)
 
 
 def assert_summary_only(shown: str, plan: Plan) -> None:
@@ -207,14 +209,30 @@ def test_the_full_plan_shows_what_will_be_sent_and_how_to_approve_it(plan: Plan)
         assert expected in shown
 
 
-def test_configuration_text_cant_act_on_the_terminal(plan: Plan) -> None:
-    escape, bell, override = chr(0x1B), chr(0x07), chr(0x202E)
-    hostile = plan.model_copy(update={"title": f"{escape}[2J{bell}title{override}txet"})
+HOSTILE = (chr(0x1B), chr(0x07), chr(0x9B), chr(0x85), chr(0x202E), chr(0x2028), chr(0x2029))
+"""Characters a terminal could act on: ESC, BEL, the C1 controls CSI and NEL, a right-to-left
+override, and the line and paragraph separators. JSON escapes only the first two."""
 
-    shown = format_plan(hostile)
 
-    for char in (escape, bell, override):
+def test_configuration_text_cant_act_on_the_terminal() -> None:
+    # Each text in the configuration ends with them, so they reach the title and purpose, the
+    # request's JSON, and the settings, where the rules and the formula are JSON too.
+    escape, bell, *others = HOSTILE
+    hostile = f"{escape}[2J{bell}{''.join(others)}"
+    text = (FIXTURES / "canaries.yaml").read_text(encoding="utf-8")
+    for canary in CANARIES:
+        # A JSON string is a YAML double-quoted scalar, with each of those characters escaped.
+        text = text.replace(f"'{canary}'", json.dumps(canary + hostile))
+    configuration = read_screen_configuration(text.encode(), "hostile.yaml")
+    assert configuration.ranking.model_dump()["formula"].endswith(hostile)
+
+    shown = format_plan(build_plan(configuration, VERSIONS))
+
+    for char in HOSTILE:
         assert char not in shown
+        assert f"\\u{ord(char):04x}" in shown
+    for canary in CANARIES:
+        assert canary in shown
     assert "[2J" in shown
 
 
