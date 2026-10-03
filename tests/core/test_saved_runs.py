@@ -327,6 +327,7 @@ def test_a_manifest_that_isnt_a_valid_run_manifest_is_refused(
         (lambda m: m.update(outcome="<b>great</b>"), "check `outcome`"),
         (lambda m: m.update(note="<b>extra</b>"), "check its fields"),
         (lambda m: m.pop("schema_version"), "has no schema version"),
+        (lambda m: m["artifacts"][0].update(path="bad\0path"), "check `artifacts`"),
     ):
         run = tmp_path / f"run-{len(expected)}"
         shutil.copytree(complete.out, run)

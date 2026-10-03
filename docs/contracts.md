@@ -793,7 +793,7 @@ In 0.1.0, a hash that doesn't match is `plan.approval_required`. `plan.changed` 
 
 **Requirement (REQ-05).** All artifact reads and writes go through the `ArtifactStore` interface. From 0.1.0 it has a local filesystem implementation.
 
-- **Relative paths.** Paths in manifests are relative to the output root, never absolute, so a moved or served directory stays valid. The store takes only such paths: segments separated by `/`, none of them empty, `.`, or `..`, and no `\` or `:`, the same rule the models apply.
+- **Relative paths.** Paths in manifests are relative to the output root, never absolute, so a moved or served directory stays valid. The store takes only such paths: segments separated by `/`, none of them empty, `.`, or `..`, and no `\`, `:`, or NUL, which no file name holds, the same rule the models apply.
 - **Immutability.** Source artifacts are never modified after they are written. Trial Folio never overwrites an existing artifact; corrections and migrations produce new artifacts.
 - **Atomic writes.** Each file is written to a temporary name in the same directory, flushed and synced to disk, and then published under its final name without replacing anything. The one exception is the file that [claims an output directory](#cli-behavior), which is created directly under its final name.
   - **Never replace.** If the final name exists, even because another process created it at the same moment, publishing fails, and the temporary file is removed. So a record that changes state is written as a new file, never over an old one: an attempt's start record and its attempt record are two files ([execution outcomes](#execution-outcomes-and-attempts)).
