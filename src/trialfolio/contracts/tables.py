@@ -113,7 +113,7 @@ class SettingsRow(ContractModel):
     provenance: Provenance
     inference_rule: NonEmptyText | None
     original_key: NonEmptyText | None
-    original_value: str | None
+    original_value: Annotated[str, Field(min_length=1)] | None
     """The value exactly as written in the configuration; null when absent."""
     source_artifact: Sha256Digest
     flags: tuple[FlagCode, ...]

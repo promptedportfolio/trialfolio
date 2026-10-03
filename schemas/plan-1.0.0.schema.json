@@ -7,11 +7,13 @@
       "description": "The request budget (budget and retries).",
       "properties": {
         "provider_requests": {
-          "minimum": 1,
+          "const": 1,
+          "description": "A 1.0.0 plan has one request, sent at most once.",
           "title": "Provider Requests",
           "type": "integer"
         },
         "credits_per_request": {
+          "description": "Portfolio123's documented cost of one request when the plan was made. It isn't fixed,\nbecause Portfolio123 can change it.",
           "minimum": 0,
           "title": "Credits Per Request",
           "type": "integer"
@@ -25,7 +27,7 @@
           "type": "integer"
         },
         "authentication_calls": {
-          "minimum": 0,
+          "const": 1,
           "title": "Authentication Calls",
           "type": "integer"
         }
@@ -633,6 +635,8 @@
       "anyOf": [
         {
           "maxLength": 2000,
+          "minLength": 1,
+          "pattern": "[^\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
           "type": "string"
         },
         {
@@ -662,6 +666,8 @@
       "items": {
         "$ref": "#/$defs/DataSent"
       },
+      "maxItems": 3,
+      "minItems": 3,
       "title": "Data Sent",
       "type": "array"
     },

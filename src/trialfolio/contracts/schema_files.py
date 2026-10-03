@@ -3,11 +3,10 @@
 
     python -m trialfolio.contracts.schema_files [--check] [--dir DIR]
 
-Without `--check`, it writes every schema and removes any other file from the directory, since
-the schemas are never written by hand. With `--check`, it writes nothing: it compares the
-directory with the schemas it generates, lists each file that differs, is missing, or is extra,
-and exits 1 if there's any. Both ignore hidden entries, such as macOS's `.DS_Store`. Neither
-removes a subdirectory: the check lists it as extra, and writing refuses to run.
+Without `--check`, it writes every schema. It never deletes anything: before writing, it refuses
+a directory that holds any other file or a subdirectory. With `--check`, it writes nothing: it
+compares the directory with the schemas it generates, lists each file that differs, is missing,
+or is extra, and exits 1 if there's any. Both ignore hidden entries, such as macOS's `.DS_Store`.
 """
 
 import argparse
@@ -109,18 +108,31 @@ def check(directory: Path) -> list[str]:
     return problems
 
 
+class SchemaDirectoryError(Exception):
+    """The directory can't take the schemas as it is. Raised before anything is written."""
+
+
 def write(directory: Path) -> None:
-    """Writes every schema into `directory`, and removes every other file from it. Raises
-    `IsADirectoryError`, before writing anything, if the directory holds a subdirectory."""
+    """Writes every schema into `directory`. Raises `SchemaDirectoryError`, before writing
+    anything, if `directory` isn't a directory, or holds a subdirectory or any other file, so a
+    mistaken target never loses a file."""
     expected = generate()
+    if not directory.is_dir() and (directory.exists() or directory.is_symlink()):
+        raise SchemaDirectoryError(f"{directory} isn't a directory. Choose another --dir.")
     present = _entries(directory)
     folders = sorted(name for name, path in present.items() if path.is_dir())
     if folders:
-        raise IsADirectoryError(f"{directory} holds directories: {', '.join(folders)}")
+        raise SchemaDirectoryError(
+            f"{directory} holds directories: {', '.join(folders)}. It holds only schema files: "
+            "remove them, or choose another --dir."
+        )
+    extra = sorted(present.keys() - expected.keys())
+    if extra:
+        raise SchemaDirectoryError(
+            f"{directory} holds files that aren't current schemas: {', '.join(extra)}. "
+            "Delete each one you've checked is obsolete, or choose another --dir."
+        )
     directory.mkdir(parents=True, exist_ok=True)
-    for name, path in present.items():
-        if name not in expected:
-            path.unlink()
     for name, content in expected.items():
         (directory / name).write_bytes(content)
 
@@ -140,14 +152,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         for problem in problems:
             print(f"schemas: {problem}", file=sys.stderr)
         if problems:
-            print("schemas: drift found. Run scripts/schemas to regenerate them.", file=sys.stderr)
+            # Writing never deletes, so an extra entry is the user's to remove first.
+            steps: list[str] = []
+            if any(problem.startswith("extra: ") for problem in problems):
+                steps.append("delete each extra entry you've checked is obsolete")
+            if not all(problem.startswith("extra: ") for problem in problems):
+                steps.append("run scripts/schemas to regenerate the schemas")
+            print(f"schemas: drift found. To fix it, {', then '.join(steps)}.", file=sys.stderr)
             return 1
         print(f"The {len(SCHEMA_FILES)} schemas in {directory} match the models.")
         return 0
     try:
         write(directory)
-    except IsADirectoryError as error:
-        print(f"schemas: {error}. Remove them; schemas/ holds only schema files.", file=sys.stderr)
+    except SchemaDirectoryError as error:
+        print(f"schemas: {error}", file=sys.stderr)
         return 1
     print(f"Wrote {len(SCHEMA_FILES)} schemas to {directory}.")
     return 0

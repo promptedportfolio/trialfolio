@@ -200,7 +200,8 @@ def test_integer_above_2_to_the_53_is_rejected() -> None:
 
 
 def test_decimal_of_10_to_the_16_is_rejected() -> None:
-    content = with_line("slippage_percent: 0.25", "slippage_percent: 10000000000000000.0")
+    """The named fixture must reach the decimal magnitude rule, not the YAML integer limit."""
+    content = (INVALID / "slippage-too-large.yaml").read_bytes()
 
     assert "`slippage_percent` must be less than 10^16." in rejection(content)
 
@@ -408,6 +409,10 @@ VALID: dict[str, Any] = {
     ("key", "value"),
     [
         ("purpose", None),
+        ("purpose", ""),
+        ("purpose", "   "),
+        ("rules", {"Price > 5", "MktCap > 1000"}),
+        ("rules", frozenset({"Price > 5", "MktCap > 1000"})),
         ("data_vendor", None),
         ("slippage_percent", 0.25),
         ("slippage_percent", True),
@@ -425,3 +430,12 @@ def test_model_rejects_what_the_contract_calls_invalid(key: str, value: object) 
     ScreenConfiguration.model_validate(VALID)
     with pytest.raises(ValidationError):
         ScreenConfiguration.model_validate({**VALID, key: value})
+
+
+@pytest.mark.parametrize("purpose", ["''", "'   '"])
+def test_empty_purpose_must_be_omitted(purpose: str) -> None:
+    """Configuration files: an optional purpose, when present, must be non-blank."""
+    content = with_line(
+        "purpose: Reference backtest for the 0.1.0 response layout.", f"purpose: {purpose}"
+    )
+    assert "`purpose`" in rejection(content)

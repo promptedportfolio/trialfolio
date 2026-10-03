@@ -103,8 +103,8 @@ NonEmptyText = Annotated[str, StringConstraints(min_length=1, pattern=NOT_BLANK)
 Title = Annotated[str, StringConstraints(min_length=1, max_length=200, pattern=NOT_BLANK)]
 """A configuration's title: 1 to 200 characters, not all whitespace."""
 
-Purpose = Annotated[str, StringConstraints(max_length=2000)]
-"""A configuration's declared purpose: up to 2,000 characters."""
+Purpose = Annotated[str, StringConstraints(min_length=1, max_length=2000, pattern=NOT_BLANK)]
+"""A configuration's declared purpose: 1 to 2,000 characters, not all whitespace."""
 
 
 def valid_date_text(value: str) -> str:

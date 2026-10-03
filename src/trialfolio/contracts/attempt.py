@@ -61,17 +61,19 @@ class StartRecord(_AttemptIdentity):
     record beside it, the attempt is `running` (uncertain completion).
     """
 
-    exchanges: tuple[Exchange, ...]
-    """The exchanges completed before it: Trial Folio's authentication call, when the attempt
-    started with one."""
+    exchanges: tuple[Exchange]
+    """The successful authentication exchange completed before the request in 0.1.0."""
 
     @model_validator(mode="after")
     def _authentication_only(self) -> Self:
         # It's written before the request is sent, so only authentication can precede it.
-        if any(exchange.request != AUTHENTICATION_REQUEST for exchange in self.exchanges):
+        (authentication,) = self.exchanges
+        if authentication.request != AUTHENTICATION_REQUEST:
             raise ValueError("a start record holds only the authentication exchange")
-        if any(exchange.note is not None for exchange in self.exchanges):
-            raise ValueError("a start record's exchanges carry no note")
+        if authentication.status != 200:
+            raise ValueError("a start record requires successful authentication")
+        if authentication.note is not None:
+            raise ValueError("a start record's exchange carries no note")
         return self
 
 
@@ -150,6 +152,17 @@ class AttemptRecord(_AttemptIdentity):
         sends = [e for e in self.exchanges if e.request != AUTHENTICATION_REQUEST]
         if len(sends) > 1:
             raise ValueError("the request is sent at most once, so it has at most one exchange")
+        authentication = [e for e in self.exchanges if e.request == AUTHENTICATION_REQUEST]
+        if len(authentication) > 1:
+            raise ValueError("an attempt has at most one authentication exchange")
+        if authentication and self.exchanges[0] != authentication[0]:
+            raise ValueError("authentication must precede the request")
+        if (sends or self.outcome == "unknown") and (
+            not authentication or authentication[0].status != 200
+        ):
+            raise ValueError("sending or restarting a request requires successful authentication")
+        if sends and self.request is None:
+            raise ValueError("a request exchange requires its saved request reference")
         if any(e.note is not None for e in self.exchanges if e.request == AUTHENTICATION_REQUEST):
             raise ValueError("only the request's exchange can carry a note")
         if any(e.note is not None for e in sends) and self.outcome != "succeeded":

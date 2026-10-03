@@ -4,5 +4,7 @@
 # which scripts/check runs (docs/contracts.md, schema generation and drift). This is the only way
 # the schemas are written; never edit them by hand.
 set -eu
-cd "$(git rev-parse --show-toplevel)"
-exec uv run python -m trialfolio.contracts.schema_files "$@"
+# The repository is the one holding this script, wherever it's run from. A relative --dir stays
+# relative to the caller's directory.
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+exec uv run --project "$root" python -m trialfolio.contracts.schema_files --dir "$root/schemas" "$@"

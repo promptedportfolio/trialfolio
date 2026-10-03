@@ -17,7 +17,7 @@ from pydantic import BaseModel, ValidationError
 from trialfolio.contracts.acknowledgment import AcknowledgmentRecord
 from trialfolio.contracts.attempt import AttemptRecord, StartRecord
 from trialfolio.contracts.manifest import RunManifest
-from trialfolio.contracts.plan import Plan
+from trialfolio.contracts.plan import DATA_SENT_SETTINGS, Plan, screen_backtest_params
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS
 from trialfolio.contracts.summary import JsonSummary
 from trialfolio.contracts.tables import (
@@ -161,6 +161,26 @@ def plan() -> Document:
                 "recipient": "Portfolio123",
                 "via": "p123api",
                 "settings": ["universe", "rules", "ranking"],
+            },
+            # The fixture previously omitted this required disclosure category.
+            {
+                "category": "backtest_settings",
+                "recipient": "Portfolio123",
+                "via": "p123api",
+                "settings": [
+                    "max_holdings",
+                    "benchmark",
+                    "start_date",
+                    "end_date",
+                    "rebalance_weeks",
+                    "transaction_price",
+                    "slippage_percent",
+                    "pit_method",
+                    "precision",
+                    "screen_type",
+                    "position_method",
+                    "currency",
+                ],
             },
         ],
         "plan_hash": PLAN_HASH,
@@ -447,6 +467,23 @@ PLAN_CHANGES: dict[str, Change] = {
     ].update(type="common"),
     "credentials with settings": lambda d: d["data_sent"][0].update(settings=["universe"]),
     "category twice": lambda d: d["data_sent"].append(d["data_sent"][1]),
+    "no data disclosure": lambda d: d.update(data_sent=[]),
+    "missing credentials category": lambda d: d["data_sent"].pop(0),
+    "missing strategy category": lambda d: d["data_sent"].pop(1),
+    "missing backtest category": lambda d: d["data_sent"].pop(2),
+    "category repeated in place of another": lambda d: d["data_sent"].__setitem__(
+        2, d["data_sent"][1]
+    ),
+    "sent setting missing": lambda d: d["data_sent"][1]["settings"].pop(),
+    "setting in wrong category": lambda d: d["data_sent"][1]["settings"].append("max_holdings"),
+    "unsent setting disclosed as sent": lambda d: d["data_sent"][2]["settings"].append(
+        "data_vendor"
+    ),
+    "two request budget": lambda d: d["budget"].update(provider_requests=2, credits=10),
+    "no authentication budget": lambda d: d["budget"].update(authentication_calls=0),
+    "repeated authentication budget": lambda d: d["budget"].update(authentication_calls=2),
+    "boolean request budget": lambda d: d["budget"].update(provider_requests=True),
+    "float credit budget": lambda d: d["budget"].update(credits_per_request=5.0),
     "uppercase hash": lambda d: d.update(plan_hash=PLAN_HASH.upper()),
     "prefixed version": lambda d: d.update(trialfolio_version="v0.1.0"),
     "end before start": lambda d: d["cases"][0]["requests"][0]["params"].update(endDt="2015-12-31"),
@@ -480,6 +517,34 @@ PLAN_CHANGES: dict[str, Change] = {
 @pytest.mark.parametrize("change", PLAN_CHANGES.values(), ids=PLAN_CHANGES.keys())
 def test_plan_rejects(change: Change) -> None:
     rejects(Plan, changed(plan, change))
+
+
+def test_plan_takes_another_documented_cost() -> None:
+    """Budget: a plan records the cost documented when it was made, which Portfolio123 can
+    change, so the reader checks only that `credits` is the product."""
+
+    def repriced(document: Document) -> None:
+        document["budget"].update(credits_per_request=3, credits=3)
+
+    Plan.model_validate_json(json.dumps(changed(plan, repriced)))
+
+
+def test_data_sent_names_each_setting_the_request_sends() -> None:
+    """Data sent: the settings `screen_backtest_params` reads are the verified ones, and
+    `data_sent` lists each of them once."""
+    read: set[str] = set()
+
+    class Recording(dict[str, object]):
+        def __getitem__(self, name: str) -> object:
+            read.add(name)
+            return super().__getitem__(name)
+
+    screen_backtest_params(Recording(SETTING_VALUES))
+
+    verified = {setting.name for setting in SCREEN_SETTINGS if setting.provenance == "verified"}
+    assert read == verified
+    disclosed = [name for names in DATA_SENT_SETTINGS.values() for name in names]
+    assert sorted(disclosed) == sorted(verified)
 
 
 def interrupted_backtest(document: Document) -> None:
@@ -618,6 +683,18 @@ ATTEMPT_CHANGES: dict[str, Change] = {
         ),
     ),
     "request sent twice": lambda d: d["exchanges"].append(d["exchanges"][1]),
+    "request without its reference": lambda d: d.update(request=None),
+    "request without authentication": lambda d: d["exchanges"].pop(0),
+    "request after rejected authentication": lambda d: d["exchanges"][0].update(status=401),
+    "request after interrupted authentication": lambda d: d["exchanges"][0].update(
+        result="interrupted", status=None
+    ),
+    "authentication after the request": lambda d: d["exchanges"].reverse(),
+    "authentication repeated": lambda d: d["exchanges"].insert(0, d["exchanges"][0]),
+    "restart after failed authentication": lambda d: (
+        restarted_without_response(d),
+        d["exchanges"][0].update(status=401),
+    ),
 }
 
 
@@ -645,6 +722,42 @@ def test_start_record_holds_only_authentication(exchange: Document) -> None:
     document["exchanges"][0] = exchange
 
     rejects(StartRecord, document)
+
+
+@pytest.mark.parametrize(
+    ("result", "status"),
+    [("response", 401), ("response", 503), ("not_connected", None), ("interrupted", None)],
+)
+def test_failed_authentication_is_an_attempt_without_a_start_record(
+    result: str, status: int | None
+) -> None:
+    """Uncertain completion: failed authentication is recorded, but never starts a backtest."""
+    start = start_record()
+    start["exchanges"][0].update(result=result, status=status)
+    rejects(StartRecord, start)
+
+    attempt = attempt_record()
+    failed_authentication(attempt)
+    attempt["exchanges"] = start["exchanges"]
+    if status != 401:
+        attempt["error"] = {"code": "provider.unavailable", "message": "Authentication failed."}
+    AttemptRecord.model_validate_json(json.dumps(attempt))
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_start_record_requires_one_authentication_exchange(count: int) -> None:
+    """0.1.0 authenticates exactly once before writing its start record."""
+    start = start_record()
+    start["exchanges"] *= count
+    rejects(StartRecord, start)
+
+
+def test_attempt_can_end_before_authentication() -> None:
+    """Interrupts after claiming output but before authentication still record a failed attempt."""
+    attempt = attempt_record()
+    failed_authentication(attempt)
+    attempt.update(exchanges=[], error={"code": "command.interrupted", "message": "Interrupted."})
+    AttemptRecord.model_validate_json(json.dumps(attempt))
 
 
 def demo(document: Document) -> None:
@@ -740,6 +853,23 @@ def test_settings_row_takes_coverage_mismatch_on_a_date() -> None:
     SettingsRow.model_validate_json(json.dumps(changed(settings_row, mismatched_start)))
 
 
+@pytest.mark.parametrize("name", ["slippage_percent", "commission", "max_pos_pct"])
+def test_settings_provenance_matches_the_documented_row(name: str) -> None:
+    """Screen settings: sent, inferred, and unsent rows retain their required provenance."""
+    row = next(row for row in plan_settings() if row["setting"] == name)
+    row["provenance"] = row.pop("expected_provenance")
+    row.update(
+        label="baseline", original_key=None, original_value=None, source_artifact=ARTIFACT_ID
+    )
+    SettingsRow.model_validate_json(json.dumps(row))
+
+    row.update(
+        provenance="unknown" if row["provenance"] == "verified" else "verified",
+        inference_rule=None,
+    )
+    rejects(SettingsRow, row)
+
+
 def unavailable(document: Document) -> None:
     document.update(
         value=None,
@@ -802,7 +932,13 @@ SETTINGS_CHANGES: dict[str, Change] = {
     "not critical": lambda d: d.update(critical=False),
     "decimal not normalized": lambda d: d.update(value="0.250"),
     "key without a value": lambda d: d.update(original_value=None),
+    "empty original value": lambda d: d.update(original_value=""),
     "inferred without a rule": lambda d: d.update(provenance="inferred"),
+    "sent value marked unknown": lambda d: d.update(provenance="unknown"),
+    "sent value marked user supplied": lambda d: d.update(provenance="user_supplied"),
+    "sent value marked inferred": lambda d: d.update(
+        provenance="inferred", inference_rule="A rule"
+    ),
     "flag twice": lambda d: d.update(flags=["coverage_mismatch", "coverage_mismatch"]),
     "unknown flag": lambda d: d.update(flags=["looks_fine"]),
     "ranking not JSON": lambda d: d.update(
