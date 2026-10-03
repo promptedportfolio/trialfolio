@@ -76,6 +76,31 @@ def test_portfolio123s_message_is_sanitized(
         assert secret not in raised.value.message
 
 
+@pytest.mark.parametrize("stage", ["authentication", "request"])
+def test_contained_credentials_are_redacted_in_full(server: FakePortfolio123, stage: str) -> None:
+    """INV-11 regression: redacting a shorter secret must not expose the rest of a longer one."""
+    api_id = "123456"
+    api_key = f"synthetic.key[{api_id}]"
+    token = f"synthetic.token[{api_key}]"
+    with P123ScreenBacktestClient(Credentials(api_id, api_key), endpoint=server.endpoint) as client:
+        text = f"Rejected {api_id} {api_key}"
+        expected = "Rejected [redacted] [redacted]"
+        if stage == "authentication":
+            server.reply("/auth", Reply(403, text.encode()))
+            with pytest.raises(ProviderError) as raised:
+                client.authenticate()
+        else:
+            server.reply("/auth", Reply(200, token.encode()))
+            client.authenticate()
+            server.reply("/screen/backtest", Reply(400, f"{text} {token}".encode()))
+            expected += " [redacted]"
+            with pytest.raises(ProviderError) as raised:
+                client.screen_backtest(PARAMS)
+
+    assert raised.value.provider_message == expected
+    assert raised.value.message.endswith(f'Portfolio123\'s message: "{expected}"')
+
+
 def test_errors_carry_no_reference_to_the_wrappers_exception(
     server: FakePortfolio123, client: P123ScreenBacktestClient
 ) -> None:

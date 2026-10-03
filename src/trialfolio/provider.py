@@ -38,6 +38,7 @@ source and with tests in tests/provider/ over a local server and socket faults:
 """
 
 import logging
+import re
 import time
 import unicodedata
 from collections.abc import Generator, Mapping
@@ -451,9 +452,13 @@ class P123ScreenBacktestClient:
         if not text.startswith(prefix):
             return None
         text = text.removeprefix(prefix)
-        for secret in (*self._secrets, self._wrapper.get_token()):
-            if secret:
-                text = text.replace(secret, "[redacted]")
+        secrets = sorted(
+            (secret for secret in (*self._secrets, self._wrapper.get_token()) if secret),
+            key=len,
+            reverse=True,
+        )
+        # Match once, so replacing an ID can't expose the rest of a key or token.
+        text = re.sub("|".join(re.escape(secret) for secret in secrets), "[redacted]", text)
         text = "".join(" " if unicodedata.category(c)[0] == "C" else c for c in text)
         text = " ".join(text.split())
         if len(text) > _MAX_PROVIDER_MESSAGE:
