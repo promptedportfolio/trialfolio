@@ -1,0 +1,317 @@
+"""Plans and approval, the core's side (docs/contracts.md, plans and approval).
+
+The core builds plans and checks approvals, and never prompts. `trialfolio.approval` is the
+CLI's side: it shows the plan and obtains the approved hash.
+
+- `installed_versions` reads the versions a plan records, and refuses an environment no release
+  has verified, with `environment.unsupported`.
+- `build_plan` resolves a screen configuration into a plan 1.0.0, with its `case_id` and
+  `plan_hash`. Nothing in a plan varies between invocations: it holds no timestamps, output
+  directory, file paths, attempt IDs, credentials, or account information.
+- `plan_hash` recomputes a plan's hash from its contents, never from its stored `plan_hash`, and
+  `check_approval` passes only exactly that hash.
+"""
+
+import importlib
+import importlib.metadata
+import importlib.util
+import json
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import date
+from types import MappingProxyType, ModuleType
+from typing import Final, Literal, cast
+
+from trialfolio.canonical import CANONICALIZATION_VERSION, canonical_json, sha256_hex
+from trialfolio.contracts.common import CRITICAL_CATEGORIES, TransportVersions, WrapperVersions
+from trialfolio.contracts.plan import (
+    DATA_SENT_SETTINGS,
+    Budget,
+    DataSent,
+    DocumentedSource,
+    Plan,
+    PlanCase,
+    PlanFlag,
+    PlanRequest,
+    PlanSetting,
+    RetryPolicy,
+    SettingValue,
+    screen_backtest_params,
+)
+from trialfolio.contracts.screen_configuration import IdRanking, NameRanking, ScreenConfiguration
+from trialfolio.contracts.screen_settings import SCREEN_SETTINGS, ScreenSetting
+from trialfolio.errors import TrialFolioError
+
+type ProviderPackage = Literal["p123api", "requests", "urllib3"]
+
+VERIFIED_VERSIONS: Final[Mapping[ProviderPackage, tuple[str, ...]]] = MappingProxyType(
+    {"p123api": ("3.1.0",), "requests": ("2.34.2",), "urllib3": ("2.8.0",)}
+)
+"""The versions of `p123api`, `requests`, and `urllib3` that a release has verified, which are
+the only ones Trial Folio plans with. The package pins each one exactly (plan contents)."""
+
+
+@dataclass(frozen=True)
+class Versions:
+    """The versions a plan records: Trial Folio's own, and those of the packages that will send
+    its requests."""
+
+    trialfolio: str
+    p123api: str
+    requests: str
+    urllib3: str
+
+
+def _verified_list() -> str:
+    names = [f"{name} {' or '.join(found)}" for name, found in VERIFIED_VERSIONS.items()]
+    return f"{', '.join(names[:-1])}, and {names[-1]}"
+
+
+def _unsupported(problem: str, remedy: str | None = None) -> TrialFolioError:
+    if remedy is None:
+        remedy = (
+            "Reinstall Trial Folio, whose package pins those versions exactly, for example in a "
+            "new virtual environment."
+        )
+    return TrialFolioError(
+        "environment.unsupported",
+        f"Trial Folio plans only with the versions of p123api, requests, and urllib3 that a "
+        f"release has verified: {_verified_list()}. {problem} Nothing was sent, and no output "
+        f"was created. {remedy}",
+    )
+
+
+def _metadata_version(name: str) -> str:
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        raise _unsupported(f"{name} isn't installed.") from None
+
+
+def _imported(name: str) -> ModuleType:
+    # Imported only once their metadata shows a verified version, so a missing package is
+    # reported as one, never as an ImportError.
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        raise _unsupported(
+            f"{name} is installed, but it can't be imported: its files, or a package it needs, "
+            "are missing or broken."
+        ) from None
+
+
+def _require_verified(versions: Versions) -> None:
+    for name, verified in VERIFIED_VERSIONS.items():
+        installed: str = getattr(versions, name)
+        if installed not in verified:
+            raise _unsupported(f"The installed {name} is {installed}.")
+
+
+def _simplejson_importable() -> bool:
+    try:
+        return importlib.util.find_spec("simplejson") is not None
+    except (ImportError, ValueError):
+        # A module imported without a spec, for example: it's importable.
+        return True
+
+
+def installed_versions() -> Versions:
+    """Reads the installed versions from package metadata (plan contents).
+
+    Raises `TrialFolioError` with `environment.unsupported` when `p123api`, `requests`, or
+    `urllib3` is missing or isn't a verified version; when `requests` or `urllib3` can't be
+    imported; when the imported `requests` or `urllib3` reports a `__version__` other than its
+    metadata's, as a stale `.dist-info` would; or when `requests` would write request bodies with
+    `simplejson` rather than the standard library's `json`, which happens whenever `simplejson` is
+    importable.
+    """
+    versions = Versions(
+        trialfolio=_metadata_version("trialfolio"),
+        p123api=_metadata_version("p123api"),
+        requests=_metadata_version("requests"),
+        urllib3=_metadata_version("urllib3"),
+    )
+    _require_verified(versions)
+    # urllib3 first: requests imports it, so a broken urllib3 is named as itself.
+    for name in ("urllib3", "requests"):
+        reported: object = getattr(_imported(name), "__version__", None)
+        if reported != getattr(versions, name):
+            raise _unsupported(
+                f"The imported {name} reports another version than its package metadata, "
+                f"{getattr(versions, name)}, so other code may be installed under its name."
+            )
+    # requests.compat chooses the module requests writes bodies with; it doesn't export the name.
+    body_writer: object = getattr(_imported("requests.compat"), "json", None)
+    if body_writer is not json or _simplejson_importable():
+        raise _unsupported(
+            "simplejson is importable here, so requests would write request bodies with it "
+            "instead of Python's json, and Trial Folio's rules for decimals are verified only "
+            "with json.",
+            "Uninstall simplejson from this environment, or run Trial Folio in its own virtual "
+            "environment.",
+        )
+    return versions
+
+
+CREDITS_PER_REQUEST: Final = 5
+"""Portfolio123's documented cost of one screen backtest, in credits (budget and retries)."""
+
+CREDITS_PER_REQUEST_SOURCE: Final = DocumentedSource(
+    title="API: Screen",
+    url="https://portfolio123.customerly.help/en/articles/43324-api-screen",
+    checked=date(2026, 10, 1),
+)
+
+BUDGET: Final = Budget(
+    provider_requests=1,
+    credits_per_request=CREDITS_PER_REQUEST,
+    credits_per_request_source=CREDITS_PER_REQUEST_SOURCE,
+    credits=CREDITS_PER_REQUEST,
+    authentication_calls=1,
+)
+"""A 1.0.0 plan's budget: one request, sent at most once, and one authentication call."""
+
+RETRY_POLICY: Final = RetryPolicy(
+    automatic_retries=0, wrapper_attempts_per_call=1, exchanges_per_call=1
+)
+
+DATA_SENT: Final = tuple(
+    DataSent(
+        category=category,
+        recipient="Portfolio123",
+        via="p123api",
+        # In the screen settings' order, never a set's, which varies between processes.
+        settings=tuple(setting.name for setting in SCREEN_SETTINGS if setting.name in carried),
+    )
+    for category, carried in DATA_SENT_SETTINGS.items()
+)
+"""The three categories of data that leave the machine, in the order data sent lists them."""
+
+
+def _configured_values(configuration: ScreenConfiguration) -> dict[str, SettingValue]:
+    """The settings the configuration gives, in their JSON types as a plan holds them: dates as
+    `YYYY-MM-DD`, and decimals as normalized text."""
+    return {
+        "universe": configuration.universe,
+        "rules": configuration.rules,
+        "ranking": configuration.ranking,
+        "max_holdings": configuration.max_holdings,
+        "benchmark": configuration.benchmark,
+        "start_date": configuration.start_date.isoformat(),
+        "end_date": configuration.end_date.isoformat(),
+        "rebalance_weeks": configuration.rebalance_weeks,
+        "transaction_price": configuration.transaction_price,
+        # The model normalized it, so its text is the normalized form, in plain notation.
+        "slippage_percent": str(configuration.slippage_percent),
+        "pit_method": configuration.pit_method,
+        "precision": configuration.precision,
+    }
+
+
+def _plan_setting(setting: ScreenSetting, value: SettingValue) -> PlanSetting:
+    # A row's own flags are known before execution; the model checks they're its documented ones.
+    flags = cast("tuple[PlanFlag, ...]", setting.flags)
+    if isinstance(value, NameRanking | IdRanking):
+        flags = (*flags, "not_snapshotted")
+    return PlanSetting(
+        setting=setting.name,
+        category=setting.category,
+        critical=setting.category in CRITICAL_CATEGORIES,
+        value=value,
+        unit=setting.unit,
+        interpretation=setting.interpretation,
+        expected_provenance=setting.provenance,
+        inference_rule=setting.inference_rule,
+        flags=flags,
+    )
+
+
+def resolve_settings(configuration: ScreenConfiguration) -> tuple[PlanSetting, ...]:
+    """Every screen setting, in order, resolved from the configuration (settings in the plan).
+
+    A setting the configuration doesn't give takes the one value its row allows: a fixed value,
+    an inferred default, `not_modeled`, or `not_sent`. So `data_vendor` is FactSet, inferred,
+    whether the configuration omits it or gives it, and how the file is written leaves no trace.
+    """
+    configured = _configured_values(configuration)
+    resolved: list[PlanSetting] = []
+    for setting in SCREEN_SETTINGS:
+        value = configured.get(setting.name)
+        if value is None:
+            (value,) = setting.allowed
+        resolved.append(_plan_setting(setting, value))
+    return tuple(resolved)
+
+
+def case_id(settings: Sequence[PlanSetting]) -> str:
+    """`case-` and the first 16 hex digits of the SHA-256 of the canonical form of `settings`,
+    each row reduced to its `setting`, `value`, and `unit` (plan hashing)."""
+    rows = [row.model_dump(mode="json", include={"setting", "value", "unit"}) for row in settings]
+    return "case-" + sha256_hex(canonical_json(rows))[:16]
+
+
+def plan_hash(plan: Plan) -> str:
+    """`sha256:` and the SHA-256 of the canonical form of `plan` without its `plan_hash` field
+    (plan hashing). It's computed from the contents, so a stored `plan_hash` is never trusted."""
+    content = plan.model_dump(mode="json", exclude={"plan_hash"})
+    return "sha256:" + sha256_hex(canonical_json(content))
+
+
+_UNHASHED: Final = "sha256:" + "0" * 64
+"""A placeholder, replaced by the plan's hash before the plan leaves `build_plan`."""
+
+
+def build_plan(configuration: ScreenConfiguration, versions: Versions) -> Plan:
+    """Builds the plan for a screen configuration: its one case, with its request and every
+    resolved setting, the budget, the retry policy, and the data sent (plan contents).
+
+    Raises `TrialFolioError` with `environment.unsupported` when `versions` names a version of
+    `p123api`, `requests`, or `urllib3` that no release has verified.
+    """
+    _require_verified(versions)
+    settings = resolve_settings(configuration)
+    params = screen_backtest_params({row.setting: row.value for row in settings})
+    draft = Plan(
+        schema_version="1.0.0",
+        trialfolio_version=versions.trialfolio,
+        canonicalization_version=CANONICALIZATION_VERSION,
+        provider_wrapper=WrapperVersions(p123api=versions.p123api),
+        transport=TransportVersions(requests=versions.requests, urllib3=versions.urllib3),
+        title=configuration.title,
+        purpose=configuration.purpose,
+        cases=(
+            PlanCase(
+                case_id=case_id(settings),
+                requests=(PlanRequest(operation="screen_backtest", params=params),),
+                settings=settings,
+            ),
+        ),
+        budget=BUDGET,
+        retry_policy=RETRY_POLICY,
+        data_sent=DATA_SENT,
+        plan_hash=_UNHASHED,
+    )
+    # The draft was validated whole. Its hash is well formed, so the copy needs no validation.
+    return draft.model_copy(update={"plan_hash": plan_hash(draft)})
+
+
+def check_approval(plan: Plan, approved_hash: str | None) -> str:
+    """Returns the plan's hash when `approved_hash` is exactly that hash, recomputed from the
+    plan's contents: the full hash, `sha256:` and 64 lowercase hex digits (approval).
+
+    Raises `TrialFolioError` with `plan.approval_required` otherwise, including for an
+    abbreviated or uppercase hash, or none.
+    """
+    expected = plan_hash(plan)
+    if approved_hash != expected:
+        given = (
+            "No approval was given."
+            if approved_hash is None
+            else "The hash given isn't this plan's hash."
+        )
+        raise TrialFolioError(
+            "plan.approval_required",
+            f"Running this plan needs its approval: its full hash, {expected}, exactly as "
+            f"shown. {given} Nothing was sent.",
+        )
+    return expected

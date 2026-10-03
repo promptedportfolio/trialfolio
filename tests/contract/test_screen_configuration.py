@@ -2,10 +2,11 @@
 
 Traces to R01-AC02, R01-AC09, and R01-AC11 (Compustat) in release 0.1.0's test pairing, and to
 the configuration file rules in docs/contracts.md. The fixtures are in
-tests/fixtures/screen-configs/. `test_documented_example_resolves_to_reference_request` needs the
-planner, which maps a configuration to its request, so it arrives with R01-T10.
+tests/fixtures/screen-configs/. `test_documented_example_resolves_to_reference_request` traces to
+the example's validation against the request Portfolio123 accepted in R01-T01.
 """
 
+import json
 import re
 from datetime import date
 from decimal import Decimal
@@ -24,6 +25,7 @@ from trialfolio.contracts.screen_configuration import (
 )
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS_BY_NAME, check_value
 from trialfolio.errors import TrialFolioError
+from trialfolio.planning import VERIFIED_VERSIONS, Versions, build_plan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "screen-configs"
@@ -83,6 +85,25 @@ def test_documented_example_reads_as_documented() -> None:
 
 def test_formula_fixture_is_the_documented_example() -> None:
     assert (FIXTURES / "formula.yaml").read_text(encoding="utf-8") == documented_example()
+
+
+def test_documented_example_resolves_to_reference_request() -> None:
+    configuration = read_screen_configuration(documented_example().encode(), "example.yaml")
+    versions = Versions(
+        trialfolio="0.1.0",
+        p123api=VERIFIED_VERSIONS["p123api"][0],
+        requests=VERIFIED_VERSIONS["requests"][0],
+        urllib3=VERIFIED_VERSIONS["urllib3"][0],
+    )
+    reference = REPO_ROOT / "reference" / "p123api-screen-backtest" / "request.json"
+
+    (request,) = build_plan(configuration, versions).cases[0].requests
+
+    assert request.operation == "screen_backtest"
+    # Compared as JSON text, so a float and an integer can't pass for each other.
+    assert json.dumps(request.params.model_dump(mode="json"), sort_keys=True) == json.dumps(
+        json.loads(reference.read_text(encoding="utf-8")), sort_keys=True
+    )
 
 
 @pytest.mark.parametrize("path", sorted(INVALID.glob("*.yaml")), ids=lambda path: path.stem)

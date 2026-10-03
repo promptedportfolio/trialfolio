@@ -1,6 +1,6 @@
 # Trial Folio contracts
 
-**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures, R01-T08 the `ArtifactStore` and the output directory claim, and R01-T09 the `ScreenBacktestClient` and its transport adapter. Nothing else here is implemented yet.
+**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures, R01-T08 the `ArtifactStore` and the output directory claim, R01-T09 the `ScreenBacktestClient` and its transport adapter, and R01-T10 plans, canonical hashing, and approval. Nothing else here is implemented yet.
 **Date:** 2026-10-01
 
 This document owns the meaning of Trial Folio's interfaces and artifacts: configuration files, saved artifacts, identifiers, metric values, errors, CLI behavior, reports, and logs. Pydantic models under `src/trialfolio/contracts/` define the executable structures, JSON Schemas generated from them under `schemas/` publish those structures, and tests with fixtures under `tests/fixtures/` provide conformance evidence. This prose stays authoritative for meaning. If a model accepts something this document says is invalid, the model has a defect.
@@ -202,7 +202,7 @@ Trial Folio sends nothing else. The documented parameters it leaves out are `ris
 
 - **No empty values.** A setting with no value from the request uses a token instead, `not_modeled` or `not_sent`. So no screen-run row has an empty `value`. Two runs that both leave a parameter unsent compare as `same`, and the report still lists its default as unknown.
 - **Interpretation.** Rows 19–23 are `not_interpreted`, and every other row is `interpreted`.
-- **Other columns.** `original_key` and `original_value` come from the configuration, and are empty for rows that no key supplies. For row 16 they're filled only when the configuration gives `data_vendor`. `inference_rule` cites the decision or documentation and the date the documentation was checked.
+- **Other columns.** `original_key` and `original_value` come from the configuration, and are empty for rows that no key supplies. For row 16 they're filled only when the configuration gives `data_vendor`. `inference_rule` cites the decision or documentation and the date the documentation was checked. Its text for rows 14, 16, and 18 is fixed in `src/trialfolio/contracts/screen_settings.py`. A plan holds it, so changing it changes the plan hash.
 - **Coverage.** `start_date` and `end_date` also carry `coverage_mismatch` when the response's coverage differs from them ([coverage](#p123api-screen-backtest-version-1)).
 - **Flags.** Each row carries the flags the table gives it, and only those, apart from `coverage_mismatch` on the date settings.
 
@@ -671,7 +671,7 @@ Each case holds:
 
 **Consistency.** A case's request is what its settings send, by the screen configuration's "Sent as" mapping, and each setting's `expected_provenance` and `flags` are the ones the [screen settings](#screen-settings) give it. `slippage` is a JSON float, never an integer, and never `-0.0`. A plan that breaks any of these is invalid.
 
-**Field shapes.** `provider_wrapper` is `{"p123api": "<version>"}`, and `transport` is `{"requests": "<version>", "urllib3": "<version>"}`. The budget records its documented cost's source in `credits_per_request_source`, with the page's `title`, its `url`, and the date it was `checked`. A 1.0.0 plan has one request, so its `provider_requests` and `authentication_calls` are 1. Its `credits_per_request` is whatever cost the documentation gave when the plan was made, so a plan stays valid if Portfolio123 changes it; `credits` must equal `provider_requests` times `credits_per_request`. Each `data_sent` entry has a `category`, the `recipient`, `Portfolio123`, `via`, `p123api`, and `settings`, the names of the settings it carries, which is empty for `credentials`. `schemas/plan-1.0.0.schema.json` gives every field.
+**Field shapes.** `provider_wrapper` is `{"p123api": "<version>"}`, and `transport` is `{"requests": "<version>", "urllib3": "<version>"}`. The budget records its documented cost's source in `credits_per_request_source`, with the page's `title`, its `url`, and the date it was `checked`. A 1.0.0 plan has one request, so its `provider_requests` and `authentication_calls` are 1. Its `credits_per_request` is whatever cost the documentation gave when the plan was made, so a plan stays valid if Portfolio123 changes it; `credits` must equal `provider_requests` times `credits_per_request`. Each `data_sent` entry has a `category`, the `recipient`, `Portfolio123`, `via`, `p123api`, and `settings`, the names of the settings it carries, in the [screen settings](#screen-settings)' order, which is empty for `credentials`. The entries are in the order [data sent](#data-sent) lists them. `schemas/plan-1.0.0.schema.json` gives every field.
 
 ### Budget and retries
 
@@ -722,7 +722,7 @@ These are categories of data, not the setting categories of `settings.csv`. Noth
 The core recomputes a plan's hash from its contents, and executes the plan only when it's given a hash equal to that. It never trusts a stored `plan_hash` field. Otherwise it fails with `plan.approval_required` and sends nothing. The CLI gets the hash in one of two ways:
 
 - **`--approve <plan-hash>`, for non-interactive use.** The value must be the full hash exactly as shown: `sha256:` and 64 lowercase hex digits. An abbreviated, malformed, or different hash doesn't match. With `--approve`, the CLI never asks for approval. The license acknowledgment is separate, and comes first ([order of steps](#approval)).
-- **Interactive confirmation.** Without `--approve`, when stdin and stderr are both terminals, the CLI shows the plan and asks the user to type `approve`. It then passes the hash of the plan it showed. Any other answer, an empty line, or the end of input is a refusal.
+- **Interactive confirmation.** Without `--approve`, when stdin and stderr are both terminals, the CLI shows the plan and asks the user to type `approve`. It then passes the hash of the plan it showed. The answer is the line typed, without its line ending, and must be exactly `approve`: lowercase, with nothing before or after it. Any other answer, an empty line, or the end of input is a refusal.
 
 Without a match, the command fails with `plan.approval_required`, exit 2, and creates no output. The plan hash has been shown, with the full plan on a terminal, and the message gives the exact option that approves this plan. So running without `--approve` from a script gets the hash without sending anything, and with `--json`, the summary's `ids` carry the `plan_hash`.
 
@@ -735,6 +735,8 @@ Without a match, the command fails with `plan.approval_required`, exit 2, and cr
 - the retry policy
 - the data sent, its recipient, and what isn't sent
 - the plan hash, and how to approve it
+
+Text from the configuration is shown with its control and formatting characters, Unicode's categories Cc and Cf, and the line and paragraph separators, written as escapes such as `\u001b`, so a title or formula can't move the cursor, clear the terminal, or reorder what's shown.
 
 **Order of steps in `trialfolio run`.** Trial Folio creates no output and sends no request before step 7. So a plan can be reviewed, and its hash obtained, without credentials.
 
@@ -829,7 +831,7 @@ These rules are `canonicalization_version` 1, a requirement since 0.1.0's sign-o
   - **Numbers.** RFC 8785 writes a number as ECMAScript does, so a whole-number float such as the slippage `1.0` becomes `1`. The [decimals rules](#screen-configuration) keep every other value in plain notation, where the two agree.
   - **Text.** `json.dumps` escapes non-ASCII text by default, so `Café` becomes `Caf\u00e9`, while RFC 8785 keeps the UTF-8 text.
 
-  So the canonical form needs an RFC 8785 implementation, never `json.dumps`. R01-T10 chooses one, and fixtures with a slippage of `1` and a non-ASCII title check it (R01-AC25).
+  So the canonical form needs an RFC 8785 implementation, never `json.dumps`. R01-T10 chose Trail of Bits' [`rfc8785`](https://github.com/trailofbits/rfc8785.py) package, pure Python with no dependencies, pinned exactly at 0.1.4, because a change in its output would change every identity. `src/trialfolio/canonical.py` applies it. Fixtures with a slippage of `1` and a non-ASCII title check it (R01-AC25), and so do RFC 8785's own samples.
 - Dates use `YYYY-MM-DD`. Datetimes are UTC ISO 8601 with a `Z` suffix.
 - Secrets are excluded by construction. Models that hold credentials are never serialized or hashed.
 - Hashes are SHA-256.

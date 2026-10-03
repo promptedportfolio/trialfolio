@@ -54,6 +54,9 @@ class ScreenSetting:
     flags: tuple[FlagCode, ...] = ()
     """The flags the row always carries. A ranking by name or ID adds `not_snapshotted`, and a
     date in `settings.csv` may add `coverage_mismatch`."""
+    inference_rule: str | None = None
+    """For an inferred value, the rule and its source, with the date the documentation was
+    checked. A plan and `settings.csv` both write it, so changing it changes the plan hash."""
 
 
 def _not_sent(name: str, category: SettingCategory) -> ScreenSetting:
@@ -63,7 +66,9 @@ def _not_sent(name: str, category: SettingCategory) -> ScreenSetting:
     )
 
 
-def _inferred_default(name: str, category: SettingCategory, value: str) -> ScreenSetting:
+def _inferred_default(
+    name: str, category: SettingCategory, value: str, inference_rule: str
+) -> ScreenSetting:
     """A value inferred from a documented default or a decision, and flagged so."""
     return ScreenSetting(
         name,
@@ -75,6 +80,7 @@ def _inferred_default(name: str, category: SettingCategory, value: str) -> Scree
         "interpreted",
         "inferred",
         ("inferred_default",),
+        inference_rule,
     )
 
 
@@ -93,12 +99,33 @@ SCREEN_SETTINGS: Final = (
     ScreenSetting("transaction_price", "execution", True, None, "text", ("open",)),
     ScreenSetting("slippage_percent", "costs", True, "percent", "decimal"),
     ScreenSetting(
-        "commission", "costs", False, None, "text", ("not_modeled",), provenance="inferred"
+        "commission",
+        "costs",
+        False,
+        None,
+        "text",
+        ("not_modeled",),
+        provenance="inferred",
+        inference_rule="Portfolio123's API: Screen page documents no commission parameter, and "
+        "slippage is its only trading-cost input (checked 2026-10-01).",
     ),
     ScreenSetting("pit_method", "data_source", True, None, "text", ("complete",)),
-    _inferred_default("data_vendor", "data_source", "FactSet"),
+    _inferred_default(
+        "data_vendor",
+        "data_source",
+        "FactSet",
+        "D-16: FactSet is the only supported data vendor. The endpoint documents no vendor "
+        "parameter, so none is sent, and the response doesn't report the vendor.",
+    ),
     ScreenSetting("precision", "other", True, None, "integer", (4,)),
-    _inferred_default("risk_stats_period", "other", "monthly"),
+    _inferred_default(
+        "risk_stats_period",
+        "other",
+        "monthly",
+        "Portfolio123's documented default: the API: Screen page lists riskStatsPeriod's values "
+        "as ['Monthly'] | 'Weekly' | 'Daily' (checked 2026-10-01), and the wrapper's "
+        "documentation says an optional parameter defaults to the first value.",
+    ),
     _not_sent("max_pos_pct", "strategy"),
     _not_sent("rank_tolerance", "strategy"),
     _not_sent("carry_cost", "costs"),
