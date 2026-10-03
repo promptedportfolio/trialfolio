@@ -17,7 +17,7 @@ from pydantic import BaseModel, ValidationError
 from trialfolio.contracts.acknowledgment import AcknowledgmentRecord
 from trialfolio.contracts.attempt import AttemptRecord, StartRecord
 from trialfolio.contracts.manifest import RunManifest
-from trialfolio.contracts.plan import Plan
+from trialfolio.contracts.plan import DATA_SENT_SETTINGS, Plan, screen_backtest_params
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS
 from trialfolio.contracts.summary import JsonSummary
 from trialfolio.contracts.tables import (
@@ -479,7 +479,6 @@ PLAN_CHANGES: dict[str, Change] = {
     "unsent setting disclosed as sent": lambda d: d["data_sent"][2]["settings"].append(
         "data_vendor"
     ),
-    "zero credit budget": lambda d: d["budget"].update(credits_per_request=0, credits=0),
     "two request budget": lambda d: d["budget"].update(provider_requests=2, credits=10),
     "no authentication budget": lambda d: d["budget"].update(authentication_calls=0),
     "repeated authentication budget": lambda d: d["budget"].update(authentication_calls=2),
@@ -518,6 +517,34 @@ PLAN_CHANGES: dict[str, Change] = {
 @pytest.mark.parametrize("change", PLAN_CHANGES.values(), ids=PLAN_CHANGES.keys())
 def test_plan_rejects(change: Change) -> None:
     rejects(Plan, changed(plan, change))
+
+
+def test_plan_takes_another_documented_cost() -> None:
+    """Budget: a plan records the cost documented when it was made, which Portfolio123 can
+    change, so the reader checks only that `credits` is the product."""
+
+    def repriced(document: Document) -> None:
+        document["budget"].update(credits_per_request=3, credits=3)
+
+    Plan.model_validate_json(json.dumps(changed(plan, repriced)))
+
+
+def test_data_sent_names_each_setting_the_request_sends() -> None:
+    """Data sent: the settings `screen_backtest_params` reads are the verified ones, and
+    `data_sent` lists each of them once."""
+    read: set[str] = set()
+
+    class Recording(dict[str, object]):
+        def __getitem__(self, name: str) -> object:
+            read.add(name)
+            return super().__getitem__(name)
+
+    screen_backtest_params(Recording(SETTING_VALUES))
+
+    verified = {setting.name for setting in SCREEN_SETTINGS if setting.provenance == "verified"}
+    assert read == verified
+    disclosed = [name for names in DATA_SENT_SETTINGS.values() for name in names]
+    assert sorted(disclosed) == sorted(verified)
 
 
 def interrupted_backtest(document: Document) -> None:

@@ -146,9 +146,9 @@ def check_row(
     inference_rule: str | None,
 ) -> ScreenSetting:
     """Returns the documented setting `name`. Raises `ValueError` when there's none; when the
-    row's category, unit, or interpretation differs from the documented row; when `critical`
-    doesn't follow the category; or when an inference rule is given for a value that isn't
-    inferred, or missing for one that is."""
+    row's category, unit, interpretation, or provenance differs from the documented row; when
+    `critical` doesn't follow the category; or when an inference rule is given for a value that
+    isn't inferred, or missing for one that is."""
     setting = SCREEN_SETTINGS_BY_NAME.get(name)
     if setting is None:
         raise ValueError(f"{name} isn't one of the screen settings")
@@ -156,6 +156,8 @@ def check_row(
         raise ValueError(f"{name} must have its documented category and unit")
     if interpretation != setting.interpretation:
         raise ValueError(f"{name} must be {setting.interpretation}")
+    if provenance != setting.provenance:
+        raise ValueError(f"{name} must have {setting.provenance} provenance")
     if critical != (setting.category in CRITICAL_CATEGORIES):
         raise ValueError("critical must be true exactly for the critical categories")
     if (inference_rule is None) == (provenance == "inferred"):

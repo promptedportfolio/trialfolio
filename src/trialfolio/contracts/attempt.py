@@ -67,12 +67,13 @@ class StartRecord(_AttemptIdentity):
     @model_validator(mode="after")
     def _authentication_only(self) -> Self:
         # It's written before the request is sent, so only authentication can precede it.
-        if any(exchange.request != AUTHENTICATION_REQUEST for exchange in self.exchanges):
+        (authentication,) = self.exchanges
+        if authentication.request != AUTHENTICATION_REQUEST:
             raise ValueError("a start record holds only the authentication exchange")
-        if self.exchanges[0].status != 200:
+        if authentication.status != 200:
             raise ValueError("a start record requires successful authentication")
-        if any(exchange.note is not None for exchange in self.exchanges):
-            raise ValueError("a start record's exchanges carry no note")
+        if authentication.note is not None:
+            raise ValueError("a start record's exchange carries no note")
         return self
 
 

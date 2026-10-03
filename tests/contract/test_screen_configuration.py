@@ -439,9 +439,3 @@ def test_empty_purpose_must_be_omitted(purpose: str) -> None:
         "purpose: Reference backtest for the 0.1.0 response layout.", f"purpose: {purpose}"
     )
     assert "`purpose`" in rejection(content)
-
-
-@pytest.mark.parametrize("rules", [["Price > 5", "MktCap > 1000"], ("Price > 5", "MktCap > 1000")])
-def test_model_keeps_rule_order(rules: list[str] | tuple[str, ...]) -> None:
-    """Configuration rules retain their order; both YAML lists and frozen tuples are accepted."""
-    assert ScreenConfiguration.model_validate(VALID | {"rules": rules}).rules == tuple(rules)

@@ -129,8 +129,6 @@ class SettingsRow(ContractModel):
             self.provenance,
             self.inference_rule,
         )
-        if self.provenance != setting.provenance:
-            raise ValueError(f"{self.setting} must have {setting.provenance} provenance")
         value = check_value_text(setting, self.value)
         if (self.original_key is None) != (self.original_value is None):
             raise ValueError("original_key and original_value must be given together")

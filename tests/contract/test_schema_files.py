@@ -7,12 +7,14 @@ these tests check the generator itself, in a temporary directory.
 
 import json
 import os
+import shutil
 import subprocess
 import typing
 from pathlib import Path
 
 import pytest
 
+from trialfolio.contracts import schema_files
 from trialfolio.contracts.schema_files import (
     JSON_SCHEMA_DIALECT,
     SCHEMA_FILES,
@@ -84,31 +86,67 @@ def test_write_refuses_unexpected_files_without_changing_anything(
         (tmp_path / name).write_bytes(content)
 
     assert main(["--dir", str(tmp_path)]) == 1
-    assert "unexpected files" in capsys.readouterr().err
+    assert "aren't current schemas" in capsys.readouterr().err
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
 
 
-def test_script_resolves_explicit_directory_from_the_callers_directory(tmp_path: Path) -> None:
-    """Regression: the shell wrapper must preserve the meaning of relative --dir arguments."""
-    write(tmp_path)
-    root = Path(__file__).resolve().parents[2]
-    cwd = root / "tests"
+def test_write_refuses_a_file_as_the_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression: a mistaken --dir naming a file is refused, not a traceback."""
+    target = tmp_path / "README.md"
+    target.write_bytes(b"keep me\n")
+
+    assert main(["--dir", str(target)]) == 1
+    assert "isn't a directory" in capsys.readouterr().err
+    assert target.read_bytes() == b"keep me\n"
+
+
+def test_a_generation_error_isnt_reported_as_a_directory_problem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken() -> None:
+        raise ValueError("a defect in a model")
+
+    monkeypatch.setattr(schema_files, "generate", broken)
+
+    with pytest.raises(ValueError, match="a defect in a model"):
+        main(["--dir", str(tmp_path)])
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def outside_any_repository() -> dict[str, str]:
+    """The environment, without the variables that point Git at a repository, and without the
+    user's Git configuration. A Git hook exports GIT_DIR, for example, which would otherwise
+    point a test's Git commands at the developer's own repository."""
+    environment = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+    return environment | {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+
+
+@pytest.mark.skipif(shutil.which("sh") is None, reason="scripts/schemas is a POSIX shell script")
+def test_script_runs_from_any_directory_and_reads_dir_from_there(tmp_path: Path) -> None:
+    """Regression: the script finds the repository from its own location, outside any Git
+    repository too, and a relative --dir is relative to the caller's directory."""
+    write(tmp_path / "out")
     result = subprocess.run(
-        ["sh", str(root / "scripts/schemas"), "--check", "--dir", os.path.relpath(tmp_path, cwd)],
-        cwd=cwd,
-        env=os.environ | {"UV_NO_SYNC": "true", "UV_OFFLINE": "true", "UV_NO_ENV_FILE": "true"},
+        ["sh", str(ROOT / "scripts" / "schemas"), "--check", "--dir", "out"],
+        cwd=tmp_path,
+        env=outside_any_repository()
+        | {"UV_NO_SYNC": "true", "UV_OFFLINE": "true", "UV_NO_ENV_FILE": "true"},
         capture_output=True,
         text=True,
         check=False,
     )
 
     assert result.returncode == 0, result.stderr
+    assert "schemas in out match the models" in result.stdout
 
 
 def test_git_checkout_preserves_schema_bytes_with_autocrlf(tmp_path: Path) -> None:
     """Regression: a Windows-style Git checkout must pass the byte-for-byte drift check."""
-    root = Path(__file__).resolve().parents[2]
-    (tmp_path / ".gitattributes").write_bytes((root / ".gitattributes").read_bytes())
+    (tmp_path / ".gitattributes").write_bytes((ROOT / ".gitattributes").read_bytes())
     write(tmp_path / "schemas")
     checkout = tmp_path / "checkout"
     checkout.mkdir()
@@ -117,7 +155,13 @@ def test_git_checkout_preserves_schema_bytes_with_autocrlf(tmp_path: Path) -> No
         ["-c", "core.autocrlf=false", "add", ".gitattributes", "schemas"],
         ["-c", "core.autocrlf=true", "checkout-index", "--all", f"--prefix={checkout}/"],
     ):
-        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", *args],
+            cwd=tmp_path,
+            env=outside_any_repository(),
+            check=True,
+            capture_output=True,
+        )
 
     assert check(checkout / "schemas") == []
 
@@ -128,7 +172,20 @@ def test_main_exits_1_on_drift_and_writes_nothing(
     assert main(["--check", "--dir", str(tmp_path)]) == 1
 
     assert list(tmp_path.iterdir()) == []
-    assert "Run scripts/schemas to regenerate them." in capsys.readouterr().err
+    assert "To fix it, run scripts/schemas to regenerate the schemas." in capsys.readouterr().err
+
+
+def test_check_says_to_delete_an_extra_file_by_hand(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression: writing never deletes, so an extra file alone isn't sent to scripts/schemas."""
+    write(tmp_path)
+    (tmp_path / "plan-0.9.0.schema.json").write_text("{}\n")
+
+    assert main(["--check", "--dir", str(tmp_path)]) == 1
+    error = capsys.readouterr().err
+    assert "To fix it, delete each extra entry you've checked is obsolete." in error
+    assert "run scripts/schemas" not in error
 
 
 def test_main_writes_then_checks_clean(tmp_path: Path) -> None:

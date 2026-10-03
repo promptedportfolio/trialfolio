@@ -156,8 +156,6 @@ class PlanSetting(ContractModel):
             self.inference_rule,
         )
         check_value(setting, self.value)
-        if self.expected_provenance != setting.provenance:
-            raise ValueError(f"{self.setting} must expect {setting.provenance} provenance")
         require_unique(self.flags, "flags")
         check_flags(setting, self.value, self.flags, executed=False)
         return self
@@ -247,9 +245,12 @@ class Budget(ContractModel):
     """The request budget (budget and retries)."""
 
     provider_requests: Annotated[Literal[1], IntegerOnly]
-    credits_per_request: Annotated[Literal[5], IntegerOnly]
+    """A 1.0.0 plan has one request, sent at most once."""
+    credits_per_request: Annotated[int, Field(ge=0)]
+    """Portfolio123's documented cost of one request when the plan was made. It isn't fixed,
+    because Portfolio123 can change it."""
     credits_per_request_source: DocumentedSource
-    credits: Annotated[Literal[5], IntegerOnly]
+    credits: Annotated[int, Field(ge=0)]
     authentication_calls: Annotated[Literal[1], IntegerOnly]
 
     @model_validator(mode="after")
@@ -267,35 +268,35 @@ class RetryPolicy(ContractModel):
     exchanges_per_call: Annotated[Literal[1], IntegerOnly]
 
 
+DataCategory = Literal["credentials", "strategy_definition", "backtest_settings"]
+
+_SENT: Final = frozenset(
+    setting.name for setting in SCREEN_SETTINGS if setting.provenance == "verified"
+)
+"""The settings the request sends: a value is verified exactly when it's sent (screen settings)."""
+
+_STRATEGY_DEFINITION: Final = frozenset({"universe", "rules", "ranking"})
+
+DATA_SENT_SETTINGS: Final[dict[DataCategory, frozenset[str]]] = {
+    "credentials": frozenset(),
+    "strategy_definition": _STRATEGY_DEFINITION,
+    "backtest_settings": _SENT - _STRATEGY_DEFINITION,
+}
+"""The settings each `data_sent` category carries (data sent). Together, they're every setting
+the request sends, each once."""
+
+
 class DataSent(ContractModel):
     """A category of data that leaves the machine, its recipient, and the settings it carries."""
 
-    category: Literal["credentials", "strategy_definition", "backtest_settings"]
+    category: DataCategory
     recipient: Literal["Portfolio123"]
     via: Literal["p123api"]
     settings: tuple[SettingName, ...]
 
     @model_validator(mode="after")
     def _known_settings(self) -> Self:
-        expected = {
-            "credentials": (),
-            "strategy_definition": ("universe", "rules", "ranking"),
-            "backtest_settings": (
-                "max_holdings",
-                "benchmark",
-                "start_date",
-                "end_date",
-                "rebalance_weeks",
-                "transaction_price",
-                "slippage_percent",
-                "pit_method",
-                "precision",
-                "screen_type",
-                "position_method",
-                "currency",
-            ),
-        }
-        if set(self.settings) != set(expected[self.category]):
+        if frozenset(self.settings) != DATA_SENT_SETTINGS[self.category]:
             raise ValueError(f"{self.category} must carry exactly its documented settings")
         require_unique(self.settings, "settings")
         return self

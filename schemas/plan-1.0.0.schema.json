@@ -8,11 +8,13 @@
       "properties": {
         "provider_requests": {
           "const": 1,
+          "description": "A 1.0.0 plan has one request, sent at most once.",
           "title": "Provider Requests",
           "type": "integer"
         },
         "credits_per_request": {
-          "const": 5,
+          "description": "Portfolio123's documented cost of one request when the plan was made. It isn't fixed,\nbecause Portfolio123 can change it.",
+          "minimum": 0,
           "title": "Credits Per Request",
           "type": "integer"
         },
@@ -20,7 +22,7 @@
           "$ref": "#/$defs/DocumentedSource"
         },
         "credits": {
-          "const": 5,
+          "minimum": 0,
           "title": "Credits",
           "type": "integer"
         },
