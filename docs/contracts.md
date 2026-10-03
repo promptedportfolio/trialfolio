@@ -1,6 +1,6 @@
 # Trial Folio contracts
 
-**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures, R01-T08 the `ArtifactStore` and the output directory claim, R01-T09 the `ScreenBacktestClient` and its transport adapter, R01-T10 plans, canonical hashing, and approval, R01-T11 attempt recording, and R01-T12 normalization and the normalized tables. Nothing else here is implemented yet.
+**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures, R01-T08 the `ArtifactStore` and the output directory claim, R01-T09 the `ScreenBacktestClient` and its transport adapter, R01-T10 plans, canonical hashing, and approval, R01-T11 attempt recording, R01-T12 normalization and the normalized tables, and R01-T13 the report, its notices, and reading a saved run back for `trialfolio report`. Nothing else here is implemented yet.
 **Date:** 2026-10-01
 
 This document owns the meaning of Trial Folio's interfaces and artifacts: configuration files, saved artifacts, identifiers, metric values, errors, CLI behavior, reports, and logs. Pydantic models under `src/trialfolio/contracts/` define the executable structures, JSON Schemas generated from them under `schemas/` publish those structures, and tests with fixtures under `tests/fixtures/` provide conformance evidence. This prose stays authoritative for meaning. If a model accepts something this document says is invalid, the model has a defect.
@@ -908,6 +908,26 @@ Defined before 0.1.0 ships:
 - An LLM-written narrative, if a later release adds one, may not introduce a metric or claim that is absent from the saved assessment.
 
 Reports count as output under [D-07](spec.md#decisions). Users may share them with the concise notice intact, subject to data-provider terms.
+
+**Rendering and re-rendering (R01-T13).** `src/trialfolio/report.py` renders a run's report, and `src/trialfolio/runs.py` reads a saved run back for `trialfolio report`. `src/trialfolio/notices.py` holds the license's name and identifier, the notice version, and the texts of the notices and the Portfolio123 data statement; a contract test checks them word for word against [disclaimers.md](disclaimers.md) and LICENSE.
+
+- **When it's written.** `run` and `demo` write `report.html` into the run after normalizing and before the manifest, so the manifest lists it. The report is rendered from what the manifest will record, without its own entry. `trialfolio report` writes only `report.html`, as the file that [claims](#cli-behavior) its new output directory: no manifest, which belongs to `run` and `demo`. It reads and checks the run first, then checks that the output directory is absent or empty, so an input that isn't a complete run is `input.not_a_run` even when the output directory isn't empty.
+- **Its structure.** In order: a header holding the concise notice, before any result, whose words "the full license and research limitations" link to the full notice; the run's outcome, statistical validation and trading readiness, both "Not assessed", and the nature of the results, backtested, or synthetic for the demo's run ([DSC-04](disclaimers.md#dsc-04-actual-simulated-and-hypothetical-results)); then the ten sections above, in order, each a `<section>` with its own `id`; then the closing section, a `<footer id="closing">`, holding the Portfolio123 data statement and then the full notice in `<details id="full-notice">`, with the license's name, `license_id`, `notice_version`, and the LICENSE link. The status is shown neutrally: every color is a neutral gray, and no status has styling of its own.
+- **Sections the evidence can't support.** A screen run declares no research objective, and has no baseline, robustness results, statistical method, or separate holdout or forward period, so those parts say they're unavailable, or not assessed, and why. A run without normalized tables, because its attempt didn't succeed, or its response couldn't be decoded or lacks the required structure, says which, and shows the plan's resolved settings with their expected provenance instead of `settings.csv`'s.
+- **Values.** Each value appears exactly as the normalized tables hold it, with its unit, its token such as `not_sent`, or, when it's unavailable, its reason code and what it means. The report never shows `quotaRemaining`.
+- **Text Trial Folio didn't write,** such as the title, the formulas, or Portfolio123's message in an error, is HTML-escaped. As in the [plan display](#approval), its control and formatting characters and its line and paragraph separators, apart from tabs and line breaks, are written as escapes such as `\u202e`, so the text can't add markup or reorder what's shown. So are lone surrogates, which UTF-8 can't hold.
+- **Links to the run's artifacts.** A report links `manifest.json` and each file the manifest lists, apart from reports, by a path relative to the report's own directory, with each segment percent-encoded. In the run, that's the path in the manifest. A report `trialfolio report` writes elsewhere links through the run's directory, by its path relative to the new output directory, such as `../../runs/baseline/plan.json`, which the CLI works out. Where there's no relative path, as between two Windows drives, the files are named without links.
+- **Deterministic.** The report holds no time of its own rendering. So rendering the same run with the same version gives the same bytes, and re-rendering a run into its own directory reproduces its report.
+
+**A complete run.** `trialfolio report` reads only through the `ArtifactStore`, and only the files the manifest lists. A directory is a complete run when all of these hold; otherwise it's `input.not_a_run`, and the message names the problem, never a value:
+
+- Its `manifest.json` is a run manifest, `artifact_type: run`, valid against its model.
+- Each file the manifest lists exists, with the size and `artifact_id` the manifest records.
+- It lists `plan.json` and `configuration.yaml`, once each. `plan.json` recomputes to its `plan_hash` ([plan hashing](#plan-hashing)), and the manifest names the same hash.
+- Each start record and attempt record it lists is in an attempt's directory of the plan's case, is valid, names that attempt, its case, and its plan's hash, and agrees with the attempt's other record. Each file an attempt record references is listed, with the same `artifact_id` and the matching role.
+- It lists both normalized tables, or neither. Each table reads back as a valid table, its rows are labeled with the plan's `case_id`, and they were drawn from the run's own `configuration.yaml` and saved response.
+
+A schema version with no reader, in the manifest, `plan.json`, a start record, an attempt record, or the manifest's entry for one of them or for a table, is `artifact.unknown_schema_version`.
 
 ## CLI behavior
 
