@@ -19,10 +19,8 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
-from types import MappingProxyType
+from types import MappingProxyType, ModuleType
 from typing import Final, Literal, cast
-
-import requests.compat
 
 from trialfolio.canonical import CANONICALIZATION_VERSION, canonical_json, sha256_hex
 from trialfolio.contracts.common import CRITICAL_CATEGORIES, TransportVersions, WrapperVersions
@@ -90,6 +88,18 @@ def _metadata_version(name: str) -> str:
         raise _unsupported(f"{name} isn't installed.") from None
 
 
+def _imported(name: str) -> ModuleType:
+    # Imported only once their metadata shows a verified version, so a missing package is
+    # reported as one, never as an ImportError.
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        raise _unsupported(
+            f"{name} is installed, but it can't be imported: its files, or a package it needs, "
+            "are missing or broken."
+        ) from None
+
+
 def _require_verified(versions: Versions) -> None:
     for name, verified in VERIFIED_VERSIONS.items():
         installed: str = getattr(versions, name)
@@ -109,10 +119,11 @@ def installed_versions() -> Versions:
     """Reads the installed versions from package metadata (plan contents).
 
     Raises `TrialFolioError` with `environment.unsupported` when `p123api`, `requests`, or
-    `urllib3` is missing or isn't a verified version; when the imported `requests` or `urllib3`
-    reports a `__version__` other than its metadata's, as a stale `.dist-info` would; or when
-    `requests` would write request bodies with `simplejson` rather than the standard library's
-    `json`, which happens whenever `simplejson` is importable.
+    `urllib3` is missing or isn't a verified version; when `requests` or `urllib3` can't be
+    imported; when the imported `requests` or `urllib3` reports a `__version__` other than its
+    metadata's, as a stale `.dist-info` would; or when `requests` would write request bodies with
+    `simplejson` rather than the standard library's `json`, which happens whenever `simplejson` is
+    importable.
     """
     versions = Versions(
         trialfolio=_metadata_version("trialfolio"),
@@ -121,15 +132,16 @@ def installed_versions() -> Versions:
         urllib3=_metadata_version("urllib3"),
     )
     _require_verified(versions)
-    for name in ("requests", "urllib3"):
-        reported: object = getattr(importlib.import_module(name), "__version__", None)
+    # urllib3 first: requests imports it, so a broken urllib3 is named as itself.
+    for name in ("urllib3", "requests"):
+        reported: object = getattr(_imported(name), "__version__", None)
         if reported != getattr(versions, name):
             raise _unsupported(
                 f"The imported {name} reports another version than its package metadata, "
                 f"{getattr(versions, name)}, so other code may be installed under its name."
             )
     # requests.compat chooses the module requests writes bodies with; it doesn't export the name.
-    body_writer: object = getattr(requests.compat, "json", None)
+    body_writer: object = getattr(_imported("requests.compat"), "json", None)
     if body_writer is not json or _simplejson_importable():
         raise _unsupported(
             "simplejson is importable here, so requests would write request bodies with it "
