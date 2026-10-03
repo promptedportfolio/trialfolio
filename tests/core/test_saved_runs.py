@@ -25,7 +25,7 @@ from tests.core.conftest import CONFIGS, RESPONSES, WriteRun, Written, manifest_
 from tests.support.fake_portfolio123 import Reply
 from tests.support.html_report import parse
 from trialfolio.canonical import sha256_hex
-from trialfolio.contracts.manifest import RunManifest
+from trialfolio.contracts.manifest import ManifestArtifact, RunManifest
 from trialfolio.errors import TrialFolioError
 from trialfolio.report import HtmlReportRenderer, rerender_report
 from trialfolio.runs import read_run
@@ -80,6 +80,30 @@ def edit_json(out: Path, path: str, change: Callable[[dict[str, Any]], None]) ->
         (out / path).write_bytes(data)
     else:
         rewrite(out, path, data)
+
+
+def edit_manifest(
+    run: Path, change: Callable[[list[ManifestArtifact]], list[ManifestArtifact]]
+) -> None:
+    """Changes the entries of a saved run's manifest."""
+    manifest = RunManifest.model_validate_json((run / "manifest.json").read_bytes())
+    artifacts = tuple(change(list(manifest.artifacts)))
+    (run / "manifest.json").write_bytes(
+        manifest_json(manifest.model_copy(update={"artifacts": artifacts}))
+    )
+
+
+def move(run: Path, path: str, to: str) -> None:
+    """Moves a file of a saved run, and its manifest entry with it."""
+    (run / to).parent.mkdir(parents=True, exist_ok=True)
+    (run / path).rename(run / to)
+    edit_manifest(
+        run,
+        lambda artifacts: [
+            artifact.model_copy(update={"path": to}) if artifact.path == path else artifact
+            for artifact in artifacts
+        ],
+    )
 
 
 def refused(run: Path, out: Path) -> TrialFolioError:
@@ -338,6 +362,62 @@ def test_files_from_another_run_are_refused_even_with_matching_hashes(
         assert expected in error.message
 
 
+SAME_CASE = FORMULA.replace(
+    b"title: Earnings yield with a liquidity floor", b"title: Another title", 1
+)
+"""`formula.yaml` with another title: the same `case_id`, another `plan_hash`."""
+
+
+def attempt_directory(written: Written) -> str:
+    record = next(a.path for a in written.manifest.artifacts if a.role == "attempt_record")
+    return record.rpartition("/")[0]
+
+
+def test_files_from_a_run_of_the_same_case_are_refused_even_with_matching_hashes(
+    write_run: WriteRun, tmp_path: Path
+) -> None:
+    run = write_run(FORMULA, COMPLETE)
+    other = write_run(SAME_CASE, Reply(200, (RESPONSES / "missing-metrics.json").read_bytes()))
+    assert other.saved.plan.cases[0].case_id == run.saved.plan.cases[0].case_id
+    assert other.saved.plan.plan_hash != run.saved.plan.plan_hash
+    ours, theirs = attempt_directory(run), attempt_directory(other)
+
+    def take_table(path: str) -> Callable[[Path], None]:
+        return lambda copy: rewrite(copy, path, (other.out / path).read_bytes())
+
+    def take_attempt(copy: Path) -> None:
+        shutil.rmtree(copy / ours)
+        shutil.copytree(other.out / theirs, copy / theirs)
+        edit_manifest(
+            copy,
+            lambda artifacts: [
+                *(a for a in artifacts if not a.path.startswith(f"{ours}/")),
+                *(a for a in other.manifest.artifacts if a.path.startswith(f"{theirs}/")),
+            ],
+        )
+
+    cases = (
+        (
+            take_table("normalized/settings.csv"),
+            "its settings.csv was drawn from another configuration than the run's.",
+        ),
+        (
+            take_table("normalized/metrics.csv"),
+            "its metrics.csv was drawn from another response than the run's.",
+        ),
+        (take_attempt, f"the records in `{theirs}` name another plan."),
+    )
+    for index, (take, expected) in enumerate(cases):
+        copy = tmp_path / f"copy-{index}"
+        shutil.copytree(run.out, copy)
+        take(copy)
+
+        error = refused(copy, tmp_path / "report")
+
+        assert error.code == "input.not_a_run"
+        assert expected in error.message
+
+
 def edit_rows(run: Path, path: str, change: Callable[[list[Any]], list[Any]]) -> None:
     """Changes the rows of one of a saved run's tables, and its manifest entry to match."""
     content = (run / path).read_bytes()
@@ -400,6 +480,74 @@ def test_an_attempt_record_must_be_its_directorys_and_reference_listed_files(
         copy = tmp_path / f"run-{len(expected)}"
         shutil.copytree(complete.out, copy)
         edit_json(copy, record, change)
+
+        error = refused(copy, tmp_path / "report")
+
+        assert error.code == "input.not_a_run"
+        assert expected in error.message
+
+
+def test_an_attempts_records_must_be_named_as_records_in_the_plans_case(
+    complete: Written, tmp_path: Path
+) -> None:
+    directory = attempt_directory(complete)
+    attempt = directory.rpartition("/")[2]
+    elsewhere = f"cases/case-{'0' * 16}/attempts/{attempt}"
+    moves = (
+        (f"{directory}/attempt.json", f"{elsewhere}/attempt.json"),
+        (f"{directory}/started.json", f"{elsewhere}/started.json"),
+        (f"{directory}/attempt.json", f"{directory}/record.json"),
+        (f"{directory}/started.json", f"{directory}/start.json"),
+    )
+    for index, (path, to) in enumerate(moves):
+        copy = tmp_path / f"copy-{index}"
+        shutil.copytree(complete.out, copy)
+        move(copy, path, to)
+
+        error = refused(copy, tmp_path / "report")
+
+        assert error.code == "input.not_a_run"
+        assert f"its manifest lists `{to}` as an attempt's" in error.message
+        assert "isn't one in an attempt's directory of the plan's case" in error.message
+
+
+def test_a_manifest_must_list_the_configuration_and_both_tables_or_neither(
+    complete: Written, tmp_path: Path
+) -> None:
+    configuration = next(a for a in complete.manifest.artifacts if a.role == "configuration")
+
+    def without(role: str) -> Callable[[Path], None]:
+        return lambda copy: edit_manifest(
+            copy, lambda artifacts: [a for a in artifacts if a.role != role]
+        )
+
+    def twice(copy: Path) -> None:
+        shutil.copyfile(copy / "configuration.yaml", copy / "configuration-copy.yaml")
+        edit_manifest(
+            copy,
+            lambda artifacts: [
+                *artifacts,
+                configuration.model_copy(update={"path": "configuration-copy.yaml"}),
+            ],
+        )
+
+    changes = (
+        (without("metrics"), "doesn't list normalized/metrics.csv as the run's one metrics."),
+        (without("settings"), "doesn't list normalized/settings.csv as the run's one settings."),
+        (
+            without("configuration"),
+            "doesn't list configuration.yaml as the run's one configuration.",
+        ),
+        (
+            lambda copy: move(copy, "configuration.yaml", "screen.yaml"),
+            "doesn't list configuration.yaml as the run's one configuration.",
+        ),
+        (twice, "doesn't list configuration.yaml as the run's one configuration."),
+    )
+    for index, (change, expected) in enumerate(changes):
+        copy = tmp_path / f"copy-{index}"
+        shutil.copytree(complete.out, copy)
+        change(copy)
 
         error = refused(copy, tmp_path / "report")
 
