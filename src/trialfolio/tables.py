@@ -71,7 +71,7 @@ def read_metrics_csv(content: bytes, source_name: str) -> tuple[MetricsRow, ...]
     """Reads `metrics.csv` from its bytes, named `source_name` in messages.
 
     Raises `TrialFolioError` with `input.not_a_run` when the file isn't a valid `metrics.csv`. The
-    message names the row and column, never a value.
+    message names the line the row starts on, and the column, never a value.
     """
     return _read(content, source_name, METRICS_COLUMNS, MetricsRow)
 
@@ -90,11 +90,11 @@ def _read[M: BaseModel](
         raise _not_a_table(source_name, "it isn't UTF-8 text.") from None
     if text.startswith(_BOM):
         raise _not_a_table(source_name, "it starts with a byte-order mark.")
-    lines = _records(text, source_name)
-    if not lines or tuple(lines[0]) != columns:
+    records = _records(text, source_name)
+    if not records or tuple(records[0][1]) != columns:
         raise _not_a_table(source_name, "its header isn't the table's columns, in order.")
     rows: list[M] = []
-    for number, cells in enumerate(lines[1:], start=2):
+    for number, cells in records[1:]:
         if len(cells) != len(columns):
             raise _not_a_table(source_name, f"line {number} doesn't have one cell per column.")
         fields: dict[str, object] = {}
@@ -114,8 +114,9 @@ def _read[M: BaseModel](
     return tuple(rows)
 
 
-def _records(text: str, source_name: str) -> list[list[str]]:
-    """Each CSV record of `text`.
+def _records(text: str, source_name: str) -> list[tuple[int, list[str]]]:
+    """Each CSV record of `text`, with the line it starts on. A quoted cell can span lines, such
+    as a multi-line `original_value`, so a record's line isn't its position.
 
     The `csv` module refuses a cell longer than its field size limit, 131,072 characters by
     default, but nothing limits a cell's length when a table is written. No cell can be longer
@@ -123,11 +124,17 @@ def _records(text: str, source_name: str) -> list[list[str]]:
     """
     limit = csv.field_size_limit(max(csv.field_size_limit(), len(text)))
     try:
-        return list(csv.reader(io.StringIO(text, newline=""), strict=True))
+        reader = csv.reader(io.StringIO(text, newline=""), strict=True)
+        records: list[tuple[int, list[str]]] = []
+        start = 1
+        for cells in reader:
+            records.append((start, cells))
+            start = reader.line_num + 1
     except csv.Error:
         raise _not_a_table(source_name, "it isn't CSV as RFC 4180 quotes it.") from None
     finally:
         csv.field_size_limit(limit)
+    return records
 
 
 def _not_a_table(source_name: str, problem: str) -> TrialFolioError:

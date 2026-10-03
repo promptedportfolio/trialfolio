@@ -163,6 +163,13 @@ def test_a_metrics_table_that_isnt_one_is_not_a_run(
         pytest.param(b",true,", b",yes,", "`critical` is invalid", id="not a boolean"),
         pytest.param(b",not_snapshotted\n", b",snapshot\n", "check `flags`", id="unknown flag"),
         pytest.param(b",not_sent,", b",,", "check `value`", id="an empty value"),
+        pytest.param(
+            # The ranking's original value spans lines 5 and 6, so max_holdings is on line 7.
+            b",max_holdings,strategy,true,",
+            b",max_holdings,strategy,yes,",
+            "line 7's `critical` is invalid",
+            id="after a row on two lines",
+        ),
     ],
 )
 def test_a_settings_table_that_isnt_one_is_not_a_run(

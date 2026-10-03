@@ -470,7 +470,7 @@ Schema version 1.0.0. `metrics.csv` and `settings.csv` are introduced in 0.1.0, 
 
 - **Which runs have them.** A run's tables are written only from a decoded response with the [required structure](#p123api-screen-backtest-version-1): `normalized/metrics.csv`, then `normalized/settings.csv`. A response saved undecoded, as `response.raw`, or without that structure, is `provider.response_invalid`, and neither table is written: the normalized result is unavailable. An attempt that didn't succeed has no response to normalize, and no tables.
 - **The label.** A run's rows carry its case's `case_id` as their `label`: the identity of the resolved settings, which the attempt's directory names too. So two runs of the same configuration label their rows the same.
-- **Reading.** A file that isn't a valid table, because of its encoding, a byte-order mark, its header, its quoting, or a row's cells, is `input.not_a_run`. The message names the line and the column, never a value.
+- **Reading.** A file that isn't a valid table, because of its encoding, a byte-order mark, its header, its quoting, or a row's cells, is `input.not_a_run`. The message names the line the row starts on, since a quoted cell can span lines, and the column, never a value.
 
 ### `metrics.csv`
 
