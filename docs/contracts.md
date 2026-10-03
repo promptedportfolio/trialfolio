@@ -1,6 +1,6 @@
 # Trial Folio contracts
 
-**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures, R01-T08 the `ArtifactStore` and the output directory claim, R01-T09 the `ScreenBacktestClient` and its transport adapter, and R01-T10 plans, canonical hashing, and approval. Nothing else here is implemented yet.
+**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures, R01-T08 the `ArtifactStore` and the output directory claim, R01-T09 the `ScreenBacktestClient` and its transport adapter, R01-T10 plans, canonical hashing, and approval, R01-T11 attempt recording, and R01-T12 normalization and the normalized tables. Nothing else here is implemented yet.
 **Date:** 2026-10-01
 
 This document owns the meaning of Trial Folio's interfaces and artifacts: configuration files, saved artifacts, identifiers, metric values, errors, CLI behavior, reports, and logs. Pydantic models under `src/trialfolio/contracts/` define the executable structures, JSON Schemas generated from them under `schemas/` publish those structures, and tests with fixtures under `tests/fixtures/` provide conformance evidence. This prose stays authoritative for meaning. If a model accepts something this document says is invalid, the model has a defect.
@@ -320,6 +320,7 @@ Introduced in 0.1.0 (task R01-T02). Portfolio123 doesn't document the response f
 
 - The layout is the decoded JSON body that `p123api`'s `screen_backtest(params, to_pandas=False)` returns for `POST /screen/backtest`. It was observed with `p123api` 3.1.0.
 - The response carries no version of its own. Trial Folio labels a response version 1 when it has the required structure below.
+- Trial Folio's adapter for it, in `src/trialfolio/normalization.py`, is parser version 1 (R01-T12). The manifest records it with the layout's version.
 
 **Required structure.** A response without it is saved, and the result is flagged `provider.response_invalid`:
 
@@ -329,14 +330,18 @@ Introduced in 0.1.0 (task R01-T02). Portfolio123 doesn't document the response f
 
 Nothing else is required. Extra keys, or a missing `chart` or summary row, don't make a response invalid. Individual values fail as follows:
 
-- **A metric key that is missing, or whose value is `null`,** makes that metric unavailable with `blank_in_source`. A value that isn't a JSON number is unavailable with `unparseable_in_source`.
+- **A metric key that is missing, or whose value is `null`,** makes that metric unavailable with `blank_in_source`. A value that isn't a JSON number is unavailable with `unparseable_in_source`. That includes `NaN` and `Infinity`, which `response.json` can hold ([writing the files](#execution-outcomes-and-attempts)).
 - **Coverage dates.** If `results.rows` is empty, or `columns` lacks `Tran Dt` or `End Dt`, then `coverage_start` and `coverage_end` are unavailable with `blank_in_source`. A date that isn't `YYYY-MM-DD` is `unparseable_in_source`. `coverage_periods` is always the number of rows, including zero.
+  - **Every row counts.** The earliest or latest date is known only when every row has one, so if any row's `Tran Dt` isn't a `YYYY-MM-DD` calendar date, `null` included, `coverage_start` is `unparseable_in_source`, and the same holds for `End Dt` and `coverage_end`.
+  - **Dates that contradict each other.** If the earliest `Tran Dt` is after the latest `End Dt`, neither can be the coverage, and both are `unparseable_in_source`.
 
 **Numbers and precision.**
 
 - The wrapper decodes JSON numbers into binary floating point. Trial Folio saves each one in its shortest round-trip form. For values of up to 15 significant digits, that form keeps every digit the provider sent except trailing zeros.
 - Trial Folio reads numbers from the saved text as decimals, never as binary floats. A value keeps exactly the digits it has there, and `source_decimals` is the number of digits after its decimal point.
 - A value can therefore carry fewer decimal places than the request's `precision`. The reference response was requested at 4, and its `stats.port.standard_dev` has 3. Trial Folio doesn't pad it back to 4.
+- **Exponents.** `json` writes a float below 0.0001, or from 10^16 up, with an exponent. Such a value is written in plain notation, with the digits that gives, so `1e-05` is `0.00001`, with 5 decimal places.
+- **Counts.** `risk_samples` is a whole number, 0 or more, written with its digits alone, so `118.0` is written `118`. A fraction or a negative value is `unparseable_in_source`.
 - No value in the reference response carries more decimal places than the requested precision.
 
 **Metrics.** `metrics.csv` has these rows, in this order:
@@ -461,6 +466,12 @@ Schema version 1.0.0. `metrics.csv` and `settings.csv` are introduced in 0.1.0, 
 - **Compatibility.** New columns are appended only, and adding one is a schema change under [artifact compatibility](#artifact-compatibility).
 - **Schemas.** `schemas/metrics-row-1.0.0.schema.json` and `schemas/settings-row-1.0.0.schema.json` each describe one row, after a CSV adapter step has read its cells: an empty cell is `null`, `critical` is a boolean, `source_decimals` is an integer, the period dates are dates, and `flags` is an array of codes. A property's position is its column's.
 
+**Writing and reading them.** `src/trialfolio/normalization.py` normalizes a saved response, and `src/trialfolio/tables.py` writes the tables and reads them back (R01-T12):
+
+- **Which runs have them.** A run's tables are written only from a decoded response with the [required structure](#p123api-screen-backtest-version-1): `normalized/metrics.csv`, then `normalized/settings.csv`. A response saved undecoded, as `response.raw`, or without that structure, is `provider.response_invalid`, and neither table is written: the normalized result is unavailable. An attempt that didn't succeed has no response to normalize, and no tables.
+- **The label.** A run's rows carry its case's `case_id` as their `label`: the identity of the resolved settings, which the attempt's directory names too. So two runs of the same configuration label their rows the same.
+- **Reading.** A file that isn't a valid table, because of its encoding, a byte-order mark, its header, its quoting, or a row's cells, is `input.not_a_run`. The message names the line the row starts on, since a quoted cell can span lines, and the column, never a value.
+
 ### `metrics.csv`
 
 One row for each metric of each result. That includes coverage values, which use the `date` and `count` units.
@@ -502,6 +513,12 @@ One row for each setting of each result. This includes documented settings that 
 | `original_value` | The value exactly as written in the source. Empty when absent. In the row model, absent is `null`, never an empty string; `original_key` and `original_value` are present or absent together. |
 | `source_artifact` | `artifact_id` of the saved screen configuration |
 | `flags` | Flag codes, separated by semicolons. Empty when none apply. |
+
+For a screen run:
+
+- **`original_key`** is the configuration's top-level key, which is the setting's name.
+- **`original_value`** is the value's text in the configuration file: from its first character to its last one that isn't YAML white space or a line break. So it keeps quotes and block indicators, as in `0.250` and `'2016-01-01'`. A block list or mapping keeps its line breaks, its indentation, and any comment between its items, but not one after its last item.
+- **`value`** writes a list or a ranking as JSON, with `", "` and `": "` between items and non-ASCII text as it is: `["AvgDailyTot(30) > 1000000"]`.
 
 ### `differences.csv`
 

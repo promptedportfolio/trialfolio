@@ -1,12 +1,28 @@
-"""Storage boundaries for the core tests: what the store syncs, and failures injected into its
-file operations (AGENTS.md, verification expectations: injected storage failures)."""
+"""Boundaries for the core tests: what the store syncs, failures injected into its file
+operations (AGENTS.md, verification expectations: injected storage failures), and an attempt run
+over the fake Portfolio123 server, below `urllib3`, whose saved response the normalization tests
+read."""
 
+import itertools
+import json
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
+from tests.support import canaries
+from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from trialfolio.attempts import Attempt
+from trialfolio.configuration import original_values, read_screen_configuration
+from trialfolio.contracts.attempt import SavedResponse
+from trialfolio.contracts.plan import Plan
+from trialfolio.normalization import NormalizedTables, write_tables
+from trialfolio.planning import VERIFIED_VERSIONS, Versions, build_plan
+from trialfolio.provider import Credentials, P123ScreenBacktestClient
+from trialfolio.storage import LocalArtifactStore, StoredFile
 
 type Identity = tuple[int, int]
 
@@ -183,3 +199,67 @@ def snapshot(root: Path) -> dict[str, bytes | None]:
         path.relative_to(root).as_posix(): None if path.is_dir() else path.read_bytes()
         for path in sorted(root.rglob("*"))
     }
+
+
+CONFIGS = Path(__file__).resolve().parents[1] / "fixtures" / "screen-configs"
+RESPONSES = Path(__file__).resolve().parents[1] / "fixtures" / "responses"
+
+VERSIONS = Versions(
+    trialfolio="0.1.0",
+    p123api=VERIFIED_VERSIONS["p123api"][0],
+    requests=VERIFIED_VERSIONS["requests"][0],
+    urllib3=VERIFIED_VERSIONS["urllib3"][0],
+)
+
+
+@dataclass(frozen=True)
+class Normalized:
+    """A run's attempt over the fake server, and what normalizing its saved response wrote."""
+
+    store: LocalArtifactStore
+    plan: Plan
+    configuration: StoredFile
+    response: SavedResponse
+    sent: dict[str, object]
+    """The backtest request's body, as the fake server received it."""
+
+    def write_tables(self) -> NormalizedTables:
+        content = self.store.read(self.configuration.path)
+        return write_tables(
+            self.store,
+            self.plan,
+            original_values(content, "configuration.yaml"),
+            configuration=self.configuration,
+            response=self.response,
+        )
+
+
+type Execute = Callable[[bytes, bytes], Normalized]
+
+
+@pytest.fixture
+def execute(tmp_path: Path) -> Iterator[Execute]:
+    """Runs one attempt as `run` does: plans the configuration's bytes, claims a new output
+    directory with `plan.json`, saves `configuration.yaml`, and sends the request with the real
+    client, `requests`, and `urllib3` to the fake server, which answers it with a 200 and the
+    body given. The attempt saves the response; normalizing it is left to the test."""
+    server = FakePortfolio123()
+    outputs = itertools.count(1)
+
+    def run(content: bytes, body: bytes) -> Normalized:
+        plan = build_plan(read_screen_configuration(content, "configuration.yaml"), VERSIONS)
+        store = LocalArtifactStore(tmp_path / f"out-{next(outputs)}")
+        store.claim("plan.json", plan.model_dump_json(indent=2).encode())
+        configuration = store.write("configuration.yaml", content)
+        server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+        server.reply("/screen/backtest", Reply(200, body))
+        credentials = Credentials(canaries.API_ID, canaries.API_KEY)
+        with P123ScreenBacktestClient(credentials, endpoint=server.endpoint) as client:
+            result = Attempt(plan, plan.plan_hash, store).run(client)
+        assert result.record.outcome == "succeeded"
+        assert result.record.response is not None
+        sent = json.loads(server.received[-1].body)
+        return Normalized(store, plan, configuration, result.record.response, sent)
+
+    yield run
+    server.close()
