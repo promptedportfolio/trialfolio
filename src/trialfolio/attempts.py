@@ -164,16 +164,35 @@ def read_attempt(store: ArtifactStore, case_id: str, attempt_id: uuid.UUID) -> A
     directory = attempt_directory(case_id, attempt_id)
     start = _read(store, f"{directory}/{START_RECORD}", StartRecord)
     record = _read(store, f"{directory}/{ATTEMPT_RECORD}", AttemptRecord)
+    check_records(start, record, case_id, attempt_id)
+    return attempt_status(start, record)
+
+
+def check_records(
+    start: StartRecord | None, record: AttemptRecord | None, case_id: str, attempt_id: uuid.UUID
+) -> None:
+    """Checks that an attempt's records belong together, in the directory of `case_id` and
+    `attempt_id`.
+
+    Raises `ValueError` when a record names another attempt than its directory, or the attempt
+    record doesn't hold its start record's contents.
+    """
     for read in (start, record):
         if read is not None and (read.case_id, read.attempt_id) != (case_id, attempt_id):
             raise ValueError("the record names another attempt than its directory")
+    if record is not None and start is not None:
+        shared = set(StartRecord.model_fields) - {"exchanges"}
+        if record.model_dump(include=shared) != start.model_dump(include=shared) or (
+            record.exchanges[: len(start.exchanges)] != start.exchanges
+        ):
+            raise ValueError("the attempt record doesn't hold its start record's contents")
+
+
+def attempt_status(start: StartRecord | None, record: AttemptRecord | None) -> AttemptStatus | None:
+    """How an attempt with these records reads: from its attempt record, or, without one, from its
+    start record, as `running`, possibly charged, with one provider request. None when it has
+    neither."""
     if record is not None:
-        if start is not None:
-            shared = set(StartRecord.model_fields) - {"exchanges"}
-            if record.model_dump(include=shared) != start.model_dump(include=shared) or (
-                record.exchanges[: len(start.exchanges)] != start.exchanges
-            ):
-                raise ValueError("the attempt record doesn't hold its start record's contents")
         return AttemptStatus(
             attempt_id=record.attempt_id,
             outcome=record.outcome,

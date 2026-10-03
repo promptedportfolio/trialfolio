@@ -139,15 +139,15 @@ UtcDatetime = Annotated[datetime, AfterValidator(_in_utc)]
 
 RELATIVE_PATH_PATTERN: Final = r"[^/\\:]+(/[^/\\:]+)*"
 """Segments separated by `/`, none empty, and no `\\` or `:`, so the path is relative on Windows
-too. `valid_relative_path` also rejects `.` and `..` segments."""
+too. `valid_relative_path` also rejects `.` and `..` segments, and NUL."""
 
 
 def valid_relative_path(value: str) -> str:
     """Raises `ValueError` unless `value` is a path relative to the output root: segments
-    separated by `/`, none of them empty, `.`, or `..`. The `ArtifactStore` and the models check
-    paths with this one rule."""
-    if not re.fullmatch(RELATIVE_PATH_PATTERN, value):
-        raise ValueError("must be a relative path with / separators, and no \\ or :")
+    separated by `/`, none of them empty, `.`, or `..`, and no NUL, which no file name holds. The
+    `ArtifactStore` and the models check paths with this one rule."""
+    if not re.fullmatch(RELATIVE_PATH_PATTERN, value) or "\0" in value:
+        raise ValueError("must be a relative path with / separators, and no \\, :, or NUL")
     if any(part in (".", "..") for part in value.split("/")):
         raise ValueError("must stay inside the output directory, with no . or .. segments")
     return value

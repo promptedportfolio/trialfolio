@@ -97,6 +97,7 @@ def test_write_needs_a_claimed_directory(tmp_path: Path) -> None:
         "cases/",
         "cases\\attempt.json",
         "C:attempt.json",
+        "cases/attempt\0.json",
     ],
 )
 def test_paths_must_be_relative_to_the_root(
