@@ -141,6 +141,20 @@ def test_rerendered_links_reach_the_runs_files_from_the_reports_directory(
     assert (out / "report.html").read_bytes() != (run / "report.html").read_bytes()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX gives a name that isn't UTF-8 as surrogates")
+def test_a_run_directory_whose_name_isnt_utf8_is_linked_by_its_bytes(complete: Written) -> None:
+    saved = read_run(LocalArtifactStore(complete.out))
+    # As os.path.relpath gives it for a directory named with the byte 0xE9, which isn't UTF-8.
+    run_path = os.fsdecode(b"../runs/caf\xe9")
+
+    document = parse(RENDERER.render(saved, run_path))
+    hrefs = [a.attrs["href"] or "" for a in document.root.find_all("a")]
+    relative_hrefs = [h for h in hrefs if not h.startswith("#") and not urlsplit(h).scheme]
+
+    assert len(relative_hrefs) == len(complete.manifest.artifacts)
+    assert all(href.startswith("../runs/caf%E9/") for href in relative_hrefs)
+
+
 def test_without_a_relative_path_the_artifacts_are_named_without_links(
     complete: Written, tmp_path: Path
 ) -> None:

@@ -37,6 +37,7 @@ report's contents.
 
 import html
 import logging
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -85,9 +86,11 @@ class ReportRenderer(Protocol):
         """The report of `run`, as an HTML document.
 
         `run_path` is where the run's directory is, relative to the report's: `""` when the report
-        is in it, as `run` writes it, or a path such as `../../runs/baseline` with `/` separators.
-        Each artifact is linked by that path. None names the artifacts without links, for a report
-        with no relative path to the run.
+        is in it, as `run` writes it, or a path such as `../../runs/baseline` with `/` separators,
+        as the file system gives it. Each artifact is linked by that path, each segment
+        percent-encoded from its bytes in the file system, so a name that isn't UTF-8 is linked as
+        it is. None names the artifacts without links, for a report with no relative path to the
+        run.
 
         Raises `ValueError` if `run_path` is absolute or has an empty segment.
         """
@@ -157,7 +160,11 @@ class HtmlReportRenderer:
 
 
 def _base(run_path: str | None) -> tuple[str, ...] | None:
-    """The run's directory as percent-encoded path segments, or None for no links."""
+    """The run's directory as percent-encoded path segments, or None for no links.
+
+    Each segment is encoded from its bytes in the file system, which `os.fsencode` gives back: a
+    name that isn't UTF-8 reaches Python as surrogate escapes, which UTF-8 can't encode.
+    """
     if run_path is None:
         return None
     if run_path in ("", "."):
@@ -165,7 +172,7 @@ def _base(run_path: str | None) -> tuple[str, ...] | None:
     segments = run_path.removesuffix("/").split("/")
     if any(segment in ("", ".") for segment in segments):
         raise ValueError("the run's path must be relative, with no empty or . segments")
-    return tuple(quote(segment, safe="") for segment in segments)
+    return tuple(quote(os.fsencode(segment), safe="") for segment in segments)
 
 
 # What the report says about each code it shows.
