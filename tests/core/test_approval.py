@@ -9,6 +9,7 @@ hash and the budget are shown, never the formulas. The terminal is a real pseudo
 """
 
 import io
+import subprocess
 import sys
 from pathlib import Path
 from typing import TextIO
@@ -22,7 +23,8 @@ from trialfolio.contracts.plan import Plan
 from trialfolio.errors import TrialFolioError
 from trialfolio.planning import VERIFIED_VERSIONS, Versions, build_plan
 
-FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "screen-configs"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FIXTURES = REPO_ROOT / "tests" / "fixtures" / "screen-configs"
 
 CANARIES = (
     "canary-title-5e1d0b7c",
@@ -204,3 +206,11 @@ def test_configuration_text_cant_act_on_the_terminal(plan: Plan) -> None:
     for char in (escape, bell, override):
         assert char not in shown
     assert "[2J" in shown
+
+
+def test_without_termios_this_module_still_imports() -> None:
+    # A corrected defect: on Windows, which has no termios, importing the terminal helper failed,
+    # so this module didn't collect, rather than only its terminal tests skipping.
+    script = "import sys\nsys.modules['termios'] = None\nimport tests.core.test_approval\n"
+
+    subprocess.run([sys.executable, "-c", script], capture_output=True, check=True, cwd=REPO_ROOT)

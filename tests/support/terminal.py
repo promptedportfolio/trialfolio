@@ -3,11 +3,11 @@ test pairing: the terminal). It isn't a double: `stdin` and `stderr` are its ter
 `isatty()` is true because they are terminals.
 
 R01-T15's terminal support runs a command in a subprocess under a pseudo-terminal; this one
-serves code called in the test process. POSIX only: Windows has no pseudo-terminals.
+serves code called in the test process. POSIX only: Windows has no pseudo-terminals. The module
+still imports there, so a test module that uses it collects, and only its terminal tests skip.
 """
 
 import os
-import termios
 import threading
 from types import TracebackType
 from typing import Self, TextIO
@@ -46,6 +46,9 @@ class PseudoTerminal:
         with the terminal's `\\r\\n` line endings read as `\\n`."""
         if not self._closed:
             self._closed = True
+            # Imported here, because Windows has no termios (see the module's docstring).
+            import termios
+
             # Waits until the reader has taken everything written, before closing.
             termios.tcdrain(self.stderr.fileno())
             self.stdin.close()
