@@ -143,9 +143,19 @@ def test_typing_approve_approves_the_plan_shown(plan: Plan) -> None:
 
 @posix_only
 @pytest.mark.parametrize(
-    "keys", ["no\n", "\n", "\x04", "Approve\n", " approve\n", "approve \n", "approved\n"]
+    "keys",
+    [
+        "no\n",
+        "\n",
+        "\x04",
+        "Approve\n",
+        " approve\n",
+        "approve \n",
+        "approved\n",
+        b"approv\xe9\n",  # an accented e in Latin-1, which isn't UTF-8, the terminal's encoding
+    ],
 )
-def test_any_other_answer_or_the_end_of_input_is_a_refusal(plan: Plan, keys: str) -> None:
+def test_any_other_answer_or_the_end_of_input_is_a_refusal(plan: Plan, keys: str | bytes) -> None:
     with PseudoTerminal() as terminal:
         terminal.press(keys)
         message = refusal(plan, None, stdin=terminal.stdin, stderr=terminal.stderr)

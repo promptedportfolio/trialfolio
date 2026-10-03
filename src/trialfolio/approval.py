@@ -196,7 +196,8 @@ def obtain_approval(plan: Plan, approve: str | None, *, stdin: TextIO, stderr: T
       the method `option`, and only the hash and the budget are shown.
     - Without it, when `stdin` and `stderr` are both terminals, it shows the full plan and asks
       the user to type `approve`, which approves the plan shown, with the method `interactive`.
-      Any other answer, an empty line, or the end of input is a refusal.
+      Any other answer, a line that isn't text in `stdin`'s encoding, an empty line, or the end
+      of input is a refusal.
 
     Raises `TrialFolioError` with `plan.approval_required` when the plan isn't approved, once
     the plan hash has been shown, with the full plan when `stderr` is a terminal. The message
@@ -223,7 +224,10 @@ def obtain_approval(plan: Plan, approve: str | None, *, stdin: TextIO, stderr: T
     if on_terminal and stdin.isatty():
         _write(stderr, format_plan(plan))
         _write(stderr, f"\nType {APPROVE_ANSWER} to run this plan, or anything else to stop: ")
-        answer = stdin.readline().removesuffix("\n").removesuffix("\r")
+        try:
+            answer: str | None = stdin.readline().removesuffix("\n").removesuffix("\r")
+        except UnicodeDecodeError:  # It isn't text, so it isn't approve either.
+            answer = None
         if answer != APPROVE_ANSWER:
             raise _not_approved(
                 shown_hash, f"The plan wasn't approved: the answer wasn't {APPROVE_ANSWER}."

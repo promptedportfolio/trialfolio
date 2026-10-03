@@ -36,14 +36,15 @@ class PseudoTerminal:
                 return
             self._shown += data
 
-    def press(self, keys: str) -> None:
-        """Sends keys, as typed. A line takes effect at `\\n`, and `\\x04` at the start of a line
-        is the end of input."""
-        os.write(self._controller, keys.encode())
+    def press(self, keys: str | bytes) -> None:
+        """Sends keys, as typed: text in UTF-8, or bytes as they are. A line takes effect at
+        `\\n`, and `\\x04` at the start of a line is the end of input."""
+        os.write(self._controller, keys.encode() if isinstance(keys, str) else keys)
 
     def shown(self) -> str:
         """Closes the terminal side, and returns everything shown on it, typed echo included,
-        with the terminal's `\\r\\n` line endings read as `\\n`."""
+        with the terminal's `\\r\\n` line endings read as `\\n`, and bytes that aren't UTF-8
+        replaced."""
         if not self._closed:
             self._closed = True
             # Imported here, because Windows has no termios (see the module's docstring).
@@ -55,7 +56,7 @@ class PseudoTerminal:
             self.stderr.close()
             self._reader.join(timeout=10)
             os.close(self._controller)
-        return self._shown.decode("utf-8").replace("\r\n", "\n")
+        return self._shown.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
     def __enter__(self) -> Self:
         return self
