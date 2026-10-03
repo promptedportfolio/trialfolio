@@ -160,6 +160,25 @@ def test_authentication_that_never_connected_is_not_connected(
     assert faults.connects == (0 if fault == "name lookup" else 1)
 
 
+def test_a_refused_proxy_connection_is_not_connected(
+    server: FakePortfolio123, faults: SocketFaults
+) -> None:
+    # 0.1.0's client uses no proxy, so this drives the adapter directly. The rule unwraps a
+    # urllib3 ProxyError, so a later release that adds a proxy keeps it.
+    adapter = ExchangeRecordingAdapter()
+    session = requests.Session()
+    session.trust_env = False
+    session.mount("http://", adapter)
+    session.proxies = {"http": server.endpoint}
+    server.close()
+
+    with adapter.call("request"), pytest.raises(requests.exceptions.ProxyError):
+        session.post("http://127.0.0.1:9/screen/backtest")
+
+    assert adapter.exchanges == (ended(BACKTEST, "not_connected"),)
+    assert faults.connects == 1
+
+
 # Interrupted: possibly sent
 
 
