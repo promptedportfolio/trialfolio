@@ -114,16 +114,15 @@ class ProviderError(TrialFolioError):
 
     `message` is for the terminal and the attempt record. It ends with Portfolio123's own message,
     sanitized, when the failure table calls for it and the wrapper's message carries one. That
-    text can repeat configuration values, so `log_message` leaves it out (docs/contracts.md,
-    errors and credentials).
+    text can repeat configuration values, so `log_message`, which is also the error's `str()`,
+    leaves it out (docs/contracts.md, errors and credentials).
     """
 
     def __init__(self, code: ErrorCode, message: str, provider_message: str | None = None) -> None:
         full = message
         if provider_message is not None:
             full = f'{message} Portfolio123\'s message: "{provider_message}"'
-        super().__init__(code, full)
-        self.log_message = message
+        super().__init__(code, full, message)
         self.provider_message = provider_message
 
     def __reduce__(  # pyright: ignore[reportIncompatibleMethodOverride]

@@ -972,7 +972,7 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
 
 ## Errors
 
-The core raises typed errors with stable dotted codes and actionable messages. Only the CLI maps them to exit codes. Messages say what failed, why, and what to do next. They never include credentials, and they include the offending values only in the terminal, never in logs. Portfolio123's own message, which a provider error ends with when [0.1.0's failure table](releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior) calls for it, can repeat configuration values, so the error also carries its message without that text for logs ([credentials](#credentials)).
+The core raises typed errors with stable dotted codes and actionable messages. Only the CLI maps them to exit codes. Messages say what failed, why, and what to do next. They never include credentials, and they include the offending values only in the terminal, never in logs. Portfolio123's own message, which a provider error ends with when [0.1.0's failure table](releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior) calls for it, can repeat configuration values, so the error also carries its message without that text for logs ([credentials](#credentials)). Every error carries such a loggable message, the same as its message when there's no text to leave out. It's also the error's string form, so a logged traceback leaves the text out too.
 
 | Code | Exit | Meaning |
 |---|---|---|

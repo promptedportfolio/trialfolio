@@ -11,6 +11,7 @@ before a request.
 import copy
 import logging
 import pickle
+import traceback
 
 import pytest
 
@@ -121,10 +122,10 @@ def test_errors_carry_no_reference_to_the_wrappers_exception(
     assert raised.value.__context__ is None
     assert raised.value.__traceback__ is not None
     frames = []
-    traceback = raised.value.__traceback__
-    while traceback is not None:
-        frames.append(traceback.tb_frame.f_code.co_name)
-        traceback = traceback.tb_next
+    entry = raised.value.__traceback__
+    while entry is not None:
+        frames.append(entry.tb_frame.f_code.co_name)
+        entry = entry.tb_next
     # Raised by the client itself, outside the wrapper's frames.
     assert frames[-1] == ("authenticate" if stage == "authentication" else "screen_backtest")
 
@@ -134,12 +135,13 @@ def test_a_provider_error_keeps_its_parts_when_copied() -> None:
 
     copied = pickle.loads(pickle.dumps(error))
 
-    assert (copied.code, copied.message, copied.log_message, copied.provider_message) == (
-        error.code,
-        error.message,
-        "Rejected.",
-        "Invalid parameter",
-    )
+    assert (
+        copied.code,
+        copied.message,
+        copied.log_message,
+        str(copied),
+        copied.provider_message,
+    ) == (error.code, error.message, "Rejected.", "Rejected.", "Invalid parameter")
 
 
 def test_logs_hold_no_credentials_tokens_parameters_or_provider_text(
@@ -166,9 +168,11 @@ def test_logs_hold_no_credentials_tokens_parameters_or_provider_text(
     for canary in (canaries.API_ID, canaries.API_KEY, canaries.TOKEN, "canary-provider-text"):
         assert canary not in logged
     assert "SP500" not in logged
-    # The provider's text is in the message, for the terminal, and not in the loggable one.
+    # The provider's text is in the message, for the terminal, and not in the loggable one,
+    # which is also the error's string form, so a logged traceback leaves it out too.
     assert "canary-provider-text" in raised.value.message
     assert "canary-provider-text" not in raised.value.log_message
+    assert "canary-provider-text" not in "".join(traceback.format_exception(raised.value))
 
 
 def test_a_refused_exchange_is_logged(
