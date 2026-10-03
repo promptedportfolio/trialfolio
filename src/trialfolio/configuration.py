@@ -12,11 +12,14 @@ PyYAML's parse events, never through PyYAML's constructors, so it decides what e
 - Null values, duplicate keys, non-text keys, anchors, aliases, explicit tags, and credential-like
   keys are rejected.
 
+`original_values` gives each top-level value's text exactly as the file writes it, for
+`settings.csv`'s `original_value` (docs/contracts.md, settings.csv).
+
 Error messages name the offending key and never include its value, so they're safe to log.
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date
 from decimal import Decimal
 from typing import Final, NoReturn, Protocol, cast
@@ -68,6 +71,10 @@ MAX_DIGITS: Final = 16
 MAX_DEPTH: Final = 16
 """The deepest a value may be nested. A screen configuration needs 2 levels."""
 
+_YAML_SPACE: Final = " \t\r\n\x85\u2028\u2029"
+"""YAML's white space and line breaks, which PyYAML reads as such: a block scalar's span ends
+after them."""
+
 _TAG = "tag:yaml.org,2002:"
 _STR = f"{_TAG}str"
 _INTEGER = re.compile(INTEGER_PATTERN)
@@ -88,7 +95,7 @@ def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfigu
     Raises `TrialFolioError` with `config.invalid` when the file breaks any rule of the screen
     configuration. The message lists each problem, names its key, and includes no value.
     """
-    loaded = _read_yaml(content, source_name)
+    loaded, _ = _read_yaml(content, source_name)
     if not isinstance(loaded, dict):
         _fail(source_name, ["The file must be a mapping of keys to values."])
     document = cast("dict[str, object]", loaded)
@@ -111,6 +118,19 @@ def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfigu
         _fail(
             source_name, [_describe(detail) for detail in details if not _follows(detail, details)]
         )
+
+
+def original_values(content: bytes, source_name: str) -> Mapping[str, str]:
+    """Each top-level key's value as the file writes it, by key: its text from its first
+    character to its last one that isn't YAML white space or a line break. That keeps quotes,
+    block indicators, and, inside a block list or mapping, the line breaks, indentation, and
+    comments between its items (docs/contracts.md, settings.csv's `original_value`).
+
+    For a file `read_screen_configuration` accepted. Raises `TrialFolioError` with
+    `config.invalid` when the file breaks a YAML rule, as that function does.
+    """
+    _, originals = _read_yaml(content, source_name)
+    return originals
 
 
 def _follows(detail: ErrorDetails, details: list[ErrorDetails]) -> bool:
@@ -159,13 +179,15 @@ def _describe(detail: ErrorDetails) -> str:
     return f"`{key}` {message[0].lower()}{message[1:]}."
 
 
-def _read_yaml(content: bytes, source_name: str) -> object:
+def _read_yaml(content: bytes, source_name: str) -> tuple[object, dict[str, str]]:
+    """The document's value, and each top-level value's text as `original_values` gives it."""
     try:
         text = content.decode("utf-8").removeprefix("\ufeff")
     except UnicodeDecodeError:
         _fail(source_name, ["The file isn't UTF-8 text."])
     try:
-        return _Builder(text).document()
+        builder = _Builder(text)
+        return builder.document(), builder.originals
     except _Invalid as error:
         where = f"`{_format_path(error.path)}`" if error.path else "The file"
         _fail(source_name, [f"{where} {error.problem}"])
@@ -176,6 +198,20 @@ def _read_yaml(content: bytes, source_name: str) -> object:
         _fail(source_name, [f"The file isn't valid YAML{place}."])
     except yaml.YAMLError:
         _fail(source_name, ["The file isn't valid YAML."])
+
+
+class _Mark(Protocol):
+    """A position in the text, as PyYAML marks an event's start or end."""
+
+    @property
+    def index(self) -> int: ...
+
+
+def _index(mark: _Mark | None) -> int:
+    """Where a mark is, as an index into the text."""
+    if mark is None:  # PyYAML's parser marks every event; its stubs allow none
+        raise _Invalid((), "isn't valid YAML.")
+    return mark.index
 
 
 class _Parser(Protocol):
@@ -191,7 +227,13 @@ class _Builder:
     """Builds plain values from parse events, applying the rules in the module docstring."""
 
     def __init__(self, text: str) -> None:
+        self._text = text
         self._loader = cast("_Parser", yaml.SafeLoader(text))
+        self._end = 0
+        """Where the last scalar or flow collection ended, as an index into the text. A block
+        collection ends where its last item does."""
+        self.originals: dict[str, str] = {}
+        """Each top-level value's text, by key, once `document` has returned."""
 
     def document(self) -> object:
         try:
@@ -222,14 +264,22 @@ class _Builder:
             raise _Invalid(path, "has no value.")
         if event.anchor is not None:
             raise _Invalid(path, "has an anchor. Anchors and aliases aren't accepted.")
+        value = self._node(event, path)
+        if len(path) == 1 and isinstance(path[0], str):
+            span = self._text[_index(event.start_mark) : self._end]
+            self.originals[path[0]] = span.rstrip(_YAML_SPACE)
+        return value
+
+    def _node(self, event: NodeEvent, path: KeyPath) -> object:
         if isinstance(event, ScalarEvent):
+            self._end = _index(event.end_mark)
             return self._scalar(event, path)
         if isinstance(event, SequenceStartEvent):
             self._no_tag(event.tag, path)
             items: list[object] = []
             while not isinstance(self._loader.peek_event(), SequenceEndEvent):
                 items.append(self._value((*path, len(items))))
-            self._loader.get_event()
+            self._close(event)
             return items
         if isinstance(event, MappingStartEvent):
             self._no_tag(event.tag, path)
@@ -239,9 +289,16 @@ class _Builder:
                 if key in mapping:
                     raise _Invalid((*path, key), "appears more than once.")
                 mapping[key] = self._value((*path, key))
-            self._loader.get_event()
+            self._close(event)
             return mapping
         raise _Invalid(path, "isn't a value this reader accepts.")
+
+    def _close(self, start: SequenceStartEvent | MappingStartEvent) -> None:
+        end = self._loader.get_event()
+        # A flow collection ends at its bracket. A block one has no closing mark: its end event
+        # sits where the next token starts, after any comment, so it ends with its last item.
+        if start.flow_style:
+            self._end = _index(end.end_mark)
 
     def _key(self, path: KeyPath) -> str:
         event = self._loader.get_event()

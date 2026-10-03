@@ -1,0 +1,148 @@
+{
+  "cost": 5,
+  "quotaRemaining": 4321,
+  "stats": {
+    "samples": 119,
+    "correlation": 0.8123,
+    "r_squared": 0.6598,
+    "beta": 1.04,
+    "alpha": -2.517,
+    "port": {
+      "standard_dev": 18.217,
+      "sharpe_ratio": 0.61,
+      "sortino_ratio": 0.8842,
+      "total_return": 151.7,
+      "annualized_return": 9.6643,
+      "max_drawdown": -33.12
+    },
+    "bench": {
+      "standard_dev": 15.4,
+      "sharpe_ratio": 0.7712,
+      "sortino_ratio": 1.0398,
+      "total_return": 238.05,
+      "annualized_return": 12.3,
+      "max_drawdown": -24.5
+    }
+  },
+  "results": {
+    "columns": [
+      "#",
+      "As Of Dt",
+      "Rank Dt",
+      "Tran Dt",
+      "End Dt",
+      "#Pos",
+      "New Pos",
+      "Sold Pos",
+      "Turn",
+      "Ret%",
+      "Bench%",
+      "Excess%",
+      "100 USD Investment",
+      "100 USD in SPY:USA",
+      "Costs",
+      "Cash",
+      "Min % no slip",
+      "Max % no slip",
+      "StdDev"
+    ],
+    "rows": [],
+    "average": [
+      null,
+      null,
+      null,
+      null,
+      25.0,
+      12.75,
+      6.5,
+      26.0,
+      26.09,
+      36.24,
+      -10.15,
+      null,
+      null,
+      0.2025,
+      0.6,
+      -37.76,
+      90.175,
+      20.79
+    ],
+    "upMarkets": [
+      null,
+      4,
+      null,
+      null,
+      25.0,
+      12.75,
+      6.5,
+      26.0,
+      26.09,
+      36.24,
+      -10.15,
+      null,
+      null,
+      0.2025,
+      0.6,
+      -37.76,
+      90.175,
+      20.79
+    ],
+    "downMarkets": [
+      null,
+      0,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "chart": {
+    "dates": [
+      "2016-01-01",
+      "2018-07-02",
+      "2021-01-04",
+      "2023-07-03",
+      "2025-12-31"
+    ],
+    "screenReturns": [
+      100.0,
+      132.11,
+      161.99,
+      212.86,
+      251.7
+    ],
+    "benchReturns": [
+      100.0,
+      156.6,
+      217.79,
+      278.23,
+      338.05
+    ],
+    "turnoverPct": [
+      100.0,
+      44.0,
+      36.0,
+      24.0,
+      0.0
+    ],
+    "positionCnt": [
+      25.0,
+      25.0,
+      25.0,
+      25.0,
+      25.0
+    ]
+  }
+}
