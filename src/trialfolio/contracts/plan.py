@@ -129,6 +129,10 @@ type SettingValue = (
 and tokens too; a list of text; or a ranking mapping (plan contents, settings in the plan)."""
 
 
+PlanFlag = Literal["inferred_default", "not_snapshotted"]
+"""The flags known before execution (plan contents, settings in the plan)."""
+
+
 class PlanSetting(ContractModel):
     """One resolved setting: a `settings.csv` row without `label`, `original_key`,
     `original_value`, and `source_artifact`, with `expected_provenance` for `provenance`.
@@ -142,7 +146,7 @@ class PlanSetting(ContractModel):
     interpretation: Interpretation
     expected_provenance: Provenance
     inference_rule: NonEmptyText | None
-    flags: tuple[Literal["inferred_default", "not_snapshotted"], ...]
+    flags: tuple[PlanFlag, ...]
 
     @model_validator(mode="after")
     def _documented(self) -> Self:

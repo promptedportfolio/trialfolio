@@ -17,12 +17,13 @@ At each release, regenerate the component tables from the resolved dependency se
 | urllib3 | HTTP library under requests. The adapter reads its connection errors ([ADR 0006](docs/adrs/0006-observe-the-wrappers-http-exchanges.md)). Pinned exactly, to the verified version in [contracts.md, plan contents](docs/contracts.md#plan-contents). | Declared since R01-T06: 2.8.0 | MIT |
 | pydantic | Contracts: validation, serialization, and the generated JSON Schemas ([ADR 0002](docs/adrs/0002-pydantic-contracts-and-protocols.md)). Constrained to major version 2 (`>=2.13,<3`). | Declared since R01-T07: 2.13.5 | MIT |
 | PyYAML | Reads configuration files. Trial Folio builds values from its parse events, not its constructors (`src/trialfolio/configuration.py`). Constrained to `>=6,<7`. | Declared since R01-T07: 6.0.3 | MIT |
+| rfc8785 | RFC 8785 canonical JSON, behind every plan hash and case ID (`src/trialfolio/canonical.py`; [contracts.md, canonical hashing](docs/contracts.md#canonical-hashing)). Pinned exactly, because a change in its output would change those identities. | Declared since R01-T10: 0.1.4 | Apache-2.0 |
 
 Record any other dependency here when it's added, for example a templating library, together with every package it brings in.
 
-**The locked runtime set** (`uv export --frozen --no-dev --no-emit-project`, checked 2026-10-02): p123api 3.1.0, pydantic 2.13.5, PyYAML 6.0.3, requests 2.34.2, urllib3 2.8.0, annotated-types 0.8.0, certifi 2026.7.22, charset-normalizer 3.5.2, idna 3.20, pydantic-core 2.46.5, typing-inspection 0.4.4, and typing_extensions 4.16.0. Each is the version whose license the next table records.
+**The locked runtime set** (`uv export --frozen --no-dev --no-emit-project`, checked 2026-10-03): p123api 3.1.0, pydantic 2.13.5, PyYAML 6.0.3, requests 2.34.2, rfc8785 0.1.4, urllib3 2.8.0, annotated-types 0.8.0, certifi 2026.7.22, charset-normalizer 3.5.2, idna 3.20, pydantic-core 2.46.5, typing-inspection 0.4.4, and typing_extensions 4.16.0. Each is the version whose license the next table records.
 
-Verified observation, checked 2026-10-01: p123api 3.1.0 (MIT, released 2026-08-25) depends on `requests` and `typing_extensions`, and has an optional pandas extra. `requests` in turn brings in `urllib3`, `charset-normalizer`, `idna`, and `certifi`. Checked 2026-10-02 from package metadata: pydantic 2.13.5 depends on `pydantic-core`, `annotated-types`, `typing-inspection`, and `typing_extensions`, and PyYAML 6.0.3 depends on nothing.
+Verified observation, checked 2026-10-01: p123api 3.1.0 (MIT, released 2026-08-25) depends on `requests` and `typing_extensions`, and has an optional pandas extra. `requests` in turn brings in `urllib3`, `charset-normalizer`, `idna`, and `certifi`. Checked 2026-10-02 from package metadata: pydantic 2.13.5 depends on `pydantic-core`, `annotated-types`, `typing-inspection`, and `typing_extensions`, and PyYAML 6.0.3 depends on nothing. Checked 2026-10-03 from package metadata: rfc8785 0.1.4 (Trail of Bits) has no runtime dependencies, only optional development extras.
 
 ## Licenses observed for the dependency set
 
@@ -33,6 +34,7 @@ Verified observation, checked 2026-10-01 against the versions listed. The table 
 | p123api 3.1.0, pydantic 2.13.5, pydantic-core 2.46.5, annotated-types 0.8.0, typing-inspection 0.4.4, urllib3 2.8.0, charset-normalizer 3.5.2, PyYAML 6.0.3 (checked 2026-10-02) | MIT | Include each copyright notice and permission notice |
 | idna 3.20 | BSD-3-Clause | Reproduce the copyright notice, conditions, and disclaimer; don't use the copyright holders' or contributors' names to endorse or promote Trial Folio without permission |
 | requests 2.34.2 | Apache-2.0 | Provide the license text and carry the contents of its NOTICE file, currently "Requests / Copyright 2019 Kenneth Reitz"; mark any modified files as changed |
+| rfc8785 0.1.4 (checked 2026-10-03) | Apache-2.0 | Provide the license text, which its wheel ships as `LICENSE` in `.dist-info`; mark any modified files as changed. Neither the wheel nor the repository's v0.1.4 tag has a NOTICE file. Its source says parts are adapted from the Apache-2.0 reference implementation in `cyberphone/json-canonicalization`. |
 | typing_extensions 4.16.0 | PSF-2.0 | Retain the PSF license agreement and copyright notice; include a summary of changes if modified |
 | certifi 2026.7.22 | MPL-2.0 | Its files remain under MPL-2.0; tell recipients where to obtain their source, and publish any modifications to those files under MPL-2.0 |
 

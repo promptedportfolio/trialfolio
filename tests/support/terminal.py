@@ -1,0 +1,66 @@
+"""A real pseudo-terminal in the test process, for prompts and typed answers (release 0.1.0,
+test pairing: the terminal). It isn't a double: `stdin` and `stderr` are its terminal side, so
+`isatty()` is true because they are terminals.
+
+R01-T15's terminal support runs a command in a subprocess under a pseudo-terminal; this one
+serves code called in the test process. POSIX only: Windows has no pseudo-terminals.
+"""
+
+import os
+import termios
+import threading
+from types import TracebackType
+from typing import Self, TextIO
+
+
+class PseudoTerminal:
+    """A pseudo-terminal. What the code writes is collected from the other side by a thread, so
+    a long display never fills the terminal's buffer, and `press` sends keys as a user would."""
+
+    def __init__(self) -> None:
+        self._controller, terminal = os.openpty()
+        self.stdin: TextIO = open(os.dup(terminal), encoding="utf-8")  # noqa: SIM115
+        self.stderr: TextIO = open(terminal, "w", encoding="utf-8")  # noqa: SIM115
+        self._shown = bytearray()
+        self._reader = threading.Thread(target=self._read, daemon=True)
+        self._reader.start()
+        self._closed = False
+
+    def _read(self) -> None:
+        while True:
+            try:
+                data = os.read(self._controller, 4096)
+            except OSError:  # Linux reports EIO once the terminal side is closed
+                return
+            if not data:
+                return
+            self._shown += data
+
+    def press(self, keys: str) -> None:
+        """Sends keys, as typed. A line takes effect at `\\n`, and `\\x04` at the start of a line
+        is the end of input."""
+        os.write(self._controller, keys.encode())
+
+    def shown(self) -> str:
+        """Closes the terminal side, and returns everything shown on it, typed echo included,
+        with the terminal's `\\r\\n` line endings read as `\\n`."""
+        if not self._closed:
+            self._closed = True
+            # Waits until the reader has taken everything written, before closing.
+            termios.tcdrain(self.stderr.fileno())
+            self.stdin.close()
+            self.stderr.close()
+            self._reader.join(timeout=10)
+            os.close(self._controller)
+        return self._shown.decode("utf-8").replace("\r\n", "\n")
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.shown()
