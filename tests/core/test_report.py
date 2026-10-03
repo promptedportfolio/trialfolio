@@ -14,6 +14,7 @@ report is rendered from a run written over the fake server by the real client an
 writes it; R01-T16 checks the same through the CLI.
 """
 
+import json
 import re
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -523,14 +524,20 @@ def test_text_from_the_configuration_cant_add_markup_or_reorder_whats_shown(
     assert settings(document)["rules"][2] == f'["{rule.replace(chr(34), chr(92) + chr(34))}"]'
 
 
-def test_the_account_quota_stays_out(complete: Written) -> None:
-    attempt = complete.saved.attempts[0].record
+def test_the_account_quota_stays_out(write_run: WriteRun) -> None:
+    # complete.json's quota, 4321, can turn up by chance in the report's hashes and attempt ID.
+    # Fifteen digits can't: a given 15-character run of hex digits is about one in 10^18.
+    quota = 864209753186420
+    body = json.loads((RESPONSES / "complete.json").read_bytes())
+    body["quotaRemaining"] = quota
+    written = write_run(FORMULA, Reply(200, json.dumps(body).encode()))
+    attempt = written.saved.attempts[0].record
     assert attempt is not None
-    assert attempt.provider_metadata.quota_remaining == 4321
+    assert attempt.provider_metadata.quota_remaining == quota
 
-    assert "4321" not in complete.html
-    assert "quota" not in complete.html.lower()
-    assert parse(complete.html).dd("Cost")[0] == "5 credits, as Portfolio123 reported"
+    assert str(quota) not in written.html
+    assert "quota" not in written.html.lower()
+    assert parse(written.html).dd("Cost")[0] == "5 credits, as Portfolio123 reported"
 
 
 def test_rendering_is_deterministic_and_names_its_version(complete: Written) -> None:
