@@ -14,6 +14,8 @@ saved.
 """
 
 import json
+from collections.abc import Mapping
+from datetime import date
 
 import pytest
 
@@ -283,6 +285,72 @@ def test_coverage_that_differs_from_the_requested_dates_flags_both(execute: Exec
     assert settings["end_date"].flags == ("coverage_mismatch",)
     for row in tables.metrics_rows:
         assert (str(row.period_start), str(row.period_end)) == ("2016-01-04", "2025-12-26")
+
+
+def with_dates(changes: Mapping[tuple[int, str], str | None]) -> bytes:
+    """complete.json, with each date given by its row's index and its column changed."""
+    response = json.loads(COMPLETE)
+    results = response["results"]
+    for (row, column), value in changes.items():
+        results["rows"][row][results["columns"].index(column)] = value
+    return json.dumps(response).encode()
+
+
+# complete.json's earliest Tran Dt, 2016-01-01, is in its last row, and its latest End Dt,
+# 2025-12-31, in its first. A date that's null makes its coverage date unavailable.
+@pytest.mark.parametrize(
+    ("changes", "start", "end", "flagged"),
+    [
+        pytest.param(
+            {(0, "End Dt"): "2025-12-26"},
+            "2016-01-01",
+            "2025-12-26",
+            {"end_date"},
+            id="only the end differs",
+        ),
+        pytest.param(
+            {(3, "Tran Dt"): "2016-01-04"},
+            "2016-01-04",
+            "2025-12-31",
+            {"start_date"},
+            id="only the start differs",
+        ),
+        pytest.param(
+            {(1, "Tran Dt"): None, (0, "End Dt"): "2025-12-26"},
+            None,
+            "2025-12-26",
+            {"end_date"},
+            id="no start, and the end differs",
+        ),
+        pytest.param(
+            {(2, "End Dt"): None, (3, "Tran Dt"): "2016-01-04"},
+            "2016-01-04",
+            None,
+            {"start_date"},
+            id="no end, and the start differs",
+        ),
+    ],
+)
+def test_each_date_setting_is_compared_with_its_own_coverage_date(
+    execute: Execute,
+    changes: Mapping[tuple[int, str], str | None],
+    start: str | None,
+    end: str | None,
+    flagged: set[str],
+) -> None:
+    tables = execute(FORMULA, with_dates(changes)).write_tables()
+
+    metrics = by_metric(tables.metrics_rows)
+    settings = by_setting(tables.settings_rows)
+    assert metrics[("strategy", "coverage_start")].value == start
+    assert metrics[("strategy", "coverage_end")].value == end
+    for setting in ("start_date", "end_date"):
+        expected = ("coverage_mismatch",) if setting in flagged else ()
+        assert settings[setting].flags == expected
+    # Each period date is its own coverage date, and empty only when that one is unavailable.
+    for row in tables.metrics_rows:
+        assert row.period_start == (None if start is None else date.fromisoformat(start))
+        assert row.period_end == (None if end is None else date.fromisoformat(end))
 
 
 def test_a_response_with_no_periods_has_no_coverage_dates_and_flags_nothing(
