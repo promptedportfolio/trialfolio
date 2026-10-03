@@ -571,6 +571,20 @@ An attempt with a start record and no attempt record is `running` ([uncertain co
 
 `schemas/start-record-1.0.0.schema.json` and `schemas/attempt-record-1.0.0.schema.json` give every field.
 
+**Writing the files.** `src/trialfolio/attempts.py` writes an attempt's files (R01-T11). After Trial Folio's authentication call succeeds, it writes them in this order:
+
+1. **`request.json`.** It's the request's `params`, which hold no credentials, as Python's `json.dumps` writes them, indented. `requests` writes the request body with the same function, unindented. So each number's text is the body's, and non-ASCII text is escaped, as it is in the body. It comes before the start record, so the start record is the last write before the send, and an attempt restarted with a saved response has a request to reference.
+2. **`started.json`.** Then the request is sent.
+3. **`response.json` or `response.raw`.** `response.json` is the decoded value as `json.dumps` writes it, on one line. Unindented, `json` writes with its C encoder, which nests as deep as the C decoder that read the value; the Python encoder that indenting uses could run out of recursion first. Non-ASCII text is escaped, so a lone surrogate the decoder accepted is written back as it came. So are `NaN` and `Infinity`.
+4. **`attempt.json`,** whatever ended the attempt.
+
+An attempt that ends after the claim and before it authenticates, such as after an interrupt, or a failure to write `configuration.yaml`, writes only its attempt record.
+
+- **`provider_metadata`** takes `cost` and `quotaRemaining` from the top level of a decoded response. A value that's absent, or isn't a non-negative integer, is `null`.
+- **An interrupt while the attempt record is written.** If the record was published whole, it's left as it is. Otherwise it's written once more, with `command.interrupted` as its error code, unless the attempt succeeded. An interrupt during that second write ends the command, and the start record, if there is one, reads as `running`.
+- **An error that decides the code keeps the message of the one it overrides,** after "Before that:". So a record whose code is `command.interrupted` after a 400 still holds Portfolio123's message.
+- **An unexpected exception** ends the attempt like any other ending: the exchanges give the outcome, and the code is `provider.outcome_unknown` when the outcome is `unknown`, and `internal.unexpected` otherwise. Its code wins over a provider error's, but not over an interrupt's or a storage failure's ([endings that decide the error code](#endings-that-decide-the-error-code)). Its message names only its type, never its own message, which could hold a value. The log gives its type and its frames (`attempt.unexpected`).
+
 Trial Folio saves decoded provider payloads, which is what the wrapper exposes, and labels them as decoded payloads. It doesn't capture HTTP headers, and it keeps a raw body only in one case: a 200 the wrapper can't decode, which it saves as `response.raw`, labeled undecoded ([HTTP exchanges](#http-exchanges)). Trial Folio configures the wrapper for a single HTTP attempt per call, and its adapter allows one exchange per call, as below. So the request is sent at most once, and running the command again is a new attempt.
 
 ### HTTP exchanges
@@ -1067,7 +1081,7 @@ Development credentials are handled as [AGENTS.md](../AGENTS.md#credentials-and-
   - `~/Library/Logs/trialfolio` on macOS
   - `%LOCALAPPDATA%\trialfolio\logs` on Windows
 
-Initial event names: `cli.command.started`, `cli.command.completed`, `review.input.loaded`, `artifact.write.completed`, `artifact.sync.degraded`, `report.render.completed`, `plan.created`, `plan.approved`, `attempt.started`, `attempt.completed`, `provider.request.started`, `provider.request.completed`, `provider.request.failed`, `provider.request.refused`, `case.completed`, `experiment.resumed`.
+Initial event names: `cli.command.started`, `cli.command.completed`, `review.input.loaded`, `artifact.write.completed`, `artifact.sync.degraded`, `report.render.completed`, `plan.created`, `plan.approved`, `attempt.started`, `attempt.completed`, `attempt.unexpected`, `provider.request.started`, `provider.request.completed`, `provider.request.failed`, `provider.request.refused`, `case.completed`, `experiment.resumed`.
 
 ## Fixtures
 
