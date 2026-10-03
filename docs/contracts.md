@@ -1,6 +1,6 @@
 # Trial Folio contracts
 
-**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures, and R01-T08 the `ArtifactStore` and the output directory claim. Nothing else here is implemented yet.
+**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures, R01-T08 the `ArtifactStore` and the output directory claim, and R01-T09 the `ScreenBacktestClient` and its transport adapter. Nothing else here is implemented yet.
 **Date:** 2026-10-01
 
 This document owns the meaning of Trial Folio's interfaces and artifacts: configuration files, saved artifacts, identifiers, metric values, errors, CLI behavior, reports, and logs. Pydantic models under `src/trialfolio/contracts/` define the executable structures, JSON Schemas generated from them under `schemas/` publish those structures, and tests with fixtures under `tests/fixtures/` provide conformance evidence. This prose stays authoritative for meaning. If a model accepts something this document says is invalid, the model has a defect.
@@ -579,16 +579,16 @@ Trial Folio mounts its own transport adapter on the wrapper's HTTP session, for 
 
 | Field | Contents |
 |---|---|
-| `request` | The method and path, for example `POST /auth` or `POST /screen/backtest` |
+| `request` | The method and path, for example `POST /auth` or `POST /screen/backtest`. The path leaves out any query, which could carry data. |
 | `result` | `response`: a complete response arrived. `not_connected`: the connection provably never opened, so nothing was sent. `interrupted`: no complete response arrived, and the connection can't be shown never to have opened, so the request may have reached Portfolio123. |
-| `status` | The HTTP status of a `response`. `null` otherwise. |
+| `status` | The HTTP status of a `response`. `null` otherwise. A status outside 100 to 599 isn't an HTTP status ([RFC 9110, section 15](https://www.rfc-editor.org/rfc/rfc9110#section-15)), so an exchange that gets one is `interrupted`: no complete response arrived. |
 | `note` | `completed_from_saved_response` on the request's exchange of an attempt restarted with a saved response, recorded as a `response` with status 200 ([uncertain completion](#uncertain-completion)). `null` otherwise, and always in a start record. |
 
 - **Not connected means provably not sent.** An exchange is `not_connected` only when the `requests` error wraps a `urllib3` `MaxRetryError` whose `reason`, after unwrapping a `urllib3` `ProxyError` to its `original_error`, is a `ConnectTimeoutError`. That class covers a failed name lookup (`NameResolutionError`), a refused or unreachable connection (`NewConnectionError`), and a connect timeout. 0.1.0 uses no proxy ([credentials](#credentials)); unwrapping a `ProxyError` keeps the rule right if a later release adds one. It's the test `urllib3`'s `Retry` applies, in `_is_connection_error`, to decide that a request is safe to retry because the server didn't receive it. Every other ending without a complete response is `interrupted`, including a reset, a read timeout, a TLS failure, and an interrupt during the name lookup. So an unclear case counts as possibly sent.
 - **Recorded before sending.** The adapter adds each exchange to the list before it sends, and fills in the result afterwards. An exchange still without a result when the attempt record is written, for example after Ctrl-C, is `interrupted`. An exchange that already has a result keeps it.
 - **The body is read inside the adapter.** A body that breaks off is therefore recorded as `interrupted`.
-- **Nothing else is recorded,** with one exception. The adapter keeps no headers, tokens, or exception objects, and no bodies, except the body of a 200 on the request's exchange, which it holds in memory. If the wrapper can't decode that body, Trial Folio saves it as `response.raw`, labeled undecoded, so the evidence is kept ([INV-01](spec.md#enduring-invariants)). An authentication body holds the token, so it's never kept. The adapter changes no request or response, and passes every error on unchanged.
-- **One exchange per call.** Each call to the wrapper, whether Trial Folio's own authentication call or the request's call, makes exactly one exchange. The adapter refuses any further exchange during the same call before connecting, whatever its path, by raising an error of Trial Folio's own type. The wrapper catches only `requests.ConnectionError`, so that error ends the call. A refused exchange sent nothing, so it isn't recorded. The rule refuses, without depending on how either is triggered:
+- **Nothing else is recorded,** with one exception. The adapter keeps no headers, tokens, or exception objects, and no bodies, except the body of a 200 on the request's exchange, which it holds in memory. If the wrapper can't decode that body, Trial Folio saves it as `response.raw`, labeled undecoded, so the evidence is kept ([INV-01](spec.md#enduring-invariants)). The wrapper couldn't decode it when the request's call raised anything after the 200, not only a `JSONDecodeError`: JSON nested too deeply for the decoder raises `RecursionError`, for example. An authentication body holds the token, so it's never kept. The adapter changes no request or response, and passes every error on unchanged.
+- **One exchange per call.** Each call to the wrapper, whether Trial Folio's own authentication call or the request's call, makes exactly one exchange. The adapter refuses any further exchange during the same call before connecting, whatever its path, by raising an error of Trial Folio's own type. The wrapper catches only `requests.ConnectionError`, so that error ends the call. A refused exchange sent nothing, so it isn't recorded, and the adapter logs `provider.request.refused`. An exchange outside any call is refused the same way. The rule refuses, without depending on how either is triggered:
   - **The wrapper's resend.** After a 401 or 403, the wrapper re-authenticates and resends the request ([retry policy](#budget-and-retries)). Its `POST /auth` is a second exchange, so it's refused, and the request isn't resent.
   - **A redirect.** `requests` follows a 301, 302, 303, 307, or 308 that has a `Location` header by sending the next request through the same session, and so through the adapter. That's a second exchange, so it's refused. Any other 3xx is an ordinary response. Either way, the exchange records the 3xx as a `response`.
 - **No retries inside an exchange.** The adapter keeps `requests`' default `urllib3` retry setting, `Retry(0, read=False)`, so `urllib3` never resends within one exchange.
@@ -972,7 +972,7 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
 
 ## Errors
 
-The core raises typed errors with stable dotted codes and actionable messages. Only the CLI maps them to exit codes. Messages say what failed, why, and what to do next. They never include credentials, and they include the offending values only in the terminal, never in logs.
+The core raises typed errors with stable dotted codes and actionable messages. Only the CLI maps them to exit codes. Messages say what failed, why, and what to do next. They never include credentials, and they include the offending values only in the terminal, never in logs. Portfolio123's own message, which a provider error ends with when [0.1.0's failure table](releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior) calls for it, can repeat configuration values, so the error also carries its message without that text for logs ([credentials](#credentials)).
 
 | Code | Exit | Meaning |
 |---|---|---|
@@ -1038,7 +1038,12 @@ The CLI reads the variables and passes a credential object to the provider clien
 - **The README says so** ([R01-T17](releases/0.1.0-api-execution.md#implementation-tasks-only-after-ready)).
 - **The CLI's entry function** takes parameters for tests only: the endpoint, the request timeout, the clock, and the factory that makes the output directory's `ArtifactStore` ([0.1.0's test doubles](releases/0.1.0-api-execution.md#test-pairing)). It's internal ([public contract boundary](#public-contract-boundary)), and the installed command never passes them.
 
-The wrapper's error objects need the same care. The response attached to a `p123api` `ClientException` carries the `Authorization` header, and for authentication failures its request body contains the API key. The client's token accessor exposes the bearer token. Trial Folio never logs, serializes, or saves these objects. From an error it keeps only the status code and a sanitized message. Redaction tests seed canary values and check that they appear nowhere in the outputs or logs, including after an authentication failure.
+The wrapper's error objects need the same care. The response attached to a `p123api` `ClientException` carries the `Authorization` header, and for authentication failures its request body contains the API key. The client's token accessor exposes the bearer token. Trial Folio never logs, serializes, or saves these objects. From an error it keeps only the status code and a sanitized message:
+
+- **What it reads.** Only the exception's type and message. Portfolio123's own text is the message of a plain `ClientException`, after the wrapper's prefix, `API request failed: ` or `API authentication failed: `. `ClientItemNotFoundException`'s message is the wrapper's own, and so are the authentication messages for a 400, 401, 402, or 406.
+- **Sanitizing.** Each occurrence of the API ID, the API key, or the token becomes `[redacted]`. Control characters become spaces, runs of whitespace one space, and the text is cut to 300 characters, the last an ellipsis.
+- **No reference.** The client raises its own error outside the handler of the wrapper's, so the error's `__cause__` and `__context__` are empty, and nothing reaches the wrapper's exception from it.
+- **Logs.** A provider error's message ends with Portfolio123's sanitized text when there is some. That's for the terminal and the attempt record. Its loggable message leaves the text out ([errors](#errors)). Redaction tests seed canary values and check that they appear nowhere in the outputs or logs, including after an authentication failure.
 
 Development credentials are handled as [AGENTS.md](../AGENTS.md#credentials-and-reference-data) describes.
 
@@ -1060,7 +1065,7 @@ Development credentials are handled as [AGENTS.md](../AGENTS.md#credentials-and-
   - `~/Library/Logs/trialfolio` on macOS
   - `%LOCALAPPDATA%\trialfolio\logs` on Windows
 
-Initial event names: `cli.command.started`, `cli.command.completed`, `review.input.loaded`, `artifact.write.completed`, `artifact.sync.degraded`, `report.render.completed`, `plan.created`, `plan.approved`, `attempt.started`, `attempt.completed`, `provider.request.started`, `provider.request.completed`, `provider.request.failed`, `case.completed`, `experiment.resumed`.
+Initial event names: `cli.command.started`, `cli.command.completed`, `review.input.loaded`, `artifact.write.completed`, `artifact.sync.degraded`, `report.render.completed`, `plan.created`, `plan.approved`, `attempt.started`, `attempt.completed`, `provider.request.started`, `provider.request.completed`, `provider.request.failed`, `provider.request.refused`, `case.completed`, `experiment.resumed`.
 
 ## Fixtures
 
