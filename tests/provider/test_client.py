@@ -101,15 +101,21 @@ def test_contained_credentials_are_redacted_in_full(server: FakePortfolio123, st
     assert raised.value.message.endswith(f'Portfolio123\'s message: "{expected}"')
 
 
+@pytest.mark.parametrize("stage", ["authentication", "request"])
 def test_errors_carry_no_reference_to_the_wrappers_exception(
-    server: FakePortfolio123, client: P123ScreenBacktestClient
+    server: FakePortfolio123, client: P123ScreenBacktestClient, stage: str
 ) -> None:
-    # The wrapper's exception holds the response, whose request carries the bearer token.
-    authenticate(server, client)
-    server.reply("/screen/backtest", Reply(400, b"Invalid parameter"))
-
-    with pytest.raises(ProviderError) as raised:
-        client.screen_backtest(PARAMS)
+    # The wrapper's exception holds the response, whose request carries the API key after an
+    # authentication failure, and the bearer token after a request's.
+    if stage == "authentication":
+        server.reply("/auth", Reply(403, b"Forbidden"))
+        with pytest.raises(ProviderError) as raised:
+            client.authenticate()
+    else:
+        authenticate(server, client)
+        server.reply("/screen/backtest", Reply(400, b"Invalid parameter"))
+        with pytest.raises(ProviderError) as raised:
+            client.screen_backtest(PARAMS)
 
     assert raised.value.__cause__ is None
     assert raised.value.__context__ is None
@@ -120,7 +126,7 @@ def test_errors_carry_no_reference_to_the_wrappers_exception(
         frames.append(traceback.tb_frame.f_code.co_name)
         traceback = traceback.tb_next
     # Raised by the client itself, outside the wrapper's frames.
-    assert frames[-1] == "screen_backtest"
+    assert frames[-1] == ("authenticate" if stage == "authentication" else "screen_backtest")
 
 
 def test_a_provider_error_keeps_its_parts_when_copied() -> None:
