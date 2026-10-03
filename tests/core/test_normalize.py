@@ -446,7 +446,9 @@ UNPARSEABLE = Value(None, "unparseable_in_source")
     ("rows", "columns", "start", "end"),
     [
         pytest.param(
-            '[["2016-03-01", "2016-04-01"], ["2016-01-04", "2016-03-01"]]',
+            # Neither the first row nor the last holds the earliest or the latest date.
+            '[["2016-03-01", "2016-03-15"], ["2016-01-04", "2016-04-01"], '
+            '["2016-02-01", "2016-03-01"]]',
             '["Tran Dt", "End Dt"]',
             Value("2016-01-04"),
             Value("2016-04-01"),
