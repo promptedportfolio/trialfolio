@@ -946,6 +946,7 @@ class _Report:
                 "<p>A run has one case: the resolved settings, identified by their case ID. Every"
                 " attempt of it is listed, whatever its outcome.</p>"
             ),
+            *self._synthetic_records(),
             "<dl>",
             f"<dt>Case</dt><dd>{_code(self._case.case_id)}</dd>",
             f"<dt>Plan hash</dt><dd>{_code(plan.plan_hash)}</dd>",
@@ -1006,6 +1007,17 @@ class _Report:
             ]
         )
         return parts
+
+    def _synthetic_records(self) -> list[str]:
+        if not self._run.manifest.synthetic:
+            return []
+        return [
+            (
+                "<p>The run is synthetic, so its attempt, the attempt's exchanges, and the counts"
+                " below are invented, as a real run would record them. Nothing was sent to"
+                " Portfolio123, and nothing was charged.</p>"
+            )
+        ]
 
     def _attempt(self, attempt: SavedAttempt) -> list[str]:
         status = attempt.status

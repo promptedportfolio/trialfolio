@@ -233,18 +233,23 @@ class _Ending:
     @property
     def detail(self) -> str:
         """What it says about the request, for a message."""
-        if self.outcome == "succeeded":
-            return "The screen backtest request succeeded, and its response was saved."
-        if self.outcome == "unknown":
-            return (
-                "The screen backtest request may have been charged, and its outcome is unknown:"
-                " no response was saved. Trial Folio never retries it automatically: check the"
-                " account's API credits on Portfolio123's website before running the command"
-                " again."
-            )
-        if self.possibly_charged:
-            return "The screen backtest request reached Portfolio123, and may have been charged."
-        return "The screen backtest request wasn't sent."
+        return request_detail(self.outcome, possibly_charged=self.possibly_charged)
+
+
+def request_detail(outcome: Outcome, *, possibly_charged: bool) -> str:
+    """What an attempt with this outcome says about the request, for a message: whether it was
+    sent, and whether it may have been charged, as the attempt record does."""
+    if outcome == "succeeded":
+        return "The screen backtest request succeeded, and its response was saved."
+    if outcome == "unknown":
+        return (
+            "The screen backtest request may have been charged, and its outcome is unknown: no"
+            " response was saved. Trial Folio never retries it automatically: check the account's"
+            " API credits on Portfolio123's website before running the command again."
+        )
+    if possibly_charged:
+        return "The screen backtest request reached Portfolio123, and may have been charged."
+    return "The screen backtest request wasn't sent."
 
 
 class Attempt:
@@ -442,18 +447,18 @@ class Attempt:
         try:
             self._write(ATTEMPT_RECORD, data, "attempt_record")
         except KeyboardInterrupt:
-            error = _prevailing(_interrupted(end), error)
+            error = prevailing(_interrupted(end), error)
             if self._published(data):
                 return True, error, record
             if record.error is not None:
                 record = record.model_copy(update={"error": _detail_of(error)})
             return self._write_again(record), error, record
         except TrialFolioError as failure:
-            return False, _prevailing(_with_detail(failure, end), error), record
+            return False, prevailing(_with_detail(failure, end), error), record
         # Unwritten, the start record, if any, reads as running.
         except Exception as failure:  # noqa: BLE001
             self._log_unexpected(failure)
-            return False, _prevailing(_unexpected(failure, end), error), record
+            return False, prevailing(_unexpected(failure, end), error), record
         return True, error, record
 
     def _write_again(self, record: AttemptRecord) -> bool:
@@ -574,7 +579,7 @@ def _rank(error: TrialFolioError) -> int:
     return 0 if isinstance(error, ProviderError) else 1
 
 
-def _prevailing(error: TrialFolioError, earlier: TrialFolioError | None) -> TrialFolioError:
+def prevailing(error: TrialFolioError, earlier: TrialFolioError | None) -> TrialFolioError:
     """The error that decides the code, of `error` and the `earlier` one. When it's `error`, its
     message keeps the earlier one's, Portfolio123's own text included."""
     if earlier is None:
