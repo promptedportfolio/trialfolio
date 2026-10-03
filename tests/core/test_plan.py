@@ -138,14 +138,19 @@ def test_the_plan_records_its_versions_budget_retry_policy_and_data_sent() -> No
         "wrapper_attempts_per_call": 1,
         "exchanges_per_call": 1,
     }
-    assert [(entry["category"], set(entry["settings"])) for entry in plan["data_sent"]] == [
-        ("credentials", set()),
-        ("strategy_definition", {"universe", "rules", "ranking"}),
+    # The entries in data sent's order, and each one's settings in the screen settings' order,
+    # which the hash covers.
+    assert [(entry["category"], entry["settings"]) for entry in plan["data_sent"]] == [
+        ("credentials", []),
+        ("strategy_definition", ["universe", "rules", "ranking"]),
         (
             "backtest_settings",
-            {
+            [
+                "screen_type",
                 "max_holdings",
+                "position_method",
                 "benchmark",
+                "currency",
                 "start_date",
                 "end_date",
                 "rebalance_weeks",
@@ -153,10 +158,7 @@ def test_the_plan_records_its_versions_budget_retry_policy_and_data_sent() -> No
                 "slippage_percent",
                 "pit_method",
                 "precision",
-                "screen_type",
-                "position_method",
-                "currency",
-            },
+            ],
         ),
     ]
     assert {(entry["recipient"], entry["via"]) for entry in plan["data_sent"]} == {
