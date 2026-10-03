@@ -30,7 +30,7 @@ from trialfolio.errors import TrialFolioError
 from trialfolio.report import HtmlReportRenderer, rerender_report
 from trialfolio.runs import read_run
 from trialfolio.storage import LocalArtifactStore
-from trialfolio.tables import read_metrics_csv, read_settings_csv
+from trialfolio.tables import metrics_csv, read_metrics_csv, read_settings_csv, settings_csv
 
 FORMULA = (CONFIGS / "formula.yaml").read_bytes()
 RANKING_NAME = (CONFIGS / "ranking-name.yaml").read_bytes()
@@ -322,6 +322,50 @@ def test_files_from_another_run_are_refused_even_with_matching_hashes(
 
         assert error.code == "input.not_a_run"
         assert expected in error.message
+
+
+def edit_rows(run: Path, path: str, change: Callable[[list[Any]], list[Any]]) -> None:
+    """Changes the rows of one of a saved run's tables, and its manifest entry to match."""
+    content = (run / path).read_bytes()
+    if path == "normalized/metrics.csv":
+        rewrite(run, path, metrics_csv(change(list(read_metrics_csv(content, path)))))
+    else:
+        rewrite(run, path, settings_csv(change(list(read_settings_csv(content, path)))))
+
+
+INCOMPLETE_TABLES: dict[str, tuple[str, Callable[[list[Any]], list[Any]]]] = {
+    "a metric missing": (
+        "normalized/metrics.csv",
+        lambda rows: [row for row in rows if row.metric_id != "max_drawdown"],
+    ),
+    "a metric repeated": ("normalized/metrics.csv", lambda rows: [*rows, rows[-1]]),
+    "metrics out of order": ("normalized/metrics.csv", lambda rows: rows[::-1]),
+    "no metrics": ("normalized/metrics.csv", lambda rows: []),
+    "a setting missing": ("normalized/settings.csv", lambda rows: rows[1:]),
+    "a setting repeated": ("normalized/settings.csv", lambda rows: [rows[0], *rows]),
+    "no settings": ("normalized/settings.csv", lambda rows: []),
+}
+
+
+@pytest.mark.parametrize(
+    ("path", "change"), INCOMPLETE_TABLES.values(), ids=INCOMPLETE_TABLES.keys()
+)
+def test_a_table_without_one_row_for_each_metric_or_setting_is_refused(
+    complete: Written, tmp_path: Path, path: str, change: Callable[[list[Any]], list[Any]]
+) -> None:
+    edit_rows(complete.out, path, change)
+
+    error = refused(complete.out, tmp_path / "report")
+
+    assert error.code == "input.not_a_run"
+    if path == "normalized/metrics.csv":
+        assert "its metrics.csv doesn't hold one row for each of the layout's metrics" in (
+            error.message
+        )
+    else:
+        assert "its settings.csv doesn't hold one row for each of the plan's settings" in (
+            error.message
+        )
 
 
 def test_an_attempt_record_must_be_its_directorys_and_reference_listed_files(

@@ -925,7 +925,7 @@ Reports count as output under [D-07](spec.md#decisions). Users may share them wi
 - Each file the manifest lists exists, with the size and `artifact_id` the manifest records.
 - It lists `plan.json` and `configuration.yaml`, once each. `plan.json` recomputes to its `plan_hash` ([plan hashing](#plan-hashing)), and the manifest names the same hash.
 - Each start record and attempt record it lists is in an attempt's directory of the plan's case, is valid, names that attempt, its case, and its plan's hash, and agrees with the attempt's other record. Each file an attempt record references is listed, with the same `artifact_id` and the matching role.
-- It lists both normalized tables, or neither. Each table reads back as a valid table, its rows are labeled with the plan's `case_id`, and they were drawn from the run's own `configuration.yaml` and saved response.
+- It lists both normalized tables, or neither. Each table reads back as a valid table, its rows are labeled with the plan's `case_id`, and they were drawn from the run's own `configuration.yaml` and saved response. `metrics.csv` holds one row for each of the layout's metrics, and `settings.csv` one for each of the plan's settings, in their documented order: a table missing a row, or with one repeated, isn't complete.
 
 A schema version with no reader, in the manifest, `plan.json`, a start record, an attempt record, or the manifest's entry for one of them or for a table, is `artifact.unknown_schema_version`.
 
