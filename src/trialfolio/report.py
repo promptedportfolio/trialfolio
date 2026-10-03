@@ -265,6 +265,14 @@ _PROVENANCE: Final[dict[str, str]] = {
     "unknown": "Not available from any source.",
 }
 
+_SYNTHETIC_VERIFIED: Final = (
+    "Where a real run's value is sent to Portfolio123 or captured from its response. Here it comes"
+    " from the run's configuration or its invented response: nothing was sent, and no value came"
+    " from Portfolio123."
+)
+"""What `verified` means in a synthetic run's report, which never calls its values Portfolio123's
+(DSC-04)."""
+
 _ATTEMPT_OUTCOMES: Final[dict[str, str]] = {
     "succeeded": (
         "Portfolio123 returned a response, which was saved. That says nothing about the strategy."
@@ -608,6 +616,7 @@ class _Report:
         )
         vendor = self._by_name.get("data_vendor")
         pit = self._by_name.get("pit_method")
+        meanings = _PROVENANCE | ({"verified": _SYNTHETIC_VERIFIED} if manifest.synthetic else {})
         return [
             self._heading("data"),
             "<dl>",
@@ -627,7 +636,7 @@ class _Report:
             "<ul>",
             *(
                 f"<li>{_code(name)}: {meaning}</li>"
-                for name, meaning in _PROVENANCE.items()
+                for name, meaning in meanings.items()
                 if name in self._provenances()
             ),
             "</ul>",

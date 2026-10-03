@@ -259,6 +259,7 @@ def test_a_synthetic_runs_report_never_calls_it_a_backtest_or_its_values_portfol
     synthetic = parse(write_run(FORMULA, response("complete.json"), synthetic=True).html)
     claims = {
         "definitions": "read from Portfolio123's response",
+        "data": "captured from Portfolio123's response, by this run",
         "results": "The risk statistics are Portfolio123's",
         "cases": "Portfolio123 returned a response",
         "evidence": "the run is one backtest",
@@ -268,6 +269,9 @@ def test_a_synthetic_runs_report_never_calls_it_a_backtest_or_its_values_portfol
         assert claim in real.root.by_id(section).text
         assert claim not in synthetic.root.find_all("main")[0].text
     assert "invented response" in synthetic.root.by_id("definitions").text
+    assert "Here it comes from the run's configuration or its invented response" in (
+        synthetic.root.by_id("data").text
+    )
     assert "The risk statistics are invented" in synthetic.root.by_id("results").text
     assert "the run is one synthetic example" in synthetic.root.by_id("evidence").text
 
