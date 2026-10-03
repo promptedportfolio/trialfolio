@@ -167,7 +167,12 @@ def _plan(manifest: RunManifest, contents: dict[str, bytes]) -> Plan:
     content = contents[PLAN_PATH]
     _check_version(_json_object(content, PLAN_PATH).get("schema_version"), PLAN_PATH, "plan")
     plan = _validated(Plan, content, PLAN_PATH, "plan")
-    if plan_hash(plan) != plan.plan_hash:
+    try:
+        recomputed = plan_hash(plan)
+    except ValueError as error:
+        # The message names the kind of value canonical JSON can't write, never the value.
+        raise _not_a_run(f"its plan.json can't be hashed ({error}).") from None
+    if recomputed != plan.plan_hash:
         raise _not_a_run(
             "its plan.json doesn't recompute to its plan_hash, so the plan changed after it was"
             " approved."

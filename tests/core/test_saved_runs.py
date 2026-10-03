@@ -185,6 +185,12 @@ BROKEN: dict[str, Callable[[Path], None]] = {
     "a plan that doesn't recompute to its hash": lambda run: edit_json(
         run, "plan.json", lambda plan: plan.update(title="Another title")
     ),
+    # A valid plan, whose budget canonical JSON can't write exactly, so it has no hash.
+    "a plan that can't be hashed": lambda run: edit_json(
+        run,
+        "plan.json",
+        lambda plan: plan["budget"].update(credits=2**53, credits_per_request=2**53),
+    ),
 }
 
 
@@ -207,6 +213,7 @@ def test_the_messages_name_the_problem(complete: Written, tmp_path: Path) -> Non
         "no manifest",
         "a listed file missing",
         "a plan that doesn't recompute to its hash",
+        "a plan that can't be hashed",
     ):
         copy = tmp_path / name
         shutil.copytree(run, copy)
@@ -216,6 +223,8 @@ def test_the_messages_name_the_problem(complete: Written, tmp_path: Path) -> Non
     assert "it has no manifest.json." in messages[0]
     assert "lists `normalized/settings.csv`, which is missing." in messages[1]
     assert "its plan.json doesn't recompute to its plan_hash" in messages[2]
+    assert "its plan.json can't be hashed (" in messages[3]
+    assert str(2**53) not in messages[3]
 
 
 def test_an_empty_directory_and_a_regular_file_arent_runs(tmp_path: Path) -> None:
