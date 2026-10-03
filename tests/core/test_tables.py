@@ -126,6 +126,17 @@ def broken(content: bytes, old: bytes, new: bytes) -> bytes:
         pytest.param(
             lambda c: broken(c, b",strategy,", b',"strat"egy,'), "RFC 4180", id="bad quoting"
         ),
+        pytest.param(
+            # The csv module's strict mode reads this quote as part of the cell.
+            lambda c: broken(c, b",total_return,151.7,", b',total"return,151.7,'),
+            "RFC 4180",
+            id="a quote inside an unquoted cell",
+        ),
+        pytest.param(
+            lambda c: broken(c, b",total_return,151.7,", b',total_return",151.7,'),
+            "RFC 4180",
+            id="a quote ending an unquoted cell",
+        ),
         pytest.param(lambda c: c + b"x,y\n", "line 22", id="too few cells"),
         pytest.param(
             lambda c: broken(c, b",percent,1,", b",percent,one,"),

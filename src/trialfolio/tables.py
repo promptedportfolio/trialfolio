@@ -30,6 +30,11 @@ from trialfolio.errors import TrialFolioError
 
 _BOM: Final = "\ufeff"
 _INTEGER: Final = re.compile(INTEGER_PATTERN)
+_QUOTED_CELL: Final = re.compile(r'"[^"]*+(?:""[^"]*+)*+"')
+_CELL_EDGES: Final = ("", ",", "\r", "\n")
+"""What may come before a quoted cell's opening quote, and after its closing one: the text's
+start or end, a comma, or a line ending, as the `csv` module reads one."""
+_NOT_RFC_4180: Final = "it isn't CSV as RFC 4180 quotes it."
 
 
 def metrics_csv(rows: Sequence[MetricsRow]) -> bytes:
@@ -122,6 +127,8 @@ def _records(text: str, source_name: str) -> list[tuple[int, list[str]]]:
     default, but nothing limits a cell's length when a table is written. No cell can be longer
     than the text, so the limit is raised to the text's length while it's read, and restored.
     """
+    if not _quoted_per_rfc_4180(text):
+        raise _not_a_table(source_name, _NOT_RFC_4180)
     limit = csv.field_size_limit(max(csv.field_size_limit(), len(text)))
     try:
         reader = csv.reader(io.StringIO(text, newline=""), strict=True)
@@ -131,10 +138,31 @@ def _records(text: str, source_name: str) -> list[tuple[int, list[str]]]:
             records.append((start, cells))
             start = reader.line_num + 1
     except csv.Error:
-        raise _not_a_table(source_name, "it isn't CSV as RFC 4180 quotes it.") from None
+        raise _not_a_table(source_name, _NOT_RFC_4180) from None
     finally:
         csv.field_size_limit(limit)
     return records
+
+
+def _quoted_per_rfc_4180(text: str) -> bool:
+    """Whether every double quote in `text` is in a quoted cell: a whole cell, which starts and
+    ends with a double quote and holds one only doubled.
+
+    The `csv` module's strict mode refuses a character after a cell's closing quote, but reads a
+    double quote in a cell that doesn't start with one as part of the cell, as in `total"return`.
+    RFC 4180 doesn't allow one there.
+    """
+    start = text.find('"')
+    while start != -1:
+        cell = _QUOTED_CELL.match(text, start)
+        if (
+            cell is None
+            or text[start - 1 : start] not in _CELL_EDGES
+            or text[cell.end() : cell.end() + 1] not in _CELL_EDGES
+        ):
+            return False
+        start = text.find('"', cell.end())
+    return True
 
 
 def _not_a_table(source_name: str, problem: str) -> TrialFolioError:
