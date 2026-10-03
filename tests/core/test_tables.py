@@ -84,6 +84,23 @@ def test_text_that_needs_quoting_reads_back_unchanged(execute: Execute) -> None:
     assert read_settings_csv(settings, "settings.csv") == written.settings_rows
 
 
+def test_a_cell_longer_than_the_csv_modules_limit_reads_back(execute: Execute) -> None:
+    # A comment between two rules is part of their original value, and nothing limits its length.
+    limit = csv.field_size_limit()
+    rule = b"  - 'AvgDailyTot(30) > 1000000'\n"
+    assert rule in FORMULA
+    content = FORMULA.replace(rule, rule + b"  # " + b"x" * limit + b"\n  - 'Price > 5'\n")
+    run = execute(content, (RESPONSES / "complete.json").read_bytes())
+    written = run.write_tables()
+
+    settings = run.store.read(written.settings.path)
+    rules = next(row for row in written.settings_rows if row.setting == "rules")
+    assert len(str(rules.original_value)) > limit
+    assert read_settings_csv(settings, "settings.csv") == written.settings_rows
+    # Reading raises the csv module's limit only while it reads.
+    assert csv.field_size_limit() == limit
+
+
 def test_two_runs_write_the_same_rows_in_the_same_order(execute: Execute) -> None:
     first = tables(execute, "missing-metrics.json")
     second = tables(execute, "missing-metrics.json")

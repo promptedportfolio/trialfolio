@@ -90,10 +90,7 @@ def _read[M: BaseModel](
         raise _not_a_table(source_name, "it isn't UTF-8 text.") from None
     if text.startswith(_BOM):
         raise _not_a_table(source_name, "it starts with a byte-order mark.")
-    try:
-        lines = list(csv.reader(io.StringIO(text, newline=""), strict=True))
-    except csv.Error:
-        raise _not_a_table(source_name, "it isn't CSV as RFC 4180 quotes it.") from None
+    lines = _records(text, source_name)
     if not lines or tuple(lines[0]) != columns:
         raise _not_a_table(source_name, "its header isn't the table's columns, in order.")
     rows: list[M] = []
@@ -115,6 +112,22 @@ def _read[M: BaseModel](
                 source_name, f"line {number} isn't a valid row: check {where}."
             ) from None
     return tuple(rows)
+
+
+def _records(text: str, source_name: str) -> list[list[str]]:
+    """Each CSV record of `text`.
+
+    The `csv` module refuses a cell longer than its field size limit, 131,072 characters by
+    default, but nothing limits a cell's length when a table is written. No cell can be longer
+    than the text, so the limit is raised to the text's length while it's read, and restored.
+    """
+    limit = csv.field_size_limit(max(csv.field_size_limit(), len(text)))
+    try:
+        return list(csv.reader(io.StringIO(text, newline=""), strict=True))
+    except csv.Error:
+        raise _not_a_table(source_name, "it isn't CSV as RFC 4180 quotes it.") from None
+    finally:
+        csv.field_size_limit(limit)
 
 
 def _not_a_table(source_name: str, problem: str) -> TrialFolioError:
