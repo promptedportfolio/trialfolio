@@ -565,11 +565,17 @@ class _Report:
             f"<tr><td>{name}</td><td>{_code(metric_id)}</td><td>{definition}</td></tr>"
             for metric_id, (name, definition) in _METRICS.items()
         ]
+        source = (
+            f"the run's invented response, laid out as {_code(LAYOUT)} version 1: none comes from"
+            " Portfolio123. Each is defined as that layout defines it"
+            if self._run.manifest.synthetic
+            else f"Portfolio123's response, laid out as {_code(LAYOUT)} version 1"
+        )
         return [
             self._heading("definitions"),
             (
-                f"<p>The metrics are read from Portfolio123's response, laid out as {_code(LAYOUT)}"
-                " version 1. The benchmark's metrics are defined as the strategy's.</p>"
+                f"<p>The metrics are read from {source}. The benchmark's metrics are defined as the"
+                " strategy's.</p>"
             ),
             '<div class="wide"><table>',
             "<thead><tr><th>Metric</th><th>Identifier</th><th>Definition</th></tr></thead>",
@@ -782,9 +788,11 @@ class _Report:
         if self._run.metrics is None:
             parts.append(f"<p>The normalized result is unavailable: {self._no_tables_reason()}</p>")
         else:
+            synthetic = self._run.manifest.synthetic
+            source = "invented, as every value here is" if synthetic else "Portfolio123's"
             parts.append(
                 "<p>Each value has exactly the digits the response carries, never padded or"
-                " rounded; Decimals counts them. The risk statistics are Portfolio123's, for the"
+                f" rounded; Decimals counts them. The risk statistics are {source}, for the"
                 " period the settings give as <code>risk_stats_period</code>.</p>"
             )
             benchmark = self._by_name.get("benchmark")
@@ -995,9 +1003,10 @@ class _Report:
         record = attempt.record
         first = record if record is not None else attempt.start
         exchanges = first.exchanges if first is not None else ()
-        facts = [
-            f"<dt>Outcome</dt><dd>{_code(status.outcome)}: {_ATTEMPT_OUTCOMES[status.outcome]}</dd>",
-        ]
+        meaning = _ATTEMPT_OUTCOMES[status.outcome]
+        if status.outcome == "succeeded" and self._run.manifest.synthetic:
+            meaning = "The run's invented response was saved. That says nothing about the strategy."
+        facts = [f"<dt>Outcome</dt><dd>{_code(status.outcome)}: {meaning}</dd>"]
         if record is not None and record.error is not None:
             facts.append(
                 f"<dt>Error</dt><dd>{_code(record.error.code)}: {_text(record.error.message)}</dd>"
@@ -1068,11 +1077,12 @@ class _Report:
         ]
 
     def _evidence(self) -> list[str]:
+        run = "one synthetic example" if self._run.manifest.synthetic else "one backtest"
         return [
             self._heading("evidence"),
             (
-                "<p>Unavailable: the run is one backtest over the requested dates. It has no"
-                " separate development, selection, holdout, or forward period.</p>"
+                f"<p>Unavailable: the run is {run} over the requested dates. It has no separate"
+                " development, selection, holdout, or forward period.</p>"
             ),
             f"<p>{self._nature()}</p>",
             "</section>",

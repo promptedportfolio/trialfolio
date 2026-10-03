@@ -252,6 +252,26 @@ def test_results_are_labeled_backtested_and_a_synthetic_run_synthetic(
     assert synthetic.dd("Approval") == ["Not required: the synthetic run sends nothing."]
 
 
+def test_a_synthetic_runs_report_never_calls_it_a_backtest_or_its_values_portfolio123s(
+    write_run: WriteRun,
+) -> None:
+    real = parse(write_run(FORMULA, response("complete.json")).html)
+    synthetic = parse(write_run(FORMULA, response("complete.json"), synthetic=True).html)
+    claims = {
+        "definitions": "read from Portfolio123's response",
+        "results": "The risk statistics are Portfolio123's",
+        "cases": "Portfolio123 returned a response",
+        "evidence": "the run is one backtest",
+    }
+
+    for section, claim in claims.items():
+        assert claim in real.root.by_id(section).text
+        assert claim not in synthetic.root.find_all("main")[0].text
+    assert "invented response" in synthetic.root.by_id("definitions").text
+    assert "The risk statistics are invented" in synthetic.root.by_id("results").text
+    assert "the run is one synthetic example" in synthetic.root.by_id("evidence").text
+
+
 # Values, units, and unavailable metrics (R01-AC12)
 
 
