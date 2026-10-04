@@ -47,6 +47,7 @@ from trialfolio.contracts.common import ErrorDetail
 from trialfolio.contracts.manifest import CommandRecord
 from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.summary import JsonSummary, NoCounts, RunCounts, SummaryIds
+from trialfolio.display import visible
 from trialfolio.errors import EXIT_CODES, TrialFolioError
 from trialfolio.logs import LOGS_DIRECTORY, CommandLogs
 from trialfolio.notices import CONCISE_NOTICE, FULL_NOTICE, LICENSE_ID, LICENSE_NAME, NOTICE_VERSION
@@ -193,11 +194,18 @@ def _out(parser: argparse.ArgumentParser, meaning: str) -> None:
 
 
 def _directory(value: str) -> str:
-    """`--out` as given, unless it's blank: a blank path names no directory of its own, an empty
-    one is the current directory to the file system, and the JSON summary's `output_dir` can hold
-    neither."""
+    """`--out` as given, unless it's blank or isn't valid text: a blank path names no directory
+    of its own, an empty one is the current directory to the file system, and the JSON summary's
+    `output_dir` can hold neither, nor a name in another encoding than UTF-8, which Python reads
+    with lone surrogates."""
     if not value.strip():
         raise argparse.ArgumentTypeError("it's blank, and must name the output directory")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise argparse.ArgumentTypeError(
+            "it isn't valid UTF-8 text, so the JSON summary couldn't name it; choose a name in UTF-8"
+        ) from None
     return value
 
 
@@ -259,7 +267,9 @@ class _Invocation:
         if error is not None and error.code == "internal.unexpected":
             # Before the claim, the held events go to the per-user log directory.
             path = self.log.path or self.log.attach_to_user_directory()
-            where = "Its log couldn't be written." if path is None else f"Its log is {path}."
+            where = (
+                "Its log couldn't be written." if path is None else f"Its log is {_shown(path)}."
+            )
             error = TrialFolioError(
                 error.code, f"{error.message} {where}", f"{error.log_message} {where}"
             )
@@ -435,7 +445,7 @@ def _run(invocation: _Invocation) -> TrialFolioError | None:
     _require_acknowledgment(invocation)
     started_at = _started(invocation)
     content = _read_input(args.config)
-    configuration = read_screen_configuration(content, args.config)
+    configuration = read_screen_configuration(content, _shown(args.config))
     store = invocation.store_factory(args.out)
     store.check_empty()
     plan = _plan(invocation, build_plan(configuration, installed_versions()))
@@ -518,8 +528,8 @@ def _report(invocation: _Invocation) -> TrialFolioError | None:
     if not os.path.exists(args.run_dir):
         raise TrialFolioError(
             "input.not_found",
-            f"The run directory {args.run_dir} doesn't exist. Give the output directory of a run"
-            " that trialfolio run or trialfolio demo wrote. No output was created.",
+            f"The run directory {_shown(args.run_dir)} doesn't exist. Give the output directory of"
+            " a run that trialfolio run or trialfolio demo wrote. No output was created.",
         )
 
     try:
@@ -609,9 +619,17 @@ def _read_input(path: str) -> bytes:
         reason = error.strerror or type(error).__name__
         raise TrialFolioError(
             "input.not_found",
-            f"Couldn't read the configuration file {path}: {reason}. Check the path. Nothing was"
-            " sent, and no output was created.",
+            f"Couldn't read the configuration file {_shown(path)}: {reason}. Check the path."
+            " Nothing was sent, and no output was created.",
         ) from None
+
+
+def _shown(path: str | os.PathLike[str]) -> str:
+    """A path from the command line or the environment, as an error message shows it. A name in
+    another encoding than UTF-8 reaches Python with lone surrogates, which the JSON summary can't
+    hold, so they're written as escapes, as control characters are, which could act on a
+    terminal."""
+    return visible(os.fspath(path))
 
 
 def _plan(invocation: _Invocation, plan: Plan) -> Plan:
@@ -745,8 +763,8 @@ def _record_acknowledgment(
         if required:
             raise TrialFolioError(
                 "storage.write_failed",
-                f"Couldn't record your acknowledgment in {path}: {reason}. Check the directory's"
-                f" permissions, or set {acknowledgment.ACCEPT_VARIABLE} instead.",
+                f"Couldn't record your acknowledgment in {_shown(path)}: {reason}. Check the"
+                f" directory's permissions, or set {acknowledgment.ACCEPT_VARIABLE} instead.",
             ) from None
         _logger.warning(
             "Couldn't record your acknowledgment in %s (%s), so Trial Folio will ask again next"

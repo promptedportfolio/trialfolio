@@ -6,8 +6,9 @@ Traces to R01-AC18, over the scenarios of R01-AC01 (no approval), R01-AC05 (prov
 missing credentials), and R01-AC15 (an output directory that isn't empty), and for `report`,
 `demo`, and `license`; and to docs/contracts.md, JSON summary: `ids` and `outputs` leave out a key
 that has no value, `counts` is `{}` for `report` and `license`, and `outcome`, `exit_code`, and
-`error` agree; and to R01-T14's rule that a blank `--out`, which `output_dir` can't hold, is a
-usage error. Each summary is checked against the `JsonSummary` model and the keys of the
+`error` agree; and to R01-T14's rules that a blank `--out`, or one that isn't valid UTF-8 text,
+which `output_dir` can't hold, is a usage error, and that an error message escapes a path it
+names, so the summary can hold it. Each summary is checked against the `JsonSummary` model and the keys of the
 generated schema, `schemas/json-summary-1.0.0.schema.json`. Through the CLI's entry function in
 the test process, with the real client, `requests`, and `urllib3` over the fake server.
 """
@@ -365,3 +366,56 @@ def test_a_blank_output_directory_is_a_usage_error(
     assert outcome.stdout == ""
     assert "argument --out: it's blank, and must name the output directory" in outcome.stderr
     assert sorted(p.name for p in cli.tmp.iterdir()) == before
+
+
+NOT_UTF8 = chr(0xDCFF)
+"""How Python reads the byte 0xff in a name that isn't UTF-8 (PEP 383): a lone surrogate, which
+JSON text can't hold."""
+
+ESCAPED = "\\udcff"
+"""How an error message shows it."""
+
+
+@pytest.mark.parametrize("command", ["run", "report", "demo"])
+def test_an_output_directory_that_isnt_utf8_text_is_a_usage_error(
+    cli: Cli, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    cli.ready()
+    monkeypatch.chdir(cli.tmp)
+    before = sorted(p.name for p in cli.tmp.iterdir())
+    inputs = {"run": [str(config("formula.yaml"))], "report": [str(cli.tmp)], "demo": []}
+
+    outcome = cli(command, *inputs[command], "--out", f"out-{NOT_UTF8}", "--json")
+
+    assert outcome.exit_code == 2
+    assert outcome.stdout == ""
+    assert "argument --out: it isn't valid UTF-8 text" in outcome.stderr
+    assert sorted(p.name for p in cli.tmp.iterdir()) == before
+
+
+def test_a_configuration_path_that_isnt_utf8_text_is_escaped_in_the_error(cli: Cli) -> None:
+    cli.accept_license()
+
+    outcome = cli("run", cli.tmp / f"missing-{NOT_UTF8}.yaml", "--out", cli.tmp / "out", "--json")
+    summary = summary_of(outcome, "run")
+
+    assert outcome.exit_code == 3
+    error = summary["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "input.not_found"
+    assert f"missing-{ESCAPED}.yaml" in error["message"]  # pyright: ignore[reportOperatorIssue]
+    assert not (cli.tmp / "out").exists()
+
+
+def test_a_run_directory_path_that_isnt_utf8_text_is_escaped_in_the_error(cli: Cli) -> None:
+    cli.accept_license()
+
+    outcome = cli("report", cli.tmp / f"run-{NOT_UTF8}", "--out", cli.tmp / "report", "--json")
+    summary = summary_of(outcome, "report")
+
+    assert outcome.exit_code == 3
+    error = summary["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "input.not_found"
+    assert f"run-{ESCAPED}" in error["message"]  # pyright: ignore[reportOperatorIssue]
+    assert not (cli.tmp / "report").exists()
