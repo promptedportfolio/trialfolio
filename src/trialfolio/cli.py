@@ -462,9 +462,12 @@ def _event(name: str, terminal: bool) -> dict[str, object]:
 
 def _init(invocation: _Invocation) -> TrialFolioError | None:
     """Sets up a workspace. It processes no data, so it needs no acknowledgment, and its log goes
-    to the per-user log directory, so the workspace holds only its starter files."""
-    invocation.log.attach_to_user_directory()
+    to the per-user log directory, so the workspace holds only its starter files. When that
+    directory is in the workspace, the command writes no log, so the workspace stays as it was if
+    it's refused."""
     directory: str = invocation.args.dir
+    invocation.log.keep_out_of(Path(directory))
+    invocation.log.attach_to_user_directory()
     store = invocation.store_factory(directory)
     store.check_empty()
     (first, content), *rest = starter_files(invocation.version)

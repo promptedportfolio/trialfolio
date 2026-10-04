@@ -71,6 +71,48 @@ def test_init_logs_to_the_per_user_log_directory(cli: Cli) -> None:
     assert "trialfolio init ended" in log.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("log_dir", [".", "logs", "nested/logs"])
+def test_a_log_directory_in_the_workspace_gets_no_log(
+    cli: Cli, monkeypatch: pytest.MonkeyPatch, log_dir: str
+) -> None:
+    workspace = cli.tmp / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    monkeypatch.setenv("TRIALFOLIO_LOG_DIR", log_dir)
+
+    outcome = cli("init")
+
+    assert outcome.exit_code == 0, outcome.stderr
+    assert snapshot(workspace) == STARTER
+    assert "The log directory is in the workspace" in outcome.stderr
+
+
+def test_a_workspace_that_holds_the_default_log_directory_gets_no_log(cli: Cli) -> None:
+    # The temporary home is empty, and each platform's default log directory is in it.
+    outcome = cli("init", cli.home)
+
+    assert outcome.exit_code == 0, outcome.stderr
+    assert snapshot(cli.home) == STARTER
+
+
+def test_a_log_directory_in_a_workspace_that_isnt_empty_leaves_it_unchanged(
+    cli: Cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = cli.tmp / "workspace"
+    workspace.mkdir()
+    (workspace / "notes.txt").write_bytes(b"mine")
+    before = snapshot(workspace)
+    # Through a symbolic link, so only the resolved path shows it's in the workspace.
+    (cli.tmp / "link").symlink_to(workspace, target_is_directory=True)
+    monkeypatch.setenv("TRIALFOLIO_LOG_DIR", str(cli.tmp / "link" / "logs"))
+
+    outcome = cli("init", workspace, "--json")
+
+    assert outcome.exit_code == 4
+    assert error_of(outcome.stdout)["code"] == "output.not_empty"
+    assert snapshot(workspace) == before
+
+
 def test_init_without_a_directory_sets_up_the_current_one(
     cli: Cli, monkeypatch: pytest.MonkeyPatch
 ) -> None:
