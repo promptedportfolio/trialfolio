@@ -273,7 +273,8 @@ class Attempt:
         """Starts the attempt: gives it an ID and its start time. Writes nothing.
 
         `synthetic` is for the attempt of the run `trialfolio demo` writes, which sends nothing.
-        Its records are a real attempt's, possibly charged, and its progress says they're invented.
+        Its records are a real attempt's. Where they say it's possibly charged, its progress says
+        they're invented.
 
         Raises `TrialFolioError` with `plan.approval_required` unless `approved_hash` is the
         plan's hash, recomputed from its contents (approval), and `ValueError` if `clock` doesn't
@@ -410,8 +411,8 @@ class Attempt:
         record = self._record(exchanges, end, error)
         recorded, error, record = self._write_record(record, error, end)
         charged = "yes" if record.possibly_charged else "no"
-        if self._synthetic:
-            charged = f"{charged}, in its invented records, though nothing was sent"
+        if self._synthetic and record.possibly_charged:
+            charged = "yes, in its invented records, though nothing was sent"
         _logger.log(
             logging.INFO if error is None else logging.ERROR,
             "Attempt ended %s after %.3f s: %s; possibly charged: %s; attempt record written: %s.",
