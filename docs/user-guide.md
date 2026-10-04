@@ -116,7 +116,7 @@ precision: 4                                           # 4 only
 ```
 
 - **Every key but `purpose` and `data_vendor` is required.** There's no default end date, and no default slippage of zero.
-- **Formulas go in single quotes,** so double quotes inside them stay as they are. A formula without quotes is rejected, because outside quotes YAML reads a space and `#` as the start of a comment: it would cut `FRank("EarnYield", #Industry) > 50` short. Double quotes and block scalars (`|`) work too. Other text, such as the title, the universe, or a ranking system's name, needs no quotes.
+- **Formulas go in single quotes,** so double quotes inside them stay as they are. A formula without quotes is rejected, because outside quotes YAML reads a space and `#` as the start of a comment: it would cut `FRank("EarnYield", #Industry) > 50` short. Double quotes and block scalars (`|`) work too. Other text, such as the title, the universe, or a ranking system's name, needs no quotes, unless it holds a space followed by `#`. YAML cuts that text short too, with no error: `name: Core Combo #2` names `Core Combo`. Write it as `name: 'Core Combo #2'`.
 - **Comments** run from `#` to the end of the line, outside quotes. They aren't part of the plan, so they don't change its hash, and the run keeps them in its copy of the file.
 - **A ranking** is one formula, as above, or an existing ranking system in your account, by name or by ID:
 

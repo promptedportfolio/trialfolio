@@ -9,7 +9,8 @@ title: Earnings yield with a liquidity floor   # Yours, for the report. Never se
 universe: SP500                                # A Portfolio123 universe, by name
 # Write every formula in single quotes. Outside quotes, YAML reads a space and # as the start of
 # a comment, so it would cut a formula such as 'FRank("EarnYield", #Industry) > 50' short.
-# Trial Folio rejects a formula without quotes.
+# Trial Folio rejects a formula without quotes. Quote other text that holds a space and # too,
+# such as a ranking system's name, or YAML cuts it short the same way.
 rules:                                         # At least one formula
   - 'AvgDailyTot(30) > 1000000'
 ranking:                                       # One formula, or a ranking system's name or id
