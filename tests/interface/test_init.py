@@ -208,7 +208,7 @@ def test_the_starter_configuration_has_a_comment_on_each_key() -> None:
         "precision",
     }
     assert [key for key, comment in comments.items() if not comment] == []
-    assert "Write every formula in single quotes." in text
+    assert "Write the text Portfolio123 receives in single quotes" in text
 
 
 def test_the_starter_configuration_resolves_to_the_request_portfolio123_accepted() -> None:

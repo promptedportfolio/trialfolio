@@ -31,7 +31,7 @@ Portfolio123 does the backtesting. Trial Folio plans each request, records exact
 - rebalancing every week or every 4 weeks, open prices, complete point-in-time data, and results to 4 decimal places
 - Portfolio123's standard FactSet data, in US dollars. You may leave the data vendor out.
 
-Anything else is rejected with a clear error before anything is sent. Formulas, both the rules and a ranking formula, go in quotes, so that YAML can't read a `#` in one as the start of a comment. [The screen configuration](docs/contracts.md#screen-configuration) gives every setting, with an example. Trial Folio doesn't import results produced elsewhere.
+Anything else is rejected with a clear error before anything is sent. The text Portfolio123 receives goes in quotes: the rules, a ranking formula or name, the universe, and the benchmark, as in `universe: 'SP500'`. So YAML can't read a `#` in it as the start of a comment. [The screen configuration](docs/contracts.md#screen-configuration) gives every setting, with an example. Trial Folio doesn't import results produced elsewhere.
 
 Statistical validation and trading readiness are **not assessed** by any planned release before the statistical evaluation increment.
 

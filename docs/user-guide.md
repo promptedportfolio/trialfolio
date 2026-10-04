@@ -98,14 +98,14 @@ kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor           # yours; never sent
 purpose: Reference backtest for the 0.1.0 response layout.   # optional; never sent
-universe: SP500
+universe: 'SP500'
 rules:
   - 'AvgDailyTot(30) > 1000000'                        # at least one rule
 ranking:
   formula: 'EarnYield'
   lower_is_better: false
 max_holdings: 25
-benchmark: SPY
+benchmark: 'SPY'
 start_date: 2016-01-01
 end_date: 2025-12-31
 rebalance_weeks: 4                                     # 1 or 4
@@ -116,7 +116,8 @@ precision: 4                                           # 4 only
 ```
 
 - **Every key but `purpose` and `data_vendor` is required.** There's no default end date, and no default slippage of zero.
-- **Formulas go in single quotes,** so double quotes inside them stay as they are. A formula without quotes is rejected, because outside quotes YAML reads a space and `#` as the start of a comment: it would cut `FRank("EarnYield", #Industry) > 50` short. Double quotes and block scalars (`|`) work too. Other text, such as the title, the universe, or a ranking system's name, needs no quotes, unless it holds a space followed by `#`. YAML cuts that text short too, with no error: `name: Core Combo #2` names `Core Combo`. Write it as `name: 'Core Combo #2'`.
+- **Text that Portfolio123 receives goes in single quotes:** the rules, the ranking's formula or name, the universe, and the benchmark. Without quotes it's rejected, because outside quotes YAML reads a space and `#` as the start of a comment, with no error. It would cut `FRank("EarnYield", #Industry) > 50` short, and read `name: Core Combo #2` as `Core Combo`, a different ranking system. Single quotes also keep the double quotes inside a formula as they are. Double quotes and block scalars (`|`) work too.
+- **Other values need no quotes:** numbers, dates, `true` and `false`, fixed words such as `screen`, `open`, and `complete`, and the title and purpose, which are never sent. A title or purpose that holds a space followed by `#` still needs quotes, or YAML cuts it short.
 - **Comments** run from `#` to the end of the line, outside quotes. They aren't part of the plan, so they don't change its hash, and the run keeps them in its copy of the file.
 - **A ranking** is one formula, as above, or an existing ranking system in your account, by name or by ID:
 
@@ -139,7 +140,7 @@ precision: 4                                           # 4 only
 **Check:**
 
 - A misspelled key, a missing required key, or an unsupported value fails with `config.invalid`, exit code 3. The message lists every problem, and nothing is sent or created. For example, `rebalance_weeks: 2` gives "`rebalance_weeks` input should be 1 or 4."
-- A rule without quotes, such as `- AvgDailyTot(30) > 1000000`, fails the same way, with "`rules[0]` is a formula without quotes."
+- A rule without quotes, such as `- AvgDailyTot(30) > 1000000`, fails the same way, with "`rules[0]` is text Portfolio123 receives, written without quotes." So does `universe: SP500`, naming `universe`.
 - Adding or changing a comment doesn't change the plan hash that [the plan](#5-review-the-plan) shows.
 
 ## 5. Review the plan

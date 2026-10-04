@@ -35,7 +35,7 @@ COMPLETE = (RESPONSES / "complete.json").read_bytes()
 # Each settings row as docs/contracts.md's screen settings give it for the documented example:
 # setting, category, critical, value, unit, interpretation, provenance, original value, flags.
 DOCUMENTED_SETTINGS = (
-    ("universe", "universe", True, "SP500", None, "interpreted", "verified", "SP500",
+    ("universe", "universe", True, "SP500", None, "interpreted", "verified", "'SP500'",
      ("not_snapshotted",)),
     ("screen_type", "universe", True, "stock", None, "interpreted", "verified", None, ()),
     ("rules", "strategy", True, '["AvgDailyTot(30) > 1000000"]', None, "interpreted",
@@ -44,7 +44,7 @@ DOCUMENTED_SETTINGS = (
      "interpreted", "verified", "formula: 'EarnYield'\n  lower_is_better: false", ()),
     ("max_holdings", "strategy", True, "25", "count", "interpreted", "verified", "25", ()),
     ("position_method", "strategy", True, "long", None, "interpreted", "verified", None, ()),
-    ("benchmark", "benchmark", True, "SPY", None, "interpreted", "verified", "SPY", ()),
+    ("benchmark", "benchmark", True, "SPY", None, "interpreted", "verified", "'SPY'", ()),
     ("currency", "currency", True, "USD", None, "interpreted", "verified", None, ()),
     ("start_date", "dates", True, "2016-01-01", None, "interpreted", "verified", "2016-01-01",
      ()),

@@ -54,8 +54,11 @@ A new rule needs a new file, and a row here. The test checks that this table and
 | `empty-rule.yaml` | Each rule is a non-empty string | `rules[0]` |
 | `empty-formula.yaml` | A ranking formula is a non-empty string | `ranking.formula` |
 | `empty-ranking-name.yaml` | A ranking name is a non-empty string | `ranking.name` |
-| `unquoted-rule.yaml` | A formula is written in quotes or as a block scalar | `rules[0]` |
-| `unquoted-formula.yaml` | A formula is written in quotes or as a block scalar | `ranking.formula` |
+| `unquoted-rule.yaml` | Text Portfolio123 receives is written in quotes or as a block scalar | `rules[0]` |
+| `unquoted-formula.yaml` | Text Portfolio123 receives is written in quotes or as a block scalar | `ranking.formula` |
+| `unquoted-ranking-name.yaml` | Text Portfolio123 receives is written in quotes or as a block scalar. It's `../ranking-name.yaml` with the name unquoted. | `ranking.name` |
+| `unquoted-universe.yaml` | Text Portfolio123 receives is written in quotes or as a block scalar | `universe` |
+| `unquoted-benchmark.yaml` | Text Portfolio123 receives is written in quotes or as a block scalar | `benchmark` |
 
 ## Ranking
 

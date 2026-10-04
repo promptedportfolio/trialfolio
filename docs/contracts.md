@@ -102,11 +102,11 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 | `schema_version` | string | Yes | A supported version (`1.0.0`). Any other value fails with `config.invalid`, and the message names the supported versions. | Not sent |
 | `title` | string | Yes | 1–200 characters. Used as the report heading. | Not sent |
 | `purpose` | string | No | 1–2,000 characters, not all whitespace. If it's absent, the report says no purpose was declared. | Not sent |
-| `universe` | string | Yes | A non-empty Portfolio123 universe name, for example `SP500` | `screen.universe` |
+| `universe` | string | Yes | A non-empty Portfolio123 universe name, written in quotes or as a block scalar ([text sent](#screen-configuration)), for example `'SP500'` | `screen.universe` |
 | `rules` | list of strings | Yes | At least one screening formula. Each one is a non-empty string, written in quotes or as a block scalar ([formulas](#screen-configuration)), and their order is kept. The model accepts ordered lists or tuples, never sets. | `screen.rules`, each as `{"formula": "…"}`. It has no `type` field, because Portfolio123 rejects one (R01-T01). |
 | `ranking` | mapping | Yes | Exactly one of the [ranking forms](#ranking-forms) | `screen.ranking` |
 | `max_holdings` | integer | Yes | 1 or more | `screen.maxNumHoldings` |
-| `benchmark` | string | Yes | A non-empty Portfolio123 benchmark symbol, for example `SPY` | `screen.benchmark` |
+| `benchmark` | string | Yes | A non-empty Portfolio123 benchmark symbol, written in quotes or as a block scalar, for example `'SPY'` | `screen.benchmark` |
 | `start_date` | date | Yes | `YYYY-MM-DD` | `startDt` |
 | `end_date` | date | Yes | `YYYY-MM-DD`, later than `start_date`. There is no default of today. | `endDt` |
 | `rebalance_weeks` | integer | Yes | 1 or 4 | `rebalFreq`: `Every Week` for 1, or `Every 4 Weeks` for 4 |
@@ -132,7 +132,7 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 | Form | Keys in `ranking` | Sent as |
 |---|---|---|
 | A single formula (recommended) | `formula`, a non-empty string, written in quotes or as a block scalar; `lower_is_better`, a boolean, required | `{"formula": "…", "lowerIsBetter": …}` |
-| An existing ranking system, by name | `name`, a non-empty string | The name, as a string |
+| An existing ranking system, by name | `name`, a non-empty string, written in quotes or as a block scalar | The name, as a string |
 | An existing ranking system, by ID | `id`, a positive integer | The ID, as an integer |
 
 - **One form only.** `ranking` holds exactly one of `formula`, `name`, and `id`. `lower_is_better` is allowed only with `formula`.
@@ -160,7 +160,7 @@ Either one fails with `config.invalid`, and the message names the supported form
   - **Not a string.** A number written as a string is rejected.
 - **Dates.** `end_date` is later than `start_date`.
 - **Formulas.** Formulas are the user's strategy definition. They're sent and saved, but never logged. Write them in single quotes. Portfolio123 formulas often contain double quotes, which single quotes keep as they are. YAML processes no escapes inside single quotes, and a single quote inside one is written twice (`''`).
-  - **A formula is quoted (R01-T18).** Each rule, and the ranking's `formula`, is written in single or double quotes, or as a block scalar (`|` or `>`). A plain scalar, without quotes, fails with `config.invalid`, and the message names its key and says to write it in single quotes. Outside quotes, YAML reads a space followed by `#` as the start of a comment. Portfolio123 formulas can hold `#`, as in `FRank("EarnYield", #Industry) > 50`, which YAML would read without quotes as `FRank("EarnYield",` with no error. Other text, such as the title, universe, benchmark, and a ranking system's name, may be written without quotes. But YAML cuts it short at a space followed by `#` too, with no error: `name: Core Combo #2` names `Core Combo`. So text that holds a space followed by `#` is written in quotes.
+  - **Text Portfolio123 receives is quoted (R01-T18).** Each rule, the ranking's `formula` or `name`, the universe, and the benchmark is written in single or double quotes, or as a block scalar (`|` or `>`). A plain scalar, without quotes, fails with `config.invalid`, and the message names its key and says to write it in single quotes. Outside quotes, YAML reads a space followed by `#` as the start of a comment, with no error. Portfolio123 formulas can hold `#`, as in `FRank("EarnYield", #Industry) > 50`, which YAML would read without quotes as `FRank("EarnYield",`. A name can hold one too: `name: Core Combo #2` would send `Core Combo`, which could name another ranking system, so Portfolio123 would run the wrong backtest. Quoting all such text, whatever it holds, makes one rule with no exceptions. Fixed words, such as `screen`, `open`, `complete`, and `FactSet`, and the title and purpose, which are never sent, may be written without quotes; a title or purpose that holds a space followed by `#` still needs them.
 - **Descriptions.** `title` and `purpose` describe the run. They are recorded in the plan and the run manifest with `user_supplied` provenance ([plan contents](#plan-contents)). They're never sent, and they aren't part of the resolved settings that identify a case.
 
 **Sent on every request.** Trial Folio adds three fixed values, which 0.1.0's scope doesn't let the configuration change. R01-T01 verified each one.
@@ -214,14 +214,14 @@ kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor
 purpose: Reference backtest for the 0.1.0 response layout.
-universe: SP500
+universe: 'SP500'
 rules:
   - 'AvgDailyTot(30) > 1000000'
 ranking:
   formula: 'EarnYield'
   lower_is_better: false
 max_holdings: 25
-benchmark: SPY
+benchmark: 'SPY'
 start_date: 2016-01-01
 end_date: 2025-12-31
 rebalance_weeks: 4
@@ -975,7 +975,7 @@ The command is `trialfolio`. Commands are introduced by release:
 - **The demo.** `trialfolio demo` takes `run`'s steps, with `approval: not_required`, over a client that opens no connection. That client records the two exchanges a successful call records, `POST /auth` and `POST /screen/backtest`, each a 200, because the 1.0.0 attempt record holds an attempt that succeeded only with them. So the demo's run has every file and record of a real one, and its records read as a real run's do, possibly charged with one provider request. Its manifest is labeled synthetic, and its report says that its attempt, exchanges, and counts are invented and nothing was sent or charged. Its packaged configuration, the documented example retitled, and response, the `complete.json` fixture without `cost` and `quotaRemaining`, are in `src/trialfolio/demo_data/`, so the run reports no cost.
 - **`trialfolio report`** gives `input.not_found` for a run directory that doesn't exist, and `input.not_a_run` for anything else that isn't a complete run.
 - **`trialfolio init` (R01-T19).** It writes the starter files in `src/trialfolio/init_data/` into the workspace, `.` when no directory is given: `screen.yaml`, which claims the workspace, then `README.md` and `.gitignore`. `src/trialfolio/starter.py` gives them.
-  - **`screen.yaml`** is the [documented example](#example) without its purpose, with a comment on each key and on quoting formulas. Its settings resolve to the request Portfolio123 accepted in R01-T01.
+  - **`screen.yaml`** is the [documented example](#example) without its purpose, with a comment on each key and on quoting the text Portfolio123 receives. Its settings resolve to the request Portfolio123 accepted in R01-T01.
   - **`README.md`** says what the workspace holds, and the next steps, with a link to the user guide at the version's release tag, which works once the version is tagged.
   - **`.gitignore`** keeps credential files (`.env*` and `*.env`) and the `runs/` and `reports/` folders at the workspace's top level out of Git, because runs and reports hold Portfolio123 data.
   - **No acknowledgment.** It processes no data, so it needs no [license acknowledgment](#license-acknowledgment). It sends nothing.

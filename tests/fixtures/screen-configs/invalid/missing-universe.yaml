@@ -10,7 +10,7 @@ ranking:
   formula: 'EarnYield'
   lower_is_better: false
 max_holdings: 25
-benchmark: SPY
+benchmark: 'SPY'
 start_date: 2016-01-01
 end_date: 2025-12-31
 rebalance_weeks: 4

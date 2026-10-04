@@ -11,10 +11,12 @@ PyYAML's parse events, never through PyYAML's constructors, so it decides what e
   form a YAML 1.1 loader would convert, such as `010`, `1:30`, `yes`, or `2.5e-1`, is rejected.
 - Null values, duplicate keys, non-text keys, anchors, aliases, explicit tags, and credential-like
   keys are rejected.
-- In a screen configuration, a formula must be quoted or a block scalar: a rule, or the ranking's
-  `formula`. A plain one is rejected, because outside quotes YAML reads a space and `#` as the
-  start of a comment, and Portfolio123 formulas can hold `#`, as in `#Industry`. A plain formula
-  would be cut short without an error.
+- In a screen configuration, the text Portfolio123 receives must be quoted or a block scalar:
+  each rule, the ranking's `formula` or `name`, the universe, and the benchmark. A plain one is
+  rejected, because outside quotes YAML reads a space and `#` as the start of a comment, so
+  `name: Core Combo #2` would send `Core Combo`, and Portfolio123 formulas can hold `#`, as in
+  `#Industry`. Fixed words, such as `open`, and the title and purpose, which are never sent, may
+  be plain.
 
 `original_values` gives each top-level value's text exactly as the file writes it, for
 `settings.csv`'s `original_value` (docs/contracts.md, settings.csv).
@@ -115,7 +117,7 @@ def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfigu
             source_name,
             [f"`schema_version` isn't a supported version. Supported versions: {supported}."],
         )
-    unquoted = [_unquoted_formula(path) for path in plain if _is_formula(path)]
+    unquoted = [_unquoted_text(path) for path in plain if _is_sent_text(path)]
     try:
         configuration = ScreenConfiguration.model_validate(document)
     except ValidationError as error:
@@ -142,18 +144,25 @@ def original_values(content: bytes, source_name: str) -> Mapping[str, str]:
     return originals
 
 
-def _is_formula(path: KeyPath) -> bool:
-    """A screen configuration's formulas: each rule, and the ranking's `formula`."""
-    return path == ("ranking", "formula") or (
+_SENT_TEXT: Final = frozenset(
+    {("universe",), ("benchmark",), ("ranking", "formula"), ("ranking", "name")}
+)
+"""The free text Portfolio123 receives, besides the rules: names, symbols, and the formula."""
+
+
+def _is_sent_text(path: KeyPath) -> bool:
+    """Free text a screen configuration sends to Portfolio123: each rule, the ranking's formula or
+    name, the universe, and the benchmark."""
+    return path in _SENT_TEXT or (
         len(path) == 2 and path[0] == "rules" and isinstance(path[1], int)
     )
 
 
-def _unquoted_formula(path: KeyPath) -> str:
+def _unquoted_text(path: KeyPath) -> str:
     return (
-        f"`{_format_path(path)}` is a formula without quotes. Write it in single quotes: outside"
-        " quotes, YAML reads a space and # as the start of a comment, so an unquoted formula can"
-        " be cut short without an error."
+        f"`{_format_path(path)}` is text Portfolio123 receives, written without quotes. Write it in"
+        " single quotes: outside quotes, YAML reads a space and # as the start of a comment, so"
+        " the text could be cut short without an error."
     )
 
 

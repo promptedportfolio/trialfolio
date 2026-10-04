@@ -1,4 +1,4 @@
-"""`trialfolio run` rejects a misspelled or unsupported setting, or a formula without quotes, with
+"""`trialfolio run` rejects a misspelled or unsupported setting, or text sent without quotes, with
 `config.invalid` before anything else: exit 3, no output directory, and no request, even with
 credentials and an `--approve` given.
 
