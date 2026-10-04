@@ -157,15 +157,25 @@ class Terminal:
 
     def press(self, keys: str | bytes) -> None:
         """Sends keys, as typed: text in UTF-8, or bytes as they are. A line takes effect at
-        `\\n`, `\\x04` at the start of a line is the end of input, and `CTRL_C` is Ctrl-C."""
+        `\\n`, `\\x04` at the start of a line is the end of input, and `CTRL_C` is Ctrl-C. Once
+        the terminal is closed, because the process has ended, this fails the test."""
+        assert not self._closed, f"the process has ended:\n{self._text()}"
         os.write(self._controller, keys.encode() if isinstance(keys, str) else keys)
 
     def wait_for(self, text: str, timeout: float = 30) -> None:
         """Waits until the terminal has shown `text`, such as a prompt, and fails the test if it
-        doesn't within `timeout` seconds, or the process ends first."""
+        doesn't within `timeout` seconds, or the process ends without showing it. A process that
+        ended has its terminal closed, as `wait` does."""
         deadline = time.monotonic() + timeout
         while text not in self._text():
-            if self._process.poll() is not None or time.monotonic() > deadline:
+            ended = self._process.poll() is not None
+            if ended:
+                # It may have shown the text after the check above, just before it ended. This
+                # takes everything it showed, as `wait` does, before deciding.
+                self._close()
+                if text in self._text():
+                    return
+            if ended or time.monotonic() > deadline:
                 raise AssertionError(f"the terminal never showed {text!r}:\n{self._text()}")
             time.sleep(0.01)
 
