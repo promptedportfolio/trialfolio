@@ -31,10 +31,13 @@ R01-T08 checked what each platform reports, on macOS 26.6.2 with Python 3.12.13:
   two, and treats any other error as a failed write.
 - macOS keeps a file's extended attributes on FAT and exFAT in an AppleDouble file named `._`
   plus the file's name, created with the file and removed with it.
-- On FAT and exFAT, macOS gives a new, empty file a placeholder inode, 2**64 - 3 for every one,
-  until its first write gives it its own. A walk-through of the user guide found this on
-  2026-10-04, on macOS 26.6.2: the claim had read its file's identity before writing it, so
-  every claim there failed with `output.not_empty`. It now reads it once the file is written.
+- On FAT and exFAT, macOS gives each new, empty file a temporary inode of its own, counted down
+  from 2**64 for each mount, until its first write gives it a lasting one. A write that failed
+  with `ENOSPC`, and wrote nothing, gave the empty file another temporary inode, and so did
+  mounting the volume again. A walk-through of the user guide found on 2026-10-04, on macOS
+  26.6.2, that the claim had read its file's identity before writing it, so every claim there
+  failed with `output.not_empty`. It now reads it once the file is written, or once writing it
+  failed. PR #30's review checked these inodes on disk images the same day.
 - On Windows, from CPython 3.12.13's source and Microsoft's documentation: `os.open` calls
   `_wopen`, which fails with `EACCES` for a directory; `os.fsync` calls `_commit`, which takes a
   file descriptor; and `os.rename` calls `MoveFileExW` with no flags, so it fails if the name
@@ -221,7 +224,8 @@ class LocalArtifactStore:
         if "/" in valid_relative_path(path):
             raise ValueError("the file that claims a directory must be directly in it")
         if not data:
-            # An empty file's identity can't prove ownership where empty files share one.
+            # On FAT and exFAT, an empty file has only a temporary identity, which can change while
+            # it stays empty, so it can't prove ownership.
             raise ValueError("the file that claims a directory must not be empty")
         if self._claimed:
             raise RuntimeError("this store has already claimed its directory")

@@ -7,10 +7,10 @@ Traces to R01-AC29, and to docs/contracts.md, endings that decide the error code
 storage (completion, no hard links), through the CLI's entry function in the test process, with
 storage faults wrapping the real store. On Linux and macOS, a file system without hard links, which
 the storage faults' failed `os.link` stands for, fails at `configuration.yaml`, before any
-request, also where empty files share a placeholder identity, as on FAT and exFAT on macOS (a
-corrected defect, 2026-10-04); the same write failing with `ENOSPC` leaves a `failed` attempt
-record. A failure after the
-store published the manifest, such as its directory's sync, discards it (R01-T14).
+request, also where an empty file has a placeholder identity until its first write, as on FAT and
+exFAT on macOS (a corrected defect, 2026-10-04); the same write failing with `ENOSPC` leaves a
+`failed` attempt record. A failure after the store published the manifest, such as its directory's
+sync, discards it (R01-T14).
 """
 
 import sys
@@ -149,8 +149,8 @@ def test_a_file_system_without_hard_links_fails_at_the_configuration_before_any_
     cli: Cli, faults: FaultyStores, monkeypatch: pytest.MonkeyPatch, placeholder: bool
 ) -> None:
     if placeholder:
-        # FAT and exFAT on macOS also give every empty file the same placeholder inode, until its
-        # first write. Before the claim read its identity once written, this failed at the claim.
+        # FAT and exFAT on macOS also give each new, empty file a temporary inode until its first
+        # write. Before the claim read its identity once written, this failed at the claim.
         placeholder_identities(monkeypatch)
     cli.ready()
     out = cli.tmp / "out"

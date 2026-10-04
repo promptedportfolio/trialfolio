@@ -16,9 +16,9 @@ named file, once:
 A name matches a path's last segment, such as `response.json`. R01-T11 created this ahead of
 R01-T15, which added the failed `os.link`.
 
-`placeholder_identities` stands for the other way FAT and exFAT differ on macOS: every empty file
-has the same placeholder inode until its first write. It patches `os` for the whole test, so it
-applies to any store, wrapped or not.
+`placeholder_identities` stands for the other way FAT and exFAT differ on macOS: each new, empty
+file has a temporary inode of its own until its first write gives it a lasting one. It patches
+`os` for the whole test, so it applies to any store, wrapped or not.
 """
 
 import errno
@@ -35,22 +35,22 @@ _NO_HARD_LINKS = errno.ENOTSUP if sys.platform == "darwin" else errno.EPERM
 """How `os.link` reports a file system without hard links: `ENOTSUP` on macOS, as R01-T08 saw
 on exFAT and FAT32 disk images, and `EPERM` on Linux, as link(2) documents."""
 
-PLACEHOLDER_INODE = 2**64 - 3
-"""The inode that `os.fstat` and `os.lstat` report for every new, empty file on exFAT and FAT32
-disk images on macOS 26.6.2, until its first write gives it its own (2026-10-04)."""
-
 
 def placeholder_identities(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Makes every empty regular file report `PLACEHOLDER_INODE`, as FAT and exFAT do on macOS, so
-    that two empty files have the same identity, and a file's identity changes when it's first
-    written."""
+    """Makes each empty regular file report a placeholder inode of its own, as FAT and exFAT do on
+    macOS, so that a file's identity changes when it's first written.
+
+    On exFAT and FAT32 disk images on macOS 26.6.2, `os.fstat` and `os.lstat` reported a temporary
+    inode for each new, empty file, counted down from 2**64 for each mount, and a lasting one once
+    it was first written (2026-10-04). Here, an empty file's placeholder is 2**64 - 1 minus its
+    real inode: its own, and the same while it stays empty."""
     real_fstat, real_lstat = os.fstat, os.lstat
 
     def placeholder(result: os.stat_result) -> os.stat_result:
         if not stat.S_ISREG(result.st_mode) or result.st_size != 0:
             return result
         fields = list(result[: os.stat_result.n_sequence_fields])
-        fields[stat.ST_INO] = PLACEHOLDER_INODE
+        fields[stat.ST_INO] = 2**64 - 1 - result.st_ino
         # The rest, such as st_mtime, come only from the mapping, which takes none of the
         # sequence's fields: Python 3.14 refuses one there.
         others = {

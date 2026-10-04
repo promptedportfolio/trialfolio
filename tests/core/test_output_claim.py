@@ -5,10 +5,10 @@ Traces to docs/contracts.md, CLI behavior (claiming the directory), and interrup
 claim succeeds); to R01-AC15's check that a directory isn't empty, hidden files included; to
 R01-AC27, of which this module is the core part: processes released together claim one directory,
 and at most one succeeds each time; to R01-AC28's interrupt while the claim writes `plan.json`,
-which leaves nothing behind; and to two corrected defects on FAT and exFAT, where empty files share
-a placeholder identity: every claim failed with `output.not_empty`, as a walk-through of the user
-guide found on 2026-10-04; and a claim that failed after its first write left its file, as PR #30's
-review found.
+which leaves nothing behind; and to two corrected defects on FAT and exFAT, where a file's first
+write replaces its temporary identity: every claim failed with `output.not_empty`, as a walk-through
+of the user guide found on 2026-10-04; and a claim that failed after its first write left its file,
+as PR #30's review found.
 """
 
 import errno
@@ -466,8 +466,8 @@ def test_claim_needs_its_file_directly_in_the_directory(tmp_path: Path) -> None:
 
 
 def test_claim_needs_a_file_that_isnt_empty(tmp_path: Path) -> None:
-    # Where empty files share an identity, as on FAT and exFAT, an empty file can't prove it's
-    # the claim's own.
+    # On FAT and exFAT, an empty file has only a temporary identity, which can change while it
+    # stays empty, so it can't prove it's the claim's own.
     with pytest.raises(ValueError, match="not be empty"):
         LocalArtifactStore(tmp_path / "out").claim("plan.json", b"")
 
@@ -503,12 +503,12 @@ def test_claim_on_macos_counts_any_other_apple_double_file(tmp_path: Path, fault
     claim_fails_with("output.not_empty", LocalArtifactStore(tmp_path))
 
 
-def test_claim_succeeds_where_empty_files_share_a_placeholder_identity(
+def test_claim_succeeds_where_an_empty_file_has_a_placeholder_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # On FAT and exFAT, macOS gives every new, empty file the same placeholder inode until its
-    # first write. Verified on disk images on macOS 26.6.2, where reading the identity before the
-    # write made every claim fail with output.not_empty (2026-10-04).
+    # On FAT and exFAT, macOS gives each new, empty file a temporary inode until its first write.
+    # On disk images on macOS 26.6.2, reading the identity before the write made every claim fail
+    # with output.not_empty (2026-10-04).
     placeholder_identities(monkeypatch)
 
     LocalArtifactStore(tmp_path / "out").claim("plan.json", PLAN)
@@ -516,7 +516,7 @@ def test_claim_succeeds_where_empty_files_share_a_placeholder_identity(
     assert snapshot(tmp_path) == {"out": None, "out/plan.json": PLAN}
 
 
-def test_a_failed_claim_removes_its_file_where_empty_files_share_a_placeholder_identity(
+def test_a_failed_claim_removes_its_file_where_an_empty_file_has_a_placeholder_identity(
     tmp_path: Path, faults: Faults, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     placeholder_identities(monkeypatch)
