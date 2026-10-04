@@ -31,6 +31,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Final, Self, TextIO
+from unicodedata import normalize
 
 from trialfolio.userdirs import log_directory
 
@@ -222,10 +223,52 @@ class CommandLogs:
 
 
 def _within(path: Path, directory: Path) -> bool:
-    """Whether `path` is `directory` or in it: as written, with `..` resolved, as the output
-    directory's claim reads a path; or once symbolic links are resolved, as the file system
-    does."""
-    return any(
-        Path(resolve(path)).is_relative_to(resolve(directory))
-        for resolve in (os.path.abspath, os.path.realpath)
-    )
+    """Whether `path` is `directory` or in it, where the file system puts each: `directory` as
+    the output directory's claim reads a path, with `..` resolved as written, and `path` as
+    creating it does, once symbolic links are resolved.
+
+    The parts of each that exist are compared as the file system identifies them, so another
+    spelling of the same folder counts: in another case, on a file system that ignores case, as
+    macOS's and Windows' do by default, or in another Unicode normalization, on one that ignores
+    that, as macOS's does. Names that don't exist yet are compared ignoring both, as such a file
+    system would: on one that doesn't ignore them, a log directory that differs from the
+    workspace only that way gets no log file either."""
+    workspace = _existing(os.path.abspath(directory))
+    log = _existing(os.path.realpath(path))
+    if workspace is None or log is None:
+        return False  # Where no part of a path exists, nothing can be created.
+    _, status, unmade = workspace
+    start, start_status, names = log
+    if unmade:
+        # The workspace doesn't exist yet: `path` is in it only if it will be made in the same
+        # folder, through the same names.
+        same_names = _folded(names[: len(unmade)]) == _folded(unmade)
+        return same_names and os.path.samestat(start_status, status)
+    return any(_is(part, status) for part in (start, *start.parents))
+
+
+def _existing(path: str) -> tuple[Path, os.stat_result, tuple[str, ...]] | None:
+    """`path`'s deepest part that exists, its status, and the names after it; None when no part
+    of it exists."""
+    whole = Path(path)
+    for part in (whole, *whole.parents):
+        try:
+            status = os.stat(part)
+        except OSError:
+            continue
+        return part, status, whole.parts[len(part.parts) :]
+    return None
+
+
+def _is(path: Path, status: os.stat_result) -> bool:
+    """Whether `path` exists, and is the file `status` describes."""
+    try:
+        return os.path.samestat(os.stat(path), status)
+    except OSError:
+        return False
+
+
+def _folded(names: tuple[str, ...]) -> tuple[str, ...]:
+    """The names as a file system that ignores case and Unicode normalization compares them:
+    Unicode's canonical caseless match."""
+    return tuple(normalize("NFD", normalize("NFD", name).casefold()) for name in names)

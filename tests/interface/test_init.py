@@ -114,6 +114,44 @@ def test_a_log_directory_in_a_workspace_that_isnt_empty_leaves_it_unchanged(
     assert snapshot(workspace) == before
 
 
+# The workspace's name, and another spelling of it: in another case, which macOS's and Windows'
+# file systems ignore by default, and in another Unicode normalization, which macOS's ignores.
+SPELLINGS = [("Workspace", "workspace"), ("Caf\u00e9", "Cafe\u0301")]
+
+
+@pytest.mark.parametrize(("name", "spelling"), SPELLINGS)
+def test_a_log_directory_in_another_spelling_of_a_new_workspace_gets_no_log(
+    cli: Cli, monkeypatch: pytest.MonkeyPatch, name: str, spelling: str
+) -> None:
+    workspace = cli.tmp / name
+    monkeypatch.setenv("TRIALFOLIO_LOG_DIR", str(cli.tmp / spelling / "logs"))
+
+    outcome = cli("init", workspace)
+
+    assert outcome.exit_code == 0, outcome.stderr
+    assert snapshot(workspace) == STARTER
+    # Neither exists yet, so they're compared as a file system that ignores the difference would.
+    assert "The log directory is in the workspace" in outcome.stderr
+
+
+@pytest.mark.parametrize(("name", "spelling"), SPELLINGS)
+def test_a_log_directory_in_another_spelling_of_an_occupied_workspace_leaves_it_unchanged(
+    cli: Cli, monkeypatch: pytest.MonkeyPatch, name: str, spelling: str
+) -> None:
+    workspace = cli.tmp / name
+    workspace.mkdir()
+    (workspace / "notes.txt").write_bytes(b"mine")
+    before = snapshot(workspace)
+    # On a file system that tells the spellings apart, the log goes to another folder.
+    monkeypatch.setenv("TRIALFOLIO_LOG_DIR", str(cli.tmp / spelling / "logs"))
+
+    outcome = cli("init", workspace, "--json")
+
+    assert outcome.exit_code == 4
+    assert error_of(outcome.stdout)["code"] == "output.not_empty"
+    assert snapshot(workspace) == before
+
+
 def test_init_without_a_directory_sets_up_the_current_one(
     cli: Cli, monkeypatch: pytest.MonkeyPatch
 ) -> None:
