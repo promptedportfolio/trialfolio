@@ -57,6 +57,8 @@ def test_demo_runs_offline_and_labels_its_run_synthetic(cli: Cli, connects: list
     assert manifest.synthetic is True
     assert manifest.approval == "not_required"
     assert manifest.command.name == "demo"
+    assert manifest.command.options == {"json": False}
+    assert str(out) not in (out / "manifest.json").read_text()
     assert manifest.outcome == "completed"
     assert manifest.error is None
     assert manifest.counts.cost is None

@@ -457,7 +457,8 @@ def _run(invocation: _Invocation) -> TrialFolioError | None:
         store,
         CommandRecord(
             name="run",
-            options={"out": args.out, "approve": args.approve, "json": args.json},
+            # No path: one can name the user, and the manifest is in the output directory.
+            options={"approve": args.approve, "json": args.json},
             started_at=started_at,
         ),
         clock=invocation.clock,
@@ -494,7 +495,7 @@ def _demo(invocation: _Invocation) -> TrialFolioError | None:
         store,
         CommandRecord(
             name="demo",
-            options={"out": args.out, "json": args.json},
+            options={"json": args.json},
             started_at=invocation.clock(),
         ),
         clock=invocation.clock,

@@ -76,6 +76,25 @@ def test_the_response_is_saved_whole_and_the_manifest_hashes_match(cli: Cli) -> 
     assert manifest.outcome == "completed"
 
 
+def test_the_manifest_records_the_options_without_a_path(cli: Cli) -> None:
+    # A path can name the user, and manifests may be shared (D-14).
+    cli.ready()
+    serve_success(cli.server)
+    out = cli.tmp / "out"
+
+    outcome = approved_run(cli, out)
+
+    assert outcome.exit_code == 0, outcome.stderr
+    content = (out / "manifest.json").read_text()
+    manifest = RunManifest.model_validate_json(content)
+    assert manifest.command.options == {
+        "approve": plan_hash_for(config("formula.yaml")),
+        "json": True,
+    }
+    assert str(cli.tmp) not in content
+    assert str(config("formula.yaml").parent) not in content
+
+
 def test_one_attempt_lists_authentication_then_the_request(cli: Cli) -> None:
     cli.ready()
     serve_success(cli.server)
