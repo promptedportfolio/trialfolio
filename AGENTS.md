@@ -16,6 +16,8 @@ Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and event
 
 [docs/spec-authoring-guide.md](docs/spec-authoring-guide.md) is bootstrap context. When it disagrees with a document above, the document above wins.
 
+When proposing or completing a release specification, follow [Product direction (D-23)](docs/spec.md#product-direction) and the [roadmap's release planning requirements](docs/roadmap.md#release-planning-requirements). Identify the research task, the manual work removed or question enabled, and the scenario that will demonstrate it. The roadmap's future targets do not authorize implementation or expand an assigned release's scope.
+
 ## Rules
 
 - **Decide routine matters; report contradictions.** Make routine decisions within the assigned scope. Report material contradictions between documents instead of choosing the easiest reading.
