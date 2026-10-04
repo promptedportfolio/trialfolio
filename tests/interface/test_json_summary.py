@@ -6,7 +6,8 @@ Traces to R01-AC18, over the scenarios of R01-AC01 (no approval), R01-AC05 (prov
 missing credentials), and R01-AC15 (an output directory that isn't empty), and for `report`,
 `demo`, and `license`; and to docs/contracts.md, JSON summary: `ids` and `outputs` leave out a key
 that has no value, `counts` is `{}` for `report` and `license`, and `outcome`, `exit_code`, and
-`error` agree. Each summary is checked against the `JsonSummary` model and the keys of the
+`error` agree; and to R01-T14's rule that a blank `--out`, which `output_dir` can't hold, is a
+usage error. Each summary is checked against the `JsonSummary` model and the keys of the
 generated schema, `schemas/json-summary-1.0.0.schema.json`. Through the CLI's entry function in
 the test process, with the real client, `requests`, and `urllib3` over the fake server.
 """
@@ -344,3 +345,23 @@ def test_without_json_report_and_demo_write_their_result(cli: Cli) -> None:
     assert demo.stdout.startswith(f"Synthetic example run written to {run}.")
     assert report.exit_code == 0
     assert report.stdout == f"Report written: {out / 'report.html'}\n"
+
+
+@pytest.mark.parametrize("out", [" ", ""], ids=["whitespace", "empty"])
+@pytest.mark.parametrize("command", ["run", "report", "demo"])
+def test_a_blank_output_directory_is_a_usage_error(
+    cli: Cli, monkeypatch: pytest.MonkeyPatch, command: str, out: str
+) -> None:
+    # A blank path names no directory of its own, and the summary's `output_dir` can't hold it,
+    # so the parser rejects it before anything runs.
+    cli.ready()
+    monkeypatch.chdir(cli.tmp)
+    before = sorted(p.name for p in cli.tmp.iterdir())
+    inputs = {"run": [str(config("formula.yaml"))], "report": [str(cli.tmp)], "demo": []}
+
+    outcome = cli(command, *inputs[command], "--out", out, "--json")
+
+    assert outcome.exit_code == 2
+    assert outcome.stdout == ""
+    assert "argument --out: it's blank, and must name the output directory" in outcome.stderr
+    assert sorted(p.name for p in cli.tmp.iterdir()) == before

@@ -180,8 +180,21 @@ def _parser(version: str) -> argparse.ArgumentParser:
 
 def _out(parser: argparse.ArgumentParser, meaning: str) -> None:
     parser.add_argument(
-        "--out", required=True, metavar="DIR", help=f"{meaning}: absent, or an empty directory"
+        "--out",
+        required=True,
+        metavar="DIR",
+        type=_directory,
+        help=f"{meaning}: absent, or an empty directory",
     )
+
+
+def _directory(value: str) -> str:
+    """`--out` as given, unless it's blank: a blank path names no directory of its own, an empty
+    one is the current directory to the file system, and the JSON summary's `output_dir` can hold
+    neither."""
+    if not value.strip():
+        raise argparse.ArgumentTypeError("it's blank, and must name the output directory")
+    return value
 
 
 def _json(parser: argparse.ArgumentParser) -> None:
@@ -260,17 +273,19 @@ class _Invocation:
         return exit_code
 
     def _write_result(self, error: TrialFolioError | None, exit_code: int) -> None:
+        # Built before writing, so that a summary that fails validation, a defect, is never
+        # taken for a closed stream and silently left out.
+        if self.args.json:
+            result = json.dumps(self._summary(error, exit_code).model_dump(mode="json")) + "\n"
+        else:
+            result = "".join(f"{line}\n" for line in self.result) if error is None else ""
         try:
             if error is not None:
                 self.stderr.write(f"Error ({error.code}): {error.message}\n")
                 if self.output_dir is not None and self.name in ("run", "demo"):
                     self.stderr.write(f"The run's records are in {self.output_dir}.\n")
                 self.stderr.flush()
-            if self.args.json:
-                summary = self._summary(error, exit_code)
-                self.stdout.write(json.dumps(summary.model_dump(mode="json")) + "\n")
-            elif error is None:
-                self.stdout.write("".join(f"{line}\n" for line in self.result))
+            self.stdout.write(result)
             self.stdout.flush()
         except (OSError, ValueError):  # A closed stream: nothing more can be shown.
             pass
