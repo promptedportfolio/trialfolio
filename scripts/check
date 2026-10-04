@@ -22,17 +22,6 @@ if [ -z "${CI:-}" ] && [ "$(git config core.hooksPath)" != .githooks ]; then
   exit 1
 fi
 
-# Until R01-T16 writes the tests, a pytest step that collects none (exit 5) passes.
-run_pytest() {
-  status=0
-  uv run pytest "$@" || status=$?
-  if [ "$status" -eq 5 ]; then
-    echo "no tests collected; allowed until R01-T16"
-  elif [ "$status" -ne 0 ]; then
-    exit "$status"
-  fi
-}
-
 step "Lock file matches pyproject.toml"
 uv lock --check
 
@@ -58,10 +47,11 @@ if [ -n "$untracked" ]; then
   exit 1
 fi
 
+# A pytest step that collects no tests fails too (exit 5), so a missing test can't pass.
 step "Tests"
-run_pytest
+uv run pytest
 
 step "Packaging tests"
-run_pytest -m packaging
+uv run pytest -m packaging
 
 printf '\nAll checks passed.\n'
