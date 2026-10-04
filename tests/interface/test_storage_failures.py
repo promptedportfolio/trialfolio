@@ -7,8 +7,10 @@ Traces to R01-AC29, and to docs/contracts.md, endings that decide the error code
 storage (completion, no hard links), through the CLI's entry function in the test process, with
 storage faults wrapping the real store. On Linux and macOS, a file system without hard links, which
 the storage faults' failed `os.link` stands for, fails at `configuration.yaml`, before any
-request; the same write failing with `ENOSPC` leaves a `failed` attempt record. A failure after the
-store published the manifest, such as its directory's sync, discards it (R01-T14).
+request, also where an empty file has a placeholder identity until its first write, as on FAT and
+exFAT on macOS (a corrected defect, 2026-10-04); the same write failing with `ENOSPC` leaves a
+`failed` attempt record. A failure after the store published the manifest, such as its directory's
+sync, discards it (R01-T14).
 """
 
 import sys
@@ -25,7 +27,7 @@ from tests.interface.conftest import (
     plan_hash_for,
     serve_success,
 )
-from tests.support.storage_faults import StorageFaults
+from tests.support.storage_faults import StorageFaults, placeholder_identities
 from trialfolio.attempts import read_attempt
 from trialfolio.contracts.attempt import AttemptRecord
 from trialfolio.errors import TrialFolioError
@@ -142,9 +144,14 @@ def test_a_failure_writing_the_configuration_fails_before_any_request(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows publishes files by renaming them")
+@pytest.mark.parametrize("placeholder", [False, True], ids=["own-identity", "placeholder-identity"])
 def test_a_file_system_without_hard_links_fails_at_the_configuration_before_any_request(
-    cli: Cli, faults: FaultyStores
+    cli: Cli, faults: FaultyStores, monkeypatch: pytest.MonkeyPatch, placeholder: bool
 ) -> None:
+    if placeholder:
+        # FAT and exFAT on macOS also give each new, empty file a temporary inode until its first
+        # write. Before the claim read its identity once written, this failed at the claim.
+        placeholder_identities(monkeypatch)
     cli.ready()
     out = cli.tmp / "out"
     serve_success(cli.server)

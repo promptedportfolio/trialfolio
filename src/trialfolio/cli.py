@@ -293,13 +293,15 @@ class _Invocation:
                 error.code, f"{error.message} {where}", f"{error.log_message} {where}"
             )
         exit_code = 0 if error is None else EXIT_CODES[error.code]
+        detail = "no error" if error is None else f"{error.code}: {error.log_message}"
         _logger.log(
             logging.INFO if error is None else logging.ERROR,
-            "trialfolio %s ended after %.3f s with exit code %d: %s.",
+            "trialfolio %s ended after %.3f s with exit code %d: %s",
             self.name,
             time.monotonic() - started,
             exit_code,
-            "no error" if error is None else f"{error.code}: {error.log_message}",
+            # A message ends with its own period.
+            detail if detail.endswith(".") else f"{detail}.",
             extra={**_event("cli.command.completed", False), **self._linked_ids()},
         )
         self._write_result(error, exit_code)
@@ -606,7 +608,8 @@ def _report(invocation: _Invocation) -> TrialFolioError | None:
             f"Trial Folio can't read runs in this environment: {missing} can't be imported,"
             " because its files, or a package it needs, are missing or broken. No output was"
             " created. Reinstall Trial Folio, whose package pins its dependencies exactly, for"
-            " example in a new virtual environment.",
+            " example in a new virtual environment. If you run it from a copy of its repository,"
+            " run uv sync there instead.",
         ) from None
 
     report = rerender_report(
@@ -711,16 +714,22 @@ def _credentials(environ: MutableMapping[str, str]) -> "Credentials":
     api_id = environ.get(API_ID_VARIABLE, "")
     api_key = environ.get(API_KEY_VARIABLE, "")
     missing = [
-        name
-        for name, value in ((API_ID_VARIABLE, api_id), (API_KEY_VARIABLE, api_key))
+        (name, credential)
+        for name, credential, value in (
+            (API_ID_VARIABLE, "API ID", api_id),
+            (API_KEY_VARIABLE, "API key", api_key),
+        )
         if not value.strip()
     ]
     if missing:
+        names = " and ".join(name for name, _ in missing)
+        credentials = " and ".join(credential for _, credential in missing)
+        listed = "lists it" if len(missing) == 1 else "lists both"
         raise TrialFolioError(
             "provider.auth_failed",
-            f"Portfolio123 credentials are missing: set {' and '.join(missing)} to your API ID"
-            " and API key, which Portfolio123's website lists under DataMiner & API. Nothing was"
-            " sent, and no output was created.",
+            f"Portfolio123 credentials are missing: set {names} to your {credentials}."
+            f" Portfolio123's website {listed} under DataMiner & API. Nothing was sent, and no"
+            " output was created.",
         )
     return Credentials(api_id, api_key)
 

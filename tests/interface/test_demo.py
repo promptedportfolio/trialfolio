@@ -5,8 +5,9 @@ with records that read back as a complete run, and a report that says nothing wa
 Traces to release 0.1.0's included scope (`trialfolio demo`) and required behavior 12 (`demo`
 makes no network access), to docs/contracts.md, artifact storage (`synthetic` and the approval
 `not_required`) and reports (a synthetic run's report), and to R01-AC16's checks of the demo's
-labels, which R01-T16 repeats from a clean install. Through the CLI's entry function in the test
-process.
+labels, which R01-T16 repeats from a clean install. Its progress says the attempt's records are
+invented only where they say it's possibly charged (corrected wording, 2026-10-04). Through the
+CLI's entry function in the test process.
 """
 
 import json
@@ -18,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from tests.interface.conftest import Cli
+from tests.interface.conftest import Cli, FaultyStores
 from tests.support.html_report import parse
 from trialfolio.contracts.attempt import AttemptRecord, StartRecord
 from trialfolio.contracts.manifest import RunManifest
@@ -63,6 +64,30 @@ def test_demo_runs_offline_and_labels_its_run_synthetic(cli: Cli, connects: list
     assert manifest.error is None
     assert manifest.counts.cost is None
     assert "Nothing was sent to Portfolio123" in outcome.stdout
+    # Its progress says the attempt's records are invented: before 2026-10-04, it said only that
+    # the attempt was possibly charged.
+    assert "possibly charged: yes, in its invented records, though nothing was sent;" in (
+        outcome.stderr
+    )
+
+
+def test_the_demos_attempt_says_only_no_when_it_isnt_possibly_charged(
+    cli: Cli, faults: FaultyStores
+) -> None:
+    # An attempt that ends before it authenticates isn't possibly charged, even in the demo's
+    # records. PR #30's review found "no, in its invented records, though nothing was sent" here.
+    cli.accept_license()
+    out = cli.tmp / "demo"
+    faults.fail_os("configuration.yaml")
+
+    outcome = cli("demo", "--out", out, store_factory=faults)
+
+    assert outcome.exit_code == 4, outcome.stderr
+    log = (out / "logs" / "trialfolio.log").read_text(encoding="utf-8")
+    events = [json.loads(line) for line in log.splitlines()]
+    (ended,) = [event["message"] for event in events if event["event"] == "attempt.completed"]
+    assert ended.endswith("; possibly charged: no; attempt record written: yes.")
+    assert "invented" not in ended
 
 
 def test_the_demos_run_reads_back_as_a_complete_run(cli: Cli) -> None:

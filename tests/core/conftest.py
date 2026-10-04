@@ -118,7 +118,9 @@ class Faults:
         self._before_write: dict[str, Effect] = {}
         self._after_close: dict[str, Effect] = {}
         self._after_mkdir: dict[str, Effect] = {}
+        self._before_sync: dict[str, Effect] = {}
         self._writing: dict[int, Effect] = {}
+        self._syncing: dict[int, Effect] = {}
         self._closing: dict[int, Effect] = {}
         real_open, real_write, real_close, real_mkdir = os.open, os.write, os.close, os.mkdir
 
@@ -138,6 +140,8 @@ class Faults:
             descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
             for effect in matching(self._before_write, path):
                 self._writing[descriptor] = effect
+            for effect in matching(self._before_sync, path):
+                self._syncing[descriptor] = effect
             for effect in matching(self._after_close, path):
                 self._closing[descriptor] = effect
             try:
@@ -154,8 +158,20 @@ class Faults:
                 effect()
             return real_write(descriptor, data)
 
+        def sync(descriptor: int) -> None:
+            effect = self._syncing.get(descriptor)
+            if effect is not None:
+                effect()
+
+        real_fsync = os.fsync
+
+        def fsync(descriptor: int) -> None:
+            sync(descriptor)
+            real_fsync(descriptor)
+
         def close(descriptor: int) -> None:
             self._writing.pop(descriptor, None)
+            self._syncing.pop(descriptor, None)
             effect = self._closing.pop(descriptor, None)
             real_close(descriptor)
             if effect is not None:
@@ -170,6 +186,18 @@ class Faults:
         monkeypatch.setattr(os, "write", write)
         monkeypatch.setattr(os, "close", close)
         monkeypatch.setattr(os, "mkdir", mkdir)
+        monkeypatch.setattr(os, "fsync", fsync)
+        if sys.platform == "darwin":
+            import fcntl
+
+            real_fcntl = fcntl.fcntl
+
+            def full_sync(descriptor: int, command: int, argument: int = 0) -> int:
+                if command == fcntl.F_FULLFSYNC:
+                    sync(descriptor)
+                return real_fcntl(descriptor, command, argument)
+
+            monkeypatch.setattr(fcntl, "fcntl", full_sync)
 
     def on_open(self, name: str, effect: Effect) -> None:
         """Runs `effect` just before the file is opened."""
@@ -182,6 +210,11 @@ class Faults:
     def on_write(self, name: str, effect: Effect) -> None:
         """Runs `effect` just before each write to the file."""
         self._before_write[name] = effect
+
+    def on_sync(self, name: str, effect: Effect) -> None:
+        """Runs `effect` just before each sync of the file, whether `os.fsync` or, on macOS,
+        `fcntl.F_FULLFSYNC`."""
+        self._before_sync[name] = effect
 
     def after_close(self, name: str, effect: Effect) -> None:
         """Runs `effect` once the file is closed, as if closing it reported an error."""

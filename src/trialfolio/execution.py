@@ -263,6 +263,11 @@ class Execution:
     def _version(self) -> str:
         return self._plan.trialfolio_version
 
+    @property
+    def _synthetic(self) -> bool:
+        """Whether this is the synthetic run `trialfolio demo` writes."""
+        return self._command.name == "demo"
+
     def _attempt_run(
         self,
         configuration: bytes,
@@ -273,7 +278,13 @@ class Execution:
         try:
             if on_claimed is not None:
                 on_claimed()
-            self._attempt = Attempt(self._plan, self._approved_hash, self._store, clock=self._clock)
+            self._attempt = Attempt(
+                self._plan,
+                self._approved_hash,
+                self._store,
+                clock=self._clock,
+                synthetic=self._synthetic,
+            )
             self._configuration = self._store.write(CONFIGURATION_PATH, configuration)
             self._files.append(("configuration", self._configuration))
             made = client()
@@ -282,7 +293,11 @@ class Execution:
                 made.close()
             if self._attempt is None:
                 self._attempt = Attempt(
-                    self._plan, self._approved_hash, self._store, clock=self._clock
+                    self._plan,
+                    self._approved_hash,
+                    self._store,
+                    clock=self._clock,
+                    synthetic=self._synthetic,
                 )
             return self._attempt.end_before_authenticating(ending)
         try:
@@ -372,7 +387,7 @@ class Execution:
             trialfolio_version=self._version,
             created_at=created_at,
             command=self._command,
-            synthetic=self._command.name == "demo",
+            synthetic=self._synthetic,
             plan_hash=self._plan.plan_hash,
             approval=self._approval,
             outcome="completed" if error is None else "failed",

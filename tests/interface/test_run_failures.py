@@ -91,16 +91,33 @@ def test_missing_credentials_fail_before_anything_is_written_or_sent(cli: Cli) -
     assert outcome.exit_code == 5
     error = error_of(outcome)
     assert error["code"] == "provider.auth_failed"
-    assert "TRIALFOLIO_P123_API_ID" in error["message"]
-    assert "TRIALFOLIO_P123_API_KEY" in error["message"]
+    assert (
+        "set TRIALFOLIO_P123_API_ID and TRIALFOLIO_P123_API_KEY to your API ID and API key."
+        in error["message"]
+    )
     assert not out.exists()
     assert cli.server.requests() == []
     assert outcome.summary["output_dir"] is None
 
 
-def test_a_blank_credential_counts_as_missing(cli: Cli, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("blank", "named", "other", "other_name"),
+    [
+        ("TRIALFOLIO_P123_API_KEY", "your API key.", "TRIALFOLIO_P123_API_ID", "API ID"),
+        ("TRIALFOLIO_P123_API_ID", "your API ID.", "TRIALFOLIO_P123_API_KEY", "API key"),
+    ],
+    ids=["key", "id"],
+)
+def test_a_blank_credential_counts_as_missing(
+    cli: Cli,
+    monkeypatch: pytest.MonkeyPatch,
+    blank: str,
+    named: str,
+    other: str,
+    other_name: str,
+) -> None:
     cli.ready()
-    monkeypatch.setenv("TRIALFOLIO_P123_API_KEY", "   ")
+    monkeypatch.setenv(blank, "   ")
     out = cli.tmp / "out"
 
     outcome = approved_run(cli, out)
@@ -108,8 +125,10 @@ def test_a_blank_credential_counts_as_missing(cli: Cli, monkeypatch: pytest.Monk
     assert outcome.exit_code == 5
     error = error_of(outcome)
     assert error["code"] == "provider.auth_failed"
-    assert "TRIALFOLIO_P123_API_KEY" in error["message"]
-    assert "TRIALFOLIO_P123_API_ID" not in error["message"]
+    # It names only the missing one: before 2026-10-04, it asked for both by name.
+    assert f"set {blank} to {named}" in error["message"]
+    assert other not in error["message"]
+    assert other_name not in error["message"]
     assert not out.exists()
     assert cli.server.requests() == []
 

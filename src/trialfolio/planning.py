@@ -71,7 +71,8 @@ def _unsupported(problem: str, remedy: str | None = None) -> TrialFolioError:
     if remedy is None:
         remedy = (
             "Reinstall Trial Folio, whose package pins those versions exactly, for example in a "
-            "new virtual environment."
+            "new virtual environment. If you run it from a copy of its repository, run uv sync "
+            "there instead."
         )
     return TrialFolioError(
         "environment.unsupported",
