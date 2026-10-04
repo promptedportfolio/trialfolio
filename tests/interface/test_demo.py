@@ -63,6 +63,11 @@ def test_demo_runs_offline_and_labels_its_run_synthetic(cli: Cli, connects: list
     assert manifest.error is None
     assert manifest.counts.cost is None
     assert "Nothing was sent to Portfolio123" in outcome.stdout
+    # Its progress says the attempt's records are invented: before 2026-10-04, it said only that
+    # the attempt was possibly charged.
+    assert "possibly charged: yes, in its invented records, though nothing was sent;" in (
+        outcome.stderr
+    )
 
 
 def test_the_demos_run_reads_back_as_a_complete_run(cli: Cli) -> None:

@@ -262,9 +262,18 @@ class Attempt:
     """
 
     def __init__(
-        self, plan: Plan, approved_hash: str, store: ArtifactStore, *, clock: Clock = utc_now
+        self,
+        plan: Plan,
+        approved_hash: str,
+        store: ArtifactStore,
+        *,
+        clock: Clock = utc_now,
+        synthetic: bool = False,
     ) -> None:
         """Starts the attempt: gives it an ID and its start time. Writes nothing.
+
+        `synthetic` is for the attempt of the run `trialfolio demo` writes, which sends nothing.
+        Its records are a real attempt's, possibly charged, and its progress says they're invented.
 
         Raises `TrialFolioError` with `plan.approval_required` unless `approved_hash` is the
         plan's hash, recomputed from its contents (approval), and `ValueError` if `clock` doesn't
@@ -287,6 +296,7 @@ class Attempt:
         self._params: dict[str, object] = request.params.model_dump(mode="json")
         self._store = store
         self._clock = clock
+        self._synthetic = synthetic
         self._started = time.monotonic()
         self._directory = attempt_directory(case.case_id, self._attempt_id)
         self._files: list[AttemptFile] = []
@@ -399,13 +409,16 @@ class Attempt:
         error = _error(ending, end)
         record = self._record(exchanges, end, error)
         recorded, error, record = self._write_record(record, error, end)
+        charged = "yes" if record.possibly_charged else "no"
+        if self._synthetic:
+            charged = f"{charged}, in its invented records, though nothing was sent"
         _logger.log(
             logging.INFO if error is None else logging.ERROR,
             "Attempt ended %s after %.3f s: %s; possibly charged: %s; attempt record written: %s.",
             record.outcome,
             time.monotonic() - self._started,
             "no error" if error is None else error.code,
-            "yes" if record.possibly_charged else "no",
+            charged,
             "yes" if recorded else "no",
             extra=self._log_fields("attempt.completed"),
         )

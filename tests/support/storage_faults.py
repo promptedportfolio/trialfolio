@@ -15,10 +15,15 @@ named file, once:
 
 A name matches a path's last segment, such as `response.json`. R01-T11 created this ahead of
 R01-T15, which added the failed `os.link`.
+
+`placeholder_identities` stands for the other way FAT and exFAT differ on macOS: every empty file
+has the same placeholder inode until its first write. It patches `os` for the whole test, so it
+applies to any store, wrapped or not.
 """
 
 import errno
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -29,6 +34,35 @@ from trialfolio.storage import ArtifactStore, StoredFile
 _NO_HARD_LINKS = errno.ENOTSUP if sys.platform == "darwin" else errno.EPERM
 """How `os.link` reports a file system without hard links: `ENOTSUP` on macOS, as R01-T08 saw
 on exFAT and FAT32 disk images, and `EPERM` on Linux, as link(2) documents."""
+
+PLACEHOLDER_INODE = 2**64 - 3
+"""The inode that `os.fstat` and `os.lstat` report for every new, empty file on exFAT and FAT32
+disk images on macOS 26.6.2, until its first write gives it its own (2026-10-04)."""
+
+
+def placeholder_identities(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Makes every empty regular file report `PLACEHOLDER_INODE`, as FAT and exFAT do on macOS, so
+    that two empty files have the same identity, and a file's identity changes when it's first
+    written."""
+    real_fstat, real_lstat = os.fstat, os.lstat
+
+    def placeholder(result: os.stat_result) -> os.stat_result:
+        if not stat.S_ISREG(result.st_mode) or result.st_size != 0:
+            return result
+        fields = list(result[: os.stat_result.n_sequence_fields])
+        fields[stat.ST_INO] = PLACEHOLDER_INODE
+        # The rest, such as st_mtime, come only from the mapping.
+        others = {name: getattr(result, name) for name in dir(result) if name.startswith("st_")}
+        return os.stat_result(fields, others)
+
+    def fstat(descriptor: int) -> os.stat_result:
+        return placeholder(real_fstat(descriptor))
+
+    def lstat(path: str | os.PathLike[str], *, dir_fd: int | None = None) -> os.stat_result:
+        return placeholder(real_lstat(path, dir_fd=dir_fd))
+
+    monkeypatch.setattr(os, "fstat", fstat)
+    monkeypatch.setattr(os, "lstat", lstat)
 
 
 class StorageFaults:

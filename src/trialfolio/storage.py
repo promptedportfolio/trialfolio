@@ -31,6 +31,10 @@ R01-T08 checked what each platform reports, on macOS 26.6.2 with Python 3.12.13:
   two, and treats any other error as a failed write.
 - macOS keeps a file's extended attributes on FAT and exFAT in an AppleDouble file named `._`
   plus the file's name, created with the file and removed with it.
+- On FAT and exFAT, macOS gives a new, empty file a placeholder inode, 2**64 - 3 for every one,
+  until its first write gives it its own. A walk-through of the user guide found this on
+  2026-10-04, on macOS 26.6.2: the claim had read its file's identity before writing it, so
+  every claim there failed with `output.not_empty`. It now reads it once the file is written.
 - On Windows, from CPython 3.12.13's source and Microsoft's documentation: `os.open` calls
   `_wopen`, which fails with `EACCES` for a directory; `os.fsync` calls `_commit`, which takes a
   file descriptor; and `os.rename` calls `MoveFileExW` with no flags, so it fails if the name
@@ -127,9 +131,9 @@ class ArtifactStore(Protocol):
 
         First checks the root as `check_empty` does, apart from listing it. Then creates the
         root, and any missing parent directories, one at a time. Then creates the file, which
-        must be directly in the root, under its final name with an exclusive create, writes and
-        syncs it, and lists the root. On success, the file and the directories' entries are
-        durable, and the store can `write`.
+        must be directly in the root and not empty, under its final name with an exclusive
+        create, writes and syncs it, and lists the root. On success, the file and the
+        directories' entries are durable, and the store can `write`.
 
         Raises `TrialFolioError` with `output.not_empty` if the file existed already, the root
         holds anything else, or the root or a parent disappeared; and with `storage.write_failed`
@@ -216,6 +220,9 @@ class LocalArtifactStore:
     def claim(self, path: str, data: bytes) -> StoredFile:
         if "/" in valid_relative_path(path):
             raise ValueError("the file that claims a directory must be directly in it")
+        if not data:
+            # An empty file's identity can't prove ownership where empty files share one.
+            raise ValueError("the file that claims a directory must not be empty")
         if self._claimed:
             raise RuntimeError("this store has already claimed its directory")
         self._check_root()
@@ -340,6 +347,10 @@ class LocalArtifactStore:
             except FileNotFoundError:
                 _not_empty("The output directory disappeared while Trial Folio claimed it.")
             self._write_all(descriptor, data)
+            # Read again once written: macOS gives a new file on FAT or exFAT a placeholder inode,
+            # the same for every empty file, until its first write gives it its own.
+            with _defer_sigint():
+                claim.file = os.fstat(descriptor)
         finally:
             if descriptor is not None:
                 os.close(descriptor)

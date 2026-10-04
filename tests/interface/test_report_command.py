@@ -235,6 +235,7 @@ def test_a_provider_package_that_cant_be_imported_is_an_unsupported_environment(
     assert isinstance(error, dict)
     assert error["code"] == "environment.unsupported"
     assert "p123api can't be imported" in error["message"]
+    assert "If you run it from a copy of its repository, run uv sync there" in error["message"]
     assert not out.exists()
 
 

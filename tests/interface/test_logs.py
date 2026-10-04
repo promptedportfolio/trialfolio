@@ -165,6 +165,12 @@ def test_an_authentication_failure_logs_no_canary(cli: Cli) -> None:
     assert outcome.exit_code == 5
     assert log_files(cli) == [out / "logs" / "trialfolio.log"]
     assert logged_canaries(cli) == []
+    # The error's message ends the line with its own period, never a second one (corrected on
+    # 2026-10-04).
+    events = lines(out / "logs" / "trialfolio.log")
+    (completed,) = (event for event in events if event["event"] == "cli.command.completed")
+    assert str(completed["message"]).endswith(".")
+    assert not str(completed["message"]).endswith("..")
 
 
 def test_a_claim_that_fails_writes_no_log_file_anywhere(cli: Cli) -> None:

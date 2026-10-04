@@ -58,6 +58,7 @@ def test_an_unverified_version_is_unsupported(
 
     assert f"The installed {name} is {version}." in message
     assert "Reinstall Trial Folio" in message
+    assert "If you run it from a copy of its repository, run uv sync there instead." in message
 
 
 def test_an_imported_module_of_another_version_is_unsupported(
@@ -131,3 +132,4 @@ def test_a_missing_provider_package_is_unsupported(name: str, state: str) -> Non
     else:
         assert f"{name} is installed, but it can't be imported" in message
     assert "Reinstall Trial Folio" in message
+    assert "If you run it from a copy of its repository, run uv sync there instead." in message
