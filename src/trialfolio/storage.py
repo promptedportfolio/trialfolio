@@ -50,7 +50,7 @@ import signal
 import sys
 import threading
 from collections.abc import Generator, Iterable
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import FrameType
@@ -346,11 +346,19 @@ class LocalArtifactStore:
                 _not_empty("The output directory isn't empty.")
             except FileNotFoundError:
                 _not_empty("The output directory disappeared while Trial Folio claimed it.")
-            self._write_all(descriptor, data)
-            # Read again once written: macOS gives a new file on FAT or exFAT a placeholder inode,
-            # the same for every empty file, until its first write gives it its own.
-            with _defer_sigint():
-                claim.file = os.fstat(descriptor)
+            try:
+                self._write_all(descriptor, data)
+                # Read again once written: on FAT and exFAT, macOS gives a new, empty file a
+                # temporary inode, which its first write replaces.
+                with _defer_sigint():
+                    claim.file = os.fstat(descriptor)
+            except BaseException:
+                # So may a write that failed or was interrupted, even one that wrote nothing, and
+                # cleanup checks this identity. If reading it fails too, the first failure is the
+                # one to report.
+                with _defer_sigint(), suppress(OSError):
+                    claim.file = os.fstat(descriptor)
+                raise
         finally:
             if descriptor is not None:
                 os.close(descriptor)

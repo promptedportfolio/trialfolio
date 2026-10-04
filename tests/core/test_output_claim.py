@@ -5,9 +5,10 @@ Traces to docs/contracts.md, CLI behavior (claiming the directory), and interrup
 claim succeeds); to R01-AC15's check that a directory isn't empty, hidden files included; to
 R01-AC27, of which this module is the core part: processes released together claim one directory,
 and at most one succeeds each time; to R01-AC28's interrupt while the claim writes `plan.json`,
-which leaves nothing behind; and to a corrected defect, found by a walk-through of the user guide
-on 2026-10-04: on FAT and exFAT, where empty files share a placeholder identity, every claim failed
-with `output.not_empty`.
+which leaves nothing behind; and to two corrected defects on FAT and exFAT, where empty files share
+a placeholder identity: every claim failed with `output.not_empty`, as a walk-through of the user
+guide found on 2026-10-04; and a claim that failed after its first write left its file, as PR #30's
+review found.
 """
 
 import errno
@@ -22,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.core.conftest import Faults, SyncLog, identity, raises, snapshot
+from tests.core.conftest import Effect, Faults, SyncLog, identity, raises, snapshot
 from tests.support.storage_faults import placeholder_identities
 from trialfolio.errors import TrialFolioError
 from trialfolio.storage import LocalArtifactStore
@@ -525,6 +526,38 @@ def test_a_failed_claim_removes_its_file_where_empty_files_share_a_placeholder_i
     claim_fails_with("output.not_empty", LocalArtifactStore(out))
 
     assert snapshot(tmp_path) == {"out": None, "out/theirs.txt": b"theirs\n"}
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        (raises(OSError(errno.EIO, "Input/output error")), TrialFolioError),
+        (lambda: signal.raise_signal(signal.SIGINT), KeyboardInterrupt),
+    ],
+    ids=["failed-sync", "interrupt"],
+)
+def test_a_claim_that_fails_after_its_first_write_removes_its_file_whose_identity_changed(
+    tmp_path: Path,
+    faults: Faults,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Effect,
+    expected: type[BaseException],
+) -> None:
+    # The first write replaced the file's placeholder inode, as on FAT and exFAT, so cleanup must
+    # check the identity the file has then. PR #30's review found that a failure after the write
+    # left the file, which the next claim of the directory then refused as not empty.
+    placeholder_identities(monkeypatch)
+    original_handler = signal.getsignal(signal.SIGINT)
+    faults.on_sync("plan.json", failure)
+
+    with pytest.raises(expected) as raised:
+        LocalArtifactStore(tmp_path / "out").claim("plan.json", PLAN)
+
+    if isinstance(raised.value, TrialFolioError):
+        assert raised.value.code == "storage.write_failed"
+        assert "Input/output error" in raised.value.message
+    assert snapshot(tmp_path) == {}
+    assert signal.getsignal(signal.SIGINT) is original_handler
 
 
 # Processes released together by a barrier (R01-AC27).
