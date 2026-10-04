@@ -51,8 +51,13 @@ def placeholder_identities(monkeypatch: pytest.MonkeyPatch) -> None:
             return result
         fields = list(result[: os.stat_result.n_sequence_fields])
         fields[stat.ST_INO] = PLACEHOLDER_INODE
-        # The rest, such as st_mtime, come only from the mapping.
-        others = {name: getattr(result, name) for name in dir(result) if name.startswith("st_")}
+        # The rest, such as st_mtime, come only from the mapping, which takes none of the
+        # sequence's fields: Python 3.14 refuses one there.
+        others = {
+            name: getattr(result, name)
+            for name in dir(result)
+            if name.startswith("st_") and name not in os.stat_result.__match_args__
+        }
         return os.stat_result(fields, others)
 
     def fstat(descriptor: int) -> os.stat_result:
