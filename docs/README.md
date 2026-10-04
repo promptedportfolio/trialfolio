@@ -5,6 +5,7 @@ These are the specifications for Trial Folio. Release 0.1.0's implementation tas
 ## Where to start
 
 - **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. [0.1.0 API execution](releases/0.1.0-api-execution.md) is Ready, and its implementation tasks are done. [0.2.0](releases/0.2.0-review.md) is an outline, to be completed as a specification before it's implemented.
+- **Using Trial Folio:** read the [user guide](user-guide.md).
 - **Understanding the product:** read [spec.md](spec.md), then [roadmap.md](roadmap.md).
 - **Checking permissions or notices:** read [../LICENSE](../LICENSE), [licensing-policy.md](licensing-policy.md), and [disclaimers.md](disclaimers.md).
 
@@ -29,6 +30,7 @@ These are the specifications for Trial Folio. Release 0.1.0's implementation tas
 | [adrs/0005-build-on-the-portfolio123-api-only.md](adrs/0005-build-on-the-portfolio123-api-only.md) | Building on the Portfolio123 API only, with no DataMiner integration, and the reordered releases |
 | [adrs/0006-observe-the-wrappers-http-exchanges.md](adrs/0006-observe-the-wrappers-http-exchanges.md) | Recording each HTTP exchange the `p123api` wrapper makes, so failures are classified by what was sent |
 | [adrs/0007-host-the-source-publicly-on-github.md](adrs/0007-host-the-source-publicly-on-github.md) | The public GitHub repository, its hosting exception, and where packages come from |
+| [user-guide.md](user-guide.md) | How to set up and use Trial Folio, workflow by workflow, with what to check at each step. It owns no requirement: where it disagrees with an owning document, the guide is fixed. |
 | [ai-development.md](ai-development.md) | How AI is used to build Trial Folio, in plain language |
 | [spec-authoring-guide.md](spec-authoring-guide.md) | Bootstrap context used to write these documents. Superseded wherever an owning document says otherwise |
 
