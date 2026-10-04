@@ -37,11 +37,11 @@ Statistical validation and trading readiness are **not assessed** by any planned
 
 ## Installation
 
-No installation is available yet. When 0.1.0 is released, this section will give the verified installation steps. Releases will be downloaded from [promptedportfolio.com](https://promptedportfolio.com), not from PyPI, and installed with `uv` or `pipx`.
+No installation is available yet. When 0.1.0 is released, this section will give the verified installation steps. Releases will be downloaded from [promptedportfolio.com](https://promptedportfolio.com), not from PyPI, and installed with `uv` or `pipx`. Until then, you can run 0.1.0 from a copy of this repository, as the [user guide](docs/user-guide.md#1-set-up) describes.
 
 ## Usage
 
-These are release 0.1.0's commands. Put your Portfolio123 API ID and API key in the environment variables `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`, and run a screen configuration:
+These are release 0.1.0's commands. The [user guide](docs/user-guide.md) walks through each workflow, from setting up to reading the report, with what to check at each step. Put your Portfolio123 API ID and API key in the environment variables `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`, and run a screen configuration:
 
 ```text
 trialfolio run screen.yaml --out runs/baseline/
@@ -112,6 +112,7 @@ The full notice is in [docs/disclaimers.md](docs/disclaimers.md).
 
 ## Documentation
 
+- [docs/user-guide.md](docs/user-guide.md): how to set up and use Trial Folio, workflow by workflow.
 - [docs/README.md](docs/README.md): a map of the specifications.
 - [AGENTS.md](AGENTS.md): instructions for coding agents.
 - [docs/ai-development.md](docs/ai-development.md): how AI is used to build Trial Folio.
