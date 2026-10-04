@@ -7,6 +7,7 @@ These are the specifications for Trial Folio. Release 0.1.0's implementation tas
 - **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. [0.1.0 API execution](releases/0.1.0-api-execution.md) is Ready, and its implementation tasks are done. [0.2.0](releases/0.2.0-review.md) is an outline, to be completed as a specification before it's implemented.
 - **Using Trial Folio:** read the [user guide](user-guide.md).
 - **Understanding the product:** read [spec.md](spec.md), then [roadmap.md](roadmap.md).
+- **Planning a release:** follow [Product direction (D-23)](spec.md#product-direction) and the [release planning requirements](roadmap.md#release-planning-requirements), then write or complete its release specification. Roadmap targets are not implementation assignments.
 - **Checking permissions or notices:** read [../LICENSE](../LICENSE), [licensing-policy.md](licensing-policy.md), and [disclaimers.md](disclaimers.md).
 
 ## Documents
@@ -14,7 +15,7 @@ These are the specifications for Trial Folio. Release 0.1.0's implementation tas
 | Document | Owns |
 |---|---|
 | [spec.md](spec.md) | Purpose, primary use, vocabulary, invariants (INV), enduring requirements (REQ), and owner decisions (D) and defaults (P) |
-| [roadmap.md](roadmap.md) | The release sequence, dependencies, the value of each increment, driving-use-case coverage, and deferred scope |
+| [roadmap.md](roadmap.md) | Release planning requirements, the proposed sequence and workflow benefits, dependencies, driving-use-case coverage, and excluded or deferred scope |
 | [contracts.md](contracts.md) | Interface and artifact meanings: configuration, identity, provenance, metrics, storage, hashing, reports, CLI, errors, protocols, credentials, and logging |
 | [methodology.md](methodology.md) | Research design, statistical assumptions, evidence requirements, and interpretation (METH) |
 | [licensing-policy.md](licensing-policy.md) | Eligibility, reserved uses, permissions, publication and distribution, and release gates (LIC) |

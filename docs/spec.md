@@ -1,7 +1,7 @@
 # Trial Folio product specification
 
 **Status:** Draft
-**Date:** 2026-10-01
+**Date:** 2026-10-04
 **Owner:** Nathan Slaughter
 
 This document owns Trial Folio's purpose, vocabulary, enduring invariants, enduring product requirements, and the record of owner decisions. Release scope lives in [releases/](releases/), interface semantics in [contracts.md](contracts.md), research design in [methodology.md](methodology.md), and legal terms in [../LICENSE](../LICENSE) and [licensing-policy.md](licensing-policy.md). Release 0.1.0's implementation tasks are done; [AGENTS.md](../AGENTS.md) gives its current state.
@@ -25,6 +25,16 @@ The driving use case is reproducing published factor research in Portfolio123. A
 - Results gross and net of declared costs, rolling returns over several holding periods, quantile-bucket returns, and period splits around the paper's sample and publication dates.
 
 [methodology.md](methodology.md) (METH-09) defines the scientific meaning of these needs. [roadmap.md](roadmap.md) shows which increment delivers each one. Trial Folio stays general enough for other strategy research, but when priorities conflict, this use case decides.
+
+## Product direction
+
+**Requirement (D-23).** Prioritize complete research workflows. A feature earns its place by helping a researcher answer a stated question, understand a limitation, or remove manual work from a study. DataMiner's capabilities are a reference for provider operations; matching its operation list or every option is not a release or product-completion criterion.
+
+As the product grows, organize work around the study, its experiments, and its evidence. Keep the question, baseline, known prior research, changes, and findings connected. Provider operations are steps within that workflow. Exploratory work can begin with a lightweight brief; reproduction studies and confirmatory claims still require their respective protocols and evidence under [METH-09 and METH-01 to METH-04](methodology.md).
+
+Favor consistent analysis of archived evidence, explanations of differences and missing data, predefined sensitivity experiments, and records of how a reproduction departs from its source. Preserve failed and inconclusive work. Additional data access, provider options, and discovery tools are prioritized when a study needs them. Scientific assessments remain subject to their methodology requirements; a more convenient interface does not establish validation.
+
+The [roadmap](roadmap.md) owns the sequence, exclusions, and [release planning requirements](roadmap.md#release-planning-requirements). Each release specification turns that direction into observable acceptance criteria. Application 1.0.0 follows the [public-contract stability policy](contracts.md#versioning); adding a graphical interface alone does not satisfy it.
 
 ## Users and outcomes
 
@@ -128,6 +138,7 @@ Decisions are the owner's. Proposed defaults stand until changed before the impl
 | D-20 | A release accepts only the setting values a recorded live call has verified. Release 0.1.0 verifies 1-week rebalancing, ranking by name, and ranking by ID, each in its own call, under a budget the owner approves. Other values are verified when a release needs them; for experiments, that's in R03-T01. | Requirement | 2026-10-01 |
 | D-21 | Reports link to two pages outside themselves: the LICENSE published with the Trial Folio version that rendered them, and Portfolio123's terms. Next to the full notice, they carry a statement that Trial Folio's license grants no rights to Portfolio123 data and that the user is responsible for following Portfolio123's terms ([DSC-06](disclaimers.md#dsc-06-portfolio123-notices)). The links load nothing, so reports stay self-contained (D-07). The LICENSE link works once the repository is public and the version is tagged. This settles the open question of a public license link ([DSC-03](disclaimers.md#dsc-03-where-notices-appear)). | Requirement | 2026-10-02 |
 | D-22 | Distribution channel ([ADR 0007](adrs/0007-host-the-source-publicly-on-github.md)). The source is public on GitHub, under LICENSE section 5.4's narrow exception for viewing and forking there. Installable packages are downloaded from the brand's site, delivered with LICENSE. Trial Folio isn't published on PyPI, whose terms grant redistribution rights the license reserves. A Homebrew tap may follow, pointing at the site's archive, without prebuilt bottles. Outside contributions aren't accepted until contributor terms exist ([LIC-14](licensing-policy.md#lic-14-contributions)). | Requirement | 2026-10-02 |
+| D-23 | Prioritize complete research workflows under [Product direction](#product-direction). DataMiner capability coverage is a reference, not a release or product-completion criterion. Release planning must demonstrate the research benefit using the [roadmap's requirements](roadmap.md#release-planning-requirements). | Requirement | 2026-10-04 |
 
 ### Proposed defaults
 
