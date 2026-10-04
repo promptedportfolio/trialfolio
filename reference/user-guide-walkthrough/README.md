@@ -31,4 +31,4 @@ The run and the report were written in the walk-through's temporary workspace. L
 
 - `payloads/runs/first/`: step 7's run.
 - `payloads/reports/first/`: step 9's re-rendered report and its log.
-- `payloads/terminal/`: step 7's terminal output. `run-stdout.txt` holds its summary, and `run-stderr.txt` the plan and its progress.
+- `payloads/terminal/`: step 7's terminal output. `run-stdout.txt` holds its summary, and `run-stderr.txt` the plan hash, the budget, and the run's progress. With a matching `--approve`, the CLI shows only the plan hash and the budget ([the plan display](../../docs/contracts.md#approval)), so the full plan isn't in the terminal output: it's the run's `plan.json`.
