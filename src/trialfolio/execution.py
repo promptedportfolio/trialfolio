@@ -63,11 +63,12 @@ from trialfolio.normalization import (
     LAYOUT_VERSION,
     PARSER_VERSION,
     NormalizedTables,
+    holds_series,
     write_tables,
 )
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
 from trialfolio.planning import check_approval
-from trialfolio.provider import ScreenBacktestClient
+from trialfolio.provider import DecodedResponse, ScreenBacktestClient
 from trialfolio.report import HtmlReportRenderer, write_report
 from trialfolio.runs import CONFIGURATION_PATH, MANIFEST_PATH, PLAN_PATH, SavedAttempt, SavedRun
 from trialfolio.storage import ArtifactStore, StoredFile
@@ -358,7 +359,8 @@ class Execution:
             for row in case.settings
             if "not_snapshotted" in row.flags
         )
-        decoded = record.response is not None and record.response.form == "decoded"
+        saved = None if self._result is None else self._result.response
+        series = isinstance(saved, DecodedResponse) and holds_series(saved.payload)
         return RunManifest(
             schema_version=SCHEMA_VERSION,
             artifact_type="run",
@@ -379,9 +381,9 @@ class Execution:
             license_id=LICENSE_ID,
             notice_version=NOTICE_VERSION,
             capabilities=Capabilities(
-                # A decoded response holds the per-period series, `results.rows` and `chart`,
-                # which 0.1.0 preserves without normalizing.
-                return_series="source_only" if decoded else "absent",
+                # The per-period series, `results.rows` and `chart`, which 0.1.0 preserves
+                # without normalizing, when the saved response holds them.
+                return_series="source_only" if series else "absent",
                 statistical_validation="not_assessed",
                 trading_readiness="not_assessed",
             ),

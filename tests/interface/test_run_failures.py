@@ -235,6 +235,31 @@ def test_a_response_that_fails_validation_is_flagged_after_it_is_saved(cli: Cli)
     assert not (out / "normalized").exists()
 
 
+@pytest.mark.parametrize(
+    ("reply", "series"),
+    [(response("invalid-structure.json"), True), (Reply(200, b"{}"), False)],
+    ids=["series-without-stats", "empty-object"],
+)
+def test_return_series_says_whether_the_saved_response_holds_series(
+    cli: Cli, reply: Reply, series: bool
+) -> None:
+    # Both fail validation, and both are saved decoded; only the first has `results.rows` and
+    # `chart`, which the manifest's capability and the report may say were preserved.
+    cli.ready()
+    cli.server.reply("/auth", AUTHENTICATED)
+    cli.server.reply("/screen/backtest", reply)
+    out = cli.tmp / "out"
+
+    outcome = approved_run(cli, out)
+
+    assert error_of(outcome)["code"] == "provider.response_invalid"
+    manifest = accounted_for(out, "provider.response_invalid")
+    assert manifest.capabilities.return_series == ("source_only" if series else "absent")
+    report = (out / "report.html").read_text()
+    assert ("per-period returns: preserved in the saved response" in report) is series
+    assert ("Its per-period series is preserved there" in report) is series
+
+
 # A read timeout (R01-AC06)
 
 

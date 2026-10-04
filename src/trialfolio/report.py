@@ -652,10 +652,13 @@ class _Report:
         if not forms:
             return "None: the run saved no response."
         if "decoded" in forms:
-            return (
+            kept = (
                 "None. Trial Folio excludes nothing from the response, and keeps it whole as it"
-                " was saved. Its per-period series is preserved there, but not interpreted."
+                " was saved."
             )
+            if self._run.manifest.capabilities.return_series == "source_only":
+                kept += " Its per-period series is preserved there, but not interpreted."
+            return kept
         return "None. The response is kept whole, as it came, undecoded."
 
     def _responses(self) -> list[SavedResponse]:

@@ -8,6 +8,8 @@ version 1).
 - `metrics_rows` gives `metrics.csv`'s 20 rows, and `settings_rows` `settings.csv`'s 23, in
   their documented order.
 - `write_tables` does both for an attempt that succeeded, and writes the two tables.
+- `holds_series` says whether a decoded response holds the per-period series that 0.1.0 preserves
+  without interpreting, for the manifest's `return_series`.
 
 The tables are written only from a decoded response with the required structure. For any other
 response, the normalized result is unavailable: `write_tables` raises
@@ -202,6 +204,29 @@ def read_response(content: bytes, path: str) -> ScreenBacktestResult:
     values = {metric.path: _reported(top, metric) for metric in METRICS if metric.path is not None}
     coverage = _coverage(cast("list[str]", columns), cast("list[list[object]]", rows))
     return ScreenBacktestResult(coverage=coverage, values=values)
+
+
+def holds_series(payload: object) -> bool:
+    """Whether a decoded response holds per-period series, which 0.1.0 preserves without
+    interpreting (the manifest's `return_series`): a `results.rows` array with a row, or a
+    `chart` object holding an array with an entry. A response without either, such as `{}`,
+    holds none, whether or not it has the required structure."""
+    if not isinstance(payload, dict):
+        return False
+    top = cast("dict[str, object]", payload)
+    results = top.get("results")
+    if isinstance(results, dict):
+        rows = cast("dict[str, object]", results).get("rows")
+        if _non_empty_array(rows):
+            return True
+    chart = top.get("chart")
+    if not isinstance(chart, dict):
+        return False
+    return any(_non_empty_array(series) for series in cast("dict[str, object]", chart).values())
+
+
+def _non_empty_array(value: object) -> bool:
+    return isinstance(value, list) and len(cast("list[object]", value)) > 0
 
 
 def _object(value: object, name: str, path: str) -> dict[str, object]:
