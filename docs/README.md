@@ -19,6 +19,7 @@ These are the specifications for Trial Folio. Release 0.1.0 is being implemented
 | [licensing-policy.md](licensing-policy.md) | Eligibility, reserved uses, permissions, publication and distribution, and release gates (LIC) |
 | [disclaimers.md](disclaimers.md) | Notice texts and placement, warranty summary, Portfolio123 notices and terms, and operating safeguards (DSC) |
 | [releases/0.1.0-api-execution.md](releases/0.1.0-api-execution.md) | One screen backtest through the API, with a saved record and report (R01) |
+| [releases/0.1.0-verification.md](releases/0.1.0-verification.md) | Release 0.1.0's verification record: each command's date, versions, and outcome, and the evidence for each acceptance criterion |
 | [releases/0.2.0-review.md](releases/0.2.0-review.md) | Offline comparison of saved runs against a baseline (R02). An outline, to be completed before implementation |
 | [releases/0.3.0-experiments.md](releases/0.3.0-experiments.md) | Finite experiments with resume (R03). An outline, to be completed before implementation |
 | [adrs/0001-python-and-portfolio123-integration.md](adrs/0001-python-and-portfolio123-integration.md) | Python, `p123api`, and the third-party code boundary, with verification notes |
