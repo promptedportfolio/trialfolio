@@ -154,9 +154,11 @@ class Cli:
         stderr: TextIO | None = None,
         store_factory: Callable[[str], ArtifactStore] = LocalArtifactStore,
         timeout: int | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> Outcome:
         """Runs the command with `argv`. stdin is empty unless given. stderr is captured unless
-        given, such as a pseudo-terminal's."""
+        given, such as a pseudo-terminal's. The clock gives `STARTED`, then a second later at each
+        reading, unless given."""
         out = io.StringIO()
         captured = io.StringIO()
         err = captured if stderr is None else stderr
@@ -169,7 +171,7 @@ class Cli:
                 [str(arg) for arg in argv],
                 endpoint=self.server.endpoint,
                 timeout=timeout,
-                clock=lambda: next(moments),
+                clock=(lambda: next(moments)) if clock is None else clock,
                 store_factory=store_factory,
             )
         return Outcome(code, out.getvalue(), captured.getvalue() if stderr is None else "")

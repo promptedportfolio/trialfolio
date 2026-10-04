@@ -8,9 +8,11 @@ the test process, with the real client, `requests`, and `urllib3` over the fake 
 """
 
 import hashlib
+import io
 import json
 import os
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,7 @@ import pytest
 from tests.interface.conftest import (
     AUTHENTICATED,
     RESPONSES,
+    STARTED,
     Cli,
     FaultyStores,
     Outcome,
@@ -93,6 +96,31 @@ def test_the_manifest_records_the_options_without_a_path(cli: Cli) -> None:
     }
     assert str(cli.tmp) not in content
     assert str(config("formula.yaml").parent) not in content
+
+
+def test_the_manifest_gives_the_time_the_command_started(cli: Cli) -> None:
+    # The clock reads an hour later once the plan is shown, as after a long wait for approval at
+    # the prompt: the command started, and read its configuration, before that.
+    cli.ready()
+    serve_success(cli.server)
+    out = cli.tmp / "out"
+    shown = io.StringIO()
+
+    def clock() -> datetime:
+        return STARTED + timedelta(hours=1 if "Plan hash:" in shown.getvalue() else 0)
+
+    path = config("formula.yaml")
+    outcome = cli(
+        "run", path, "--out", out, "--approve", plan_hash_for(path), stderr=shown, clock=clock
+    )
+
+    assert outcome.exit_code == 0, shown.getvalue()
+    manifest = RunManifest.model_validate_json((out / "manifest.json").read_bytes())
+    assert manifest.command.started_at == STARTED
+    (configuration,) = (a for a in manifest.artifacts if a.role == "configuration")
+    assert configuration.source is not None
+    assert configuration.source.acquired_at == STARTED
+    assert manifest.created_at == STARTED + timedelta(hours=1)
 
 
 def test_one_attempt_lists_authentication_then_the_request(cli: Cli) -> None:

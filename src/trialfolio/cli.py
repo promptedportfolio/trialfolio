@@ -433,6 +433,7 @@ def _run(invocation: _Invocation) -> TrialFolioError | None:
     args = invocation.args
     _ignore_key_log(invocation.environ)
     _require_acknowledgment(invocation)
+    started_at = _started(invocation)
     content = _read_input(args.config)
     configuration = read_screen_configuration(content, args.config)
     store = invocation.store_factory(args.out)
@@ -449,7 +450,6 @@ def _run(invocation: _Invocation) -> TrialFolioError | None:
     from trialfolio.execution import Execution
     from trialfolio.provider import P123ScreenBacktestClient
 
-    started_at = invocation.clock()
     execution = Execution(
         plan,
         approval.plan_hash,
@@ -478,6 +478,7 @@ def _run(invocation: _Invocation) -> TrialFolioError | None:
 def _demo(invocation: _Invocation) -> TrialFolioError | None:
     args = invocation.args
     _require_acknowledgment(invocation)
+    started_at = _started(invocation)
     store = invocation.store_factory(args.out)
     store.check_empty()
     versions = installed_versions()
@@ -496,7 +497,7 @@ def _demo(invocation: _Invocation) -> TrialFolioError | None:
         CommandRecord(
             name="demo",
             options={"json": args.json},
-            started_at=invocation.clock(),
+            started_at=started_at,
         ),
         clock=invocation.clock,
     )
@@ -592,6 +593,13 @@ def _ignore_key_log(environ: MutableMapping[str, str]) -> None:
             KEY_LOG_VARIABLE,
             extra={"event": "cli.environment.ignored"},
         )
+
+
+def _started(invocation: _Invocation) -> datetime:
+    """When `run` or `demo` started, as the manifest records it, and when it acquired the
+    configuration: once the license is acknowledged, before the configuration is read, so the
+    run's duration includes planning and any wait for approval."""
+    return invocation.clock()
 
 
 def _read_input(path: str) -> bytes:
