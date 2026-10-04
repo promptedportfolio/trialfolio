@@ -235,7 +235,7 @@ This example is validated in two ways:
 - **Against Portfolio123.** It resolves to exactly the request in [`reference/p123api-screen-backtest/request.json`](../reference/p123api-screen-backtest/request.json), which Portfolio123 accepted in R01-T01.
 - **Against this mapping.** The example was parsed with a YAML safe loader and mapped by the rules above, and the result equals that request.
 
-Once implemented, a test repeats the second check: `tests/contract/test_screen_configuration.py::test_documented_example_resolves_to_reference_request` ([0.1.0's test pairing](releases/0.1.0-api-execution.md#test-pairing)).
+A test repeats the second check: `tests/contract/test_screen_configuration.py::test_documented_example_resolves_to_reference_request` ([0.1.0's test pairing](releases/0.1.0-api-execution.md#test-pairing)).
 
 ### Review configuration
 

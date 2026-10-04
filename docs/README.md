@@ -1,10 +1,10 @@
 # Trial Folio documentation
 
-These are the specifications for Trial Folio. Release 0.1.0 is being implemented; [AGENTS.md](../AGENTS.md) gives its current state. Each document owns one kind of requirement. The other documents reference it instead of copying it, and a contradiction between documents is a defect to fix.
+These are the specifications for Trial Folio. Release 0.1.0's implementation tasks are done; [AGENTS.md](../AGENTS.md) gives its current state. Each document owns one kind of requirement. The other documents reference it instead of copying it, and a contradiction between documents is a defect to fix.
 
 ## Where to start
 
-- **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. The next implementable release is [0.1.0 API execution](releases/0.1.0-api-execution.md). It's Ready: the owner signed off on 2026-10-01.
+- **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. [0.1.0 API execution](releases/0.1.0-api-execution.md) is Ready, and its implementation tasks are done. [0.2.0](releases/0.2.0-review.md) is an outline, to be completed as a specification before it's implemented.
 - **Understanding the product:** read [spec.md](spec.md), then [roadmap.md](roadmap.md).
 - **Checking permissions or notices:** read [../LICENSE](../LICENSE), [licensing-policy.md](licensing-policy.md), and [disclaimers.md](disclaimers.md).
 
