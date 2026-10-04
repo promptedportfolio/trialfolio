@@ -220,7 +220,7 @@ def test_a_blank_directory_is_a_usage_error(cli: Cli) -> None:
     assert "it's blank" in outcome.stderr
 
 
-def test_a_failed_write_says_the_workspace_holds_some_starter_files(
+def test_a_failed_write_says_nothing_was_sent_and_what_is_left(
     cli: Cli, faults: FaultyStores
 ) -> None:
     workspace = cli.tmp / "workspace"
@@ -232,8 +232,8 @@ def test_a_failed_write_says_the_workspace_holds_some_starter_files(
     error = error_of(outcome.stdout)
     assert error["code"] == "storage.write_failed"
     assert error["message"].endswith(
-        f"{workspace} holds some of the starter files: remove them, then run trialfolio init"
-        " there again."
+        f" Nothing was sent. {workspace} holds some of the starter files: remove them, then run"
+        " trialfolio init there again."
     )
     assert outcome.summary["output_dir"] == str(workspace)
     assert set(snapshot(workspace)) == {"screen.yaml"}

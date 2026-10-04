@@ -488,7 +488,9 @@ def _init(invocation: _Invocation) -> TrialFolioError | None:
                 "command.interrupted", f"Trial Folio was interrupted. Nothing was sent. {left}"
             )
         return TrialFolioError(
-            failure.code, f"{failure.message} {left}", f"{failure.log_message} {left}"
+            failure.code,
+            f"{failure.message} Nothing was sent. {left}",
+            f"{failure.log_message} Nothing was sent. {left}",
         )
     where = "the current directory" if directory == "." else directory
     invocation.result = [
