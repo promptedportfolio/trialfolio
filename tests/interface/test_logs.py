@@ -124,6 +124,9 @@ class Interloper:
     def write(self, path: str, data: bytes) -> StoredFile:
         return self._store.write(path, data)
 
+    def discard(self, path: str, data: bytes) -> None:
+        self._store.discard(path, data)
+
     def read(self, path: str) -> bytes:
         return self._store.read(path)
 

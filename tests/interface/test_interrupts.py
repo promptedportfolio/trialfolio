@@ -14,6 +14,7 @@ through the CLI's entry function in the test process. The stages:
 - after the backtest request got a 400, before the attempt record: the record is written once,
   with `command.interrupted`, keeping Portfolio123's message after "Before that:".
 - after the attempt record: the record isn't changed.
+- after the manifest was published, before its write returned: the manifest is discarded.
 
 Each ending after the claim leaves no manifest, so the output is visibly incomplete. Storage
 faults and socket faults inject the interrupts, at the boundaries the release allows.
@@ -111,6 +112,9 @@ class _AfterWriteStore:
         if path.rsplit("/", 1)[-1] == self._name:
             self._action()
         return stored
+
+    def discard(self, path: str, data: bytes) -> None:
+        self._store.discard(path, data)
 
     def read(self, path: str) -> bytes:
         return self._store.read(path)
@@ -348,4 +352,24 @@ def test_an_interrupt_after_a_successful_attempt_record_leaves_no_manifest(
     assert (attempt_directory(out) / "response.json").exists()
     assert not (out / "normalized").exists()
     assert not (out / "manifest.json").exists()
+    written_once(faults)
+
+
+def test_an_interrupt_after_the_manifest_is_published_discards_it(
+    cli: Cli, faults: FaultyStores
+) -> None:
+    cli.ready()
+    out = cli.tmp / "out"
+    serve_success(cli.server)
+    faults.fail_after("manifest.json", KeyboardInterrupt())
+
+    outcome = approved_run(cli, out, store_factory=faults)
+
+    interrupted(outcome)
+    assert faults.published[-1] == "manifest.json"
+    assert not (out / "manifest.json").exists()
+    assert (out / "report.html").exists()
+    assert "manifest" not in outcome.summary["outputs"]  # pyright: ignore[reportOperatorIssue]
+    message = outcome.summary["error"]["message"]  # pyright: ignore[reportIndexIssue]
+    assert "The run has no manifest, so its output is incomplete." in message
     written_once(faults)

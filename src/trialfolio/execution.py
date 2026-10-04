@@ -13,7 +13,9 @@ artifact storage, and reports).
 4. Normalizes a response that was saved into `normalized/metrics.csv` and `normalized/settings.csv`.
    A response that fails validation is flagged `provider.response_invalid`, without tables.
 5. Writes `report.html`, rendered from the manifest as it will be written, without the report.
-6. Writes `manifest.json` last, listing every file. Without it, the output is incomplete.
+6. Writes `manifest.json` last, listing every file. Without it, the output is incomplete. A write
+   of it that fails, an interrupt included, discards it if the store had published it already, so
+   a run the command reports as failed never reads as complete.
 
 Steps 4 to 6 follow any attempt whose record was written, so a failed attempt is accounted for
 too, unless an interrupt or a storage failure decided the error code: the output then stays
@@ -134,6 +136,8 @@ class Execution:
         self._tables: NormalizedTables | None = None
         self._report: StoredFile | None = None
         self._manifest: StoredFile | None = None
+        self._manifest_left = False
+        """Whether a manifest whose write failed couldn't be discarded."""
         self._files: list[tuple[ArtifactRole, StoredFile]] = []
         self._configuration_version = ""
 
@@ -181,7 +185,7 @@ class Execution:
         during the claim, which removes what the claim created, so nothing is left. After the
         claim, every ending is returned, except a second interrupt while the attempt record is
         written once more, and an unexpected exception after the attempt ended, which leave the
-        output without a manifest.
+        output without a manifest. `ending_detail` says what such an ending means for the run.
         """
         if self._claimed:
             raise RuntimeError("an execution runs once")
@@ -213,21 +217,19 @@ class Execution:
             report = write_report(self._store, saved, HtmlReportRenderer(self._version))
             self._report = report
             self._files.append(("report", report))
-            manifest = self._build_manifest(result.record, error, created_at)
-            self._manifest = self._store.write(MANIFEST_PATH, _model_json(manifest))
+            self._write_manifest(self._build_manifest(result.record, error, created_at))
         except KeyboardInterrupt:
             return prevailing(
                 TrialFolioError(
                     "command.interrupted",
-                    f"Trial Folio was interrupted after the attempt ended. {self._detail()}"
-                    " The run has no manifest, so its output is incomplete.",
+                    f"Trial Folio was interrupted after the attempt ended. {self.ending_detail()}",
                 ),
                 error,
             )
         except TrialFolioError as failure:
             if failure.code != "storage.write_failed":
                 raise
-            ending = f"{self._detail()} The run has no manifest, so its output is incomplete."
+            ending = self.ending_detail()
             return prevailing(
                 TrialFolioError(
                     failure.code,
@@ -244,6 +246,12 @@ class Execution:
             extra=self._log_fields("case.completed"),
         )
         return error
+
+    def ending_detail(self) -> str:
+        """What the run's records say, for the message of an ending after the claim that the run
+        didn't record itself: whether the screen backtest request was sent and may have been
+        charged, as the attempt's records read, and whether the run has its manifest."""
+        return f"{self._request_detail()} {self._manifest_detail()}"
 
     @property
     def _version(self) -> str:
@@ -302,11 +310,42 @@ class Execution:
     def _started(self) -> StartRecord | None:
         return None if self._attempt is None else self._attempt.start_record
 
-    def _detail(self) -> str:
-        if self._result is None:
-            return request_detail("failed", possibly_charged=False)
-        record = self._result.record
-        return request_detail(record.outcome, possibly_charged=record.possibly_charged)
+    def _request_detail(self) -> str:
+        result = self._result
+        if result is not None and result.recorded:
+            record = result.record
+            return request_detail(record.outcome, possibly_charged=record.possibly_charged)
+        if self._attempt is not None and self._attempt.start_record is not None:
+            return (
+                "The screen backtest request may have been sent, and may have been charged: the"
+                " attempt's start record reads as running. Trial Folio never retries it"
+                " automatically."
+            )
+        return "The screen backtest request wasn't sent."
+
+    def _manifest_detail(self) -> str:
+        if self._manifest is not None:
+            return "The run's manifest was written, so its output is complete."
+        if self._manifest_left:
+            return (
+                "The run's manifest.json was published before the failure, and couldn't be"
+                " removed, so the run reads as complete although the command failed."
+            )
+        return "The run has no manifest, so its output is incomplete."
+
+    def _write_manifest(self, manifest: RunManifest) -> None:
+        """Writes the manifest. A write that fails, an interrupt or an unexpected exception
+        included, discards the file if the store published it before the failure."""
+        data = _model_json(manifest)
+        try:
+            self._manifest = self._store.write(MANIFEST_PATH, data)
+        except BaseException:
+            self._manifest = None
+            try:
+                self._store.discard(MANIFEST_PATH, data)
+            except TrialFolioError:
+                self._manifest_left = True
+            raise
 
     def _build_manifest(
         self, record: AttemptRecord, error: TrialFolioError | None, created_at: datetime
