@@ -1,0 +1,21 @@
+# Invalid: Each rule is a formula, written in quotes or as a block scalar.
+# Key: rules[0]
+kind: screen
+schema_version: 1.0.0
+title: Earnings yield with a liquidity floor
+purpose: Reference backtest for the 0.1.0 response layout.
+universe: SP500
+rules:
+  - AvgDailyTot(30) > 1000000
+ranking:
+  formula: 'EarnYield'
+  lower_is_better: false
+max_holdings: 25
+benchmark: SPY
+start_date: 2016-01-01
+end_date: 2025-12-31
+rebalance_weeks: 4
+transaction_price: open
+slippage_percent: 0.25
+pit_method: complete
+precision: 4

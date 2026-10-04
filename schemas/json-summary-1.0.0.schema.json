@@ -49,7 +49,7 @@
     },
     "NoCounts": {
       "additionalProperties": false,
-      "description": "The counts of a command that has none: `report` and `license`.",
+      "description": "The counts of a command that has none: `init`, `report`, and `license`.",
       "properties": {},
       "title": "NoCounts",
       "type": "object"
@@ -130,6 +130,11 @@
       "additionalProperties": false,
       "description": "The output files, relative to `output_dir`, by role. A key is left out for a file the\ncommand didn't write.",
       "properties": {
+        "configuration": {
+          "pattern": "^[^/\\\\:]+(/[^/\\\\:]+)*$",
+          "title": "Configuration",
+          "type": "string"
+        },
         "manifest": {
           "pattern": "^[^/\\\\:]+(/[^/\\\\:]+)*$",
           "title": "Manifest",
@@ -170,6 +175,7 @@
     },
     "command": {
       "enum": [
+        "init",
         "run",
         "report",
         "demo",
@@ -220,7 +226,7 @@
           "type": "null"
         }
       ],
-      "description": "The output directory as given on the command line; null if none was created.",
+      "description": "The output directory as given on the command line, `.` for `trialfolio init` without\none; null if none was created.",
       "title": "Output Dir"
     },
     "outputs": {

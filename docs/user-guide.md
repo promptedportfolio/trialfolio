@@ -37,16 +37,31 @@ Steps:
 
    Add the line to your shell's startup file, such as `~/.zshrc`, to keep it. The rest of this guide writes `trialfolio` for this command.
 
-3. Keep your configurations and runs in a folder of your own, outside the repository, and run the commands from there.
+3. Set up a workspace: a folder of your own, outside the repository, for your configurations and runs. Run the commands from there.
+
+   ```sh
+   trialfolio init ~/research
+   cd ~/research
+   ```
+
+   It writes three files:
+
+   - `screen.yaml`, a starter configuration
+   - `README.md`, the next steps
+   - `.gitignore`, which keeps credential files, runs, and reports out of Git, if you keep the folder in a repository
+
+   The folder must be new or empty. Given no folder, `trialfolio init` sets up the current one. It needs no license acknowledgment, and sends nothing.
 
 **Check:**
 
 - `trialfolio --version` prints `trialfolio 0.1.0`.
-- `trialfolio --help` lists `run`, `report`, `demo`, and `license`.
+- `trialfolio --help` lists `init`, `run`, `report`, `demo`, and `license`.
+- `trialfolio init ~/research` exits 0 without asking you to acknowledge the license. The folder holds exactly `screen.yaml`, `README.md`, and `.gitignore`, with no `logs/` folder.
+- Running it again on the same folder fails with `output.not_empty`, exit code 4, and changes nothing.
 
 ## 2. Acknowledge the license
 
-`run`, `report`, and `demo` need a one-time acknowledgment of the license and the research notice. `--version`, `--help`, and `trialfolio license` don't.
+`run`, `report`, and `demo` need a one-time acknowledgment of the license and the research notice. `--version`, `--help`, `trialfolio init`, and `trialfolio license` don't.
 
 1. Read them: `trialfolio license`. It prints the license, the full research notice, and whether you've acknowledged them.
 2. Acknowledge them, in one of three ways:
@@ -76,7 +91,7 @@ trialfolio demo --out demo/
 
 ## 4. Write a screen configuration
 
-A screen configuration is a YAML file describing one long-only stock screen backtest. Start from this example, which Portfolio123 accepted in a live call:
+A screen configuration is a YAML file describing one long-only stock screen backtest. Start from your workspace's `screen.yaml`. It has the settings of this example, which Portfolio123 accepted in a live call, with a comment on each key:
 
 ```yaml
 kind: screen
@@ -101,7 +116,8 @@ precision: 4                                           # 4 only
 ```
 
 - **Every key but `purpose` and `data_vendor` is required.** There's no default end date, and no default slippage of zero.
-- **Formulas go in single quotes,** so double quotes inside them stay as they are.
+- **Formulas go in single quotes,** so double quotes inside them stay as they are. A formula without quotes is rejected, because outside quotes YAML reads a space and `#` as the start of a comment: it would cut `FRank("EarnYield", #Industry) > 50` short. Double quotes and block scalars (`|`) work too. Other text, such as the title, the universe, or a ranking system's name, needs no quotes.
+- **Comments** run from `#` to the end of the line, outside quotes. They aren't part of the plan, so they don't change its hash, and the run keeps them in its copy of the file.
 - **A ranking** is one formula, as above, or an existing ranking system in your account, by name or by ID:
 
   ```yaml
@@ -123,6 +139,8 @@ precision: 4                                           # 4 only
 **Check:**
 
 - A misspelled key, a missing required key, or an unsupported value fails with `config.invalid`, exit code 3. The message lists every problem, and nothing is sent or created. For example, `rebalance_weeks: 2` gives "`rebalance_weeks` input should be 1 or 4."
+- A rule without quotes, such as `- AvgDailyTot(30) > 1000000`, fails the same way, with "`rules[0]` is a formula without quotes."
+- Adding or changing a comment doesn't change the plan hash that [the plan](#5-review-the-plan) shows.
 
 ## 5. Review the plan
 
@@ -273,7 +291,7 @@ Every error message says what failed, why, and what to do next. These are the on
 | Code | What happened | What to do |
 |---|---|---|
 | `config.invalid` | The configuration has a problem; the message lists each one | Fix them. Nothing was sent. |
-| `output.not_empty` | `--out` names a directory that isn't empty | Choose a new or empty directory |
+| `output.not_empty` | `--out`, or the folder given to `trialfolio init`, names a directory that isn't empty | Choose a new or empty directory |
 | `plan.approval_required` | The plan wasn't approved, or the hash didn't match | Approve it in a terminal, or give its full hash. Nothing was sent. |
 | `environment.unsupported` | The installed `p123api`, `requests`, or `urllib3` isn't the verified version | Run `uv sync` in the repository to restore the locked versions |
 | `provider.auth_failed` | The credentials are missing, or Portfolio123 refused them | Check the API ID and key |
@@ -288,6 +306,6 @@ Every error message says what failed, why, and what to do next. These are the on
 
 After a Portfolio123 error, the run's directory still has its report and manifest, which record the failure. After an interrupt, a storage failure, or an internal error, there's no manifest, so the run reads as incomplete. [Errors](contracts.md#errors) lists every code.
 
-**Logs.** Each command with an output directory logs to `logs/trialfolio.log` there. `trialfolio license`, and an internal error before the output directory is claimed, log to a per-user directory, which the README's [Your data stays on your machine](../README.md#your-data-stays-on-your-machine) lists, with how to delete it. To see more detail, set `TRIALFOLIO_LOG_LEVEL=DEBUG`. At every level, logs hold no credentials, configuration values, formulas, or results.
+**Logs.** Each command with an output directory logs to `logs/trialfolio.log` there. `trialfolio init`, `trialfolio license`, and an internal error before the output directory is claimed log to a per-user directory, which the README's [Your data stays on your machine](../README.md#your-data-stays-on-your-machine) lists, with how to delete it. To see more detail, set `TRIALFOLIO_LOG_LEVEL=DEBUG`. At every level, logs hold no credentials, configuration values, formulas, or results.
 
 **Reporting a problem.** [CONTACT.md](../CONTACT.md) links to a form for bugs and questions.

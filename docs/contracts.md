@@ -103,7 +103,7 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 | `title` | string | Yes | 1–200 characters. Used as the report heading. | Not sent |
 | `purpose` | string | No | 1–2,000 characters, not all whitespace. If it's absent, the report says no purpose was declared. | Not sent |
 | `universe` | string | Yes | A non-empty Portfolio123 universe name, for example `SP500` | `screen.universe` |
-| `rules` | list of strings | Yes | At least one screening formula. Each one is a non-empty string, and their order is kept. The model accepts ordered lists or tuples, never sets. | `screen.rules`, each as `{"formula": "…"}`. It has no `type` field, because Portfolio123 rejects one (R01-T01). |
+| `rules` | list of strings | Yes | At least one screening formula. Each one is a non-empty string, written in quotes or as a block scalar ([formulas](#screen-configuration)), and their order is kept. The model accepts ordered lists or tuples, never sets. | `screen.rules`, each as `{"formula": "…"}`. It has no `type` field, because Portfolio123 rejects one (R01-T01). |
 | `ranking` | mapping | Yes | Exactly one of the [ranking forms](#ranking-forms) | `screen.ranking` |
 | `max_holdings` | integer | Yes | 1 or more | `screen.maxNumHoldings` |
 | `benchmark` | string | Yes | A non-empty Portfolio123 benchmark symbol, for example `SPY` | `screen.benchmark` |
@@ -131,7 +131,7 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 
 | Form | Keys in `ranking` | Sent as |
 |---|---|---|
-| A single formula (recommended) | `formula`, a non-empty string; `lower_is_better`, a boolean, required | `{"formula": "…", "lowerIsBetter": …}` |
+| A single formula (recommended) | `formula`, a non-empty string, written in quotes or as a block scalar; `lower_is_better`, a boolean, required | `{"formula": "…", "lowerIsBetter": …}` |
 | An existing ranking system, by name | `name`, a non-empty string | The name, as a string |
 | An existing ranking system, by ID | `id`, a positive integer | The ID, as an integer |
 
@@ -160,6 +160,7 @@ Either one fails with `config.invalid`, and the message names the supported form
   - **Not a string.** A number written as a string is rejected.
 - **Dates.** `end_date` is later than `start_date`.
 - **Formulas.** Formulas are the user's strategy definition. They're sent and saved, but never logged. Write them in single quotes. Portfolio123 formulas often contain double quotes, which single quotes keep as they are. YAML processes no escapes inside single quotes, and a single quote inside one is written twice (`''`).
+  - **A formula is quoted (R01-T18).** Each rule, and the ranking's `formula`, is written in single or double quotes, or as a block scalar (`|` or `>`). A plain scalar, without quotes, fails with `config.invalid`, and the message names its key and says to write it in single quotes. Outside quotes, YAML reads a space followed by `#` as the start of a comment. Portfolio123 formulas can hold `#`, as in `FRank("EarnYield", #Industry) > 50`, which YAML would read without quotes as `FRank("EarnYield",` with no error. Other text, such as the title, universe, benchmark, and a ranking system's name, may be written without quotes.
 - **Descriptions.** `title` and `purpose` describe the run. They are recorded in the plan and the run manifest with `user_supplied` provenance ([plan contents](#plan-contents)). They're never sent, and they aren't part of the resolved settings that identify a case.
 
 **Sent on every request.** Trial Folio adds three fixed values, which 0.1.0's scope doesn't let the configuration change. R01-T01 verified each one.
@@ -936,6 +937,7 @@ The command is `trialfolio`. Commands are introduced by release:
 
 | Command | Release | Purpose |
 |---|---|---|
+| `trialfolio init [<dir>]` | 0.1.0 | Set up a workspace: a new or empty folder, the current one by default, with a starter screen configuration, a README, and a `.gitignore` |
 | `trialfolio run <config> --out <dir> [--approve <plan-hash>]` | 0.1.0 | Plan and execute one supported screen backtest, once its [plan is approved](#approval) |
 | `trialfolio report <run-dir> --out <dir>` | 0.1.0 | Re-render a saved run's report offline |
 | `trialfolio demo --out <dir>` | 0.1.0 | Write a synthetic example run, labeled synthetic, and render its report offline |
@@ -946,7 +948,7 @@ The command is `trialfolio`. Commands are introduced by release:
 
 - **stdout** carries the command's result: a short human summary, or with `--json` the [JSON summary](#json-summary).
 - **stderr** carries progress, warnings, and errors, which come from the same events as the log file. It also carries the [plan display](#approval) and the confirmation prompts, which are written directly and never logged, because they show configuration values.
-- **Output directory.** `review` and `run` create the output directory. They refuse to write into a directory that exists and is not empty (`output.not_empty`). There is no overwrite option in 0.1.0. `experiment` reuses an existing directory only to resume the same plan, as release 0.3.0 specifies.
+- **Output directory.** `review` and `run` create the output directory. They refuse to write into a directory that exists and is not empty (`output.not_empty`). There is no overwrite option in 0.1.0. `init` treats its workspace the same way. `experiment` reuses an existing directory only to resume the same plan, as release 0.3.0 specifies.
 - **Claiming the directory.** A command that creates a new output checks the directory early, but another process can write to it before the command writes anything, for example while `run` waits for approval. So the command claims the directory with its first file. `experiment` resuming its own existing directory doesn't claim it; it takes the experiment lock instead, as release 0.3.0 specifies. The claim:
   1. It creates the directory if it's absent, and any missing parent directories, one at a time, remembering which ones it created. A directory that another process creates first is used as it is, and not remembered. Before it creates anything, it checks the path as the early check does: a path that exists and isn't a directory, a symbolic link to nothing included, is `output.not_empty`, and a path that can't be created, because a parent isn't a directory or none exists, is `storage.write_failed`. `..` segments are resolved in the path as written, so the claim never creates a directory that's only on the way to `..`.
   2. It creates its first file directly under its final name, with an exclusive create that fails if the name exists, then writes and syncs it. No temporary file is involved, so nothing else is written into a directory that isn't claimed.
@@ -972,6 +974,14 @@ The command is `trialfolio`. Commands are introduced by release:
 - **The manifest.** `command.options` records `approve` and `json`, as given. Neither the configuration's path nor `--out` is recorded, because a path can name the user, and manifests may be shared ([D-14](spec.md#decisions)): `configuration.yaml` holds the configuration's bytes, and the manifest is in the output directory. Every run lists the layout's parser. `command.started_at` is when the command started: once the license is acknowledged, before it reads the configuration, so the run's duration includes planning and any wait for approval. The configuration's source record is acquired then; the request's when the attempt started; the response's when it ended. A response is `verified`, and the configuration `user_supplied`. `return_series` is `source_only` when the attempt saved a decoded response that holds per-period series: a `results.rows` array with a row, or a `chart` object holding an array with an entry. It's `absent` otherwise, as for a response such as `{}`, and the report then says nothing was preserved of turnover, positions, or per-period returns.
 - **The demo.** `trialfolio demo` takes `run`'s steps, with `approval: not_required`, over a client that opens no connection. That client records the two exchanges a successful call records, `POST /auth` and `POST /screen/backtest`, each a 200, because the 1.0.0 attempt record holds an attempt that succeeded only with them. So the demo's run has every file and record of a real one, and its records read as a real run's do, possibly charged with one provider request. Its manifest is labeled synthetic, and its report says that its attempt, exchanges, and counts are invented and nothing was sent or charged. Its packaged configuration, the documented example retitled, and response, the `complete.json` fixture without `cost` and `quotaRemaining`, are in `src/trialfolio/demo_data/`, so the run reports no cost.
 - **`trialfolio report`** gives `input.not_found` for a run directory that doesn't exist, and `input.not_a_run` for anything else that isn't a complete run.
+- **`trialfolio init` (R01-T19).** It writes the starter files in `src/trialfolio/init_data/` into the workspace, `.` when no directory is given: `screen.yaml`, which claims the workspace, then `README.md` and `.gitignore`. `src/trialfolio/starter.py` gives them.
+  - **`screen.yaml`** is the [documented example](#example) without its purpose, with a comment on each key and on quoting formulas. Its settings resolve to the request Portfolio123 accepted in R01-T01.
+  - **`README.md`** says what the workspace holds, and the next steps, with a link to the user guide at the version's release tag, which works once the version is tagged.
+  - **`.gitignore`** keeps credential files (`.env*` and `*.env`) and the `runs/` and `reports/` folders at the workspace's top level out of Git, because runs and reports hold Portfolio123 data.
+  - **No acknowledgment.** It processes no data, so it needs no [license acknowledgment](#license-acknowledgment). It sends nothing.
+  - **Its log** goes to the per-user log directory, as `trialfolio license`'s does, so the workspace holds only the starter files.
+  - **A failure after the claim.** A write that fails, or an interrupt, after `screen.yaml` claimed the workspace leaves the files written so far. It removes nothing. The message gives the usual code, `storage.write_failed` or `command.interrupted`, says nothing was sent, and says the workspace holds some of the starter files, to remove before running `trialfolio init` there again.
+  - **Nothing depends on a workspace.** No other command looks for one, and the starter files hold nothing Trial Folio reads back.
 - **stdout and stderr.** Without `--json`, stdout holds a short summary on success, and nothing on failure. stderr shows the error with its full message, progress at INFO, and warnings. An argument the parser rejects is a usage error, exit 2, reported by the parser on stderr, without a JSON summary: no error code covers it. That includes a blank `--out`, empty or only whitespace, which names no directory of its own, and an `--out` that isn't valid UTF-8 text, such as a name in another encoding, which Python reads with lone surrogates: the summary's `output_dir` couldn't hold either. An error message that names a path from the command line or the environment, such as the configuration's, the run directory's, or the log's, writes its lone surrogates and its control and formatting characters as escapes, as the [plan display](#approval) does, so the summary can hold the message, and the path can't act on a terminal.
 - **The JSON summary.** `counts.attempts` is 1 once an attempt record or a start record exists. `metrics_unavailable` is 0 when there's no `metrics.csv`. `warnings` counts the warnings logged during the command.
 - **The entry function** is `trialfolio.cli.main(argv, *, endpoint, timeout, clock, store_factory)`. It returns the exit code, and reads `sys.stdin`, `sys.stdout`, and `sys.stderr` as they are when it's called. The installed command, and `python -m trialfolio`, call it with none of the keyword parameters.
@@ -1002,13 +1012,13 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
 | `outcome` | `completed`, `partial`, or `failed` |
 | `exit_code` | The process exit code |
 | `ids` | Identifiers the command created, for example `{"review_id": "…"}`. For `run`: `plan_hash` and `case_id` once the plan is built, even if it isn't approved, and `attempt_id` whenever an attempt record or a start record exists, including after a failed authentication. Empty when it created none. |
-| `output_dir` | The output directory as given on the command line. `null` if none was created. |
-| `outputs` | Output files relative to `output_dir`, keyed by role: `manifest`, `report`, `metrics`, `settings`, `differences` |
+| `output_dir` | The output directory as given on the command line, and `.` for `trialfolio init` given none. `null` if none was created. |
+| `outputs` | Output files relative to `output_dir`, keyed by role: `configuration` (the starter configuration `trialfolio init` writes), `manifest`, `report`, `metrics`, `settings`, `differences` |
 | `counts` | For `run`: `attempts`; `provider_requests`, the sends of the planned request that may have reached Portfolio123, never authentication ([HTTP exchanges](#http-exchanges)), which the [budget](#budget-and-retries) limits; `metrics_unavailable`; `warnings`; and the credit `cost` when the provider reports it. For `review` (0.2.0): `results`, `settings_flagged`, `metrics_unavailable`, `warnings`. |
 | `statistical_validation`, `trading_readiness` | `not_assessed` in every 0.x release that doesn't assess them |
 | `error` | `null`, or `{"code": …, "message": …}` using the codes in [errors](#errors) |
 
-`ids` and `outputs` leave out a key that has no value, rather than writing `null`. `counts` is `{}` for `report` and `license`. When `outcome` is `completed`, `exit_code` is 0 and `error` is `null`. Otherwise `exit_code` is the error code's exit code, and `outcome` is `partial` exactly for `execution.partial`. `schemas/json-summary-1.0.0.schema.json` gives every field.
+`ids` and `outputs` leave out a key that has no value, rather than writing `null`. `counts` is `{}` for `init`, `report`, and `license`. When `outcome` is `completed`, `exit_code` is 0 and `error` is `null`. Otherwise `exit_code` is the error code's exit code, and `outcome` is `partial` exactly for `execution.partial`. `schemas/json-summary-1.0.0.schema.json` gives every field.
 
 ### License acknowledgment
 
@@ -1025,7 +1035,7 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
   - Setting `TRIALFOLIO_ACCEPT_LICENSE` to `<license_id>/<notice_version>`, for example `LicenseRef-NSPRL-1.0/1.0`, acknowledges for that process only and records nothing, which suits CI.
 
   Without either, the command exits with `license.not_acknowledged`. The message gives both options and the exact value to use.
-- **Exempt commands.** `trialfolio --version`, `--help`, and `trialfolio license` work without an acknowledgment. `trialfolio license` prints the license, the full notice, and the acknowledgment status.
+- **Exempt commands.** `trialfolio --version`, `--help`, `trialfolio init`, which processes no data, and `trialfolio license` work without an acknowledgment. `trialfolio license` prints the license, the full notice, and the acknowledgment status.
 - **The record.** It's a file, `acknowledgment.json`, in the per-user configuration directory:
   - `TRIALFOLIO_CONFIG_DIR`, if set
   - otherwise `$XDG_CONFIG_HOME/trialfolio` or `~/.config/trialfolio` on Linux
@@ -1129,7 +1139,7 @@ Development credentials are handled as [AGENTS.md](../AGENTS.md#credentials-and-
 - **Levels.** ERROR for a failed operation, WARNING for a degraded condition the command continues through, INFO for lifecycle milestones, and DEBUG for diagnostic detail. Log files record INFO and above. Setting `TRIALFOLIO_LOG_LEVEL` to `DEBUG`, `INFO`, `WARNING`, or `ERROR` changes that, for diagnosis. Any other value is ignored, with a warning on stderr. The content rules apply at every level.
 - **Tracing.** Start and end events carry duration and outcome for each command, case, attempt, and provider request, linked by IDs, and this serves as the trace. OpenTelemetry is adopted only through an ADR, with local file exporters only.
 - **Metrics.** There is no metrics system. Per-run counts and durations go in the manifest.
-- **Storage.** Logs go to `logs/` inside the output directory, or to the per-user log directory for commands without one, such as `trialfolio license`. A command with an output directory holds its events in memory until it has [claimed the directory](#cli-behavior). If it stops before then, including when the claim fails, it writes no log file, and its messages appear only on stderr. The exception is `internal.unexpected`: the command then writes the held events to the per-user log directory, and its message names that file. Log size is bounded by rotation. The README documents the locations and how to delete them.
+- **Storage.** Logs go to `logs/` inside the output directory, or to the per-user log directory for commands without one, such as `trialfolio license`, and for `trialfolio init`, so a workspace holds only its starter files. A command with an output directory holds its events in memory until it has [claimed the directory](#cli-behavior). If it stops before then, including when the claim fails, it writes no log file, and its messages appear only on stderr. The exception is `internal.unexpected`: the command then writes the held events to the per-user log directory, and its message names that file. Log size is bounded by rotation. The README documents the locations and how to delete them.
 - **The per-user log directory** follows the same pattern as the [acknowledgment record](#license-acknowledgment), in each platform's conventional place for logs:
   - `TRIALFOLIO_LOG_DIR`, if set
   - otherwise `$XDG_STATE_HOME/trialfolio/logs` or `~/.local/state/trialfolio/logs` on Linux

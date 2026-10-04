@@ -297,6 +297,73 @@ def test_an_empty_key_is_named() -> None:
     assert "`''` isn't a key this configuration accepts." in rejection(content)
 
 
+# Formulas are written in quotes or as block scalars (R01-AC02)
+
+RULE = "  - 'AvgDailyTot(30) > 1000000'"
+HASH_FORMULA = 'FRank("EarnYield", #Industry) > 50'
+"""A formula holding `#`, as Portfolio123's scopes do: without quotes, YAML would read
+`FRank("EarnYield",` and take the rest for a comment."""
+
+
+def test_a_formula_holding_a_hash_is_read_whole_in_quotes() -> None:
+    configuration = read_screen_configuration(
+        with_line(RULE, f"  - '{HASH_FORMULA}'"), "screen.yaml"
+    )
+
+    assert configuration.rules == (HASH_FORMULA,)
+
+
+def test_a_formula_holding_a_hash_without_quotes_is_rejected_not_cut_short() -> None:
+    message = rejection(with_line(RULE, f"  - {HASH_FORMULA}"))
+
+    assert "`rules[0]` is a formula without quotes. Write it in single quotes" in message
+    assert "FRank" not in message
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        '  - "AvgDailyTot(30) > 1000000"',
+        "  - |-\n    AvgDailyTot(30) > 1000000",
+        "  - >-\n    AvgDailyTot(30) > 1000000",
+    ],
+    ids=["double-quoted", "literal-block", "folded-block"],
+)
+def test_a_formula_in_double_quotes_or_a_block_scalar_is_accepted(written: str) -> None:
+    configuration = read_screen_configuration(with_line(RULE, written), "screen.yaml")
+
+    assert configuration.rules == ("AvgDailyTot(30) > 1000000",)
+
+
+def test_only_formulas_need_quotes() -> None:
+    """The documented example writes its title, universe, and benchmark without quotes, and a
+    ranking system's name isn't a formula."""
+    configuration = read_screen_configuration(documented_example().encode(), "screen.yaml")
+    named = read_screen_configuration(
+        with_line("  formula: 'EarnYield'\n  lower_is_better: false", "  name: Value Composite"),
+        "screen.yaml",
+    )
+
+    assert (configuration.universe, configuration.benchmark) == ("SP500", "SPY")
+    assert named.ranking == NameRanking(name="Value Composite")
+
+
+def test_each_unquoted_formula_is_listed_with_the_other_problems() -> None:
+    content = (
+        with_line(RULE, f"{RULE}\n  - Close(0) > 5")
+        .replace(b"  formula: 'EarnYield'", b"  formula: EarnYield")
+        .replace(b"max_holdings: 25\n", b"")
+    )
+
+    message = rejection(content)
+
+    assert "`max_holdings` is required." in message
+    assert "`rules[1]` is a formula without quotes." in message
+    assert "`ranking.formula` is a formula without quotes." in message
+    assert "`rules[0]`" not in message
+    assert message.count("\n- ") == 3
+
+
 @pytest.mark.parametrize(
     ("text", "blank"),
     [("\x1c", False), ("\ufeff", False), ("\u3000", True), ("\u0085", True), (" \t", True)],

@@ -1,0 +1,26 @@
+# A screen configuration: one long-only stock screen backtest, through Portfolio123's API.
+# trialfolio init wrote it with the settings of the example Portfolio123 accepted in a live call.
+# Change them for your own backtest. Then review its plan, which sends nothing until you approve:
+#   trialfolio run screen.yaml --out runs/first/
+kind: screen
+schema_version: 1.0.0
+title: Earnings yield with a liquidity floor   # Yours, for the report. Never sent.
+# purpose: Why you're running this backtest.   # Optional. Never sent.
+universe: SP500
+# Write every formula in single quotes. Outside quotes, YAML reads a space and # as the start of
+# a comment, so it would cut a formula such as 'FRank("EarnYield", #Industry) > 50' short.
+# Trial Folio rejects a formula without quotes.
+rules:                                         # At least one formula
+  - 'AvgDailyTot(30) > 1000000'
+ranking:                                       # One formula, or a ranking system's name or id
+  formula: 'EarnYield'
+  lower_is_better: false
+max_holdings: 25
+benchmark: SPY
+start_date: 2016-01-01
+end_date: 2025-12-31                           # Required: there's no default of today
+rebalance_weeks: 4                             # 1 or 4
+transaction_price: open                        # open only
+slippage_percent: 0.25                         # 0.25 means 0.25%. Required: no default of zero.
+pit_method: complete                           # complete only
+precision: 4                                   # 4 only

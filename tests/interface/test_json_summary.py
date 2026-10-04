@@ -4,8 +4,9 @@ to stderr.
 
 Traces to R01-AC18, over the scenarios of R01-AC01 (no approval), R01-AC05 (provider failures and
 missing credentials), and R01-AC15 (an output directory that isn't empty), and for `report`,
-`demo`, and `license`; and to docs/contracts.md, JSON summary: `ids` and `outputs` leave out a key
-that has no value, `counts` is `{}` for `report` and `license`, and `outcome`, `exit_code`, and
+`demo`, `license`, and `init` (R01-AC33); and to docs/contracts.md, JSON summary: `ids` and
+`outputs` leave out a key that has no value, `counts` is `{}` for `init`, `report`, and `license`,
+and `outcome`, `exit_code`, and
 `error` agree; and to R01-T14's rules that a blank `--out`, or one that isn't valid UTF-8 text,
 which `output_dir` can't hold, is a usage error, and that an error message escapes a path it
 names, so the summary can hold it. Each summary is checked against the `JsonSummary` model and the keys of the
@@ -289,6 +290,30 @@ def test_report_of_an_empty_directory_isnt_a_run(cli: Cli) -> None:
 
     assert outcome.exit_code == 3
     assert summary["error"]["code"] == "input.not_a_run"  # pyright: ignore[reportIndexIssue]
+
+
+def test_init(cli: Cli) -> None:
+    workspace = cli.tmp / "workspace"
+
+    outcome = cli("init", workspace, "--json")
+    summary = summary_of(outcome, "init")
+
+    assert summary["outcome"] == "completed"
+    assert summary["ids"] == {}
+    assert summary["output_dir"] == str(workspace)
+    assert summary["outputs"] == {"configuration": "screen.yaml"}
+    assert summary["counts"] == {}
+
+
+def test_init_into_a_directory_that_isnt_empty(cli: Cli) -> None:
+    (cli.tmp / "notes.txt").write_bytes(b"mine")
+
+    outcome = cli("init", cli.tmp, "--json")
+    summary = summary_of(outcome, "init")
+
+    assert summary["error"]["code"] == "output.not_empty"  # pyright: ignore[reportIndexIssue]
+    assert summary["output_dir"] is None
+    assert summary["outputs"] == {}
 
 
 @pytest.mark.parametrize("accept", [False, True], ids=["status", "accept"])
