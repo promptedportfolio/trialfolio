@@ -8,13 +8,13 @@ transaction_price: open
 rebalance_weeks: 4
 end_date: '2025-12-31'
 start_date: '2016-01-01'
-benchmark: SPY
+benchmark: "SPY"
 max_holdings: 25
 ranking:
   lower_is_better: false
   formula: 'EarnYield'
 rules:
   - 'AvgDailyTot(30) > 1000000'
-universe: SP500
+universe: "SP500"
 purpose: Reference backtest for the 0.1.0 response layout.
 title: Earnings yield with a liquidity floor

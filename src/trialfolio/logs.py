@@ -10,7 +10,9 @@ length of one command, `CommandLogs` gives the `trialfolio` logger two handlers:
   an output directory attaches once it has claimed the directory, and writes into `logs/` there.
   If it stops before then, it writes no log file, except after an internal error, when its held
   events go to the per-user log directory. A command without an output directory, such as
-  `trialfolio license`, attaches to the per-user log directory from the start.
+  `trialfolio license`, attaches to the per-user log directory from the start. `trialfolio init`
+  does too, but keeps the log out of its workspace: when the per-user log directory is in the
+  workspace, it writes no log file.
 - **The terminal,** stderr, showing progress at INFO and warnings, in human-readable form, from the
   same events. Errors are the command's to show: it writes its error with the full message, which
   can hold Portfolio123's own text, while its log event holds only the loggable message.
@@ -23,11 +25,13 @@ an exception's message or a traceback's local variables. Log size is bounded by 
 import json
 import logging
 import logging.handlers
+import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Final, Self, TextIO
+from unicodedata import normalize
 
 from trialfolio.userdirs import log_directory
 
@@ -130,6 +134,9 @@ class CommandLogs:
         self._sink = _FileSink(JsonLineFormatter(trialfolio_version), level)
         self._terminal = _Terminal(stderr)
         self._saved: tuple[int, bool] = (self._logger.level, self._logger.propagate)
+        self._workspace: Path | None = None
+        self._declined = False
+        """Whether `attach` refused the workspace: the command writes no log file."""
         self.path: Path | None = None
         """The log file, once one is attached."""
 
@@ -164,12 +171,29 @@ class CommandLogs:
         self._logger.setLevel(self._saved[0])
         self._logger.propagate = self._saved[1]
 
+    def keep_out_of(self, workspace: Path) -> None:
+        """Keeps the log file out of `workspace`, the folder `trialfolio init` sets up, which holds
+        only its starter files, and which must stay as it was if the command refuses it. From
+        now, attaching to `workspace`, or to a directory in it, writes no log file. The per-user
+        log directory is in it when `TRIALFOLIO_LOG_DIR` names a directory there, or when the
+        workspace holds the home directory's default."""
+        self._workspace = workspace
+
     def attach(self, directory: Path) -> Path | None:
         """Starts writing the log file in `directory`, creating it if needed, with every event
-        held so far. Returns the file, or None, with a warning, when it can't be opened: the
-        command carries on without a log file."""
-        if self._sink.file is not None:
+        held so far. Returns the file, or None, with a warning, when it can't be opened, or when
+        `directory` is in the workspace `keep_out_of` named: the command carries on without a log
+        file."""
+        if self._sink.file is not None or self._declined:
             return self.path
+        if self._workspace is not None and _within(directory, self._workspace):
+            self._logger.warning(
+                "The log directory is in the workspace, which holds only the starter files, so"
+                " this command writes no log.",
+                extra={"event": "cli.log.unavailable"},
+            )
+            self._declined = True
+            return None
         path = directory / LOG_FILE
         try:
             directory.mkdir(parents=True, exist_ok=True)
@@ -196,3 +220,55 @@ class CommandLogs:
         """Attaches to the per-user log directory: for a command without an output directory,
         and for an internal error before a command claimed its own."""
         return self.attach(log_directory(self._environ))
+
+
+def _within(path: Path, directory: Path) -> bool:
+    """Whether `path` is `directory` or in it, where the file system puts each: `directory` as
+    the output directory's claim reads a path, with `..` resolved as written, and `path` as
+    creating it does, once symbolic links are resolved.
+
+    The parts of each that exist are compared as the file system identifies them, so another
+    spelling of the same folder counts: in another case, on a file system that ignores case, as
+    macOS's and Windows' do by default, or in another Unicode normalization, on one that ignores
+    that, as macOS's does. Names that don't exist yet are compared ignoring both, as such a file
+    system would: on one that doesn't ignore them, a log directory that differs from the
+    workspace only that way gets no log file either."""
+    workspace = _existing(os.path.abspath(directory))
+    log = _existing(os.path.realpath(path))
+    if workspace is None or log is None:
+        return False  # Where no part of a path exists, nothing can be created.
+    _, status, unmade = workspace
+    start, start_status, names = log
+    if unmade:
+        # The workspace doesn't exist yet: `path` is in it only if it will be made in the same
+        # folder, through the same names.
+        same_names = _folded(names[: len(unmade)]) == _folded(unmade)
+        return same_names and os.path.samestat(start_status, status)
+    return any(_is(part, status) for part in (start, *start.parents))
+
+
+def _existing(path: str) -> tuple[Path, os.stat_result, tuple[str, ...]] | None:
+    """`path`'s deepest part that exists, its status, and the names after it; None when no part
+    of it exists."""
+    whole = Path(path)
+    for part in (whole, *whole.parents):
+        try:
+            status = os.stat(part)
+        except OSError:
+            continue
+        return part, status, whole.parts[len(part.parts) :]
+    return None
+
+
+def _is(path: Path, status: os.stat_result) -> bool:
+    """Whether `path` exists, and is the file `status` describes."""
+    try:
+        return os.path.samestat(os.stat(path), status)
+    except OSError:
+        return False
+
+
+def _folded(names: tuple[str, ...]) -> tuple[str, ...]:
+    """The names as a file system that ignores case and Unicode normalization compares them:
+    Unicode's canonical caseless match."""
+    return tuple(normalize("NFD", normalize("NFD", name).casefold()) for name in names)

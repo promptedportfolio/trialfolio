@@ -38,6 +38,8 @@ class SummaryOutputs(TypedDict, total=False):
     """The output files, relative to `output_dir`, by role. A key is left out for a file the
     command didn't write."""
 
+    configuration: RelativePath
+    """`trialfolio init`'s starter screen configuration."""
     manifest: RelativePath
     report: RelativePath
     metrics: RelativePath
@@ -59,7 +61,7 @@ class RunCounts(ContractModel):
 
 
 class NoCounts(ContractModel):
-    """The counts of a command that has none: `report` and `license`."""
+    """The counts of a command that has none: `init`, `report`, and `license`."""
 
 
 class JsonSummary(ContractModel):
@@ -67,13 +69,14 @@ class JsonSummary(ContractModel):
     failure."""
 
     schema_version: Literal["1.0.0"]
-    command: Literal["run", "report", "demo", "license"]
+    command: Literal["init", "run", "report", "demo", "license"]
     trialfolio_version: SemanticVersion
     outcome: CommandOutcome
     exit_code: Annotated[Literal[0, 1, 2, 3, 4, 5, 6, 130], IntegerOnly]
     ids: SummaryIds
     output_dir: NonEmptyText | None
-    """The output directory as given on the command line; null if none was created."""
+    """The output directory as given on the command line, `.` for `trialfolio init` without
+    one; null if none was created."""
     outputs: SummaryOutputs
     counts: RunCounts | NoCounts
     statistical_validation: NotAssessed

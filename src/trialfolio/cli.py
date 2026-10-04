@@ -4,13 +4,17 @@ The CLI parses arguments, reads configuration files and the environment, present
 acknowledgment and the plan, injects credentials, calls the core, formats output, and maps errors
 to exit codes (REQ-03). Commands:
 
+- `trialfolio init [<dir>]` sets up a workspace: a new or empty folder, the current one by
+  default, with a starter screen configuration, a README, and a `.gitignore`. It processes no
+  data, so it needs no acknowledgment, and logs to the per-user log directory, so the workspace
+  holds only its starter files.
 - `trialfolio run <config> --out <dir> [--approve <plan-hash>]` plans and executes one screen
   backtest, once its plan is approved, in the order of steps docs/contracts.md's approval gives.
 - `trialfolio report <run-dir> --out <dir>` re-renders a saved run's report offline.
 - `trialfolio demo --out <dir>` writes a synthetic example run offline, labeled synthetic.
 - `trialfolio license [--accept]` prints the license, the full notice, and the acknowledgment
   status; `--accept` records the acknowledgment.
-- `trialfolio --version` and `--help`, which, with `license`, need no acknowledgment.
+- `trialfolio --version` and `--help`, which, with `init` and `license`, need no acknowledgment.
 
 stdout carries the result: a short summary, or, with `--json`, exactly one JSON summary, on
 success and on failure. stderr carries progress, warnings, and errors, and the plan display and
@@ -52,6 +56,7 @@ from trialfolio.errors import EXIT_CODES, TrialFolioError
 from trialfolio.logs import LOGS_DIRECTORY, CommandLogs
 from trialfolio.notices import CONCISE_NOTICE, FULL_NOTICE, LICENSE_ID, LICENSE_NAME, NOTICE_VERSION
 from trialfolio.planning import build_plan, installed_versions
+from trialfolio.starter import CONFIGURATION, starter_files
 from trialfolio.storage import ArtifactStore, LocalArtifactStore
 
 if TYPE_CHECKING:
@@ -66,7 +71,7 @@ type Clock = Callable[[], datetime]
 type StoreFactory = Callable[[str], ArtifactStore]
 """Makes the `ArtifactStore` of an output directory, from the path given on the command line."""
 
-type CommandName = Literal["run", "report", "demo", "license"]
+type CommandName = Literal["init", "run", "report", "demo", "license"]
 
 API_ID_VARIABLE: Final = "TRIALFOLIO_P123_API_ID"
 API_KEY_VARIABLE: Final = "TRIALFOLIO_P123_API_KEY"
@@ -144,6 +149,20 @@ def _parser(version: str) -> argparse.ArgumentParser:
 
     def command(name: str, summary: str) -> argparse.ArgumentParser:
         return commands.add_parser(name, help=summary, description=summary, allow_abbrev=False)
+
+    init = command(
+        "init",
+        "Set up a workspace: a folder with a starter screen configuration, a README, and a"
+        " .gitignore.",
+    )
+    init.add_argument(
+        "dir",
+        nargs="?",
+        default=".",
+        type=_directory,
+        help="the workspace: absent, or an empty directory; the current directory by default",
+    )
+    _json(init)
 
     run = command(
         "run",
@@ -344,6 +363,8 @@ class _Invocation:
     def _outputs(self) -> dict[str, str]:
         if self.output_dir is None:
             return {}
+        if self.name == "init":
+            return {"configuration": CONFIGURATION}
         if self.report is not None:
             return {"report": self.report}
         outputs: dict[str, str] = {}
@@ -437,6 +458,50 @@ def _event(name: str, terminal: bool) -> dict[str, object]:
 
 
 # Commands
+
+
+def _init(invocation: _Invocation) -> TrialFolioError | None:
+    """Sets up a workspace. It processes no data, so it needs no acknowledgment, and its log goes
+    to the per-user log directory, so the workspace holds only its starter files. When that
+    directory is in the workspace, the command writes no log, so the workspace stays as it was if
+    it's refused."""
+    directory: str = invocation.args.dir
+    invocation.log.keep_out_of(Path(directory))
+    invocation.log.attach_to_user_directory()
+    store = invocation.store_factory(directory)
+    store.check_empty()
+    (first, content), *rest = starter_files(invocation.version)
+    store.claim(first, content)
+    try:
+        invocation.output_dir = directory
+        _logger.info("Claimed the workspace.", extra=_event("cli.output.claimed", True))
+        for name, data in rest:
+            store.write(name, data)
+    except (TrialFolioError, KeyboardInterrupt) as failure:
+        # The claim succeeded, so the workspace isn't empty any more.
+        left = (
+            f"{_shown(directory)} holds some of the starter files: remove them, then run"
+            " trialfolio init there again."
+        )
+        if isinstance(failure, KeyboardInterrupt):
+            return TrialFolioError(
+                "command.interrupted", f"Trial Folio was interrupted. Nothing was sent. {left}"
+            )
+        return TrialFolioError(
+            failure.code,
+            f"{failure.message} Nothing was sent. {left}",
+            f"{failure.log_message} Nothing was sent. {left}",
+        )
+    where = "the current directory" if directory == "." else directory
+    invocation.result = [
+        f"Set up a workspace in {where}: {CONFIGURATION}, README.md, and .gitignore.",
+        (
+            f"Next, change {CONFIGURATION}. Then, from the workspace, review its plan with:"
+            f" trialfolio run {CONFIGURATION} --out runs/first/"
+        ),
+        "README.md lists the steps.",
+    ]
+    return None
 
 
 def _run(invocation: _Invocation) -> TrialFolioError | None:
@@ -583,6 +648,7 @@ def _license(invocation: _Invocation) -> TrialFolioError | None:
 
 
 _COMMANDS: Final[dict[CommandName, Callable[[_Invocation], TrialFolioError | None]]] = {
+    "init": _init,
     "run": _run,
     "report": _report,
     "demo": _demo,

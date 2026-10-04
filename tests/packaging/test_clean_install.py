@@ -1,5 +1,6 @@
 """The built wheel installs in a new virtual environment, offline, and its `trialfolio demo` runs
-there under the network guard, and writes a run labeled synthetic.
+there under the network guard, and writes a run labeled synthetic. Its `trialfolio init` writes
+the starter files from the installed package (R01-AC33).
 
 Traces to R01-AC16 (clean install: the wheel installs, and `trialfolio demo --out <dir>` runs
 offline with `TRIALFOLIO_ACCEPT_LICENSE` set and exits 0, labeled synthetic), in the form release
@@ -110,3 +111,13 @@ def test_the_wheel_installs_cleanly_and_its_demo_runs_offline(wheel: Path, tmp_p
     assert not (tmp_path / "config").exists()
     assert not (tmp_path / "logs").exists()
     assert (out / "logs" / "trialfolio.log").is_file()
+
+    workspace = tmp_path / "workspace"
+    initialized = run([command(environment, "trialfolio"), "init", workspace], tmp_path, env)
+
+    assert initialized.returncode == 0, initialized.stderr
+    assert sorted(path.name for path in workspace.iterdir()) == [
+        ".gitignore",
+        "README.md",
+        "screen.yaml",
+    ]

@@ -235,7 +235,7 @@ def test_integer_too_long_to_convert_is_rejected() -> None:
 
 
 def test_deep_nesting_is_rejected() -> None:
-    content = with_line("universe: SP500", "universe: " + "[" * 3000 + "]" * 3000)
+    content = with_line("universe: 'SP500'", "universe: " + "[" * 3000 + "]" * 3000)
 
     assert "`universe` is nested more than 16 levels deep." in rejection(content)
 
@@ -244,7 +244,7 @@ def test_deep_nesting_is_rejected() -> None:
     ("old", "new", "key"),
     [
         ("title: Earnings yield with a liquidity floor", "title: ' '", "title"),
-        ("benchmark: SPY", "benchmark: '\t'", "benchmark"),
+        ("benchmark: 'SPY'", "benchmark: '\t'", "benchmark"),
         ("  - 'AvgDailyTot(30) > 1000000'", "  - '  '", "rules[0]"),
         ("  formula: 'EarnYield'", "  formula: ' '", "ranking.formula"),
     ],
@@ -255,7 +255,7 @@ def test_blank_text_is_rejected(old: str, new: str, key: str) -> None:
 
 
 def test_yaml_boolean_in_a_text_key_says_to_quote_it() -> None:
-    message = rejection(with_line("benchmark: SPY", "benchmark: ON"))
+    message = rejection(with_line("benchmark: 'SPY'", "benchmark: ON"))
 
     assert "`benchmark` is a YAML 1.1 boolean" in message
     assert "quote it if it's text" in message
@@ -297,6 +297,107 @@ def test_an_empty_key_is_named() -> None:
     assert "`''` isn't a key this configuration accepts." in rejection(content)
 
 
+# Text Portfolio123 receives is written in quotes or as a block scalar (R01-AC02)
+
+RULE = "  - 'AvgDailyTot(30) > 1000000'"
+HASH_FORMULA = 'FRank("EarnYield", #Industry) > 50'
+"""A formula holding `#`, as Portfolio123's scopes do: without quotes, YAML would read
+`FRank("EarnYield",` and take the rest for a comment."""
+
+
+def test_a_formula_holding_a_hash_is_read_whole_in_quotes() -> None:
+    configuration = read_screen_configuration(
+        with_line(RULE, f"  - '{HASH_FORMULA}'"), "screen.yaml"
+    )
+
+    assert configuration.rules == (HASH_FORMULA,)
+
+
+def test_a_formula_holding_a_hash_without_quotes_is_rejected_not_cut_short() -> None:
+    message = rejection(with_line(RULE, f"  - {HASH_FORMULA}"))
+
+    assert (
+        "`rules[0]` is text Portfolio123 receives, written without quotes. Write it in" in message
+    )
+    assert "FRank" not in message
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        '  - "AvgDailyTot(30) > 1000000"',
+        "  - |-\n    AvgDailyTot(30) > 1000000",
+        "  - >-\n    AvgDailyTot(30) > 1000000",
+    ],
+    ids=["double-quoted", "literal-block", "folded-block"],
+)
+def test_a_formula_in_double_quotes_or_a_block_scalar_is_accepted(written: str) -> None:
+    configuration = read_screen_configuration(with_line(RULE, written), "screen.yaml")
+
+    assert configuration.rules == ("AvgDailyTot(30) > 1000000",)
+
+
+NAMED = "  name: 'Core Combo #2'"
+"""A ranking by a name that holds `#`: without quotes, YAML would read `Core Combo` and take the
+rest for a comment, so the request would name another ranking system."""
+
+
+def test_a_name_holding_a_hash_is_read_whole_in_quotes() -> None:
+    configuration = read_screen_configuration(
+        with_line("  formula: 'EarnYield'\n  lower_is_better: false", NAMED), "screen.yaml"
+    )
+
+    assert configuration.ranking == NameRanking(name="Core Combo #2")
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "key"),
+    [
+        (
+            "  formula: 'EarnYield'\n  lower_is_better: false",
+            "  name: Core Combo #2",
+            "ranking.name",
+        ),
+        ("universe: 'SP500'", "universe: My Universe #1", "universe"),
+        ("benchmark: 'SPY'", "benchmark: SPY", "benchmark"),
+    ],
+    ids=["ranking-name", "universe", "benchmark"],
+)
+def test_other_text_portfolio123_receives_is_rejected_without_quotes(
+    old: str, new: str, key: str
+) -> None:
+    message = rejection(with_line(old, new))
+
+    assert f"`{key}` is text Portfolio123 receives, written without quotes." in message
+    assert "Combo" not in message
+    assert "My Universe" not in message
+
+
+def test_fixed_words_and_text_never_sent_need_no_quotes() -> None:
+    """The documented example writes its title, purpose, and fixed words without quotes."""
+    configuration = read_screen_configuration(documented_example().encode(), "screen.yaml")
+
+    assert configuration.title == "Earnings yield with a liquidity floor"
+    assert (configuration.kind, configuration.transaction_price) == ("screen", "open")
+    assert configuration.pit_method == "complete"
+
+
+def test_each_unquoted_text_is_listed_with_the_other_problems() -> None:
+    content = (
+        with_line(RULE, f"{RULE}\n  - Close(0) > 5")
+        .replace(b"  formula: 'EarnYield'", b"  formula: EarnYield")
+        .replace(b"max_holdings: 25\n", b"")
+    )
+
+    message = rejection(content)
+
+    assert "`max_holdings` is required." in message
+    assert "`rules[1]` is text Portfolio123 receives, written without quotes." in message
+    assert "`ranking.formula` is text Portfolio123 receives, written without quotes." in message
+    assert "`rules[0]`" not in message
+    assert message.count("\n- ") == 3
+
+
 @pytest.mark.parametrize(
     ("text", "blank"),
     [("\x1c", False), ("\ufeff", False), ("\u3000", True), ("\u0085", True), (" \t", True)],
@@ -305,7 +406,7 @@ def test_an_empty_key_is_named() -> None:
 def test_blank_means_unicode_white_space(text: str, blank: bool) -> None:
     """The reader and the plan's setting check agree on what's blank."""
     escaped = text.encode("unicode_escape").decode()
-    content = with_line("universe: SP500", f'universe: "{escaped}"')
+    content = with_line("universe: 'SP500'", f'universe: "{escaped}"')
 
     if blank:
         assert "`universe` is blank." in rejection(content)
@@ -344,9 +445,9 @@ def test_alias_is_rejected() -> None:
 @pytest.mark.parametrize(
     ("old", "new", "key"),
     [
-        ("benchmark: SPY", "benchmark: SPY\npassword: hunter2", "password"),
-        ("benchmark: SPY", "benchmark: SPY\nAPI-Key: hunter2", "API-Key"),
-        ("benchmark: SPY", "benchmark: SPY\np123_token: hunter2", "p123_token"),
+        ("benchmark: 'SPY'", "benchmark: 'SPY'\npassword: hunter2", "password"),
+        ("benchmark: 'SPY'", "benchmark: 'SPY'\nAPI-Key: hunter2", "API-Key"),
+        ("benchmark: 'SPY'", "benchmark: 'SPY'\np123_token: hunter2", "p123_token"),
         (
             "  lower_is_better: false",
             "  lower_is_better: false\n  secret: hunter2",

@@ -1,0 +1,10 @@
+# Keeps credentials and Portfolio123 data out of Git, in a workspace that trialfolio init set up.
+
+# Credential files, such as a secret manager's references. Never commit credentials.
+.env*
+*.env
+
+# Runs and reports hold Portfolio123 data, which Portfolio123's terms govern. Sharing it publicly
+# may need Portfolio123's consent.
+/runs/
+/reports/

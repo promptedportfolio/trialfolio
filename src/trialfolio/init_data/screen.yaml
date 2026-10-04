@@ -1,0 +1,27 @@
+# A screen configuration: one long-only stock screen backtest, through Portfolio123's API.
+# trialfolio init wrote it with the settings of the example Portfolio123 accepted in a live call.
+# Change them for your own backtest. Then review its plan, which sends nothing until you approve:
+#   trialfolio run screen.yaml --out runs/first/
+kind: screen                                   # Always screen. Never sent.
+schema_version: 1.0.0                          # The configuration's format: 1.0.0. Never sent.
+title: Earnings yield with a liquidity floor   # Yours, for the report. Never sent.
+# purpose: Why you're running this backtest.   # Optional. Never sent.
+# Write the text Portfolio123 receives in single quotes: the universe, each rule, the ranking's
+# formula or name, and the benchmark. Outside quotes, YAML reads a space and # as the start of a
+# comment, so it would cut 'FRank("EarnYield", #Industry) > 50' short, or read a ranking
+# system's name 'Core Combo #2' as Core Combo. Trial Folio rejects that text without quotes.
+universe: 'SP500'                              # A Portfolio123 universe, by name
+rules:                                         # At least one formula
+  - 'AvgDailyTot(30) > 1000000'
+ranking:                                       # One formula, or a ranking system's name or id
+  formula: 'EarnYield'                         # The ranking formula
+  lower_is_better: false                       # false: higher values rank better
+max_holdings: 25                               # The most stocks held: 1 or more
+benchmark: 'SPY'                               # A Portfolio123 benchmark symbol
+start_date: 2016-01-01                         # The backtest's first day, YYYY-MM-DD
+end_date: 2025-12-31                           # Later than start_date. No default of today.
+rebalance_weeks: 4                             # Weeks between rebalances: 1 or 4
+transaction_price: open                        # The price trades use: open only
+slippage_percent: 0.25                         # 0.25 means 0.25%. Required: no default of zero.
+pit_method: complete                           # Portfolio123's point-in-time method: complete only
+precision: 4                                   # Decimal places in results: 4 only

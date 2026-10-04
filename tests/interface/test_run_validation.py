@@ -1,6 +1,6 @@
-"""`trialfolio run` rejects a misspelled or unsupported setting with `config.invalid` before
-anything else: exit 3, no output directory, and no request, even with credentials and an
-`--approve` given.
+"""`trialfolio run` rejects a misspelled or unsupported setting, or text sent without quotes, with
+`config.invalid` before anything else: exit 3, no output directory, and no request, even with
+credentials and an `--approve` given.
 
 Traces to R01-AC02's interface part, through the CLI's entry function in the test process, over
 the fake server. `tests/contract/test_screen_configuration.py` checks every invalid file at the
@@ -19,6 +19,7 @@ from tests.interface.conftest import Cli, config, serve_success
     [
         ("invalid/misspelled-key.yaml", "max_holding"),
         ("invalid/slippage-five-decimals.yaml", "slippage_percent"),
+        ("invalid/unquoted-rule.yaml", "rules[0]"),
     ],
 )
 def test_an_invalid_configuration_fails_before_anything_is_created_or_sent(

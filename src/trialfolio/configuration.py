@@ -11,6 +11,12 @@ PyYAML's parse events, never through PyYAML's constructors, so it decides what e
   form a YAML 1.1 loader would convert, such as `010`, `1:30`, `yes`, or `2.5e-1`, is rejected.
 - Null values, duplicate keys, non-text keys, anchors, aliases, explicit tags, and credential-like
   keys are rejected.
+- In a screen configuration, the text Portfolio123 receives must be quoted or a block scalar:
+  each rule, the ranking's `formula` or `name`, the universe, and the benchmark. A plain one is
+  rejected, because outside quotes YAML reads a space and `#` as the start of a comment, so
+  `name: Core Combo #2` would send `Core Combo`, and Portfolio123 formulas can hold `#`, as in
+  `#Industry`. Fixed words, such as `open`, and the title and purpose, which are never sent, may
+  be plain.
 
 `original_values` gives each top-level value's text exactly as the file writes it, for
 `settings.csv`'s `original_value` (docs/contracts.md, settings.csv).
@@ -95,7 +101,7 @@ def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfigu
     Raises `TrialFolioError` with `config.invalid` when the file breaks any rule of the screen
     configuration. The message lists each problem, names its key, and includes no value.
     """
-    loaded, _ = _read_yaml(content, source_name)
+    loaded, _, plain = _read_yaml(content, source_name)
     if not isinstance(loaded, dict):
         _fail(source_name, ["The file must be a mapping of keys to values."])
     document = cast("dict[str, object]", loaded)
@@ -111,13 +117,18 @@ def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfigu
             source_name,
             [f"`schema_version` isn't a supported version. Supported versions: {supported}."],
         )
+    unquoted = [_unquoted_text(path) for path in plain if _is_sent_text(path)]
     try:
-        return ScreenConfiguration.model_validate(document)
+        configuration = ScreenConfiguration.model_validate(document)
     except ValidationError as error:
         details = error.errors(include_input=False)
         _fail(
-            source_name, [_describe(detail) for detail in details if not _follows(detail, details)]
+            source_name,
+            [_describe(detail) for detail in details if not _follows(detail, details)] + unquoted,
         )
+    if unquoted:
+        _fail(source_name, unquoted)
+    return configuration
 
 
 def original_values(content: bytes, source_name: str) -> Mapping[str, str]:
@@ -129,8 +140,30 @@ def original_values(content: bytes, source_name: str) -> Mapping[str, str]:
     For a file `read_screen_configuration` accepted. Raises `TrialFolioError` with
     `config.invalid` when the file breaks a YAML rule, as that function does.
     """
-    _, originals = _read_yaml(content, source_name)
+    _, originals, _ = _read_yaml(content, source_name)
     return originals
+
+
+_SENT_TEXT: Final = frozenset(
+    {("universe",), ("benchmark",), ("ranking", "formula"), ("ranking", "name")}
+)
+"""The free text Portfolio123 receives, besides the rules: names, symbols, and the formula."""
+
+
+def _is_sent_text(path: KeyPath) -> bool:
+    """Free text a screen configuration sends to Portfolio123: each rule, the ranking's formula or
+    name, the universe, and the benchmark."""
+    return path in _SENT_TEXT or (
+        len(path) == 2 and path[0] == "rules" and isinstance(path[1], int)
+    )
+
+
+def _unquoted_text(path: KeyPath) -> str:
+    return (
+        f"`{_format_path(path)}` is text Portfolio123 receives, written without quotes. Write it in"
+        " single quotes: outside quotes, YAML reads a space and # as the start of a comment, so"
+        " the text could be cut short without an error."
+    )
 
 
 def _follows(detail: ErrorDetails, details: list[ErrorDetails]) -> bool:
@@ -179,15 +212,16 @@ def _describe(detail: ErrorDetails) -> str:
     return f"`{key}` {message[0].lower()}{message[1:]}."
 
 
-def _read_yaml(content: bytes, source_name: str) -> tuple[object, dict[str, str]]:
-    """The document's value, and each top-level value's text as `original_values` gives it."""
+def _read_yaml(content: bytes, source_name: str) -> tuple[object, dict[str, str], list[KeyPath]]:
+    """The document's value; each top-level value's text, as `original_values` gives it; and
+    where the file writes text as a plain scalar, without quotes, in the file's order."""
     try:
         text = content.decode("utf-8").removeprefix("\ufeff")
     except UnicodeDecodeError:
         _fail(source_name, ["The file isn't UTF-8 text."])
     try:
         builder = _Builder(text)
-        return builder.document(), builder.originals
+        return builder.document(), builder.originals, builder.plain_text
     except _Invalid as error:
         where = f"`{_format_path(error.path)}`" if error.path else "The file"
         _fail(source_name, [f"{where} {error.problem}"])
@@ -234,6 +268,8 @@ class _Builder:
         collection ends where its last item does."""
         self.originals: dict[str, str] = {}
         """Each top-level value's text, by key, once `document` has returned."""
+        self.plain_text: list[KeyPath] = []
+        """Where a plain scalar, without quotes or a block indicator, was read as text."""
 
     def document(self) -> object:
         try:
@@ -328,6 +364,7 @@ class _Builder:
             return text
         tag = self._loader.resolve(ScalarNode, text, (True, False))
         if tag == _STR:
+            self.plain_text.append(path)
             return text
         if tag == f"{_TAG}null":
             raise _Invalid(path, "has no value. Give it one, or leave the key out.")

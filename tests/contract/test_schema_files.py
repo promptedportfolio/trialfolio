@@ -6,7 +6,6 @@ these tests check the generator itself, in a temporary directory.
 """
 
 import json
-import os
 import shutil
 import subprocess
 import typing
@@ -14,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.git import outside_any_repository
 from trialfolio.contracts import schema_files
 from trialfolio.contracts.schema_files import (
     JSON_SCHEMA_DIALECT,
@@ -115,14 +115,6 @@ def test_a_generation_error_isnt_reported_as_a_directory_problem(
 
 
 ROOT = Path(__file__).resolve().parents[2]
-
-
-def outside_any_repository() -> dict[str, str]:
-    """The environment, without the variables that point Git at a repository, and without the
-    user's Git configuration. A Git hook exports GIT_DIR, for example, which would otherwise
-    point a test's Git commands at the developer's own repository."""
-    environment = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
-    return environment | {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
 
 
 @pytest.mark.skipif(shutil.which("sh") is None, reason="scripts/schemas is a POSIX shell script")

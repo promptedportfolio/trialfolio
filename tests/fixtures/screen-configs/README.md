@@ -12,7 +12,7 @@ Synthetic screen configurations for Trial Folio's tests ([fixtures](../../../doc
 | `ranking-name.yaml` | The example, ranking by an invented ranking system name | R01-AC10, R01-AC30 |
 | `ranking-id.yaml` | The example, ranking by an invented ranking system ID | R01-AC10, R01-AC30 |
 | `vendor-factset.yaml` | The example with `data_vendor: FactSet` | R01-AC11, R01-AC25 |
-| `written-differently.yaml` | The example's settings, written differently: keys in another order, `slippage_percent: 0.250`, dates as quoted strings, and `data_vendor: FactSet` | R01-AC25 |
+| `written-differently.yaml` | The example's settings, written differently: keys in another order, `slippage_percent: 0.250`, dates as quoted strings, the universe and benchmark in double quotes, and `data_vendor: FactSet` | R01-AC25 |
 | `slippage-whole.yaml` | The example with `slippage_percent: 1` | R01-AC25 |
 | `title-non-ascii.yaml` | The example with a title that contains `Café` and other non-ASCII text | R01-AC25 |
 | `canaries.yaml` | The example with a distinct canary string in the title, the purpose, the universe, each of two rules, the ranking formula, and the benchmark | R01-AC01, R01-AC17 |
