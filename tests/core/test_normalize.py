@@ -10,17 +10,20 @@ precision), R01-AC30 (the 23 settings rows and the 20 metrics rows), and R01-AC3
 structure, numbers and precision, coverage), and settings.csv (`original_key` and
 `original_value`). The attempt runs the real client, `requests`, and `urllib3` over the fake
 server, and the real store saves the response, so each value is read from the text the attempt
-saved.
+saved. For R01-AC10, a run executed through `Execution`, as `trialfolio run` executes one, also
+writes the manifest, which labels reproducibility incomplete for each reference not snapshotted.
 """
 
 import json
 from collections.abc import Mapping
 from datetime import date
+from pathlib import Path
 
 import pytest
 
-from tests.core.conftest import CONFIGS, RESPONSES, Execute
+from tests.core.conftest import CONFIGS, RESPONSES, Execute, execute_run
 from trialfolio.configuration import original_values
+from trialfolio.contracts.manifest import ExternalReference, RunManifest
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS_BY_NAME
 from trialfolio.contracts.tables import MetricsRow, SettingsRow
 from trialfolio.errors import TrialFolioError
@@ -209,6 +212,28 @@ def test_a_formula_ranking_is_recorded_whole_without_a_flag(execute: Execute) ->
 
     assert json.loads(rows["ranking"].value) == {"formula": "EarnYield", "lower_is_better": False}
     assert rows["ranking"].flags == ()
+
+
+@pytest.mark.parametrize(
+    ("config", "references"),
+    [
+        pytest.param("ranking-name.yaml", ("universe", "ranking"), id="name"),
+        pytest.param("ranking-id.yaml", ("universe", "ranking"), id="ID"),
+        # Recorded whole, the formula isn't a reference. The universe still names an object in
+        # the account.
+        pytest.param("formula.yaml", ("universe",), id="formula"),
+    ],
+)
+def test_the_manifest_labels_reproducibility_incomplete_for_each_reference_not_snapshotted(
+    tmp_path: Path, config: str, references: tuple[str, ...]
+) -> None:
+    execute_run((CONFIGS / config).read_bytes(), tmp_path / "out", COMPLETE)
+    manifest = RunManifest.model_validate_json((tmp_path / "out" / "manifest.json").read_bytes())
+
+    assert manifest.reproducibility.status == "incomplete"
+    assert manifest.reproducibility.external_references == tuple(
+        ExternalReference(setting=name, snapshotted=False) for name in references
+    )
 
 
 # Unavailable values and precision (R01-AC12)
