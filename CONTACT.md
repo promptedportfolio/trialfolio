@@ -42,7 +42,7 @@ Ask before you act if any of these apply:
 - **You would let someone other than your family members use Trial Folio through an interface you run.**
 - **You no longer qualify for the personal research grant** and want to keep using Trial Folio.
 
-You don't need permission to share or publish reports Trial Folio generated for you, as long as the notice in each report stays intact and unaltered. You remain responsible for your data provider's terms, including Portfolio123's.
+You don't need permission to share or publish reports Trial Folio generated for you, as long as the notice in each report stays intact and unaltered. You remain responsible for your data provider's terms, including Portfolio123's. Trial Folio's license grants no Portfolio123 rights. Sharing a report that contains Portfolio123 data publicly may need Portfolio123's consent.
 
 ### What to include in a request
 
