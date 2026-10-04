@@ -24,6 +24,7 @@ outcomes, counts, codes, and the credits used.
 import inspect
 import json
 import os
+import signal
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,7 +53,9 @@ PAYLOADS = REPO_ROOT / "reference" / "p123api-live-check" / "payloads"
 """Git-ignored, like every `payloads/` folder under `reference/` (REQ-11)."""
 BUDGET_VARIABLE = "TRIALFOLIO_LIVE_BUDGET_CREDITS"
 COMMAND_TIMEOUT_SECONDS = 2 * REQUEST_TIMEOUT_SECONDS
-"""Room for authentication and the request, each under the client's own timeout."""
+"""How long the test lets a command run before it interrupts it. The client's timeouts don't bound
+a command's time: `requests` applies each one to every connection attempt and every socket read,
+not to the whole exchange."""
 
 
 def refuse(reason: str) -> NoReturn:
@@ -70,23 +73,40 @@ def portfolio123_host() -> str:
 
 def trialfolio(*argv: str | Path, env: dict[str, str]) -> tuple[int, dict[str, Any]]:
     """Runs the installed command with `argv` and `--json`, with stdin closed. Returns its exit
-    code and its JSON summary."""
-    result = subprocess.run(
+    code and its JSON summary.
+
+    The test never kills the command, so a run always records how its attempt ended. Past
+    `COMMAND_TIMEOUT_SECONDS`, it interrupts the command with `SIGINT`, as Ctrl-C would, waits for
+    it to exit, and fails. Ctrl-C at the terminal reaches the command too, and the test waits for
+    it the same way, where `subprocess.run` would kill it a quarter of a second later."""
+    with subprocess.Popen(
         [str(installed_command()), *(str(arg) for arg in argv), "--json"],
         stdin=subprocess.DEVNULL,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        check=False,
         cwd=REPO_ROOT,
         env=env,
-        timeout=COMMAND_TIMEOUT_SECONDS,
-    )
-    if result.returncode == network_guard.REFUSED_EXIT_STATUS:
+    ) as process:
+        try:
+            stdout, _ = process.communicate(timeout=COMMAND_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.send_signal(signal.SIGINT)
+            process.communicate()
+            pytest.fail(
+                f"trialfolio {argv[0]} ran past {COMMAND_TIMEOUT_SECONDS} seconds, so the test"
+                " interrupted it, as Ctrl-C would: its records say how it ended",
+                pytrace=False,
+            )
+        except KeyboardInterrupt:
+            process.communicate()
+            raise
+    if process.returncode == network_guard.REFUSED_EXIT_STATUS:
         pytest.fail("The network guard refused a connection: see the run's logs", pytrace=False)
     # Checked into a name of its own, so a failure doesn't show stdout.
-    one_line = result.stdout.count("\n") == 1 and result.stdout.endswith("\n")
+    one_line = stdout.count("\n") == 1 and stdout.endswith("\n")
     assert one_line, "stdout isn't exactly one JSON summary"
-    return result.returncode, json.loads(result.stdout)
+    return process.returncode, json.loads(stdout)
 
 
 def error_code(summary: dict[str, Any]) -> object:
