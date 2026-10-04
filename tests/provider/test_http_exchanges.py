@@ -7,12 +7,16 @@ a second exchange in a call is refused before connecting, including the re-authe
 redirect, and `urllib3` retries stay at `Retry(0, read=False)`. Also to R01-AC26's cases and the
 codes of 0.1.0's failure table for authentication and the request, R01-AC06 (a read timeout is
 `interrupted` and the server receives the request once), and R01-AC07 (the exchanges, in order).
+Through attempt recording, each case also gives the attempt its outcome, code, and
+`possibly_charged`, as the failure table does, and R01-AC07's `provider_requests`: 1 after a
+success, and 0 after a failed authentication or a `not_connected` request.
 """
 
 import json
 import socket
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -23,20 +27,27 @@ from tests.provider.conftest import PARAMS, ClientFactory, authenticate
 from tests.support import canaries
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.socket_faults import SocketFaults
+from trialfolio.attempts import Attempt, AttemptStatus, provider_requests, read_attempt
+from trialfolio.configuration import read_screen_configuration
 from trialfolio.contracts.attempt import Exchange
+from trialfolio.planning import build_plan, installed_versions
 from trialfolio.provider import (
+    REQUEST_TIMEOUT_SECONDS,
     DecodedResponse,
     ExchangeRecordingAdapter,
     ExchangeRefused,
     P123ScreenBacktestClient,
     ProviderError,
+    ScreenBacktestResponse,
     UndecodedResponse,
 )
+from trialfolio.storage import LocalArtifactStore
 
 AUTH = "POST /auth"
 BACKTEST = "POST /screen/backtest"
 
-NOT_JSON = (Path(__file__).resolve().parents[1] / "fixtures/responses/not-json.txt").read_bytes()
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+NOT_JSON = (FIXTURES / "responses/not-json.txt").read_bytes()
 """The response fixture whose body isn't JSON."""
 
 
@@ -522,3 +533,241 @@ def test_an_exchange_outside_a_call_is_refused() -> None:
         session.get("http://127.0.0.1:9/")
 
     assert adapter.exchanges == ()
+
+
+# Each case's outcome, code, and possibly charged, through attempt recording (0.1.0's failure
+# table)
+
+
+type Fault = Callable[[FakePortfolio123, SocketFaults, str], object]
+"""Sets up how a call ends, given the fake server, the socket faults, and the call's path."""
+
+
+def replying(reply: Reply) -> Fault:
+    return lambda server, _faults, path: server.reply(path, reply)
+
+
+def redirecting(server: FakePortfolio123, _faults: SocketFaults, path: str) -> None:
+    server.reply(path, Reply(307, headers={"Location": f"{server.endpoint}/elsewhere"}))
+
+
+NAME_LOOKUP: Fault = lambda _server, faults, _path: faults.fail_name_lookup()
+REFUSED: Fault = lambda server, _faults, _path: server.close()
+CONNECT_TIMEOUT: Fault = lambda _server, faults, _path: faults.time_out_connect()
+CTRL_C: Fault = lambda _server, faults, _path: faults.interrupt_send()
+
+
+@dataclass(frozen=True)
+class Ending:
+    """How one of an attempt's calls ends, and what 0.1.0's failure table gives the attempt."""
+
+    call: Literal["authentication", "request"]
+    fault: Fault
+    result: int | Literal["not_connected", "interrupted"]
+    """The call's exchange: its status, or how it ended without one."""
+    outcome: Literal["succeeded", "failed", "unknown"]
+    code: str | None
+    possibly_charged: bool
+    timeout: int = REQUEST_TIMEOUT_SECONDS
+
+    @property
+    def exchanges(self) -> tuple[Exchange, ...]:
+        request = AUTH if self.call == "authentication" else BACKTEST
+        if isinstance(self.result, int):
+            last = response(request, self.result)
+        else:
+            last = ended(request, self.result)
+        return (last,) if self.call == "authentication" else (AUTHENTICATED, last)
+
+
+def on_authentication(
+    fault: Fault, result: int | Literal["not_connected", "interrupted"], code: str
+) -> Ending:
+    """Authentication's ending: the attempt is failed, and not possibly charged, because the
+    request wasn't sent."""
+    return Ending("authentication", fault, result, "failed", code, possibly_charged=False)
+
+
+def on_request(
+    fault: Fault,
+    result: int | Literal["not_connected", "interrupted"],
+    outcome: Literal["succeeded", "failed", "unknown"],
+    code: str | None,
+    *,
+    timeout: int = REQUEST_TIMEOUT_SECONDS,
+) -> Ending:
+    """The request's ending: possibly charged, unless it never connected."""
+    charged = result != "not_connected"
+    return Ending("request", fault, result, outcome, code, charged, timeout)
+
+
+ENDINGS: dict[str, Ending] = {
+    "authentication name lookup": on_authentication(
+        NAME_LOOKUP, "not_connected", "provider.unavailable"
+    ),
+    "authentication refused": on_authentication(REFUSED, "not_connected", "provider.unavailable"),
+    "authentication connect timeout": on_authentication(
+        CONNECT_TIMEOUT, "not_connected", "provider.unavailable"
+    ),
+    "authentication reset": on_authentication(
+        replying(Reply(action="reset")), "interrupted", "provider.unavailable"
+    ),
+    "authentication breaks off": on_authentication(
+        replying(Reply(200, canaries.TOKEN.encode(), action="break_off")),
+        "interrupted",
+        "provider.unavailable",
+    ),
+    "authentication ctrl-c": on_authentication(CTRL_C, "interrupted", "command.interrupted"),
+    **{
+        f"authentication {status}": on_authentication(replying(Reply(status)), status, code)
+        for status, code in [
+            (400, "provider.auth_failed"),
+            (401, "provider.auth_failed"),
+            (402, "provider.auth_failed"),
+            (403, "provider.auth_failed"),
+            (406, "provider.auth_failed"),
+            (204, "provider.request_rejected"),
+            (300, "provider.request_rejected"),
+            (404, "provider.request_rejected"),
+            (429, "provider.request_rejected"),
+            (503, "provider.unavailable"),
+        ]
+    },
+    "authentication 307": on_authentication(redirecting, 307, "provider.request_rejected"),
+    "authentication 600": on_authentication(
+        replying(Reply(600)), "interrupted", "provider.unavailable"
+    ),
+    "request 200": on_request(
+        replying(Reply(200, b'{"stats": {}, "cost": 5}')), 200, "succeeded", None
+    ),
+    # Succeeded for capture: normalizing the saved body flags `provider.response_invalid`.
+    "request 200 not JSON": on_request(replying(Reply(200, NOT_JSON)), 200, "succeeded", None),
+    "request name lookup": on_request(
+        NAME_LOOKUP, "not_connected", "failed", "provider.unavailable"
+    ),
+    "request refused": on_request(REFUSED, "not_connected", "failed", "provider.unavailable"),
+    "request connect timeout": on_request(
+        CONNECT_TIMEOUT, "not_connected", "failed", "provider.unavailable"
+    ),
+    "request reset": on_request(
+        replying(Reply(action="reset")), "interrupted", "unknown", "provider.outcome_unknown"
+    ),
+    "request read timeout": on_request(
+        replying(Reply(200, b"{}", delay=3)),
+        "interrupted",
+        "unknown",
+        "provider.outcome_unknown",
+        timeout=1,
+    ),
+    "request breaks off": on_request(
+        replying(Reply(200, b'{"stats": {}}', action="break_off")),
+        "interrupted",
+        "unknown",
+        "provider.outcome_unknown",
+    ),
+    "request ctrl-c": on_request(CTRL_C, "interrupted", "unknown", "command.interrupted"),
+    **{
+        f"request {status}": on_request(replying(Reply(status)), status, "failed", code)
+        for status, code in [
+            (400, "provider.unsupported_capability"),
+            (401, "provider.auth_failed"),
+            (402, "provider.quota_exceeded"),
+            (403, "provider.auth_failed"),
+            (204, "provider.request_rejected"),
+            (300, "provider.request_rejected"),
+            (404, "provider.request_rejected"),
+            (429, "provider.request_rejected"),
+        ]
+    },
+    **{
+        f"request {status}": on_request(
+            replying(Reply(status)), status, "unknown", "provider.outcome_unknown"
+        )
+        for status in (500, 503)
+    },
+    "request 307": on_request(redirecting, 307, "failed", "provider.request_rejected"),
+    "request 600": on_request(
+        replying(Reply(600)), "interrupted", "unknown", "provider.outcome_unknown"
+    ),
+}
+
+
+class BeforeTheRequest:
+    """The real client, with an action just before the request's call, once Trial Folio has
+    authenticated: the provider client is a boundary the tests may stand in at (AGENTS.md,
+    verification expectations)."""
+
+    def __init__(self, client: P123ScreenBacktestClient, action: Callable[[], object]) -> None:
+        self._client = client
+        self._action = action
+
+    @property
+    def authenticated(self) -> bool:
+        return self._client.authenticated
+
+    @property
+    def exchanges(self) -> tuple[Exchange, ...]:
+        return self._client.exchanges
+
+    def authenticate(self) -> None:
+        self._client.authenticate()
+
+    def screen_backtest(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
+        self._action()
+        return self._client.screen_backtest(params)
+
+    def close(self) -> None:
+        self._client.close()
+
+
+@pytest.fixture
+def out(tmp_path: Path) -> Path:
+    return tmp_path / "out"
+
+
+@pytest.fixture
+def attempt(out: Path) -> Attempt:
+    """An attempt of `formula.yaml`'s plan, in an output directory claimed as `run` claims it."""
+    path = FIXTURES / "screen-configs/formula.yaml"
+    plan = build_plan(read_screen_configuration(path.read_bytes(), path.name), installed_versions())
+    store = LocalArtifactStore(out)
+    store.claim("plan.json", plan.model_dump_json(indent=2).encode())
+    return Attempt(plan, plan.plan_hash, store)
+
+
+@pytest.mark.parametrize("ending", ENDINGS.values(), ids=ENDINGS.keys())
+def test_each_ending_gives_the_attempt_its_documented_outcome_and_possibly_charged(
+    server: FakePortfolio123,
+    make_client: ClientFactory,
+    faults: SocketFaults,
+    attempt: Attempt,
+    out: Path,
+    ending: Ending,
+) -> None:
+    client = make_client(timeout=ending.timeout)
+    if ending.call == "authentication":
+        ending.fault(server, faults, "/auth")
+        result = attempt.run(client)
+    else:
+        server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+        result = attempt.run(
+            BeforeTheRequest(client, lambda: ending.fault(server, faults, "/screen/backtest"))
+        )
+
+    record = result.record
+    assert result.recorded
+    assert record.exchanges == ending.exchanges
+    assert record.outcome == ending.outcome
+    assert record.possibly_charged is ending.possibly_charged
+    assert (record.error and record.error.code) == ending.code
+    assert (result.error and result.error.code) == ending.code
+    # The request counts once if it may have reached Portfolio123, and authentication never does
+    # (R01-AC07). Saved, the attempt reads as it was recorded.
+    requests = 1 if ending.possibly_charged else 0
+    assert provider_requests(record) == requests
+    assert read_attempt(LocalArtifactStore(out), attempt.case_id, attempt.attempt_id) == (
+        AttemptStatus(attempt.attempt_id, ending.outcome, ending.possibly_charged, requests)
+    )
+    # No request arrived twice, and nothing else arrived: no resend, re-authentication, or
+    # redirect's target.
+    assert server.requests() in ([], [AUTH], [AUTH, BACKTEST])

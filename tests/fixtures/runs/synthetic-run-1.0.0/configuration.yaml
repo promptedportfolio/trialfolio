@@ -1,0 +1,21 @@
+# The synthetic example that `trialfolio demo` runs. It's the documented example, retitled. The
+# demo sends nothing: its response, response.json beside this file, is invented too.
+kind: screen
+schema_version: 1.0.0
+title: 'Synthetic example: earnings yield with a liquidity floor'
+purpose: Shows a run's files and report offline, from invented values.
+universe: SP500
+rules:
+  - 'AvgDailyTot(30) > 1000000'
+ranking:
+  formula: 'EarnYield'
+  lower_is_better: false
+max_holdings: 25
+benchmark: SPY
+start_date: 2016-01-01
+end_date: 2025-12-31
+rebalance_weeks: 4
+transaction_price: open
+slippage_percent: 0.25
+pit_method: complete
+precision: 4

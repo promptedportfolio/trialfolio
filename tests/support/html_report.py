@@ -81,6 +81,11 @@ class Document:
                     found.append(dd.text)
         return found
 
+    def table_after(self, heading: str) -> Element:
+        """The first table after the `<h3>` whose text starts with `heading`."""
+        (h3,) = (h for h in self.root.find_all("h3") if h.text.startswith(heading))
+        return next(t for t in self.root.find_all("table") if self.before(h3, t))
+
     def rows(self, table: Element) -> list[list[Element]]:
         """Each row's cells, `<th>` or `<td>`, header row included."""
         return [

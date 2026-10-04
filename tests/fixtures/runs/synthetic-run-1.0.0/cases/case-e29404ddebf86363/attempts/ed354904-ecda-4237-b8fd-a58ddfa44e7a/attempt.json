@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0.0",
+  "trialfolio_version": "0.1.0",
+  "attempt_id": "ed354904-ecda-4237-b8fd-a58ddfa44e7a",
+  "case_id": "case-e29404ddebf86363",
+  "plan_hash": "sha256:26c7930bdc4cb8880a70657c69cf2c3e28afc0faea32686e88c44f71dd1f8261",
+  "started_at": "2026-10-04T08:16:21.650841Z",
+  "provider_wrapper": {
+    "p123api": "3.1.0"
+  },
+  "transport": {
+    "requests": "2.34.2",
+    "urllib3": "2.8.0"
+  },
+  "ended_at": "2026-10-04T08:16:21.693975Z",
+  "outcome": "succeeded",
+  "error": null,
+  "exchanges": [
+    {
+      "request": "POST /auth",
+      "result": "response",
+      "status": 200,
+      "note": null
+    },
+    {
+      "request": "POST /screen/backtest",
+      "result": "response",
+      "status": 200,
+      "note": null
+    }
+  ],
+  "possibly_charged": true,
+  "request": {
+    "path": "cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/request.json",
+    "artifact_id": "sha256:84d9553e5d05e7be96f6191ffdd68d37a9bf5e80ac2ed94a217c6db2e4cd9fbd"
+  },
+  "response": {
+    "path": "cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/response.json",
+    "artifact_id": "sha256:ee269d536bf73c7c1846bd24240f4b1d460e7867a7c935c486c656228077f4b8",
+    "form": "decoded"
+  },
+  "provider_metadata": {
+    "cost": null,
+    "quota_remaining": null
+  }
+}

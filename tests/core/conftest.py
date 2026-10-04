@@ -1,7 +1,8 @@
 """Boundaries for the core tests: what the store syncs, failures injected into its file
 operations (AGENTS.md, verification expectations: injected storage failures), an attempt run
 over the fake Portfolio123 server, below `urllib3`, whose saved response the normalization tests
-read, and a complete run, with its report and manifest, for the report tests."""
+read, a complete run, with its report and manifest, for the report tests, and a run executed
+as `trialfolio run` executes it, through `Execution`."""
 
 import itertools
 import json
@@ -36,6 +37,7 @@ from trialfolio.contracts.manifest import (
 from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION
 from trialfolio.errors import TrialFolioError
+from trialfolio.execution import Execution
 from trialfolio.normalization import (
     LAYOUT,
     LAYOUT_VERSION,
@@ -289,6 +291,29 @@ def execute(tmp_path: Path) -> Iterator[Execute]:
 
     yield run
     server.close()
+
+
+def execute_run(content: bytes, out: Path, body: bytes) -> Plan:
+    """Runs the configuration's bytes as `trialfolio run` does once it's approved with `--approve`,
+    through `Execution`, into the new output directory `out`. The real client, `requests`, and
+    `urllib3` send the request to the fake server, which answers it with a 200 and the body given.
+    Returns the plan; the run's files are under `out`."""
+    plan = build_plan(read_screen_configuration(content, "configuration.yaml"), VERSIONS)
+    command = CommandRecord(
+        name="run", options={"approve": plan.plan_hash, "json": False}, started_at=RUN_STARTED
+    )
+    server = FakePortfolio123()
+    server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+    server.reply("/screen/backtest", Reply(200, body))
+    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
+    try:
+        error = Execution(plan, plan.plan_hash, "option", LocalArtifactStore(out), command).run(
+            content, lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint)
+        )
+    finally:
+        server.close()
+    assert error is None
+    return plan
 
 
 RUN_STARTED = datetime(2026, 10, 3, 14, 0, 0, tzinfo=UTC)

@@ -5,8 +5,9 @@ vendor) and R01-AC25 (the plan hash: files written differently give the same has
 title, or the purpose changes it; a saved plan recomputes to it; a whole-number slippage is sent
 as a float, and its body text equals its text in `params`) in release 0.1.0's test pairing. Also
 to docs/contracts.md, plans and approval: plan contents, budget and retries, data sent, plan
-hashing, and approval, which never trusts a stored `plan_hash`. The attempt record and the
-manifest name the plan hash once R01-T11 and R01-T14 write them.
+hashing, and approval, which never trusts a stored `plan_hash`. A run executed through
+`Execution`, as `trialfolio run` executes one, over the fake server, saves a `plan.json` that
+recomputes to its hash, and its start record, attempt record, and manifest name that hash.
 """
 
 import json
@@ -17,10 +18,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.core.conftest import execute_run
 from tests.support import canaries
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from trialfolio.canonical import canonical_json, sha256_hex
 from trialfolio.configuration import read_screen_configuration
+from trialfolio.contracts.attempt import AttemptRecord, StartRecord
+from trialfolio.contracts.manifest import RunManifest
 from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.screen_configuration import ScreenConfiguration
 from trialfolio.errors import TrialFolioError
@@ -36,6 +40,7 @@ from trialfolio.provider import Credentials, DecodedResponse, P123ScreenBacktest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "screen-configs"
+RESPONSES = REPO_ROOT / "tests" / "fixtures" / "responses"
 
 VERIFIED = Versions(
     trialfolio="0.1.0",
@@ -275,6 +280,24 @@ def test_a_saved_plan_recomputes_to_its_hash(indent: int | None) -> None:
 
     assert plan_hash(saved) == saved.plan_hash == plan.plan_hash
     assert case_id(saved.cases[0].settings) == saved.cases[0].case_id
+
+
+@pytest.mark.parametrize("fixture", ["formula.yaml", "slippage-whole.yaml", "title-non-ascii.yaml"])
+def test_a_run_saves_a_plan_that_recomputes_to_its_hash_and_its_records_name_it(
+    tmp_path: Path, fixture: str
+) -> None:
+    out = tmp_path / "out"
+    plan = execute_run(
+        (FIXTURES / fixture).read_bytes(), out, (RESPONSES / "complete.json").read_bytes()
+    )
+
+    saved = Plan.model_validate_json((out / "plan.json").read_bytes())
+    assert plan_hash(saved) == saved.plan_hash == plan.plan_hash
+    (attempt,) = (out / "cases" / plan.cases[0].case_id / "attempts").iterdir()
+    start = StartRecord.model_validate_json((attempt / "started.json").read_bytes())
+    record = AttemptRecord.model_validate_json((attempt / "attempt.json").read_bytes())
+    manifest = RunManifest.model_validate_json((out / "manifest.json").read_bytes())
+    assert start.plan_hash == record.plan_hash == manifest.plan_hash == plan.plan_hash
 
 
 def test_a_saved_plan_whose_contents_changed_doesnt_recompute_to_its_hash() -> None:

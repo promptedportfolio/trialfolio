@@ -6,9 +6,9 @@ directory that doesn't exist with `input.not_found`, before anything is written.
 Traces to R01-AC08 (re-rendering with network access blocked matches the saved normalized data)
 and R01-AC23 (an incomplete or non-run directory fails with `input.not_a_run` and exit 3, and
 creates no output), through the CLI's entry function in the test process. The runs are written
-by `trialfolio run`, over the fake server, and by `trialfolio demo`; R01-T16 adds the committed
-`runs/synthetic-run-1.0.0/`. The network guard is on throughout, so a re-render that connected
-anywhere but localhost would fail.
+by `trialfolio run`, over the fake server, and by `trialfolio demo`, and one is a copy of the
+committed `runs/synthetic-run-1.0.0/`; the runs that are broken one way are copies of it. The
+network guard is on throughout, so a re-render that connected anywhere but localhost would fail.
 """
 
 import json
@@ -25,6 +25,16 @@ from tests.support.html_report import Document, parse
 from trialfolio.canonical import sha256_hex
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.tables import read_metrics_csv, read_settings_csv
+
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "runs" / "synthetic-run-1.0.0"
+"""The committed historical run, which `trialfolio demo` wrote with the 1.0.0 schemas."""
+
+
+def committed_run(cli: Cli, out: Path) -> Path:
+    """A copy of the committed `runs/synthetic-run-1.0.0/`."""
+    cli.accept_license()
+    shutil.copytree(FIXTURE, out)
+    return out
 
 
 def demo_run(cli: Cli, out: Path) -> Path:
@@ -61,7 +71,9 @@ def table_cells(document: Document) -> set[tuple[str, ...]]:
 # Re-rendering (R01-AC08)
 
 
-@pytest.mark.parametrize("write", [fake_server_run, demo_run], ids=["run", "demo"])
+@pytest.mark.parametrize(
+    "write", [fake_server_run, demo_run, committed_run], ids=["run", "demo", "committed"]
+)
 def test_report_rerenders_every_value_of_the_saved_tables(
     cli: Cli, write: Callable[[Cli, Path], Path]
 ) -> None:
@@ -166,7 +178,7 @@ BROKEN: dict[str, Callable[[Path], None]] = {
 def test_an_incomplete_run_fails_and_creates_no_output(
     cli: Cli, break_run: Callable[[Path], None]
 ) -> None:
-    run = demo_run(cli, cli.tmp / "run")
+    run = committed_run(cli, cli.tmp / "run")
     break_run(run)
     out = cli.tmp / "report"
 
@@ -227,15 +239,14 @@ def test_a_provider_package_that_cant_be_imported_is_an_unsupported_environment(
 
 
 def test_a_broken_copy_leaves_a_non_empty_output_directory_unchanged(cli: Cli) -> None:
-    run = demo_run(cli, cli.tmp / "run")
-    shutil.copytree(run, cli.tmp / "copy")
-    BROKEN["no manifest"](cli.tmp / "copy")
+    copy = committed_run(cli, cli.tmp / "copy")
+    BROKEN["no manifest"](copy)
     out = cli.tmp / "report"
     out.mkdir()
     (out / "keep.txt").write_text("someone else's file")
     before = snapshot(out)
 
-    outcome = cli("report", cli.tmp / "copy", "--out", out, "--json")
+    outcome = cli("report", copy, "--out", out, "--json")
 
     # The run is read before the output directory is checked.
     assert outcome.summary["error"]["code"] == "input.not_a_run"  # pyright: ignore[reportIndexIssue]
