@@ -25,6 +25,10 @@ from typing import Final, Self, TextIO
 CTRL_C: Final = b"\x03"
 """What Ctrl-C sends: the terminal's default interrupt character."""
 
+_REVOKED: Final = frozenset({errno.EBADF, errno.ENOENT})
+"""What waiting on a terminal that macOS has revoked gives: `EBADF`, or `ENOENT` when the tests run
+in a macOS sandbox (`sandbox-exec`), as a coding agent's shell may."""
+
 _CONTROLLING: Final = """
 import fcntl
 import os
@@ -195,20 +199,21 @@ class Terminal:
         import termios
 
         # The test's side of the terminal stayed open, so nothing the process wrote was lost. This
-        # waits until the reader has taken it all, then closes. macOS, as BSD does, revokes a
-        # controlling terminal when its session's leader, the process, ends, once its output has
-        # drained; the descriptor is then no longer valid.
+        # waits until the reader has taken it all, then closes, even if the wait fails. macOS, as
+        # BSD does, revokes a controlling terminal when its session's leader, the process, ends,
+        # once its output has drained; the descriptor is then no longer valid.
         try:
             termios.tcdrain(self._terminal)
         except termios.error as error:
-            if error.args[0] != errno.EBADF:
+            if error.args[0] not in _REVOKED:
                 raise
-        os.close(self._terminal)
-        for reader in self._readers:
-            reader.join(timeout=10)
-        os.close(self._controller)
-        assert self._process.stdout is not None
-        self._process.stdout.close()
+        finally:
+            os.close(self._terminal)
+            for reader in self._readers:
+                reader.join(timeout=10)
+            os.close(self._controller)
+            assert self._process.stdout is not None
+            self._process.stdout.close()
 
     def __enter__(self) -> Self:
         return self
