@@ -4,7 +4,9 @@ takes only relative paths.
 Traces to docs/contracts.md, artifact storage (REQ-05): relative paths, immutability, atomic
 writes, never replacing, no hard links, and syncing, including new directories and macOS's
 fallback from `F_FULLFSYNC`. Also to R01-AC29: a file system without hard links fails the first
-atomic write with `storage.write_failed`. The claim has its own tests, in test_output_claim.py.
+atomic write with `storage.write_failed`. And to R01-T14's rule that a manifest whose write failed
+leaves no manifest: `discard` removes a file that a failed write published. The claim has its own
+tests, in test_output_claim.py.
 """
 
 import errno
@@ -370,6 +372,63 @@ def test_any_other_failure_to_sync_a_directory_fails_the_write(
 
     assert raised.value.code == "storage.write_failed"
     assert "Input/output error" in raised.value.message
+
+
+# Discarding a failed write (R01-T14: a manifest whose write failed leaves no manifest)
+
+
+@posix_only
+def test_discard_removes_the_file_a_failed_write_published(
+    store: LocalArtifactStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = b'{"outcome": "completed"}\n'
+    refuse_directory_syncs(monkeypatch, errno.EIO)
+    with pytest.raises(TrialFolioError):
+        store.write("manifest.json", data)
+    # Only the sync after publishing failed, so the file is there.
+    assert (store.root / "manifest.json").read_bytes() == data
+
+    # Its own directory sync fails too, which doesn't fail the removal.
+    store.discard("manifest.json", data)
+
+    assert os.listdir(store.root) == ["plan.json"]
+
+
+def test_discard_leaves_another_file_and_a_missing_one_alone(store: LocalArtifactStore) -> None:
+    (store.root / "manifest.json").write_bytes(b"another process's\n")
+    before = snapshot(store.root)
+
+    store.discard("manifest.json", b"this write's\n")
+    store.discard("report.html", b"this write's\n")
+
+    assert snapshot(store.root) == before
+
+
+@posix_only
+def test_a_failed_removal_fails_the_discard(
+    store: LocalArtifactStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = b"{}\n"
+    store.write("manifest.json", data)
+
+    def unlink(path: str) -> None:
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(os, "unlink", unlink)
+
+    with pytest.raises(TrialFolioError) as raised:
+        store.discard("manifest.json", data)
+
+    assert raised.value.code == "storage.write_failed"
+    assert "Input/output error" in raised.value.message
+    assert (store.root / "manifest.json").read_bytes() == data
+
+
+def test_discard_needs_a_claimed_directory(tmp_path: Path) -> None:
+    store = LocalArtifactStore(tmp_path / "out")
+
+    with pytest.raises(RuntimeError):
+        store.discard("manifest.json", b"{}\n")
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows behavior")

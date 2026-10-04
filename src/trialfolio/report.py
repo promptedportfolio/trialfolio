@@ -652,10 +652,13 @@ class _Report:
         if not forms:
             return "None: the run saved no response."
         if "decoded" in forms:
-            return (
+            kept = (
                 "None. Trial Folio excludes nothing from the response, and keeps it whole as it"
-                " was saved. Its per-period series is preserved there, but not interpreted."
+                " was saved."
             )
+            if self._run.manifest.capabilities.return_series == "source_only":
+                kept += " Its per-period series is preserved there, but not interpreted."
+            return kept
         return "None. The response is kept whole, as it came, undecoded."
 
     def _responses(self) -> list[SavedResponse]:
@@ -946,6 +949,7 @@ class _Report:
                 "<p>A run has one case: the resolved settings, identified by their case ID. Every"
                 " attempt of it is listed, whatever its outcome.</p>"
             ),
+            *self._synthetic_records(),
             "<dl>",
             f"<dt>Case</dt><dd>{_code(self._case.case_id)}</dd>",
             f"<dt>Plan hash</dt><dd>{_code(plan.plan_hash)}</dd>",
@@ -1006,6 +1010,17 @@ class _Report:
             ]
         )
         return parts
+
+    def _synthetic_records(self) -> list[str]:
+        if not self._run.manifest.synthetic:
+            return []
+        return [
+            (
+                "<p>The run is synthetic, so its attempt, the attempt's exchanges, and the counts"
+                " below are invented, as a real run would record them. Nothing was sent to"
+                " Portfolio123, and nothing was charged.</p>"
+            )
+        ]
 
     def _attempt(self, attempt: SavedAttempt) -> list[str]:
         status = attempt.status

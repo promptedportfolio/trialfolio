@@ -18,6 +18,9 @@ A store serves one output directory, its root, and takes paths relative to it.
   directory there.
 - **Interrupts.** SIGINT is deferred during creation and ownership bookkeeping. Cleanup uses
   successful exclusive creation and file identity, never an empty file as a guess at ownership.
+- **Discarding.** A write can fail after it has published its file. `discard` removes that file,
+  when it holds exactly the write's bytes, for a caller whose file says something by being
+  there, such as the manifest.
 
 R01-T08 checked what each platform reports, on macOS 26.6.2 with Python 3.12.13:
 
@@ -152,6 +155,20 @@ class ArtifactStore(Protocol):
         """
         ...
 
+    def discard(self, path: str, data: bytes) -> None:
+        """Undoes a failed `write` of `data` to `path`, which may have published the file before
+        a later step failed: removes the file if it holds exactly `data`.
+
+        It's for a file whose presence alone says something, such as the manifest, which says
+        the run is complete, so that a failed write leaves no such file. A missing file, and one
+        with other bytes, are left as they are. SIGINT is deferred while it reads and removes
+        the file.
+
+        Raises `RuntimeError` before the store has claimed its root, and `TrialFolioError` with
+        `storage.write_failed` if the file can't be read or removed.
+        """
+        ...
+
     def read(self, path: str) -> bytes:
         """Returns the bytes of a file under the root.
 
@@ -251,6 +268,29 @@ class LocalArtifactStore:
             extra={"event": "artifact.write.completed"},
         )
         return stored
+
+    def discard(self, path: str, data: bytes) -> None:
+        parts = valid_relative_path(path).split("/")
+        if not self._claimed:
+            raise RuntimeError("claim the output directory before writing to it")
+        final = self._root.joinpath(*parts)
+        try:
+            with _defer_sigint():
+                try:
+                    if final.read_bytes() != data:
+                        return  # Another file: not this write's to remove.
+                    os.unlink(final)
+                except FileNotFoundError:
+                    return  # Never published.
+        except OSError as error:
+            raise TrialFolioError(
+                "storage.write_failed",
+                f"Couldn't remove {path}, which a failed write may have left: {_reason(error)}.",
+            ) from error
+        try:
+            self._sync_directories([final.parent])
+        except OSError:
+            pass  # The file is gone either way, and the failure being reported matters more.
 
     def read(self, path: str) -> bytes:
         # Reads follow symbolic links, as any file read does. The manifest's hashes, not the

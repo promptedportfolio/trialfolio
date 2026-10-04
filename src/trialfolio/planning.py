@@ -119,8 +119,7 @@ def installed_versions() -> Versions:
     """Reads the installed versions from package metadata (plan contents).
 
     Raises `TrialFolioError` with `environment.unsupported` when `p123api`, `requests`, or
-    `urllib3` is missing or isn't a verified version; when `requests` or `urllib3` can't be
-    imported; when the imported `requests` or `urllib3` reports a `__version__` other than its
+    `urllib3` is missing, isn't a verified version, or can't be imported; when the imported `requests` or `urllib3` reports a `__version__` other than its
     metadata's, as a stale `.dist-info` would; or when `requests` would write request bodies with
     `simplejson` rather than the standard library's `json`, which happens whenever `simplejson` is
     importable.
@@ -150,6 +149,8 @@ def installed_versions() -> Versions:
             "Uninstall simplejson from this environment, or run Trial Folio in its own virtual "
             "environment.",
         )
+    # Last, because it imports requests and urllib3: a failure here is p123api's own.
+    _imported("p123api")
     return versions
 
 

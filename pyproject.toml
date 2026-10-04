@@ -20,6 +20,9 @@ dependencies = [
     "urllib3==2.8.0",
 ]
 
+[project.scripts]
+trialfolio = "trialfolio.cli:run_installed"
+
 [build-system]
 # Pinned exactly, so the packaging tests can build the wheel offline from uv's cache.
 requires = ["hatchling==1.32.4"]
