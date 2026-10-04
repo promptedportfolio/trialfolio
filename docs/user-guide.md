@@ -214,7 +214,15 @@ Trial Folio sends them only to Portfolio123's API, directly. It ignores proxy se
 
 **Check:**
 
-- With the keychain, `security find-generic-password -s trialfolio -a p123-api-id -w` prints your API ID. Don't print the key the same way; this check shows the items are there.
+- With the keychain, this prints `p123-api-id found` and `p123-api-key found`. It checks that both items are there, without printing either value:
+
+  ```sh
+  for item in p123-api-id p123-api-key; do
+    security find-generic-password -s trialfolio -a "$item" >/dev/null && echo "$item found"
+  done
+  ```
+
+  If a line is missing, store that item again, as in the keychain's step 1.
 - With the keychain function, `type trialfolio` says it's a shell function, and `[ -z "$TRIALFOLIO_P123_API_KEY" ] && echo unset` prints `unset`: your shell doesn't keep the key.
 - Your shell's history file holds no key: `grep -c 'TRIALFOLIO_P123_API_KEY=' "$HISTFILE"` prints 0.
 - Without them, an approved plan fails with `provider.auth_failed`, exit code 5. The message names the missing variables, and says nothing was sent and no output was created.
