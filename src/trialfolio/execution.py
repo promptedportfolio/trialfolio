@@ -18,8 +18,10 @@ artifact storage, and reports).
    a run the command reports as failed never reads as complete.
 
 Steps 4 to 6 follow any attempt whose record was written, so a failed attempt is accounted for
-too, unless an interrupt or a storage failure decided the error code: the output then stays
-visibly incomplete, without a manifest (endings that decide the error code).
+too, unless an interrupt or a storage failure decided the error code, or the attempt ended before
+`configuration.yaml` was saved, which every manifest lists, as after an unexpected exception
+writing it: the output then stays visibly incomplete, without a manifest (endings that decide the
+error code).
 
 Nothing here prompts, reads the environment, or reads secrets: the command passes the approved
 hash, and a factory for the client, which holds any credentials.
@@ -201,8 +203,11 @@ class Execution:
         self._result = result
         self._files.extend((file.role, file.file) for file in result.files)
         error = result.error
-        if not result.recorded or (
-            error is not None and error.code in ("command.interrupted", "storage.write_failed")
+        if (
+            not result.recorded
+            # Every manifest lists the configuration, so without it there's none to write.
+            or self._configuration is None
+            or (error is not None and error.code in ("command.interrupted", "storage.write_failed"))
         ):
             return error
         try:

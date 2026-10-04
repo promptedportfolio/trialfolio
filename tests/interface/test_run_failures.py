@@ -7,7 +7,8 @@ Traces to R01-AC05 (authentication, unavailable-provider, quota, unsupported-cap
 rejected-request, and response-validation errors) and R01-AC06 (a simulated read timeout), and to
 release 0.1.0's failure table, through the CLI's entry function in the test process, with the real
 client, `requests`, and `urllib3` over the fake server. An unexpected exception after the attempt,
-injected by storage faults, says what the attempt's records say about the request (R01-T14).
+injected by storage faults, says what the attempt's records say about the request (R01-T14), and
+one while `configuration.yaml` is saved leaves no manifest, which would have to list it.
 """
 
 from pathlib import Path
@@ -343,3 +344,42 @@ def test_an_unexpected_exception_after_the_attempt_says_the_request_succeeded(
     assert the_attempt(out).outcome == "succeeded"
     assert not (out / "manifest.json").exists()
     assert cli.server.requests() == [AUTH, BACKTEST]
+
+
+# An unexpected exception before the configuration is saved
+
+
+def test_an_unexpected_failure_saving_the_configuration_leaves_no_manifest(
+    cli: Cli, faults: FaultyStores
+) -> None:
+    # Every manifest lists configuration.yaml, so a manifest written without it would read as a
+    # complete run that `trialfolio report` then rejects.
+    cli.ready()
+    serve_success(cli.server)
+    faults.fail_before("configuration.yaml", RuntimeError("its own message"))
+    path = config("formula.yaml")
+    out = cli.tmp / "out"
+
+    outcome = cli(
+        "run",
+        path,
+        "--out",
+        out,
+        "--approve",
+        plan_hash_for(path),
+        "--json",
+        store_factory=faults,
+    )
+
+    assert outcome.exit_code == 1
+    error = error_of(outcome)
+    assert error["code"] == "internal.unexpected"
+    assert "The screen backtest request wasn't sent." in error["message"]
+    record = the_attempt(out)
+    assert record.outcome == "failed"
+    assert record.possibly_charged is False
+    assert not (out / "configuration.yaml").exists()
+    assert not (out / "report.html").exists()
+    assert not (out / "manifest.json").exists()
+    assert outcome.summary["outputs"] == {}
+    assert cli.server.requests() == []
