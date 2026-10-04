@@ -35,7 +35,7 @@ Steps:
    alias trialfolio='uv run --project ~/trialfolio trialfolio'
    ```
 
-   Add the line to your shell's startup file, such as `~/.zshrc`, to keep it. The rest of this guide writes `trialfolio` for this command.
+   Add the line to your shell's startup file, such as `~/.zshrc`, to keep it. The rest of this guide writes `trialfolio` for this command. If you keep your API key in your system's keychain, [setting your credentials](#6-set-your-credentials) replaces this alias with a function.
 
 3. Set up a workspace: a folder of your own, outside the repository, for your configurations and runs. Run the commands from there.
 
@@ -169,9 +169,38 @@ The plan shows:
 
 ## 6. Set your credentials
 
-Trial Folio reads the API ID and key from two environment variables. Portfolio123's website lists both under DataMiner & API.
+Trial Folio reads the API ID and key from two environment variables, `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`. Portfolio123's website lists both under DataMiner & API. Trial Folio never reads them from a file, and never saves or logs them.
 
-So the key doesn't land in your shell's history, type it at a prompt that doesn't show it:
+Keep the key out of your shell's history, and out of any plain-text file. Don't put it in a `.env` file in your workspace: Trial Folio doesn't read one, and the file would sit beside the runs and reports you might copy, zip, or share. Choose one of these instead.
+
+**In your system's keychain, entered once.** On macOS:
+
+1. Store the ID and the key in your login keychain. Each command asks for the value twice, at a prompt that doesn't show it:
+
+   ```sh
+   security add-generic-password -s trialfolio -a p123-api-id -w
+   security add-generic-password -s trialfolio -a p123-api-key -w
+   ```
+
+2. In your shell's startup file, such as `~/.zshrc`, replace the `alias trialfolio=...` line from [setting up](#1-set-up) with this function. For each command, it reads both values from the keychain and sets them for that command alone, so your shell doesn't keep them. As before, replace the path with the repository's:
+
+   ```sh
+   trialfolio() {
+     TRIALFOLIO_P123_API_ID="$(security find-generic-password -s trialfolio -a p123-api-id -w)" \
+     TRIALFOLIO_P123_API_KEY="$(security find-generic-password -s trialfolio -a p123-api-key -w)" \
+       uv run --project ~/trialfolio trialfolio "$@"
+   }
+   ```
+
+3. Open a new terminal, so the function replaces the alias.
+
+To change the key, run `security add-generic-password -U -s trialfolio -a p123-api-key -w`: `-U` updates the item. To remove both, run `security delete-generic-password -s trialfolio -a p123-api-id`, and the same with `p123-api-key`.
+
+On Linux, a keyring that serves the Secret Service, such as GNOME Keyring, works the same way through `secret-tool`. `secret-tool store --label='Trial Folio API key' service trialfolio account p123-api-key` stores the key, asking for it, and `secret-tool lookup service trialfolio account p123-api-key` reads it, in place of `security find-generic-password ... -w`. Trial Folio hasn't been tested on Linux yet.
+
+**Through your password manager.** Many password managers have a command-line tool that runs one command with secrets set as environment variables. It reads them from a file of references, which name where each secret is kept and never hold the secret itself. Write references for the two variables in such a file in your workspace, with a name such as `.env` or `.env.local`, which the workspace's `.gitignore` keeps out of Git. Then run each `trialfolio` command through the tool, as its documentation describes.
+
+**At a prompt, for one shell session.** Type each value at a prompt that doesn't show the key:
 
 ```sh
 read -r TRIALFOLIO_P123_API_ID
@@ -179,12 +208,15 @@ read -rs TRIALFOLIO_P123_API_KEY
 export TRIALFOLIO_P123_API_ID TRIALFOLIO_P123_API_KEY
 ```
 
-A password manager that sets them for one command works too. Afterwards, `unset TRIALFOLIO_P123_API_ID TRIALFOLIO_P123_API_KEY` removes them from the shell.
+They last until you close the terminal. `unset TRIALFOLIO_P123_API_ID TRIALFOLIO_P123_API_KEY` removes them sooner.
 
-Trial Folio sends them only to Portfolio123's API, directly. It never saves or logs them. It ignores proxy settings and `.netrc`, and if `SSLKEYLOGFILE` is set, it warns and ignores it.
+Trial Folio sends them only to Portfolio123's API, directly. It ignores proxy settings and `.netrc`, and if `SSLKEYLOGFILE` is set, it warns and ignores it.
 
 **Check:**
 
+- With the keychain, `security find-generic-password -s trialfolio -a p123-api-id -w` prints your API ID. Don't print the key the same way; this check shows the items are there.
+- With the keychain function, `type trialfolio` says it's a shell function, and `[ -z "$TRIALFOLIO_P123_API_KEY" ] && echo unset` prints `unset`: your shell doesn't keep the key.
+- Your shell's history file holds no key: `grep -c 'TRIALFOLIO_P123_API_KEY=' "$HISTFILE"` prints 0.
 - Without them, an approved plan fails with `provider.auth_failed`, exit code 5. The message names the missing variables, and says nothing was sent and no output was created.
 
 ## 7. Run a backtest
