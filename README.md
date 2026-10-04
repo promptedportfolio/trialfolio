@@ -41,7 +41,7 @@ No installation is available yet. When 0.1.0 is released, this section will give
 
 ## Usage
 
-These are release 0.1.0's commands. The [user guide](docs/user-guide.md) walks through each workflow, from setting up to reading the report, with what to check at each step. Put your Portfolio123 API ID and API key in the environment variables `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`, and run a screen configuration. The user guide's [credentials section](docs/user-guide.md#6-set-your-credentials) shows how to keep the key in your system's keychain or password manager, never in a file or your shell's history:
+These are release 0.1.0's commands. The [user guide](docs/user-guide.md) walks through each workflow, from setting up to reading the report, with what to check at each step. Put your Portfolio123 API ID and API key in the environment variables `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`. The user guide's [credentials section](docs/user-guide.md#6-set-your-credentials) shows how to keep the key in your system's keychain or password manager, never in a file or your shell's history. Then run a screen configuration:
 
 ```text
 trialfolio run screen.yaml --out runs/baseline/
