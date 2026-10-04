@@ -63,5 +63,7 @@ def test_the_wheel_carries_the_starter_files_unchanged(wheel: Path) -> None:
             if name.startswith("trialfolio/init_data/")
         }
 
-    assert packaged == {path.name: path.read_bytes() for path in starters.iterdir()}
-    assert set(packaged) == {"screen.yaml", "README.md", "gitignore"}
+    # By name, not from the folder's listing: the build leaves out what Git ignores, such as a
+    # `.DS_Store` that macOS's Finder adds.
+    names = ("screen.yaml", "README.md", "gitignore")
+    assert packaged == {name: (starters / name).read_bytes() for name in names}
