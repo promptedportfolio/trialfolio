@@ -5,6 +5,9 @@ release allows (AGENTS.md, verification expectations; release 0.1.0, test pairin
 - a fixed clock, through `clock`;
 - storage faults, through `store_factory`.
 
+`on_terminal` runs the command in a new process instead, under a real pseudo-terminal, through
+the test launcher, with the fake server's endpoint and no other double.
+
 Each test gets a temporary home, so the per-user configuration and log directories are under it,
 and an environment without the variables Trial Folio reads, so nothing on the machine running the
 tests leaks in. stdin is empty and isn't a terminal, unless a test gives a pseudo-terminal.
@@ -16,27 +19,27 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
 import pytest
 
-from tests.support import canaries
+from tests.support import canaries, launcher
+from tests.support.clock import FixedClock
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.storage_faults import StorageFaults
+from tests.support.terminal import Terminal
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
 from trialfolio.cli import API_ID_VARIABLE, API_KEY_VARIABLE, main
 from trialfolio.configuration import read_screen_configuration
 from trialfolio.planning import build_plan, installed_versions
+from trialfolio.provider import REQUEST_TIMEOUT_SECONDS
 from trialfolio.storage import ArtifactStore, LocalArtifactStore
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 CONFIGS = FIXTURES / "screen-configs"
 RESPONSES = FIXTURES / "responses"
-
-STARTED = datetime(2026, 10, 3, 14, 0, 0, tzinfo=UTC)
-"""The fixed clock's first time; each later reading is a second after the one before."""
 
 _VARIABLES = (
     "TRIALFOLIO_CONFIG_DIR",
@@ -104,6 +107,9 @@ class FaultyStores:
     def fail_after(self, name: str, error: BaseException) -> None:
         self._setups.append(lambda store: store.fail_after(name, error))
 
+    def fail_link(self, name: str) -> None:
+        self._setups.append(lambda store: store.fail_link(name))
+
     def __call__(self, root: str) -> ArtifactStore:
         store = StorageFaults(LocalArtifactStore(root), self._monkeypatch)
         for setup in self._setups:
@@ -157,12 +163,10 @@ class Cli:
         clock: Callable[[], datetime] | None = None,
     ) -> Outcome:
         """Runs the command with `argv`. stdin is empty unless given. stderr is captured unless
-        given, such as a pseudo-terminal's. The clock gives `STARTED`, then a second later at each
-        reading, unless given."""
+        given, such as a pseudo-terminal's. The clock is a new `FixedClock`, unless given."""
         out = io.StringIO()
         captured = io.StringIO()
         err = captured if stderr is None else stderr
-        moments = (STARTED + timedelta(seconds=n) for n in range(10_000))
         with self._monkeypatch.context() as patch:
             patch.setattr(sys, "stdin", io.StringIO() if stdin is None else stdin)
             patch.setattr(sys, "stdout", out)
@@ -171,10 +175,18 @@ class Cli:
                 [str(arg) for arg in argv],
                 endpoint=self.server.endpoint,
                 timeout=timeout,
-                clock=(lambda: next(moments)) if clock is None else clock,
+                clock=FixedClock() if clock is None else clock,
                 store_factory=store_factory,
             )
         return Outcome(code, out.getvalue(), captured.getvalue() if stderr is None else "")
+
+    def on_terminal(self, *argv: str | Path, timeout: int = REQUEST_TIMEOUT_SECONDS) -> Terminal:
+        """Starts the command with `argv` through the test launcher, in a new process under a real
+        pseudo-terminal, with this one's environment and the test's directory as its working
+        directory."""
+        return Terminal(
+            launcher.command(self.server.endpoint, *argv, timeout=timeout), cwd=self.tmp
+        )
 
     def without_module(self, name: str, *argv: str | Path) -> Outcome:
         """Runs the command with `argv` in a new process, in which the module `name` can't be

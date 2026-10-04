@@ -13,6 +13,7 @@ import json
 import socket
 import threading
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Literal
 
 import pytest
@@ -34,6 +35,9 @@ from trialfolio.provider import (
 
 AUTH = "POST /auth"
 BACKTEST = "POST /screen/backtest"
+
+NOT_JSON = (Path(__file__).resolve().parents[1] / "fixtures/responses/not-json.txt").read_bytes()
+"""The response fixture whose body isn't JSON."""
 
 
 def response(request: str, status: int) -> Exchange:
@@ -452,7 +456,7 @@ def test_a_redirect_on_the_request_is_refused_before_connecting(
 @pytest.mark.parametrize(
     "body",
     [
-        pytest.param(b"<html>Service notice</html>", id="not JSON"),
+        pytest.param(NOT_JSON, id="not JSON"),
         pytest.param(b"", id="empty"),
         # Nested past the decoder's recursion limit, so it raises RecursionError, not a
         # JSONDecodeError: any failure after the 200 means the wrapper couldn't decode it.

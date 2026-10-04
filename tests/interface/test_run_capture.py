@@ -20,7 +20,6 @@ import pytest
 from tests.interface.conftest import (
     AUTHENTICATED,
     RESPONSES,
-    STARTED,
     Cli,
     FaultyStores,
     Outcome,
@@ -29,6 +28,7 @@ from tests.interface.conftest import (
     response,
     serve_success,
 )
+from tests.support.clock import STARTED
 from tests.support.fake_portfolio123 import Received, Reply
 from trialfolio.contracts.attempt import AttemptRecord
 from trialfolio.contracts.manifest import RunManifest

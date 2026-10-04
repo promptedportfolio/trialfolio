@@ -6,9 +6,10 @@ whose claim fails writes no log file anywhere.
 Traces to R01-AC17, and to docs/contracts.md, logging and local diagnostics (content, format,
 levels, and storage), through the CLI's entry function in the test process at
 `TRIALFOLIO_LOG_LEVEL=DEBUG`, with `canaries.yaml` and the real client, `requests`, and `urllib3`
-over the fake server. The canary response is built here from `complete.json`, with canary strings
-in an extra key and in the chart, and a canary number as a metric; R01-T15 adds the fixture
-`responses/canaries.json`. The per-user directories are under a temporary home.
+over the fake server, which answers with `responses/canaries.json`: `complete.json` with canary
+strings in an extra key and in the chart, and canary numbers as a metric and in a period. The
+canaries' scan looks for them in every log file. The per-user directories are under a temporary
+home.
 """
 
 import json
@@ -20,50 +21,23 @@ import pytest
 from tests.interface.conftest import (
     AUTHENTICATED,
     CONFIGS,
-    RESPONSES,
     Cli,
     Outcome,
     plan_hash_for,
+    response,
 )
+from tests.support import canaries
 from tests.support.fake_portfolio123 import Reply
 from trialfolio.storage import LocalArtifactStore, StoredFile
 from trialfolio.userdirs import log_directory
 
 CANARY_CONFIGURATION = CONFIGS / "canaries.yaml"
 
-CONFIGURATION_CANARIES = (
-    "canary-title-5e1d0b7c",
-    "canary-purpose-9a42f6e1",
-    "canary-universe-3c8b2d40",
-    "canary-rule-one-71f0a9d3",
-    "canary-rule-two-0b6e4c52",
-    "canary-formula-d29a1e87",
-    "canary-benchmark-46c3f0b9",
-)
-"""Every value `canaries.yaml` gives a canary."""
-
-RESPONSE_CANARIES = (
-    "canary-response-key-6a1f3c9e",
-    "canary-response-chart-2b7e5d10",
-    "87654.3219",
-)
-"""The canary response's canaries: a string in an extra key, one in the chart, and a number as
-`stats.port.total_return`."""
-
 UNEXPECTED_CANARY = "canary-exception-message-4d8e2a71"
 """The message of an unexpected exception, which logs give only by its type."""
 
 FIELDS = {"timestamp", "level", "event", "message", "trialfolio_version", "component"}
 """The fields every log line holds; linked IDs are added when they apply."""
-
-
-def canary_response() -> bytes:
-    """`complete.json`, with canaries among its values and in an extra key."""
-    payload = json.loads((RESPONSES / "complete.json").read_bytes())
-    payload["canaryExtra"] = {"note": RESPONSE_CANARIES[0]}
-    payload["chart"]["label"] = RESPONSE_CANARIES[1]
-    payload["stats"]["port"]["total_return"] = float(RESPONSE_CANARIES[2])
-    return json.dumps(payload).encode()
 
 
 def approved_run(cli: Cli, out: Path, **options: object) -> Outcome:
@@ -82,17 +56,12 @@ def approved_run(cli: Cli, out: Path, **options: object) -> Outcome:
 def log_files(cli: Cli) -> list[Path]:
     """Every log file under the test's directory: the output directories and the temporary
     home, which holds the per-user log directory."""
-    return sorted(path for path in cli.tmp.rglob("*") if path.is_file() and ".log" in path.name)
+    return canaries.log_files([cli.tmp])
 
 
-def logged_canaries(files: list[Path]) -> list[str]:
-    canaries = (*CONFIGURATION_CANARIES, *RESPONSE_CANARIES, UNEXPECTED_CANARY)
-    return [
-        f"{path.name}: {canary}"
-        for path in files
-        for canary in canaries
-        if canary in path.read_text(encoding="utf-8")
-    ]
+def logged_canaries(cli: Cli) -> list[str]:
+    """Where a canary appears in a log file under the test's directory."""
+    return canaries.logged([cli.tmp], more=[UNEXPECTED_CANARY])
 
 
 def lines(path: Path) -> list[dict[str, object]]:
@@ -141,7 +110,7 @@ class Defective(Interloper):
 def test_a_success_logs_only_under_the_output_directory_and_no_canary(cli: Cli) -> None:
     cli.ready()
     cli.server.reply("/auth", AUTHENTICATED)
-    cli.server.reply("/screen/backtest", Reply(200, canary_response()))
+    cli.server.reply("/screen/backtest", response("canaries.json"))
     out = cli.tmp / "out"
 
     outcome = approved_run(cli, out)
@@ -149,16 +118,18 @@ def test_a_success_logs_only_under_the_output_directory_and_no_canary(cli: Cli) 
     assert outcome.exit_code == 0, outcome.stderr
     assert log_files(cli) == [out / "logs" / "trialfolio.log"]
     assert not log_directory(os.environ).exists()
-    assert logged_canaries(log_files(cli)) == []
-    # The canaries do reach the run's artifacts, so the scan of the logs means something.
-    assert CONFIGURATION_CANARIES[0] in (out / "configuration.yaml").read_text()
-    assert RESPONSE_CANARIES[0] in next(out.glob("cases/*/attempts/*/response.json")).read_text()
+    assert logged_canaries(cli) == []
+    # Every canary does reach the run's artifacts, so the scan of the logs means something.
+    configuration = (out / "configuration.yaml").read_text()
+    assert all(canary in configuration for canary in canaries.CONFIGURATION)
+    saved = next(out.glob("cases/*/attempts/*/response.json")).read_text()
+    assert all(canary in saved for canary in canaries.RESPONSE)
 
 
 def test_each_log_line_is_one_json_object_with_the_documented_fields(cli: Cli) -> None:
     cli.ready()
     cli.server.reply("/auth", AUTHENTICATED)
-    cli.server.reply("/screen/backtest", Reply(200, canary_response()))
+    cli.server.reply("/screen/backtest", response("canaries.json"))
     out = cli.tmp / "out"
 
     approved_run(cli, out)
@@ -193,7 +164,7 @@ def test_an_authentication_failure_logs_no_canary(cli: Cli) -> None:
 
     assert outcome.exit_code == 5
     assert log_files(cli) == [out / "logs" / "trialfolio.log"]
-    assert logged_canaries(log_files(cli)) == []
+    assert logged_canaries(cli) == []
 
 
 def test_a_claim_that_fails_writes_no_log_file_anywhere(cli: Cli) -> None:
@@ -224,7 +195,7 @@ def test_an_internal_error_before_the_claim_logs_to_the_per_user_directory(cli: 
     assert logged.parent == log_directory(os.environ)
     assert str(logged) in str(error["message"])  # pyright: ignore[reportUnknownArgumentType]
     assert UNEXPECTED_CANARY not in str(error["message"])  # pyright: ignore[reportUnknownArgumentType]
-    assert logged_canaries([logged]) == []
+    assert logged_canaries(cli) == []
     assert not out.exists()
     events = [event["event"] for event in lines(logged)]
     assert "cli.command.unexpected" in events
@@ -237,7 +208,7 @@ def test_an_unknown_log_level_is_ignored_with_a_warning(
     cli.ready()
     monkeypatch.setenv("TRIALFOLIO_LOG_LEVEL", "verbose")
     cli.server.reply("/auth", AUTHENTICATED)
-    cli.server.reply("/screen/backtest", Reply(200, canary_response()))
+    cli.server.reply("/screen/backtest", response("canaries.json"))
     out = cli.tmp / "out"
 
     outcome = approved_run(cli, out)
@@ -260,7 +231,7 @@ def test_the_warning_level_leaves_info_out_of_the_log_file(
     # A warning, logged before the claim and held until it.
     monkeypatch.setenv("SSLKEYLOGFILE", str(cli.tmp / "keys.log"))
     cli.server.reply("/auth", AUTHENTICATED)
-    cli.server.reply("/screen/backtest", Reply(200, canary_response()))
+    cli.server.reply("/screen/backtest", response("canaries.json"))
     out = cli.tmp / "out"
 
     outcome = approved_run(cli, out)

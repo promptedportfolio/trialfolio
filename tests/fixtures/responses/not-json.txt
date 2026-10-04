@@ -1,0 +1,3 @@
+<!DOCTYPE html>
+<html><head><title>Service notice</title></head>
+<body><p>The service is briefly unavailable. Try again later.</p></body></html>
