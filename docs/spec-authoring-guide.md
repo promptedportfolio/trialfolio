@@ -256,10 +256,10 @@ Required behavior:
 - Produce an experiment report showing every case and its outcome.
 - Keep execution success separate from strategy usefulness.
 
-Example:
+Example, with `run`, which executes a `kind: experiment` configuration as it does a screen ([D-24](spec.md#decisions)):
 
 ~~~text
-trialfolio experiment study.yaml --out runs/study/
+trialfolio run study.yaml --out runs/study/
 ~~~
 
 Acceptance includes interruption and restart, configuration changes, a failed case, uncertain completion, and complete accounting. Automatic search, sophisticated scheduling, and statistical acceptance decisions are deferred.
