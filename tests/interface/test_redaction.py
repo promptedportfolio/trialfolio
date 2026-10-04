@@ -24,8 +24,6 @@ from tests.interface.conftest import (
 from tests.support import canaries
 from tests.support.fake_portfolio123 import Reply
 
-CANARIES = (canaries.API_ID, canaries.API_KEY, canaries.TOKEN)
-
 
 def approved_run(cli: Cli, out: Path) -> Outcome:
     path = config("formula.yaml")
@@ -35,18 +33,7 @@ def approved_run(cli: Cli, out: Path) -> Outcome:
 def leaks(cli: Cli, outcome: Outcome) -> list[str]:
     """Where a credential or token canary appears: each file under the test's directory, and
     stdout and stderr."""
-    found: list[str] = []
-    for path in sorted(cli.tmp.rglob("*")):
-        if path.is_file():
-            content = path.read_bytes()
-            found += [
-                f"{path.relative_to(cli.tmp)}: {canary}"
-                for canary in CANARIES
-                if canary.encode() in content
-            ]
-    for name, text in (("stdout", outcome.stdout), ("stderr", outcome.stderr)):
-        found += [f"{name}: {canary}" for canary in CANARIES if canary in text]
-    return found
+    return canaries.leaks([cli.tmp], stdout=outcome.stdout, stderr=outcome.stderr)
 
 
 @pytest.fixture(autouse=True)

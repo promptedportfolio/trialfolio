@@ -17,6 +17,7 @@ from typing import TextIO
 
 import pytest
 
+from tests.support import canaries
 from tests.support.terminal import PseudoTerminal
 from trialfolio.approval import Approval, format_plan, obtain_approval
 from trialfolio.configuration import read_screen_configuration
@@ -26,17 +27,6 @@ from trialfolio.planning import VERIFIED_VERSIONS, Versions, build_plan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "screen-configs"
-
-CANARIES = (
-    "canary-title-5e1d0b7c",
-    "canary-purpose-9a42f6e1",
-    "canary-universe-3c8b2d40",
-    "canary-rule-one-71f0a9d3",
-    "canary-rule-two-0b6e4c52",
-    "canary-formula-d29a1e87",
-    "canary-benchmark-46c3f0b9",
-)
-"""The configuration values in `canaries.yaml`."""
 
 VERSIONS = Versions(
     trialfolio="0.1.0",
@@ -58,13 +48,13 @@ def assert_summary_only(shown: str, plan: Plan) -> None:
     assert plan.plan_hash in shown
     assert "at most 1 provider request" in shown
     assert "5 credits" in shown
-    for canary in CANARIES:
+    for canary in canaries.CONFIGURATION:
         assert canary not in shown
 
 
 def assert_full_plan(shown: str, plan: Plan) -> None:
     assert plan.plan_hash in shown
-    for canary in CANARIES:
+    for canary in canaries.CONFIGURATION:
         assert canary in shown
 
 
@@ -220,7 +210,7 @@ def test_configuration_text_cant_act_on_the_terminal() -> None:
     escape, bell, *others = HOSTILE
     hostile = f"{escape}[2J{bell}{''.join(others)}"
     text = (FIXTURES / "canaries.yaml").read_text(encoding="utf-8")
-    for canary in CANARIES:
+    for canary in canaries.CONFIGURATION:
         # A JSON string is a YAML double-quoted scalar, with each of those characters escaped.
         text = text.replace(f"'{canary}'", json.dumps(canary + hostile))
     configuration = read_screen_configuration(text.encode(), "hostile.yaml")
@@ -231,7 +221,7 @@ def test_configuration_text_cant_act_on_the_terminal() -> None:
     for char in HOSTILE:
         assert char not in shown
         assert f"\\u{ord(char):04x}" in shown
-    for canary in CANARIES:
+    for canary in canaries.CONFIGURATION:
         assert canary in shown
     assert "[2J" in shown
 

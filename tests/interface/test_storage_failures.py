@@ -4,12 +4,14 @@ attempt's records still give its outcome: a 200 whose response wasn't saved is `
 possibly charged, and without an attempt record the start record reads as `running`.
 
 Traces to R01-AC29, and to docs/contracts.md, endings that decide the error code and artifact
-storage (completion), through the CLI's entry function in the test process, with storage faults
-wrapping the real store. R01-T15 adds the failed `os.link` of a file system without hard links,
-for R01-AC29's case at `configuration.yaml`; here the same write fails with `ENOSPC`. A failure
-after the store published the manifest, such as its directory's sync, discards it (R01-T14).
+storage (completion, no hard links), through the CLI's entry function in the test process, with
+storage faults wrapping the real store. On Linux and macOS, a file system without hard links, which
+the storage faults' failed `os.link` stands for, fails at `configuration.yaml`, before any
+request; the same write failing with `ENOSPC` leaves a `failed` attempt record. A failure after the
+store published the manifest, such as its directory's sync, discards it (R01-T14).
 """
 
+import sys
 import uuid
 from pathlib import Path
 
@@ -136,6 +138,29 @@ def test_a_failure_writing_the_configuration_fails_before_any_request(
     assert record.possibly_charged is False
     assert record.exchanges == ()
     assert not (out / "manifest.json").exists()
+    assert outcome.summary["counts"]["provider_requests"] == 0  # pyright: ignore[reportIndexIssue]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows publishes files by renaming them")
+def test_a_file_system_without_hard_links_fails_at_the_configuration_before_any_request(
+    cli: Cli, faults: FaultyStores
+) -> None:
+    cli.ready()
+    out = cli.tmp / "out"
+    serve_success(cli.server)
+    faults.fail_link("configuration.yaml")
+
+    outcome = approved_run(cli, out, faults)
+
+    write_failed(outcome)
+    message = outcome.summary["error"]["message"]  # pyright: ignore[reportIndexIssue]
+    assert "Couldn't write configuration.yaml" in message
+    assert "doesn't support hard links" in message
+    assert cli.server.received == ()
+    # Every later file fails too, the attempt record included, so the claim's plan is the only
+    # record left, with the log the claim started, and no temporary file.
+    files = sorted(path.relative_to(out).as_posix() for path in out.rglob("*") if path.is_file())
+    assert files == ["logs/trialfolio.log", "plan.json"]
     assert outcome.summary["counts"]["provider_requests"] == 0  # pyright: ignore[reportIndexIssue]
 
 

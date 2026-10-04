@@ -2,14 +2,17 @@
 written, and changes nothing in it; and a directory another process writes to before `run`
 claims it fails the claim, leaving only the other process's files.
 
-Traces to R01-AC15 and, in the test process, R01-AC27: `run`, `demo`, and `report` each fail with
-`output.not_empty` and exit 4, and the fake server receives nothing. R01-T16's
-`tests/interface/test_output_directory.py` adds R01-AC27's version with a second process writing
-while `run`, under the test launcher, waits at the approval prompt; here the other process's file
-appears just before the claim, through the entry function's `store_factory`.
+Traces to R01-AC15 and R01-AC27: `run`, `demo`, and `report` each fail with `output.not_empty`
+and exit 4, and the fake server receives nothing. R01-AC27 is checked twice: with a second process
+writing while `run`, under the test launcher on a terminal, waits at the approval prompt; and in
+the test process, where the other process's file appears just before the claim, through the entry
+function's `store_factory`.
 """
 
+import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -150,4 +153,36 @@ def test_a_file_written_before_the_claim_fails_it_and_is_left_alone(cli: Cli) ->
     assert sorted(os.listdir(out)) == ["other.txt"]
     assert (out / "other.txt").read_bytes() == b"another process's file\n"
     # Nothing of its own, logs included, and no log file anywhere.
+    assert not list(cli.home.rglob("*.log"))
+
+
+ANOTHER_PROCESS = """
+import pathlib
+import sys
+
+out = pathlib.Path(sys.argv[1])
+out.mkdir(parents=True, exist_ok=True)
+(out / "other.txt").write_bytes(b"another process's file\\n")
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no pseudo-terminals")
+def test_another_process_writing_while_run_waits_for_approval_fails_the_claim(cli: Cli) -> None:
+    cli.ready()
+    serve_success(cli.server)
+    out = cli.tmp / "out"
+
+    with cli.on_terminal("run", config("formula.yaml"), "--out", out, "--json") as terminal:
+        terminal.wait_for("Type approve")
+        subprocess.run([sys.executable, "-c", ANOTHER_PROCESS, str(out)], check=True)
+        terminal.press("approve\n")
+        exit_code = terminal.wait()
+
+    assert exit_code == 4, terminal.shown()
+    summary = json.loads(terminal.stdout)
+    assert summary["error"]["code"] == "output.not_empty"
+    assert summary["output_dir"] is None
+    assert cli.server.received == ()
+    assert sorted(os.listdir(out)) == ["other.txt"]
+    assert (out / "other.txt").read_bytes() == b"another process's file\n"
     assert not list(cli.home.rglob("*.log"))

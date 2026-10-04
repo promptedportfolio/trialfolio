@@ -5,8 +5,9 @@ Traces to R01-AC05: an unverified `p123api`, `requests`, or `urllib3`, and an im
 `simplejson`, each fail with `environment.unsupported`, which comes before the plan is shown
 because a plan needs the versions. These tests change what the test process reads, at the
 installed package versions' boundary: a directory first on `sys.path` holds a `.dist-info` that
-reports another version, or a `simplejson` package. `tests/interface/test_environment.py`
-(R01-T16) runs the command itself in a subprocess with the same directory on its `PYTHONPATH`.
+reports another version, or a `simplejson` package, from `tests/support/package_versions.py`.
+`tests/interface/test_environment.py` runs the command itself in a subprocess with the same
+directory on its `PYTHONPATH`.
 
 A missing `p123api`, `requests`, or `urllib3` fails the same way, as the release's plan details
 from R01-T10 say, and so does one that's installed but can't be imported, which R01-T14 extended
@@ -21,16 +22,11 @@ from pathlib import Path
 import pytest
 import requests
 
+from tests.support.package_versions import fake_distribution, fake_simplejson
 from trialfolio.errors import TrialFolioError
 from trialfolio.planning import VERIFIED_VERSIONS, installed_versions
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-def fake_distribution(directory: Path, name: str, version: str) -> None:
-    info = directory / f"{name}-{version}.dist-info"
-    info.mkdir()
-    (info / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n")
 
 
 def unsupported() -> str:
@@ -78,8 +74,7 @@ def test_an_imported_module_of_another_version_is_unsupported(
 def test_an_importable_simplejson_is_unsupported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / "simplejson").mkdir()
-    (tmp_path / "simplejson" / "__init__.py").write_text("")
+    fake_simplejson(tmp_path)
     monkeypatch.syspath_prepend(tmp_path)
 
     message = unsupported()

@@ -8,24 +8,33 @@ response and provider metadata are saved before anything else, and the record's 
 files), R01-AC06 (a read timeout is `unknown`, sent once), R01-AC07 (one attempt; the exchanges in
 order; `provider_requests` is 0 after a failed authentication and a `not_connected` request),
 R01-AC25 (the records name the plan hash; `request.json` holds the request's numbers as sent),
-R01-AC28 (what each interrupt leaves), and R01-AC29 (a storage failure after a 200 is `unknown`,
-and a start record alone reads as `running`). The real client, `requests`, and `urllib3` run over
-the fake server; storage faults wrap the real store.
+R01-AC28 (what each interrupt leaves, and a `run` killed with `SIGKILL` while the response is
+awaited), and R01-AC29 (a storage failure after a 200 is `unknown`, and a start record alone reads
+as `running`). The real client, `requests`, and `urllib3` run over the fake server; storage faults
+wrap the real store. The `SIGKILL` test runs `trialfolio run` under the test launcher, in its own
+process, which the kill ends at once.
 """
 
 import hashlib
 import json
 import logging
+import os
+import signal
+import subprocess
+import sys
+import time
+import uuid
 from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from tests.support import canaries
+from tests.support import canaries, launcher
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.socket_faults import SocketFaults
 from tests.support.storage_faults import StorageFaults
+from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
 from trialfolio.attempts import (
     Attempt,
     AttemptResult,
@@ -33,11 +42,12 @@ from trialfolio.attempts import (
     attempt_directory,
     read_attempt,
 )
+from trialfolio.cli import API_ID_VARIABLE, API_KEY_VARIABLE
 from trialfolio.configuration import read_screen_configuration
 from trialfolio.contracts.attempt import AttemptRecord, Exchange, StartRecord
 from trialfolio.contracts.plan import Plan
 from trialfolio.errors import TrialFolioError
-from trialfolio.planning import VERIFIED_VERSIONS, Versions, build_plan
+from trialfolio.planning import VERIFIED_VERSIONS, Versions, build_plan, installed_versions
 from trialfolio.provider import (
     REQUEST_TIMEOUT_SECONDS,
     Credentials,
@@ -49,6 +59,8 @@ from trialfolio.provider import (
 from trialfolio.storage import LocalArtifactStore
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "screen-configs"
+NOT_JSON = (FIXTURES.parent / "responses" / "not-json.txt").read_bytes()
+"""The response fixture whose body isn't JSON."""
 
 AUTH = "POST /auth"
 BACKTEST = "POST /screen/backtest"
@@ -288,7 +300,7 @@ def test_a_success_writes_the_start_record_before_sending_and_the_attempt_record
 def test_an_undecodable_200_is_saved_raw_and_succeeds_for_capture(
     server: FakePortfolio123, client: P123ScreenBacktestClient, attempt: Attempt, out: Path
 ) -> None:
-    answers(server, Reply(200, b"Not JSON <html>"))
+    answers(server, Reply(200, NOT_JSON))
 
     result = attempt.run(client)
 
@@ -296,9 +308,9 @@ def test_an_undecodable_200_is_saved_raw_and_succeeds_for_capture(
     assert record.outcome == "succeeded"
     assert record.response is not None
     assert record.response.form == "undecoded"
-    assert (out / record.response.path).read_bytes() == b"Not JSON <html>"
+    assert (out / record.response.path).read_bytes() == NOT_JSON
     assert files(out, attempt) == {"request.json", "started.json", "response.raw", "attempt.json"}
-    assert result.response == UndecodedResponse(b"Not JSON <html>")
+    assert result.response == UndecodedResponse(NOT_JSON)
     assert record.provider_metadata.cost is None
     assert record.provider_metadata.quota_remaining is None
 
@@ -453,6 +465,59 @@ def test_without_its_attempt_record_a_start_record_reads_as_running(
     assert status(out, attempt) == AttemptStatus(
         attempt_id=attempt.attempt_id, outcome="running", possibly_charged=True, provider_requests=1
     )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no SIGKILL")
+def test_a_run_killed_while_the_response_is_awaited_leaves_a_start_record_read_as_running(
+    server: FakePortfolio123, tmp_path: Path
+) -> None:
+    path = FIXTURES / "formula.yaml"
+    configuration = read_screen_configuration(path.read_bytes(), path.name)
+    plan_hash = build_plan(configuration, installed_versions()).plan_hash
+    server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+    # Held until the server closes, long after the kill.
+    server.reply("/screen/backtest", Reply(200, json.dumps(PAYLOAD).encode(), delay=600))
+    out = tmp_path / "out"
+    # The test's environment, without anything Trial Folio reads from the machine running it.
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith(("TRIALFOLIO_", "XDG_")) and name != "SSLKEYLOGFILE"
+    }
+    env |= {
+        "HOME": str(tmp_path),
+        ACCEPT_VARIABLE: ACCEPT_VALUE,
+        API_ID_VARIABLE: canaries.API_ID,
+        API_KEY_VARIABLE: canaries.API_KEY,
+    }
+    command = launcher.command(
+        server.endpoint, "run", path, "--out", out, "--approve", plan_hash, "--json"
+    )
+
+    with (tmp_path / "stderr.txt").open("w") as stderr:
+        process = subprocess.Popen(
+            command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stderr, env=env
+        )
+        deadline = time.monotonic() + 60
+        while server.requests() != [AUTH, BACKTEST]:
+            assert process.poll() is None, (tmp_path / "stderr.txt").read_text()
+            assert time.monotonic() < deadline, "the backtest request never arrived"
+            time.sleep(0.01)
+        os.kill(process.pid, signal.SIGKILL)
+        assert process.wait(60) == -signal.SIGKILL
+
+    (directory,) = (out / "cases").glob("*/attempts/*")
+    assert {child.name for child in directory.iterdir()} == {"request.json", "started.json"}
+    status = read_attempt(
+        LocalArtifactStore(str(out)), directory.parent.parent.name, uuid.UUID(directory.name)
+    )
+    assert status == AttemptStatus(
+        attempt_id=uuid.UUID(directory.name),
+        outcome="running",
+        possibly_charged=True,
+        provider_requests=1,
+    )
+    assert not (out / "manifest.json").exists()
 
 
 def test_a_storage_failure_at_the_start_record_sends_nothing(

@@ -5,7 +5,8 @@ Traces to R01-AC28 and docs/contracts.md, interrupts and endings that decide the
 through the CLI's entry function in the test process. The stages:
 
 - at the approval prompt, by a real SIGINT while the CLI reads a pseudo-terminal: nothing is
-  left, and nothing is sent. R01-T16 repeats it under the test launcher, in its own process.
+  left, and nothing is sent. It's checked twice: in the test process, and by a real Ctrl-C on the
+  terminal of the test launcher's process.
 - while the claim writes `plan.json`: the claim removes what it created, so nothing is left.
 - just after `configuration.yaml`, during authentication, and while `started.json` is written
   after authentication succeeded: a `failed` attempt record, not possibly charged, with nothing
@@ -20,6 +21,7 @@ Each ending after the claim leaves no manifest, so the output is visibly incompl
 faults and socket faults inject the interrupts, at the boundaries the release allows.
 """
 
+import json
 import os
 import signal
 import sys
@@ -41,7 +43,7 @@ from tests.interface.conftest import (
 )
 from tests.support.fake_portfolio123 import Reply
 from tests.support.socket_faults import SocketFaults
-from tests.support.terminal import PseudoTerminal
+from tests.support.terminal import CTRL_C, PseudoTerminal
 from trialfolio.contracts.attempt import AttemptRecord
 from trialfolio.storage import ArtifactStore, LocalArtifactStore, StoredFile
 
@@ -151,6 +153,27 @@ def test_ctrl_c_at_the_approval_prompt_leaves_nothing(cli: Cli) -> None:
     assert not out.exists()
     assert cli.server.received == ()
     assert outcome.summary["output_dir"] is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no pseudo-terminals")
+def test_ctrl_c_at_the_approval_prompt_under_the_test_launcher_leaves_nothing(cli: Cli) -> None:
+    cli.ready()
+    serve_success(cli.server)
+    out = cli.tmp / "out"
+
+    with cli.on_terminal("run", FORMULA, "--out", out, "--json") as terminal:
+        terminal.wait_for("Type approve")
+        terminal.press(CTRL_C)
+        exit_code = terminal.wait()
+    shown = terminal.shown()
+
+    assert exit_code == 130, shown
+    summary = json.loads(terminal.stdout)
+    assert summary["error"]["code"] == "command.interrupted"
+    assert summary["output_dir"] is None
+    assert "Nothing was sent, and no output was created." in shown
+    assert not out.exists()
+    assert cli.server.received == ()
 
 
 def test_an_interrupt_while_the_claim_writes_the_plan_leaves_nothing(

@@ -8,18 +8,27 @@ named file, once:
 - **`fail_before(name, error)`** raises `error`, such as a `KeyboardInterrupt` or an unexpected
   `RuntimeError`, before the real write starts.
 - **`fail_after(name, error)`** raises `error` once the real write has published the file.
+- **`fail_link(name)`** makes `os.link` fail as it does on a file system without hard links,
+  such as FAT or exFAT, when the real store publishes `name`, and for every file after it. On
+  Linux and macOS, the store publishes each file with `os.link`; on Windows it renames it, so
+  this fault doesn't apply there.
 
 A name matches a path's last segment, such as `response.json`. R01-T11 created this ahead of
-R01-T15, which adds a failed `os.link`, as on a file system without hard links.
+R01-T15, which added the failed `os.link`.
 """
 
 import errno
 import os
+import sys
 from pathlib import Path
 
 import pytest
 
 from trialfolio.storage import ArtifactStore, StoredFile
+
+_NO_HARD_LINKS = errno.ENOTSUP if sys.platform == "darwin" else errno.EPERM
+"""How `os.link` reports a file system without hard links: `ENOTSUP` on macOS, as R01-T08 saw
+on exFAT and FAT32 disk images, and `EPERM` on Linux, as link(2) documents."""
 
 
 class StorageFaults:
@@ -30,6 +39,8 @@ class StorageFaults:
         self._before: dict[str, BaseException] = {}
         self._after: dict[str, BaseException] = {}
         self._os_errors: set[str] = set()
+        self._links_fail_at: str | None = None
+        self._links_failing = False
         self.published: list[str] = []
         """Each path a write published, in order. A file written twice would appear twice."""
         real_open = os.open
@@ -51,10 +62,38 @@ class StorageFaults:
             return real_open(path, flags, mode, dir_fd=dir_fd)
 
         monkeypatch.setattr(os, "open", open_)
+        real_link = os.link
+
+        def link(
+            source: str | os.PathLike[str],
+            destination: str | os.PathLike[str],
+            *,
+            src_dir_fd: int | None = None,
+            dst_dir_fd: int | None = None,
+            follow_symlinks: bool = True,
+        ) -> None:
+            if Path(destination).name == self._links_fail_at:
+                self._links_failing = True
+            if self._links_failing:
+                raise OSError(_NO_HARD_LINKS, os.strerror(_NO_HARD_LINKS))
+            real_link(
+                source,
+                destination,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+                follow_symlinks=follow_symlinks,
+            )
+
+        monkeypatch.setattr(os, "link", link)
 
     def fail_os(self, name: str) -> None:
         """The next write of `name` fails inside the real store with `ENOSPC`."""
         self._os_errors.add(name)
+
+    def fail_link(self, name: str) -> None:
+        """From the write of `name` on, the real store's `os.link` fails as it does on a file
+        system without hard links."""
+        self._links_fail_at = name
 
     def fail_before(self, name: str, error: BaseException) -> None:
         """The next write of `name` raises `error` before it starts."""
