@@ -6,7 +6,8 @@ retried.
 Traces to R01-AC05 (authentication, unavailable-provider, quota, unsupported-capability,
 rejected-request, and response-validation errors) and R01-AC06 (a simulated read timeout), and to
 release 0.1.0's failure table, through the CLI's entry function in the test process, with the real
-client, `requests`, and `urllib3` over the fake server.
+client, `requests`, and `urllib3` over the fake server. An unexpected exception after the attempt,
+injected by storage faults, says what the attempt's records say about the request (R01-T14).
 """
 
 from pathlib import Path
@@ -16,10 +17,12 @@ import pytest
 from tests.interface.conftest import (
     AUTHENTICATED,
     Cli,
+    FaultyStores,
     Outcome,
     config,
     plan_hash_for,
     response,
+    serve_success,
 )
 from tests.support.fake_portfolio123 import Reply
 from trialfolio.contracts.attempt import AttemptRecord
@@ -303,3 +306,40 @@ def test_a_read_timeout_records_an_unknown_attempt_sent_once(cli: Cli) -> None:
     manifest = accounted_for(out, "provider.outcome_unknown")
     assert manifest.counts.attempts.unknown == 1
     assert manifest.counts.provider_requests == 1
+
+
+# An unexpected exception after the attempt
+
+
+def test_an_unexpected_exception_after_the_attempt_says_the_request_succeeded(
+    cli: Cli, faults: FaultyStores
+) -> None:
+    cli.ready()
+    serve_success(cli.server)
+    faults.fail_before("report.html", RuntimeError("its own message"))
+    path = config("formula.yaml")
+    out = cli.tmp / "out"
+
+    outcome = cli(
+        "run",
+        path,
+        "--out",
+        out,
+        "--approve",
+        plan_hash_for(path),
+        "--json",
+        store_factory=faults,
+    )
+
+    assert outcome.exit_code == 1
+    error = error_of(outcome)
+    assert error["code"] == "internal.unexpected"
+    message = error["message"]
+    assert message.startswith("Trial Folio failed unexpectedly (RuntimeError).")
+    # So nobody runs it again thinking nothing was sent: it may have cost credits.
+    assert "The screen backtest request succeeded, and its response was saved." in message
+    assert "The run has no manifest, so its output is incomplete." in message
+    assert "its own message" not in message
+    assert the_attempt(out).outcome == "succeeded"
+    assert not (out / "manifest.json").exists()
+    assert cli.server.requests() == [AUTH, BACKTEST]

@@ -15,7 +15,9 @@ to exit codes (REQ-03). Commands:
 stdout carries the result: a short summary, or, with `--json`, exactly one JSON summary, on
 success and on failure. stderr carries progress, warnings, and errors, and the plan display and
 prompts, which are never logged. `TrialFolioError` codes map to exit codes through `EXIT_CODES`;
-an unexpected exception is `internal.unexpected`, exit 1, and its message names the log file.
+an unexpected exception is `internal.unexpected`, exit 1, and its message names the log file
+and, once `run` or `demo` has claimed its output directory, says what the run's records say about
+the request and the manifest, as an interrupt's does.
 
 `run` and `demo` import the modules that import `p123api`, `requests`, or `urllib3` only once
 `installed_versions` has checked and imported them, so a missing or broken one is
@@ -380,42 +382,34 @@ class _Invocation:
     def _interrupted(self) -> TrialFolioError:
         """`command.interrupted` for an interrupt the command didn't record itself: before the
         claim, or a second one while the attempt ended."""
-        execution = self.execution
-        if execution is None or not execution.claimed:
-            detail = "Nothing was sent, and no output was created."
-        else:
-            from trialfolio.attempts import request_detail
-
-            result = execution.result
-            attempt = execution.attempt
-            if result is not None and result.recorded:
-                record = result.record
-                detail = request_detail(record.outcome, possibly_charged=record.possibly_charged)
-            elif attempt is not None and attempt.start_record is not None:
-                detail = (
-                    "The screen backtest request may have been sent, and may have been charged:"
-                    " the attempt's start record reads as running. Trial Folio never retries it"
-                    " automatically."
-                )
-            else:
-                detail = "The screen backtest request wasn't sent."
-            detail += " The run has no manifest, so its output is incomplete."
+        detail = self._execution_detail() or "Nothing was sent, and no output was created."
         return TrialFolioError("command.interrupted", f"Trial Folio was interrupted. {detail}")
 
     def _unexpected(self, failure: Exception) -> TrialFolioError:
         """`internal.unexpected` for a defect. Its log gives the exception's type and frames,
-        never its message, which could hold a value."""
+        never its message, which could hold a value. After the claim, its message says what the
+        run's records say, so a request that may have been charged is never hidden."""
         _logger.error(
             "Unexpected %s, at:\n%s",
             type(failure).__name__,
             "".join(traceback.format_tb(failure.__traceback__)),
             extra=_event("cli.command.unexpected", False),
         )
+        detail = self._execution_detail()
         return TrialFolioError(
             "internal.unexpected",
-            f"Trial Folio failed unexpectedly ({type(failure).__name__}). This is a defect in"
-            " Trial Folio; please report it.",
+            f"Trial Folio failed unexpectedly ({type(failure).__name__})."
+            f"{'' if detail is None else f' {detail}'} This is a defect in Trial Folio; please"
+            " report it.",
         )
+
+    def _execution_detail(self) -> str | None:
+        """What the run's records say about the request and the manifest, once `run` or `demo`
+        has claimed its output directory; None before."""
+        execution = self.execution
+        if execution is None or not execution.claimed:
+            return None
+        return execution.ending_detail()
 
     def claimed(self, out: str) -> None:
         """Called once the command has claimed its output directory: logs go there from now."""
