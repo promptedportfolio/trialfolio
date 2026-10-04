@@ -52,7 +52,7 @@ R01-T06 set these up. The status column says which have been verified, and when.
 | `TRIALFOLIO_REFERENCE_DIR=reference uv run pytest -m reference` | Conformance against local reference data (opt-in) | Verified 2026-10-04, with the owner's four reference responses |
 | `uv run pytest -m live` | Live Portfolio123 checks (opt-in, with credentials and a budget in `TRIALFOLIO_LIVE_BUDGET_CREDITS`) | Verified 2026-10-04, with the owner present and a 5-credit budget. It refuses to start without credentials or a budget. |
 
-Tooling: Python 3.12 or later, with `uv` for environments and dependencies ([D-02](docs/spec.md#decisions)). Add dependencies with `uv add`, and record each one in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), together with every package it brings in. A test checks that the file names every locked runtime package.
+Tooling: Python 3.12 or later, with `uv` for environments and dependencies ([D-02](docs/spec.md#decisions)). Add dependencies with `uv add`, and record each one in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), together with every package it brings in. A test checks that the file's "The locked runtime set" paragraph names every locked runtime package.
 
 ## Verification expectations
 
