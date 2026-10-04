@@ -26,6 +26,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn
@@ -53,9 +54,9 @@ PAYLOADS = REPO_ROOT / "reference" / "p123api-live-check" / "payloads"
 """Git-ignored, like every `payloads/` folder under `reference/` (REQ-11)."""
 BUDGET_VARIABLE = "TRIALFOLIO_LIVE_BUDGET_CREDITS"
 COMMAND_TIMEOUT_SECONDS = 2 * REQUEST_TIMEOUT_SECONDS
-"""How long the test lets a command run before it interrupts it. The client's timeouts don't bound
-a command's time: `requests` applies each one to every connection attempt and every socket read,
-not to the whole exchange."""
+"""How long the test lets a command run before it interrupts it, except on Windows (`trialfolio`
+says why). The client's timeouts don't bound a command's time: `requests` applies each one to
+every connection attempt and every socket read, not to the whole exchange."""
 
 
 def refuse(reason: str) -> NoReturn:
@@ -78,7 +79,15 @@ def trialfolio(*argv: str | Path, env: dict[str, str]) -> tuple[int, dict[str, A
     The test never kills the command, so a run always records how its attempt ended. Past
     `COMMAND_TIMEOUT_SECONDS`, it interrupts the command with `SIGINT`, as Ctrl-C would, waits for
     it to exit, and fails. Ctrl-C at the terminal reaches the command too, and the test waits for
-    it the same way, where `subprocess.run` would kill it a quarter of a second later."""
+    it the same way, where `subprocess.run` would kill it a quarter of a second later.
+
+    On Windows, the test sets no deadline: it can't interrupt the command alone as Ctrl-C would.
+    There, `Popen.send_signal` takes only `SIGTERM`, which terminates the process, and the console
+    control events. `CTRL_C_EVENT` can't be limited to one process group, and Python turns only
+    `SIGINT`, not `CTRL_BREAK_EVENT`'s `SIGBREAK`, into `KeyboardInterrupt`, so that event would
+    end the command like a kill. The owner, who is present, presses Ctrl-C instead, which the
+    console passes to every process attached to it."""
+    deadline = None if sys.platform == "win32" else COMMAND_TIMEOUT_SECONDS
     with subprocess.Popen(
         [str(installed_command()), *(str(arg) for arg in argv), "--json"],
         stdin=subprocess.DEVNULL,
@@ -89,7 +98,7 @@ def trialfolio(*argv: str | Path, env: dict[str, str]) -> tuple[int, dict[str, A
         env=env,
     ) as process:
         try:
-            stdout, _ = process.communicate(timeout=COMMAND_TIMEOUT_SECONDS)
+            stdout, _ = process.communicate(timeout=deadline)
         except subprocess.TimeoutExpired:
             process.send_signal(signal.SIGINT)
             process.communicate()
