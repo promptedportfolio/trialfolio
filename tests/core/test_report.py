@@ -23,7 +23,7 @@ import pytest
 
 from tests.core.conftest import CONFIGS, RESPONSES, WriteRun, Written
 from tests.support.fake_portfolio123 import Reply
-from tests.support.html_report import Document, Element, parse
+from tests.support.html_report import Document, parse
 from trialfolio.notices import (
     CONCISE_NOTICE,
     FULL_NOTICE,
@@ -50,15 +50,9 @@ def complete(write_run: WriteRun) -> Written:
     return write_run(FORMULA, response("complete.json"))
 
 
-def table_with(document: Document, heading: str) -> Element:
-    """The table after the `<h3>` whose text starts with `heading`."""
-    (h3,) = (h for h in document.root.find_all("h3") if h.text.startswith(heading))
-    return next(t for t in document.root.find_all("table") if document.before(h3, t))
-
-
 def metric_rows(document: Document, heading: str) -> dict[str, list[str]]:
     """Each row of a metrics table, by its identifier: the text of its cells."""
-    rows = document.rows(table_with(document, heading))[1:]
+    rows = document.rows(document.table_after(heading))[1:]
     return {row[0].find_all("code")[0].text: [cell.text for cell in row] for row in rows}
 
 
@@ -334,7 +328,7 @@ def test_an_unavailable_metric_shows_its_reason_and_never_zero(write_run: WriteR
 
 
 def coverage(document: Document) -> list[list[str]]:
-    rows = document.rows(table_with(document, "Coverage"))
+    rows = document.rows(document.table_after("Coverage"))
     return [[cell.text for cell in row] for row in rows[1:]]
 
 
@@ -378,7 +372,7 @@ def test_without_periods_the_report_says_the_coverage_couldnt_be_established(
 def settings(document: Document) -> dict[str, list[str]]:
     """Each row of the settings table, by setting: the text of its cells, with the flags cell
     reduced to its codes, separated by semicolons."""
-    rows = document.rows(table_with(document, "All settings"))
+    rows = document.rows(document.table_after("All settings"))
     return {
         row[0].text: [
             ";".join(code.text for code in cell.find_all("code")) if index == 5 else cell.text

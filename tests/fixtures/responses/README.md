@@ -10,7 +10,7 @@ R01-T12 created the first five ahead of R01-T15, for the normalization tests. R0
 
 | File | Contents | Criteria |
 |---|---|---|
-| `complete.json` | A complete response: every metric present, with 1 to 4 decimal places, four rebalance periods, newest first, the summary rows, a short `chart`, `cost`, and `quotaRemaining`. Its coverage equals the [documented example](../../../docs/contracts.md#example)'s dates, 2016-01-01 to 2025-12-31. | R01-AC10, R01-AC12, R01-AC14, R01-AC30, R01-AC31 |
+| `complete.json` | A complete response: every metric present, with 1 to 4 decimal places, four rebalance periods, newest first, the summary rows, a short `chart`, `cost`, and `quotaRemaining`. Its coverage equals the [documented example](../../../docs/contracts.md#example)'s dates, 2016-01-01 to 2025-12-31. | R01-AC03, R01-AC07, R01-AC10, R01-AC12, R01-AC13, R01-AC14, R01-AC30, R01-AC31 |
 | `missing-metrics.json` | `complete.json`, with `stats.port.sortino_ratio` absent, `stats.beta` `null`, and `stats.bench.sharpe_ratio` a string | R01-AC12, R01-AC14 |
 | `coverage-mismatch.json` | `complete.json`, with its first `Tran Dt` 2016-01-04, after the requested start, and its last `End Dt` 2025-12-26, before the requested end | R01-AC14, R01-AC31 |
 | `no-periods.json` | `complete.json` with an empty `results.rows` | R01-AC31 |
