@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="Trial Folio 0.1.0">
+<title>Synthetic example: earnings yield with a liquidity floor · Trial Folio run report</title>
+<style>
+:root{color-scheme:light dark;--text:#1d232b;--muted:#5b6573;--back:#ffffff;--panel:#f4f5f7;--rule:#d5d9df;--mark:#46556b}
+@media (prefers-color-scheme:dark){:root{--text:#e3e6ea;--muted:#9aa3ae;--back:#14171b;--panel:#1d2127;--rule:#363c45;--mark:#a9b6c8}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--back);color:var(--text);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.page{max-width:70rem;margin:0 auto;padding:2rem 1rem 4rem}
+h1{font-size:1.75rem;line-height:1.25;margin:.25rem 0 1rem}
+h2{font-size:1.25rem;margin:2.5rem 0 .75rem;padding-top:1rem;border-top:1px solid var(--rule)}
+h3{font-size:1rem;margin:1.5rem 0 .5rem}
+p,ul{margin:.5rem 0}
+.kind{margin:0;color:var(--muted);font-size:.875rem;letter-spacing:.04em;text-transform:uppercase}
+.notice{margin:1rem 0;padding:.75rem 1rem;background:var(--panel);border:1px solid var(--rule);border-left:4px solid var(--mark)}
+.synthetic{margin:1rem 0;padding:.75rem 1rem;border:2px dashed var(--mark)}
+.muted{color:var(--muted)}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:.25rem 1.25rem;margin:.75rem 0}
+dt{color:var(--muted)}
+dd{margin:0}
+.wide{overflow-x:auto;margin:.5rem 0 1rem}
+table{border-collapse:collapse;width:100%;font-size:.9375rem}
+caption{text-align:left;color:var(--muted);padding:.25rem 0}
+th,td{text-align:left;vertical-align:top;padding:.375rem .625rem;border-bottom:1px solid var(--rule)}
+th{font-weight:600;background:var(--panel)}
+td{font-variant-numeric:tabular-nums}
+code{font:.875em/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:break-word}
+.long code{overflow-wrap:anywhere}
+a{color:inherit;text-underline-offset:2px}
+nav ol{columns:2 18rem;padding-left:1.5rem}
+footer{margin-top:3rem;padding-top:1rem;border-top:2px solid var(--rule)}
+details{margin:1rem 0;padding:.75rem 1rem;background:var(--panel);border:1px solid var(--rule)}
+summary{cursor:pointer;font-weight:600}
+</style>
+</head>
+<body>
+<div class="page">
+<header>
+<p class="kind">Trial Folio run report · Synthetic example</p>
+<h1>Synthetic example: earnings yield with a liquidity floor</h1>
+<p class="notice" id="notice">Research output only. Backtested and hypothetical results do not represent achievable returns. No financial gain, future performance, suitability, or protection from loss is represented or promised. This report is not personalized investment advice. See <a href="#full-notice">the full license and research limitations</a>.</p>
+<p class="synthetic"><strong>Synthetic example.</strong> This run was written by <code>trialfolio demo</code> from invented values. None of them comes from Portfolio123, and nothing was sent to it.</p>
+<dl>
+<dt>Run outcome</dt><dd>completed. An execution status, not a research finding.</dd>
+<dt>Statistical validation</dt><dd>Not assessed</dd>
+<dt>Trading readiness</dt><dd>Not assessed</dd>
+<dt>Results</dt><dd>Synthetic: invented values, neither backtested nor actual results.</dd>
+</dl>
+<nav aria-label="Contents">
+<ol>
+<li><a href="#objective">Objective, purpose, and research status</a></li>
+<li><a href="#definitions">Definitions, and changes from a baseline</a></li>
+<li><a href="#data">Data sources, coverage, provenance, and missing values</a></li>
+<li><a href="#results">Returns, risks, costs, and assumptions</a></li>
+<li><a href="#cases">Cases and attempts</a></li>
+<li><a href="#robustness">Robustness and concentration</a></li>
+<li><a href="#statistics">Statistical methods and uncertainty</a></li>
+<li><a href="#evidence">Development, selection, holdout, and forward evidence</a></li>
+<li><a href="#feasibility">Feasibility, capacity, and missing execution evidence</a></li>
+<li><a href="#conclusion">Conclusion, limitations, and artifacts</a></li>
+<li><a href="#closing">Portfolio123 data, notices, and license</a></li>
+</ol>
+</nav>
+</header>
+<main>
+<section id="objective">
+<h2>1. Objective, purpose, and research status</h2>
+<dl>
+<dt>Objective</dt><dd>Unavailable: a screen run declares no research objective, only a title and an optional purpose.</dd>
+<dt>Title</dt><dd>Synthetic example: earnings yield with a liquidity floor</dd>
+<dt>Benchmark</dt><dd><code>SPY</code></dd>
+<dt>Statistical validation</dt><dd>Not assessed</dd>
+<dt>Trading readiness</dt><dd>Not assessed</dd>
+</dl>
+<h3>Declared purpose</h3>
+<p>Shows a run&#x27;s files and report offline, from invented values.</p>
+</section>
+<section id="definitions">
+<h2>2. Definitions, and changes from a baseline</h2>
+<p>The metrics are read from the run's invented response, laid out as <code>p123api-screen-backtest</code> version 1: none comes from Portfolio123. Each is defined as that layout defines it. The benchmark's metrics are defined as the strategy's.</p>
+<div class="wide"><table>
+<thead><tr><th>Metric</th><th>Identifier</th><th>Definition</th></tr></thead>
+<tbody>
+<tr><td>Coverage start</td><td><code>coverage_start</code></td><td>The first transaction date in the response's periods.</td></tr>
+<tr><td>Coverage end</td><td><code>coverage_end</code></td><td>The end of the response's last period.</td></tr>
+<tr><td>Coverage periods</td><td><code>coverage_periods</code></td><td>The number of rebalance periods.</td></tr>
+<tr><td>Total return</td><td><code>total_return</code></td><td>Cumulative return over the backtest.</td></tr>
+<tr><td>Annualized return</td><td><code>annualized_return</code></td><td>Compound annual growth rate over the calendar days from the first to the last date of the daily series, with 365.25-day years.</td></tr>
+<tr><td>Maximum drawdown</td><td><code>max_drawdown</code></td><td>The largest peak-to-trough decline in the daily series, as a negative number.</td></tr>
+<tr><td>Standard deviation</td><td><code>standard_deviation</code></td><td>Annualized standard deviation of monthly returns.</td></tr>
+<tr><td>Sharpe ratio</td><td><code>sharpe_ratio</code></td><td>Portfolio123's Sharpe ratio. Its risk-free rate isn't documented.</td></tr>
+<tr><td>Sortino ratio</td><td><code>sortino_ratio</code></td><td>Portfolio123's Sortino ratio. Its risk-free rate and target aren't documented.</td></tr>
+<tr><td>Correlation</td><td><code>correlation</code></td><td>Correlation with the benchmark.</td></tr>
+<tr><td>R squared</td><td><code>r_squared</code></td><td>The square of the correlation.</td></tr>
+<tr><td>Beta</td><td><code>beta</code></td><td>Beta against the benchmark.</td></tr>
+<tr><td>Alpha</td><td><code>alpha</code></td><td>Portfolio123's alpha against the benchmark. Its unit is inferred from the value's magnitude, and its method isn't documented.</td></tr>
+<tr><td>Risk samples</td><td><code>risk_samples</code></td><td>The number of returns behind the risk statistics.</td></tr>
+</tbody></table></div>
+<h3>Changes from a baseline</h3>
+<p>Unavailable: a single run has no baseline, so no setting is classified as an intended change or an unexplained mismatch.</p>
+</section>
+<section id="data">
+<h2>3. Data sources, coverage, provenance, and missing values</h2>
+<dl>
+<dt>Source</dt><dd>Invented values, packaged with Trial Folio for the demo, in the layout of Portfolio123's screen backtest response. Nothing was sent to Portfolio123.</dd>
+<dt>Response layout</dt><dd><code>p123api-screen-backtest</code> version 1, parser version 1</dd>
+<dt>Data vendor</dt><dd><code>FactSet</code> (inferred). D-16: FactSet is the only supported data vendor. The endpoint documents no vendor parameter, so none is sent, and the response doesn&#x27;t report the vendor.</dd>
+<dt>Point-in-time method</dt><dd><code>complete</code> (verified)</dd>
+</dl>
+<h3>Coverage</h3>
+<p>The coverage is read from the dates of the response's periods, and compared with the requested dates.</p>
+<div class="wide"><table>
+<thead><tr><th>Date</th><th>Requested</th><th>Coverage</th><th>Unit</th><th>Comparison</th></tr></thead>
+<tbody>
+<tr><td>Coverage start</td><td><code>2016-01-01</code></td><td><code>2016-01-01</code></td><td><code>date</code></td><td>Matches</td></tr>
+<tr><td>Coverage end</td><td><code>2025-12-31</code></td><td><code>2025-12-31</code></td><td><code>date</code></td><td>Matches</td></tr>
+<tr><td>Coverage periods</td><td></td><td><code>4</code></td><td><code>count</code></td><td></td></tr>
+</tbody></table></div>
+<h3>Provenance</h3>
+<p>Each setting and metric records where its value came from:</p>
+<ul>
+<li><code>verified</code>: Where a real run's value is sent to Portfolio123 or captured from its response. Here it comes from the run's configuration or its invented response: nothing was sent, and no value came from Portfolio123.</li>
+<li><code>inferred</code>: Derived under a documented rule, which the setting or metric records.</li>
+<li><code>unknown</code>: Not available from any source.</li>
+</ul>
+<h3>Missing values</h3>
+<p>None: every metric is available.</p>
+<h3>Exclusions</h3>
+<p>None. Trial Folio excludes nothing from the response, and keeps it whole as it was saved. Its per-period series is preserved there, but not interpreted.</p>
+</section>
+<section id="results">
+<h2>4. Returns, risks, costs, and assumptions</h2>
+<p>Each value has exactly the digits the response carries, never padded or rounded; Decimals counts them. The risk statistics are invented, as every value here is, for the period the settings give as <code>risk_stats_period</code>.</p>
+<h3>Strategy</h3>
+<div class="wide"><table>
+<caption>Over 2016-01-01 to 2025-12-31, the response's coverage.</caption>
+<thead><tr><th>Metric</th><th>Value</th><th>Unit</th><th>Decimals</th><th>Provenance</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>Total return<br><code>total_return</code></td><td><code>151.7</code></td><td><code>percent</code></td><td>1</td><td><code>verified</code></td><td><code>stats.port.total_return</code></td></tr>
+<tr><td>Annualized return<br><code>annualized_return</code></td><td><code>9.6643</code></td><td><code>percent</code></td><td>4</td><td><code>verified</code></td><td><code>stats.port.annualized_return</code></td></tr>
+<tr><td>Maximum drawdown<br><code>max_drawdown</code></td><td><code>-33.12</code></td><td><code>percent</code></td><td>2</td><td><code>verified</code></td><td><code>stats.port.max_drawdown</code></td></tr>
+<tr><td>Standard deviation<br><code>standard_deviation</code></td><td><code>18.217</code></td><td><code>percent</code></td><td>3</td><td><code>verified</code></td><td><code>stats.port.standard_dev</code></td></tr>
+<tr><td>Sharpe ratio<br><code>sharpe_ratio</code></td><td><code>0.61</code></td><td><code>ratio</code></td><td>2</td><td><code>verified</code></td><td><code>stats.port.sharpe_ratio</code></td></tr>
+<tr><td>Sortino ratio<br><code>sortino_ratio</code></td><td><code>0.8842</code></td><td><code>ratio</code></td><td>4</td><td><code>verified</code></td><td><code>stats.port.sortino_ratio</code></td></tr>
+<tr><td>Correlation vs. SPY<br><code>correlation</code></td><td><code>0.8123</code></td><td><code>ratio</code></td><td>4</td><td><code>verified</code></td><td><code>stats.correlation</code></td></tr>
+<tr><td>R squared vs. SPY<br><code>r_squared</code></td><td><code>0.6598</code></td><td><code>ratio</code></td><td>4</td><td><code>verified</code></td><td><code>stats.r_squared</code></td></tr>
+<tr><td>Beta vs. SPY<br><code>beta</code></td><td><code>1.04</code></td><td><code>ratio</code></td><td>2</td><td><code>verified</code></td><td><code>stats.beta</code></td></tr>
+<tr><td>Alpha vs. SPY<br><code>alpha</code></td><td><code>-2.517</code></td><td><code>percent</code></td><td>3</td><td><code>verified</code></td><td><code>stats.alpha</code></td></tr>
+<tr><td>Risk samples<br><code>risk_samples</code></td><td><code>119</code></td><td><code>count</code></td><td></td><td><code>verified</code></td><td><code>stats.samples</code></td></tr>
+</tbody></table></div>
+<h3>Benchmark: <code>SPY</code></h3>
+<div class="wide"><table>
+<caption>Over 2016-01-01 to 2025-12-31, the response's coverage.</caption>
+<thead><tr><th>Metric</th><th>Value</th><th>Unit</th><th>Decimals</th><th>Provenance</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>Total return<br><code>total_return</code></td><td><code>238.05</code></td><td><code>percent</code></td><td>2</td><td><code>verified</code></td><td><code>stats.bench.total_return</code></td></tr>
+<tr><td>Annualized return<br><code>annualized_return</code></td><td><code>12.3</code></td><td><code>percent</code></td><td>1</td><td><code>verified</code></td><td><code>stats.bench.annualized_return</code></td></tr>
+<tr><td>Maximum drawdown<br><code>max_drawdown</code></td><td><code>-24.5</code></td><td><code>percent</code></td><td>1</td><td><code>verified</code></td><td><code>stats.bench.max_drawdown</code></td></tr>
+<tr><td>Standard deviation<br><code>standard_deviation</code></td><td><code>15.4</code></td><td><code>percent</code></td><td>1</td><td><code>verified</code></td><td><code>stats.bench.standard_dev</code></td></tr>
+<tr><td>Sharpe ratio<br><code>sharpe_ratio</code></td><td><code>0.7712</code></td><td><code>ratio</code></td><td>4</td><td><code>verified</code></td><td><code>stats.bench.sharpe_ratio</code></td></tr>
+<tr><td>Sortino ratio<br><code>sortino_ratio</code></td><td><code>1.0398</code></td><td><code>ratio</code></td><td>4</td><td><code>verified</code></td><td><code>stats.bench.sortino_ratio</code></td></tr>
+</tbody></table></div>
+<h3>Costs</h3>
+<ul>
+<li><code>slippage_percent</code>: <code>0.25</code> <code>percent</code></li>
+<li><code>commission</code>: <code>not_modeled</code>. Not modeled by this provider path: the API documents no commission parameter, and slippage is its only trading-cost input.</li>
+<li><code>carry_cost</code>: <code>not_sent</code>. Not sent. Portfolio123's default applies, and it isn't documented.</li>
+</ul>
+<h3>Exposures</h3>
+<p>Unavailable: the response reports no exposures.</p>
+<h3>Implementation assumptions</h3>
+<ul>
+<li><code>transaction_price</code>: <code>open</code></li>
+<li><code>rebalance_weeks</code>: <code>4</code> <code>weeks</code></li>
+<li><code>max_holdings</code>: <code>25</code> <code>count</code></li>
+<li><code>pit_method</code>: <code>complete</code></li>
+</ul>
+<h3>All settings</h3>
+<p>As settings.csv records them. <em>As written</em> is the value's text in the screen configuration.</p>
+<div class="wide"><table>
+<thead><tr><th>Setting</th><th>Category</th><th>Value</th><th>Unit</th><th>Provenance</th><th>Flags</th><th>As written</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>universe</code></td><td><code>universe</code></td><td><code>SP500</code></td><td></td><td><code>verified</code></td><td><code>not_snapshotted</code>: Names an object in the Portfolio123 account whose definition wasn't captured, so reproducibility is incomplete.</td><td><code>SP500</code></td><td></td></tr>
+<tr><td><code>screen_type</code></td><td><code>universe</code></td><td><code>stock</code></td><td></td><td><code>verified</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>rules</code></td><td><code>strategy</code></td><td><code>[&quot;AvgDailyTot(30) &gt; 1000000&quot;]</code></td><td></td><td><code>verified</code></td><td></td><td><code>- &#x27;AvgDailyTot(30) &gt; 1000000&#x27;</code></td><td></td></tr>
+<tr><td><code>ranking</code></td><td><code>strategy</code></td><td><code>{&quot;formula&quot;: &quot;EarnYield&quot;, &quot;lower_is_better&quot;: false}</code></td><td></td><td><code>verified</code></td><td></td><td><code>formula: &#x27;EarnYield&#x27;
+  lower_is_better: false</code></td><td></td></tr>
+<tr><td><code>max_holdings</code></td><td><code>strategy</code></td><td><code>25</code></td><td><code>count</code></td><td><code>verified</code></td><td></td><td><code>25</code></td><td></td></tr>
+<tr><td><code>position_method</code></td><td><code>strategy</code></td><td><code>long</code></td><td></td><td><code>verified</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>benchmark</code></td><td><code>benchmark</code></td><td><code>SPY</code></td><td></td><td><code>verified</code></td><td></td><td><code>SPY</code></td><td></td></tr>
+<tr><td><code>currency</code></td><td><code>currency</code></td><td><code>USD</code></td><td></td><td><code>verified</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>start_date</code></td><td><code>dates</code></td><td><code>2016-01-01</code></td><td></td><td><code>verified</code></td><td></td><td><code>2016-01-01</code></td><td></td></tr>
+<tr><td><code>end_date</code></td><td><code>dates</code></td><td><code>2025-12-31</code></td><td></td><td><code>verified</code></td><td></td><td><code>2025-12-31</code></td><td></td></tr>
+<tr><td><code>rebalance_weeks</code></td><td><code>execution</code></td><td><code>4</code></td><td><code>weeks</code></td><td><code>verified</code></td><td></td><td><code>4</code></td><td></td></tr>
+<tr><td><code>transaction_price</code></td><td><code>execution</code></td><td><code>open</code></td><td></td><td><code>verified</code></td><td></td><td><code>open</code></td><td></td></tr>
+<tr><td><code>slippage_percent</code></td><td><code>costs</code></td><td><code>0.25</code></td><td><code>percent</code></td><td><code>verified</code></td><td></td><td><code>0.25</code></td><td></td></tr>
+<tr><td><code>commission</code></td><td><code>costs</code></td><td><code>not_modeled</code></td><td></td><td><code>inferred</code></td><td></td><td></td><td>Portfolio123&#x27;s API: Screen page documents no commission parameter, and slippage is its only trading-cost input (checked 2026-10-01).</td></tr>
+<tr><td><code>pit_method</code></td><td><code>data_source</code></td><td><code>complete</code></td><td></td><td><code>verified</code></td><td></td><td><code>complete</code></td><td></td></tr>
+<tr><td><code>data_vendor</code></td><td><code>data_source</code></td><td><code>FactSet</code></td><td></td><td><code>inferred</code></td><td><code>inferred_default</code>: A default the provider applies, inferred from its documentation or an owner decision, not reported by the provider.</td><td></td><td>D-16: FactSet is the only supported data vendor. The endpoint documents no vendor parameter, so none is sent, and the response doesn&#x27;t report the vendor.</td></tr>
+<tr><td><code>precision</code></td><td><code>other</code></td><td><code>4</code></td><td></td><td><code>verified</code></td><td></td><td><code>4</code></td><td></td></tr>
+<tr><td><code>risk_stats_period</code></td><td><code>other</code></td><td><code>monthly</code></td><td></td><td><code>inferred</code></td><td><code>inferred_default</code>: A default the provider applies, inferred from its documentation or an owner decision, not reported by the provider.</td><td></td><td>Portfolio123&#x27;s documented default: the API: Screen page lists riskStatsPeriod&#x27;s values as [&#x27;Monthly&#x27;] | &#x27;Weekly&#x27; | &#x27;Daily&#x27; (checked 2026-10-01), and the wrapper&#x27;s documentation says an optional parameter defaults to the first value.</td></tr>
+<tr><td><code>max_pos_pct</code></td><td><code>strategy</code></td><td><code>not_sent</code></td><td></td><td><code>unknown</code></td><td></td><td></td><td>Not sent. Portfolio123's default applies, and it isn't documented.</td></tr>
+<tr><td><code>rank_tolerance</code></td><td><code>strategy</code></td><td><code>not_sent</code></td><td></td><td><code>unknown</code></td><td></td><td></td><td>Not sent. Portfolio123's default applies, and it isn't documented.</td></tr>
+<tr><td><code>carry_cost</code></td><td><code>costs</code></td><td><code>not_sent</code></td><td></td><td><code>unknown</code></td><td></td><td></td><td>Not sent. Portfolio123's default applies, and it isn't documented.</td></tr>
+<tr><td><code>long_weight</code></td><td><code>strategy</code></td><td><code>not_sent</code></td><td></td><td><code>unknown</code></td><td></td><td></td><td>Not sent. Portfolio123's default applies, and it isn't documented.</td></tr>
+<tr><td><code>short_weight</code></td><td><code>strategy</code></td><td><code>not_sent</code></td><td></td><td><code>unknown</code></td><td></td><td></td><td>Not sent. Portfolio123's default applies, and it isn't documented.</td></tr>
+</tbody></table></div>
+</section>
+<section id="cases">
+<h2>5. Cases and attempts</h2>
+<p>A run has one case: the resolved settings, identified by their case ID. Every attempt of it is listed, whatever its outcome.</p>
+<p>The run is synthetic, so its attempt, the attempt's exchanges, and the counts below are invented, as a real run would record them. Nothing was sent to Portfolio123, and nothing was charged.</p>
+<dl>
+<dt>Case</dt><dd><code>case-e29404ddebf86363</code></dd>
+<dt>Plan hash</dt><dd><code>sha256:26c7930bdc4cb8880a70657c69cf2c3e28afc0faea32686e88c44f71dd1f8261</code></dd>
+<dt>Approval</dt><dd>Not required: the synthetic run sends nothing.</dd>
+<dt>Budget</dt><dd>1 provider request, at most 5 credits at Portfolio123's documented cost (API: Screen, checked 2026-10-01), and at most 1 authentication call.</dd>
+<dt>Attempts</dt><dd>1 succeeded, 0 failed, 0 unknown, 0 running</dd>
+<dt>Provider requests</dt><dd>1: the sends that may have reached Portfolio123, which may be charged even when they fail. Authentication isn't counted.</dd>
+<dt>Retries</dt><dd>0</dd>
+<dt>Cost</dt><dd>Not reported</dd>
+</dl>
+<h3>Attempt <code>ed354904-ecda-4237-b8fd-a58ddfa44e7a</code></h3>
+<dl>
+<dt>Outcome</dt><dd><code>succeeded</code>: The run's invented response was saved. That says nothing about the strategy.</dd>
+<dt>Possibly charged</dt><dd>Yes</dd>
+<dt>Provider requests</dt><dd>1</dd>
+<dt>Started</dt><dd>2026-10-04T08:16:21.650841Z</dd>
+<dt>Ended</dt><dd>2026-10-04T08:16:21.693975Z</dd>
+<dt>Cost</dt><dd>Not reported</dd>
+</dl>
+<div class="wide"><table>
+<caption>Its HTTP exchanges, in order</caption>
+<thead><tr><th>#</th><th>Request</th><th>Result</th><th>Status</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>POST /auth</code></td><td>Response</td><td>200</td><td></td></tr>
+<tr><td>2</td><td><code>POST /screen/backtest</code></td><td>Response</td><td>200</td><td></td></tr>
+</tbody></table></div>
+<h3>Versions</h3>
+<dl>
+<dt>Run written by</dt><dd>Trial Folio 0.1.0, command <code>demo</code>, started 2026-10-04T08:16:21.602254Z</dd>
+<dt>Plan built by</dt><dd>Trial Folio 0.1.0, canonicalization version 1</dd>
+<dt>Provider wrapper</dt><dd><code>p123api</code> 3.1.0</dd>
+<dt>Transport</dt><dd><code>requests</code> 2.34.2, <code>urllib3</code> 2.8.0</dd>
+<dt>License and notice</dt><dd>Recorded with the run: <code>LicenseRef-NSPRL-1.0</code>, notice version 1.0</dd>
+<dt>Report rendered by</dt><dd>Trial Folio 0.1.0</dd>
+</dl>
+</section>
+<section id="robustness">
+<h2>6. Robustness and concentration</h2>
+<p>Not assessed. Robustness results and the concentration of contributions need more than one run's summary statistics, and Trial Folio doesn't assess them.</p>
+</section>
+<section id="statistics">
+<h2>7. Statistical methods and uncertainty</h2>
+<p>Statistical validation: Not assessed. No statistical method was applied, so the report states no uncertainty, multiple-testing adjustment, or power. Summary statistics alone don't support intervals, a return series, or a drawdown history, so none is shown or reconstructed.</p>
+</section>
+<section id="evidence">
+<h2>8. Development, selection, holdout, and forward evidence</h2>
+<p>Unavailable: the run is one synthetic example over the requested dates. It has no separate development, selection, holdout, or forward period.</p>
+<p>Synthetic: invented values, neither backtested nor actual results.</p>
+</section>
+<section id="feasibility">
+<h2>9. Feasibility, capacity, and missing execution evidence</h2>
+<p>Trading readiness: Not assessed. Feasibility and capacity aren't assessed.</p>
+<p>Execution evidence this run doesn't have:</p>
+<ul>
+<li>Actual trades: none.</li>
+<li>Commission: Not modeled by this provider path: the API documents no commission parameter, and slippage is its only trading-cost input.</li>
+<li>Parameters not sent, whose defaults aren't documented: <code>max_pos_pct</code>, <code>rank_tolerance</code>, <code>carry_cost</code>, <code>long_weight</code>, <code>short_weight</code>.</li>
+<li>Turnover, positions, and per-period returns: preserved in the saved response, but not interpreted.</li>
+</ul>
+</section>
+<section id="conclusion">
+<h2>10. Conclusion, limitations, and artifacts</h2>
+<h3>Permitted conclusion</h3>
+<p>The run completed: Trial Folio wrote the synthetic run and normalized it. That's a statement about execution, not about the strategy. Statistical validation and trading readiness are not assessed, so this report permits no conclusion about whether the strategy is useful, or whether its results could be achieved.</p>
+<h3>Limitations</h3>
+<ul>
+<li>Synthetic: invented values, neither backtested nor actual results.</li>
+<li>Reproducibility is incomplete: <code>universe</code> names an object in the Portfolio123 account whose definition wasn't captured. If it changes, the same configuration can give different results.</li>
+<li>Inferred defaults, not reported by Portfolio123: <code>data_vendor</code>, <code>risk_stats_period</code>.</li>
+<li>Only summary statistics are reported: no return series, drawdown history, or interval is shown.</li>
+</ul>
+<h3>Artifacts</h3>
+<p>Each file links to the run's copy, by a path relative to this report. An <code>artifact_id</code> is the SHA-256 of the file's bytes.</p>
+<div class="wide"><table>
+<thead><tr><th>File</th><th>Role</th><th>Size, bytes</th><th>artifact_id</th></tr></thead>
+<tbody>
+<tr><td><a href="manifest.json"><code>manifest.json</code></a></td><td>Manifest, written last</td><td></td><td></td></tr>
+<tr><td class="long"><a href="plan.json"><code>plan.json</code></a></td><td>Plan</td><td>10649</td><td class="long"><code>sha256:b5f205c04848195647a0f53314fb0a4de4640318c3ca7c4e470e4b3ebec5e1e7</code></td></tr>
+<tr><td class="long"><a href="configuration.yaml"><code>configuration.yaml</code></a></td><td>Screen configuration, byte for byte</td><td>641</td><td class="long"><code>sha256:123e75b45adc4ecb45cc28ae67d8514066b2c5ee8753648477fa29c965e450a8</code></td></tr>
+<tr><td class="long"><a href="cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/request.json"><code>cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/request.json</code></a></td><td>Request, redacted</td><td>498</td><td class="long"><code>sha256:84d9553e5d05e7be96f6191ffdd68d37a9bf5e80ac2ed94a217c6db2e4cd9fbd</code></td></tr>
+<tr><td class="long"><a href="cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/started.json"><code>cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/started.json</code></a></td><td>Start record</td><td>552</td><td class="long"><code>sha256:1dd95469b8e0e84a197ff2bd7d86e4019431a88a451e07b3976f4563736f4a37</code></td></tr>
+<tr><td class="long"><a href="cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/response.json"><code>cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/response.json</code></a></td><td>Response, decoded</td><td>1931</td><td class="long"><code>sha256:ee269d536bf73c7c1846bd24240f4b1d460e7867a7c935c486c656228077f4b8</code></td></tr>
+<tr><td class="long"><a href="cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/attempt.json"><code>cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/attempt.json</code></a></td><td>Attempt record</td><td>1322</td><td class="long"><code>sha256:954a1865f337a4592ee508381ed5d41e2eef71999cd44f5e0ccaccbd32736570</code></td></tr>
+<tr><td class="long"><a href="normalized/metrics.csv"><code>normalized/metrics.csv</code></a></td><td>Normalized metrics</td><td>4469</td><td class="long"><code>sha256:9511cdb7795868b480e22a8ccc90753fdab84cb4fe6110d75ea7fe6a1465981d</code></td></tr>
+<tr><td class="long"><a href="normalized/settings.csv"><code>normalized/settings.csv</code></a></td><td>Normalized settings</td><td>4576</td><td class="long"><code>sha256:c7a15bc0d88f716d3ba5694a69d81a07f57008f11a319d07d38d03603bb8fd04</code></td></tr>
+</tbody></table></div>
+</section>
+</main>
+<footer id="closing">
+<p id="portfolio123-data"><strong>Portfolio123 data.</strong> Trial Folio&#x27;s license grants no rights to Portfolio123 data. Your use of any Portfolio123 data in this report, including sharing the report, is governed by <a href="https://www.portfolio123.com/legal">Portfolio123&#x27;s terms</a>, and you&#x27;re responsible for following them. Sharing it publicly may need Portfolio123&#x27;s consent.</p>
+<details id="full-notice">
+<summary>Full research and financial-result notice, and license</summary>
+<p>This software, its documentation, examples, analyses, and outputs are provided for general research and informational purposes. They do not constitute personalized investment, financial, legal, accounting, or tax advice, an offer or solicitation concerning any security, or a recommendation to buy, sell, hold, or apply any investment strategy. Use of the software does not itself establish an advisory, fiduciary, brokerage, or client relationship with Nathan Slaughter or the project&#x27;s contributors.</p>
+<p>Historical, hypothetical, simulated, and backtested results are not actual trading results unless expressly identified and supported as such. They depend on data, assumptions, modeling choices, and historical conditions and may be affected by hindsight, selection bias, overfitting, incomplete data, revisions, liquidity constraints, and costs or execution effects that are omitted or inaccurately modeled. Statistical significance does not establish future profitability or practical tradability.</p>
+<p>No result, ranking, score, comparison, example, or statement represents or promises that any person could or will realize financial gains, outperform a benchmark, avoid losses, or obtain similar results by investing in any security or applying any strategy. Past or simulated performance is not a reliable assurance of future results. Investments can lose some or all of their value; leveraged positions may produce losses beyond the initial capital.</p>
+<p>Users are responsible for independently evaluating information, obtaining appropriate professional advice, complying with applicable law and third-party terms, and making their own decisions. Nathan Slaughter does not undertake through this software to assess any user&#x27;s financial situation, suitability, objectives, or tolerance for loss.</p>
+<p>License: Nathan Slaughter Personal Research License, <code>LicenseRef-NSPRL-1.0</code>. Notice version 1.0. Read <a href="https://github.com/promptedportfolio/trialfolio/blob/v0.1.0/LICENSE">the LICENSE published with Trial Folio 0.1.0</a>.</p>
+</details>
+<p class="muted">Rendered by Trial Folio 0.1.0 from the run's saved records.</p>
+</footer>
+</div>
+</body>
+</html>

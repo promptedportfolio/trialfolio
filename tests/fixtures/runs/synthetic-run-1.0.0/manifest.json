@@ -1,0 +1,149 @@
+{
+  "schema_version": "1.0.0",
+  "artifact_type": "run",
+  "trialfolio_version": "0.1.0",
+  "created_at": "2026-10-04T08:16:21.724979Z",
+  "command": {
+    "name": "demo",
+    "options": {
+      "json": false
+    },
+    "started_at": "2026-10-04T08:16:21.602254Z"
+  },
+  "synthetic": true,
+  "plan_hash": "sha256:26c7930bdc4cb8880a70657c69cf2c3e28afc0faea32686e88c44f71dd1f8261",
+  "approval": "not_required",
+  "outcome": "completed",
+  "error": null,
+  "artifacts": [
+    {
+      "path": "plan.json",
+      "artifact_id": "sha256:b5f205c04848195647a0f53314fb0a4de4640318c3ca7c4e470e4b3ebec5e1e7",
+      "size": 10649,
+      "role": "plan",
+      "schema_version": "1.0.0",
+      "source": null
+    },
+    {
+      "path": "configuration.yaml",
+      "artifact_id": "sha256:123e75b45adc4ecb45cc28ae67d8514066b2c5ee8753648477fa29c965e450a8",
+      "size": 641,
+      "role": "configuration",
+      "schema_version": "1.0.0",
+      "source": {
+        "acquired_at": "2026-10-04T08:16:21.602254Z",
+        "format": "screen-configuration",
+        "format_version": "1.0.0",
+        "parser_version": null,
+        "provenance": "user_supplied",
+        "operation": null
+      }
+    },
+    {
+      "path": "cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/request.json",
+      "artifact_id": "sha256:84d9553e5d05e7be96f6191ffdd68d37a9bf5e80ac2ed94a217c6db2e4cd9fbd",
+      "size": 498,
+      "role": "provider_request",
+      "schema_version": null,
+      "source": {
+        "acquired_at": "2026-10-04T08:16:21.650841Z",
+        "format": "p123api-screen-backtest-request",
+        "format_version": "1",
+        "parser_version": null,
+        "provenance": "verified",
+        "operation": "screen_backtest"
+      }
+    },
+    {
+      "path": "cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/started.json",
+      "artifact_id": "sha256:1dd95469b8e0e84a197ff2bd7d86e4019431a88a451e07b3976f4563736f4a37",
+      "size": 552,
+      "role": "start_record",
+      "schema_version": "1.0.0",
+      "source": null
+    },
+    {
+      "path": "cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/response.json",
+      "artifact_id": "sha256:ee269d536bf73c7c1846bd24240f4b1d460e7867a7c935c486c656228077f4b8",
+      "size": 1931,
+      "role": "provider_response",
+      "schema_version": null,
+      "source": {
+        "acquired_at": "2026-10-04T08:16:21.693975Z",
+        "format": "p123api-screen-backtest",
+        "format_version": "1",
+        "parser_version": 1,
+        "provenance": "verified",
+        "operation": "screen_backtest"
+      }
+    },
+    {
+      "path": "cases/case-e29404ddebf86363/attempts/ed354904-ecda-4237-b8fd-a58ddfa44e7a/attempt.json",
+      "artifact_id": "sha256:954a1865f337a4592ee508381ed5d41e2eef71999cd44f5e0ccaccbd32736570",
+      "size": 1322,
+      "role": "attempt_record",
+      "schema_version": "1.0.0",
+      "source": null
+    },
+    {
+      "path": "normalized/metrics.csv",
+      "artifact_id": "sha256:9511cdb7795868b480e22a8ccc90753fdab84cb4fe6110d75ea7fe6a1465981d",
+      "size": 4469,
+      "role": "metrics",
+      "schema_version": "1.0.0",
+      "source": null
+    },
+    {
+      "path": "normalized/settings.csv",
+      "artifact_id": "sha256:c7a15bc0d88f716d3ba5694a69d81a07f57008f11a319d07d38d03603bb8fd04",
+      "size": 4576,
+      "role": "settings",
+      "schema_version": "1.0.0",
+      "source": null
+    },
+    {
+      "path": "report.html",
+      "artifact_id": "sha256:b330abe5edabe3d88e45223af82eb8101aea38c7478835bfcbb1517f09d5f852",
+      "size": 31029,
+      "role": "report",
+      "schema_version": null,
+      "source": null
+    }
+  ],
+  "parsers": [
+    {
+      "layout": "p123api-screen-backtest",
+      "layout_version": 1,
+      "parser_version": 1
+    }
+  ],
+  "license_id": "LicenseRef-NSPRL-1.0",
+  "notice_version": "1.0",
+  "capabilities": {
+    "return_series": "source_only",
+    "statistical_validation": "not_assessed",
+    "trading_readiness": "not_assessed"
+  },
+  "reproducibility": {
+    "status": "incomplete",
+    "external_references": [
+      {
+        "setting": "universe",
+        "snapshotted": false
+      }
+    ]
+  },
+  "counts": {
+    "results": 1,
+    "cases": 1,
+    "attempts": {
+      "succeeded": 1,
+      "failed": 0,
+      "unknown": 0,
+      "running": 0
+    },
+    "provider_requests": 1,
+    "retries": 0,
+    "cost": null
+  }
+}

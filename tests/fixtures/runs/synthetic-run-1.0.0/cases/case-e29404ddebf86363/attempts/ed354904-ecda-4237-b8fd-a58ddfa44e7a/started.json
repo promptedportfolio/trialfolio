@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "trialfolio_version": "0.1.0",
+  "attempt_id": "ed354904-ecda-4237-b8fd-a58ddfa44e7a",
+  "case_id": "case-e29404ddebf86363",
+  "plan_hash": "sha256:26c7930bdc4cb8880a70657c69cf2c3e28afc0faea32686e88c44f71dd1f8261",
+  "started_at": "2026-10-04T08:16:21.650841Z",
+  "provider_wrapper": {
+    "p123api": "3.1.0"
+  },
+  "transport": {
+    "requests": "2.34.2",
+    "urllib3": "2.8.0"
+  },
+  "exchanges": [
+    {
+      "request": "POST /auth",
+      "result": "response",
+      "status": 200,
+      "note": null
+    }
+  ]
+}
