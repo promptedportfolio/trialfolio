@@ -8,9 +8,10 @@ installed package versions' boundary: a directory first on `sys.path` holds a `.
 reports another version, or a `simplejson` package. `tests/interface/test_environment.py`
 (R01-T16) runs the command itself in a subprocess with the same directory on its `PYTHONPATH`.
 
-A missing `requests` or `urllib3` fails the same way, as the release's plan details from R01-T10
-say. That's checked in a new process, which imports the planner with the package unimportable,
-and, when it isn't installed, without its package metadata.
+A missing `p123api`, `requests`, or `urllib3` fails the same way, as the release's plan details
+from R01-T10 say, and so does one that's installed but can't be imported, which R01-T14 extended
+to `p123api`. That's checked in a new process, which imports the planner with the package
+unimportable, and, when it isn't installed, without its package metadata.
 """
 
 import subprocess
@@ -116,8 +117,8 @@ except TrialFolioError as error:
 
 
 @pytest.mark.parametrize("state", ["not installed", "unimportable"])
-@pytest.mark.parametrize("name", ["requests", "urllib3"])
-def test_a_missing_requests_or_urllib3_is_unsupported(name: str, state: str) -> None:
+@pytest.mark.parametrize("name", ["p123api", "requests", "urllib3"])
+def test_a_missing_provider_package_is_unsupported(name: str, state: str) -> None:
     # A new process, because the planner itself must import without the package.
     result = subprocess.run(
         [sys.executable, "-c", MISSING_PACKAGE, name, state],

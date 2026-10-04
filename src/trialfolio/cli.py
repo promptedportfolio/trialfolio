@@ -17,9 +17,11 @@ success and on failure. stderr carries progress, warnings, and errors, and the p
 prompts, which are never logged. `TrialFolioError` codes map to exit codes through `EXIT_CODES`;
 an unexpected exception is `internal.unexpected`, exit 1, and its message names the log file.
 
-The modules that import `p123api`, `requests`, or `urllib3` are imported only once
-`installed_versions` has checked them, so a missing or broken one is `environment.unsupported`,
-never an `ImportError`.
+`run` and `demo` import the modules that import `p123api`, `requests`, or `urllib3` only once
+`installed_versions` has checked and imported them, so a missing or broken one is
+`environment.unsupported`, never an `ImportError`. `report` sends nothing, so it checks no
+versions, but it reads runs with modules that import them: an `ImportError` there is
+`environment.unsupported` too.
 """
 
 import argparse
@@ -524,7 +526,17 @@ def _report(invocation: _Invocation) -> TrialFolioError | None:
             " that trialfolio run or trialfolio demo wrote. No output was created.",
         )
 
-    from trialfolio.report import HtmlReportRenderer, rerender_report
+    try:
+        from trialfolio.report import HtmlReportRenderer, rerender_report
+    except ImportError as failure:
+        missing = "a package it needs" if failure.name is None else failure.name
+        raise TrialFolioError(
+            "environment.unsupported",
+            f"Trial Folio can't read runs in this environment: {missing} can't be imported,"
+            " because its files, or a package it needs, are missing or broken. No output was"
+            " created. Reinstall Trial Folio, whose package pins its dependencies exactly, for"
+            " example in a new virtual environment.",
+        ) from None
 
     report = rerender_report(
         LocalArtifactStore(args.run_dir),

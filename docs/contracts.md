@@ -975,7 +975,7 @@ The command is `trialfolio`. Commands are introduced by release:
 - **stdout and stderr.** Without `--json`, stdout holds a short summary on success, and nothing on failure. stderr shows the error with its full message, progress at INFO, and warnings. An argument the parser rejects is a usage error, exit 2, reported by the parser on stderr, without a JSON summary: no error code covers it. That includes a blank `--out`, empty or only whitespace, which names no directory of its own, and which the summary's `output_dir` couldn't hold.
 - **The JSON summary.** `counts.attempts` is 1 once an attempt record or a start record exists. `metrics_unavailable` is 0 when there's no `metrics.csv`. `warnings` counts the warnings logged during the command.
 - **The entry function** is `trialfolio.cli.main(argv, *, endpoint, timeout, clock, store_factory)`. It returns the exit code, and reads `sys.stdin`, `sys.stdout`, and `sys.stderr` as they are when it's called. The installed command, and `python -m trialfolio`, call it with none of the keyword parameters.
-- **Imports.** The modules that import `p123api`, `requests`, or `urllib3` load only after `installed_versions` has checked them, so a missing or broken one is `environment.unsupported`, never an `ImportError`.
+- **Imports.** `run` and `demo` load the modules that import `p123api`, `requests`, or `urllib3` only after `installed_versions` has checked them, and it imports all three, `p123api` last, so a missing or broken one is `environment.unsupported` before the plan is shown, never an `ImportError`. `trialfolio report` sends nothing, so it checks no versions, but it reads runs with modules that import them: an `ImportError` loading those is `environment.unsupported` too.
 
 Exit codes:
 

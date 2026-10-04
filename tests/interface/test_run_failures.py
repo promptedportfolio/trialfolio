@@ -61,6 +61,23 @@ def accounted_for(out: Path, code: str) -> RunManifest:
 # Before the claim
 
 
+def test_a_p123api_that_cant_be_imported_fails_before_the_plan(cli: Cli) -> None:
+    cli.ready()
+    path = config("formula.yaml")
+    out = cli.tmp / "out"
+
+    outcome = cli.without_module(
+        "p123api", "run", path, "--out", out, "--approve", plan_hash_for(path), "--json"
+    )
+
+    assert outcome.exit_code == 3, outcome.stderr
+    error = error_of(outcome)
+    assert error["code"] == "environment.unsupported"
+    assert "p123api is installed, but it can't be imported" in error["message"]
+    assert "Plan hash" not in outcome.stderr
+    assert not out.exists()
+
+
 def test_missing_credentials_fail_before_anything_is_written_or_sent(cli: Cli) -> None:
     cli.accept_license()
     out = cli.tmp / "out"

@@ -12,6 +12,7 @@ tests leaks in. stdin is empty and isn't a terminal, unless a test gives a pseud
 
 import io
 import json
+import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -172,6 +173,31 @@ class Cli:
                 store_factory=store_factory,
             )
         return Outcome(code, out.getvalue(), captured.getvalue() if stderr is None else "")
+
+    def without_module(self, name: str, *argv: str | Path) -> Outcome:
+        """Runs the command with `argv` in a new process, in which the module `name` can't be
+        imported, as when its files are gone. In the test process, the modules that import it are
+        loaded already. The new process has this one's environment, with the test's home, and
+        stdin closed; the network guard stays on in it."""
+        result = subprocess.run(
+            [sys.executable, "-c", _WITHOUT_MODULE, name, *(str(arg) for arg in argv)],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=self.tmp,
+        )
+        return Outcome(result.returncode, result.stdout, result.stderr)
+
+
+_WITHOUT_MODULE = """
+import sys
+
+sys.modules[sys.argv[1]] = None  # importing it fails, as when its files are gone
+from trialfolio.cli import main
+
+sys.exit(main(sys.argv[2:]))
+"""
 
 
 @pytest.fixture

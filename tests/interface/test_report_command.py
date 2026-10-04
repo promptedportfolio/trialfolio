@@ -206,6 +206,26 @@ def test_a_run_directory_that_doesnt_exist_is_not_found(cli: Cli) -> None:
     assert not out.exists()
 
 
+def test_a_provider_package_that_cant_be_imported_is_an_unsupported_environment(
+    cli: Cli,
+) -> None:
+    # `report` reads runs with modules that import p123api, and checks no versions.
+    cli.accept_license()
+    given = cli.tmp / "not-a-run"
+    given.mkdir()
+    (given / "notes.txt").write_text("not a run\n")
+    out = cli.tmp / "report"
+
+    outcome = cli.without_module("p123api", "report", given, "--out", out, "--json")
+
+    assert outcome.exit_code == 3, outcome.stderr
+    error = outcome.summary["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "environment.unsupported"
+    assert "p123api can't be imported" in error["message"]
+    assert not out.exists()
+
+
 def test_a_broken_copy_leaves_a_non_empty_output_directory_unchanged(cli: Cli) -> None:
     run = demo_run(cli, cli.tmp / "run")
     shutil.copytree(run, cli.tmp / "copy")
