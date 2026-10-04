@@ -10,6 +10,7 @@ process, with the per-user directories under a temporary home.
 import importlib.metadata
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -136,6 +137,40 @@ def test_the_readme_links_to_this_versions_user_guide() -> None:
         in readme
     )
     assert "{version}" not in readme
+
+
+def test_the_starter_configuration_has_a_comment_on_each_key() -> None:
+    text = STARTER["screen.yaml"].decode()
+    # Each key, `purpose` commented out included, and the comment after its value.
+    comments = {
+        match["key"]: match["comment"]
+        for match in re.finditer(
+            r"^ *(?:# )?(?P<key>[a-z_]+):[^#\n]*(?P<comment>#.*)?$", text, re.MULTILINE
+        )
+    }
+
+    assert set(comments) == {
+        "kind",
+        "schema_version",
+        "title",
+        "purpose",
+        "universe",
+        "rules",
+        "ranking",
+        "formula",
+        "lower_is_better",
+        "max_holdings",
+        "benchmark",
+        "start_date",
+        "end_date",
+        "rebalance_weeks",
+        "transaction_price",
+        "slippage_percent",
+        "pit_method",
+        "precision",
+    }
+    assert [key for key, comment in comments.items() if not comment] == []
+    assert "Write every formula in single quotes." in text
 
 
 def test_the_starter_configuration_resolves_to_the_request_portfolio123_accepted() -> None:
