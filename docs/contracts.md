@@ -942,14 +942,14 @@ The command is `trialfolio`. Commands are introduced by release:
 | `trialfolio report <run-dir> --out <dir>` | 0.1.0 | Re-render a saved run's report offline |
 | `trialfolio demo --out <dir>` | 0.1.0 | Write a synthetic example run, labeled synthetic, and render its report offline |
 | `trialfolio review <config> --out <dir>` | 0.2.0 | Compare saved runs offline |
-| `trialfolio experiment <config> --out <dir>` | 0.3.0 | Plan, execute, and resume a finite experiment |
+| `trialfolio run <config> --out <dir>`, for a `kind: experiment` configuration | 0.3.0 | Plan, execute, and resume a finite experiment ([D-24](spec.md#decisions)) |
 | `trialfolio --version` | 0.1.0 | Print the application version |
 | `trialfolio license [--accept]` | 0.1.0 | Print the license, the full notice, and the acknowledgment status; `--accept` records the acknowledgment |
 
 - **stdout** carries the command's result: a short human summary, or with `--json` the [JSON summary](#json-summary).
 - **stderr** carries progress, warnings, and errors, which come from the same events as the log file. It also carries the [plan display](#approval) and the confirmation prompts, which are written directly and never logged, because they show configuration values.
-- **Output directory.** `review` and `run` create the output directory. They refuse to write into a directory that exists and is not empty (`output.not_empty`). There is no overwrite option in 0.1.0. `init` treats its workspace the same way. `experiment` reuses an existing directory only to resume the same plan, as release 0.3.0 specifies.
-- **Claiming the directory.** A command that creates a new output checks the directory early, but another process can write to it before the command writes anything, for example while `run` waits for approval. So the command claims the directory with its first file. `experiment` resuming its own existing directory doesn't claim it; it takes the experiment lock instead, as release 0.3.0 specifies. The claim:
+- **Output directory.** `review` and `run` create the output directory. They refuse to write into a directory that exists and is not empty (`output.not_empty`). There is no overwrite option in 0.1.0. `init` treats its workspace the same way. `run` reuses an existing directory only to resume an experiment's same plan, as release 0.3.0 specifies; never for a screen.
+- **Claiming the directory.** A command that creates a new output checks the directory early, but another process can write to it before the command writes anything, for example while `run` waits for approval. So the command claims the directory with its first file. `run` resuming an experiment in its own existing directory doesn't claim it; it takes the experiment lock instead, as release 0.3.0 specifies. The claim:
   1. It creates the directory if it's absent, and any missing parent directories, one at a time, remembering which ones it created. A directory that another process creates first is used as it is, and not remembered. Before it creates anything, it checks the path as the early check does: a path that exists and isn't a directory, a symbolic link to nothing included, is `output.not_empty`, and a path that can't be created, because a parent isn't a directory or none exists, is `storage.write_failed`. `..` segments are resolved in the path as written, so the claim never creates a directory that's only on the way to `..`.
   2. It creates its first file directly under its final name, with an exclusive create that fails if the name exists, then writes and syncs it. No temporary file is involved, so nothing else is written into a directory that isn't claimed.
   3. It lists the directory.
@@ -1022,7 +1022,7 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
 
 ### License acknowledgment
 
-**Requirement ([D-17](spec.md#decisions), [LIC-12](licensing-policy.md#lic-12-acceptance-and-acknowledgment)).** Before a command processes any data, the user acknowledges the license and the research notice once. This applies to `run`, `report`, and `demo`, and later to `review` and `experiment`. Each acknowledgment covers one license identifier and one notice version. Only a change to either one asks again.
+**Requirement ([D-17](spec.md#decisions), [LIC-12](licensing-policy.md#lic-12-acceptance-and-acknowledgment)).** Before a command processes any data, the user acknowledges the license and the research notice once. This applies to `run`, `report`, and `demo`, and later to `review`. From 0.3.0, `run` covers experiments too. Each acknowledgment covers one license identifier and one notice version. Only a change to either one asks again.
 
 - **Interactive.** When stdin and stderr are both terminals and there's no valid acknowledgment, the CLI prints three things to stderr:
   - the concise notice
