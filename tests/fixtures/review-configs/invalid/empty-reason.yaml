@@ -1,0 +1,16 @@
+# Invalid: `reason` has 1 to 500 characters.
+# Key: results[1].intended_changes[0].reason
+# Value: -
+kind: review
+schema_version: 1.0.0
+title: Holdings 25 versus 50
+purpose: Check whether doubling holdings changes risk as expected.
+baseline: hold25
+results:
+  - label: hold25
+    run: runs/hold25
+  - label: hold50
+    run: runs/hold50
+    intended_changes:
+      - setting: max_holdings
+        reason: ''

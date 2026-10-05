@@ -18,7 +18,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic.config import JsonDict
 
 from trialfolio.contracts.common import (
     MAX_SAFE_INTEGER,
@@ -27,6 +26,8 @@ from trialfolio.contracts.common import (
     NonEmptyText,
     Purpose,
     Title,
+    optional_key,
+    present,
     valid_date_text,
 )
 
@@ -43,24 +44,8 @@ RANKING_FORMS_MESSAGE: Final = (
 )
 
 
-def _optional_key(schema: JsonDict) -> None:
-    # An optional key is left out, never written as null: the schema shows no null and no default.
-    schema.pop("default", None)
-    branches = schema.pop("anyOf", [])
-    if isinstance(branches, list):
-        for branch in branches:
-            if isinstance(branch, dict) and branch != {"type": "null"}:
-                schema.update(branch)
-
-
-def _present(value: object) -> object:
-    if value is None:
-        raise ValueError("has no value. Give it one, or leave the key out.")
-    return value
-
-
 def _factset_only(value: object) -> object:
-    if _present(value) != "FactSet":
+    if present(value) != "FactSet":
         raise ValueError("must be FactSet, the only supported data vendor (D-16)")
     return value
 
@@ -192,8 +177,8 @@ class ScreenConfiguration(ContractModel):
     title: Title
     purpose: Annotated[
         Purpose | None,
-        BeforeValidator(_present),
-        Field(json_schema_extra=_optional_key),
+        BeforeValidator(present),
+        Field(json_schema_extra=optional_key),
     ] = None
     universe: NonEmptyText
     rules: Annotated[tuple[NonEmptyText, ...], Field(min_length=1, strict=False)]
@@ -210,7 +195,7 @@ class ScreenConfiguration(ContractModel):
     data_vendor: Annotated[
         Literal["FactSet"] | None,
         BeforeValidator(_factset_only),
-        Field(json_schema_extra=_optional_key),
+        Field(json_schema_extra=optional_key),
     ] = None
 
     @field_validator("rules", mode="before")

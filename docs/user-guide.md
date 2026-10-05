@@ -304,7 +304,7 @@ trialfolio report runs/first/ --out reports/first/
 
 ## 10. Use it from a script
 
-Add `--json` to any command. stdout then holds exactly one JSON object, on success and on failure, and everything else goes to stderr. The object gives the outcome, the exit code, the IDs, such as the plan hash, the output files, the counts, such as `provider_requests` and the credit `cost`, and the error, if any. Its schema is `schemas/json-summary-1.0.0.schema.json`.
+Add `--json` to any command. stdout then holds exactly one JSON object, on success and on failure, and everything else goes to stderr. The object gives the outcome, the exit code, the IDs, such as the plan hash, the output files, the counts, such as `provider_requests` and the credit `cost`, and the error, if any. Its schema is `schemas/json-summary-1.1.0.schema.json`. Trial Folio 0.1.0 writes version 1.0.0, whose schema, `schemas/json-summary-1.0.0.schema.json`, is kept beside it: 1.1.0 only adds to it.
 
 Approve only a plan you've reviewed. A script can read the hash from a run that wasn't approved, in `ids.plan_hash`, and approve it, but that skips the review the plan exists for.
 

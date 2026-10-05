@@ -1,5 +1,6 @@
 """Reads configuration files: YAML text in, validated models out (docs/contracts.md,
-configuration files).
+configuration files). `read_screen_configuration` reads a `kind: screen` file, and
+`read_review_configuration` a `kind: review` one.
 
 Reading is a named adapter step before model validation (ADR 0002). It builds plain values from
 PyYAML's parse events, never through PyYAML's constructors, so it decides what each scalar means:
@@ -49,7 +50,8 @@ from yaml.events import (
 )
 from yaml.nodes import Node, ScalarNode
 
-from trialfolio.contracts.common import DATE_PATTERN, INTEGER_PATTERN, NOT_BLANK
+from trialfolio.contracts.common import DATE_PATTERN, INTEGER_PATTERN, LABEL_PATTERN, NOT_BLANK
+from trialfolio.contracts.review_configuration import REVIEW_SCHEMA_VERSIONS, ReviewConfiguration
 from trialfolio.contracts.screen_configuration import SCREEN_SCHEMA_VERSIONS, ScreenConfiguration
 from trialfolio.errors import TrialFolioError
 
@@ -101,22 +103,7 @@ def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfigu
     Raises `TrialFolioError` with `config.invalid` when the file breaks any rule of the screen
     configuration. The message lists each problem, names its key, and includes no value.
     """
-    loaded, _, plain = _read_yaml(content, source_name)
-    if not isinstance(loaded, dict):
-        _fail(source_name, ["The file must be a mapping of keys to values."])
-    document = cast("dict[str, object]", loaded)
-    if "kind" not in document:
-        _fail(source_name, ["`kind` is required. A screen configuration has `kind: screen`."])
-    if document["kind"] != "screen":
-        _fail(source_name, ["`kind` must be screen."])
-    supported = ", ".join(SCREEN_SCHEMA_VERSIONS)
-    if "schema_version" not in document:
-        _fail(source_name, [f"`schema_version` is required. Supported versions: {supported}."])
-    if document["schema_version"] not in SCREEN_SCHEMA_VERSIONS:
-        _fail(
-            source_name,
-            [f"`schema_version` isn't a supported version. Supported versions: {supported}."],
-        )
+    document, plain = _read_document(content, source_name, "screen", SCREEN_SCHEMA_VERSIONS)
     unquoted = [_unquoted_text(path) for path in plain if _is_sent_text(path)]
     try:
         configuration = ScreenConfiguration.model_validate(document)
@@ -129,6 +116,47 @@ def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfigu
     if unquoted:
         _fail(source_name, unquoted)
     return configuration
+
+
+def read_review_configuration(content: bytes, source_name: str) -> ReviewConfiguration:
+    """Reads a review configuration from the bytes of a file, named `source_name` in messages.
+
+    Raises `TrialFolioError` with `config.invalid` when the file breaks any rule of the review
+    configuration. The message lists each problem, names its key, and includes no value. A review
+    sends nothing to Portfolio123, so its text may be written without quotes.
+    """
+    document, _ = _read_document(content, source_name, "review", REVIEW_SCHEMA_VERSIONS)
+    try:
+        return ReviewConfiguration.model_validate(document)
+    except ValidationError as error:
+        details = error.errors(include_input=False)
+        _fail(
+            source_name, [_describe(detail) for detail in details if not _follows(detail, details)]
+        )
+
+
+def _read_document(
+    content: bytes, source_name: str, kind: str, versions: tuple[str, ...]
+) -> tuple[dict[str, object], list[KeyPath]]:
+    """The document of a configuration of `kind`, once its YAML rules, its `kind`, and its
+    `schema_version` are checked; and where it writes text as a plain scalar."""
+    loaded, _, plain = _read_yaml(content, source_name)
+    if not isinstance(loaded, dict):
+        _fail(source_name, ["The file must be a mapping of keys to values."])
+    document = cast("dict[str, object]", loaded)
+    if "kind" not in document:
+        _fail(source_name, [f"`kind` is required. A {kind} configuration has `kind: {kind}`."])
+    if document["kind"] != kind:
+        _fail(source_name, [f"`kind` must be {kind}."])
+    supported = ", ".join(versions)
+    if "schema_version" not in document:
+        _fail(source_name, [f"`schema_version` is required. Supported versions: {supported}."])
+    if document["schema_version"] not in versions:
+        _fail(
+            source_name,
+            [f"`schema_version` isn't a supported version. Supported versions: {supported}."],
+        )
+    return document, plain
 
 
 def original_values(content: bytes, source_name: str) -> Mapping[str, str]:
@@ -206,6 +234,13 @@ def _describe(detail: ErrorDetails) -> str:
     context = detail.get("ctx", {})
     if kind == "string_pattern_mismatch" and context.get("pattern") == NOT_BLANK:
         return f"`{key}` is blank. Give it text that isn't only whitespace."
+    if kind == "string_pattern_mismatch" and context.get("pattern") == LABEL_PATTERN:
+        return (
+            f"`{key}` must be a label of 1 to 64 characters: lowercase letters, digits, _, and -,"
+            " starting with a letter or a digit."
+        )
+    if kind == "too_short" and detail["loc"][-1] == "intended_changes":
+        return f"`{key}` is empty. A result that declares no change leaves the key out."
     if kind == "too_short":
         least = context.get("min_length")
         return f"`{key}` must hold at least {least} item{'' if least == 1 else 's'}."

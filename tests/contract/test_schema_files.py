@@ -2,9 +2,12 @@
 
 Traces to docs/contracts.md, schema generation and drift, and to `scripts/schemas --check` in
 release 0.1.0's verification commands. `scripts/check` runs the check on the committed schemas;
-these tests check the generator itself, in a temporary directory.
+these tests check the generator itself, in a temporary directory. The JSON summary's tests trace
+to release 0.2.0's open question on the summary's version: 1.0.0's schema keeps its bytes, and
+1.1.0 only adds to it.
 """
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -23,6 +26,7 @@ from trialfolio.contracts.schema_files import (
     main,
     write,
 )
+from trialfolio.contracts.summary import JsonSummary, JsonSummaryV1_1
 
 
 def test_each_schema_names_its_model_and_mode() -> None:
@@ -204,3 +208,117 @@ def test_a_subdirectory_is_extra_and_stops_writing(
     assert main(["--dir", str(tmp_path)]) == 1
     assert [path.name for path in tmp_path.iterdir()] == ["old"]
     assert "holds directories: old" in capsys.readouterr().err
+
+
+# The JSON summary's versions
+
+SUMMARY_1_0_0 = "json-summary-1.0.0.schema.json"
+SUMMARY_1_1_0 = "json-summary-1.1.0.schema.json"
+
+SUMMARY_1_0_0_SHA256 = "0ce25e981d49a06d433fd68dd15bc15e50d929ca37604a7af79f5b51bcfdb67d"
+"""The SHA-256 of `schemas/json-summary-1.0.0.schema.json` at the tag v0.1.0, written by hand:
+`git show v0.1.0:schemas/json-summary-1.0.0.schema.json | shasum -a 256`."""
+
+
+def test_the_json_summary_1_0_0_schema_keeps_v0_1_0_s_bytes() -> None:
+    """It says what Trial Folio 0.1.0 prints, for scripts written against it."""
+    committed = (ROOT / "schemas" / SUMMARY_1_0_0).read_bytes()
+
+    assert hashlib.sha256(generate()[SUMMARY_1_0_0]).hexdigest() == SUMMARY_1_0_0_SHA256
+    assert hashlib.sha256(committed).hexdigest() == SUMMARY_1_0_0_SHA256
+
+
+PLAN_HASH = "sha256:" + "a1" * 32
+CASE_ID = "case-0123456789abcdef"
+ATTEMPT_ID = "1b4e28ba-2fa1-4d2b-883f-0016d3cca427"
+NO_COUNTS: dict[str, object] = {}
+
+
+def summary_1_0_0(command: str, **changes: object) -> dict[str, object]:
+    """A valid 1.0.0 summary of `command`, as Trial Folio 0.1.0 writes one."""
+    run_counts = {
+        "attempts": 1,
+        "provider_requests": 1,
+        "metrics_unavailable": 0,
+        "warnings": 0,
+        "cost": 5,
+    }
+    summary: dict[str, object] = {
+        "schema_version": "1.0.0",
+        "command": command,
+        "trialfolio_version": "0.1.0",
+        "outcome": "completed",
+        "exit_code": 0,
+        "ids": {"plan_hash": PLAN_HASH, "case_id": CASE_ID, "attempt_id": ATTEMPT_ID}
+        if command in ("run", "demo")
+        else {},
+        "output_dir": "out",
+        "outputs": {"manifest": "manifest.json", "report": "report.html"},
+        "counts": run_counts if command in ("run", "demo") else NO_COUNTS,
+        "statistical_validation": "not_assessed",
+        "trading_readiness": "not_assessed",
+        "error": None,
+    }
+    summary.update(changes)
+    JsonSummary.model_validate_json(json.dumps(summary))
+    return summary
+
+
+SUMMARIES_1_0_0 = {
+    "init": summary_1_0_0("init", output_dir=".", outputs={"configuration": "screen.yaml"}),
+    "run": summary_1_0_0("run"),
+    "run-failed": summary_1_0_0(
+        "run",
+        outcome="failed",
+        exit_code=3,
+        ids={},
+        output_dir=None,
+        outputs={},
+        counts={
+            "attempts": 0,
+            "provider_requests": 0,
+            "metrics_unavailable": 0,
+            "warnings": 0,
+            "cost": None,
+        },
+        error={"code": "config.invalid", "message": "screen.yaml isn't a valid configuration."},
+    ),
+    "report": summary_1_0_0("report", outputs={"report": "report.html"}),
+    "demo": summary_1_0_0("demo"),
+    "license": summary_1_0_0("license", output_dir=None, outputs={}),
+}
+
+
+@pytest.mark.parametrize("summary", SUMMARIES_1_0_0.values(), ids=SUMMARIES_1_0_0.keys())
+def test_a_1_0_0_summary_is_valid_as_1_1_0(summary: dict[str, object]) -> None:
+    """Each 1.0.0 key keeps its meaning, so a 1.0.0 summary of each 0.1.0 command, with its
+    version changed, is a valid 1.1.0 summary. The 1.1.0 model generates the 1.1.0 schema, and
+    the next test checks that the schema only adds to 1.0.0's."""
+    JsonSummaryV1_1.model_validate_json(json.dumps(summary | {"schema_version": "1.1.0"}))
+
+
+def test_the_json_summary_1_1_0_schema_only_adds_to_1_0_0() -> None:
+    old, new = (json.loads(generate()[name]) for name in (SUMMARY_1_0_0, SUMMARY_1_1_0))
+    changed = {
+        name for name in old["properties"] if old["properties"][name] != new["properties"][name]
+    }
+
+    assert new["required"] == old["required"]
+    assert new["properties"].keys() == old["properties"].keys()
+    assert new["additionalProperties"] is False
+    assert changed == {"schema_version", "command", "ids", "counts"}
+    assert new["properties"]["command"]["enum"] == [*old["properties"]["command"]["enum"], "review"]
+    old_ids, new_ids = old["$defs"]["SummaryIds"], new["$defs"]["SummaryIdsV1_1"]
+    assert new_ids["properties"] == old_ids["properties"] | {
+        "review_id": {"format": "uuid4", "title": "Review Id", "type": "string"}
+    }
+    assert "required" not in new_ids
+    old_counts = old["properties"]["counts"]["anyOf"]
+    assert new["properties"]["counts"]["anyOf"] == [
+        old_counts[0],
+        {"$ref": "#/$defs/ReviewCounts"},
+        old_counts[1],
+    ]
+    for name, definition in old["$defs"].items():
+        if name != "SummaryIds":
+            assert new["$defs"][name] == definition, name

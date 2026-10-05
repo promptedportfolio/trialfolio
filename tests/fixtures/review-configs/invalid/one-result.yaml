@@ -1,0 +1,11 @@
+# Invalid: `results` has at least two entries.
+# Key: results
+# Value: -
+kind: review
+schema_version: 1.0.0
+title: Holdings 25 versus 50
+purpose: Check whether doubling holdings changes risk as expected.
+baseline: hold25
+results:
+  - label: hold25
+    run: runs/hold25

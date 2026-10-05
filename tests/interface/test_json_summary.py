@@ -9,9 +9,14 @@ missing credentials), and R01-AC15 (an output directory that isn't empty), and f
 and `outcome`, `exit_code`, and
 `error` agree; and to R01-T14's rules that a blank `--out`, or one that isn't valid UTF-8 text,
 which `output_dir` can't hold, is a usage error, and that an error message escapes a path it
-names, so the summary can hold it. Each summary is checked against the `JsonSummary` model and the keys of the
-generated schema, `schemas/json-summary-1.0.0.schema.json`. Through the CLI's entry function in
-the test process, with the real client, `requests`, and `urllib3` over the fake server.
+names, so the summary can hold it. Each summary is checked against the `JsonSummaryV1_1` model and
+the keys of the generated schema, `schemas/json-summary-1.1.0.schema.json`. Through the CLI's entry
+function in the test process, with the real client, `requests`, and `urllib3` over the fake server.
+
+The summary's version moved from 1.0.0 to 1.1.0 with release 0.2.0, for every command, as its open
+question on the summary's version settled (owner's sign-off, 2026-10-05; D-25): the committed 1.0.0
+schema can't hold a review's summary, and keys are added only in a minor version. Each 1.0.0 key
+keeps its meaning, so these checks are otherwise 0.1.0's.
 """
 
 import json
@@ -21,10 +26,10 @@ import pytest
 
 from tests.interface.conftest import Cli, Outcome, config, plan_hash_for, serve_success
 from tests.support.fake_portfolio123 import Reply
-from trialfolio.contracts.summary import JsonSummary
+from trialfolio.contracts.summary import JsonSummaryV1_1
 from trialfolio.errors import EXIT_CODES
 
-SCHEMA = Path(__file__).resolve().parents[2] / "schemas" / "json-summary-1.0.0.schema.json"
+SCHEMA = Path(__file__).resolve().parents[2] / "schemas" / "json-summary-1.1.0.schema.json"
 
 RUN_COUNTS = {"attempts", "provider_requests", "metrics_unavailable", "warnings", "cost"}
 
@@ -34,7 +39,7 @@ def summary_of(outcome: Outcome, command: str) -> dict[str, object]:
     rules that tie its fields together."""
     summary = outcome.summary
     # From its JSON text: in strict mode, only JSON input reads an ID's text as a UUID.
-    JsonSummary.model_validate_json(outcome.stdout)
+    JsonSummaryV1_1.model_validate_json(outcome.stdout)
     schema: dict[str, object] = json.loads(SCHEMA.read_bytes())
     required = schema["required"]
     properties = schema["properties"]
@@ -42,7 +47,7 @@ def summary_of(outcome: Outcome, command: str) -> dict[str, object]:
     assert isinstance(properties, dict)
     assert set(summary) == set(required)  # pyright: ignore[reportUnknownArgumentType]
     assert set(summary) <= set(properties)  # pyright: ignore[reportUnknownArgumentType]
-    assert summary["schema_version"] == "1.0.0"
+    assert summary["schema_version"] == "1.1.0"
     assert summary["command"] == command
     assert summary["exit_code"] == outcome.exit_code
     assert summary["statistical_validation"] == "not_assessed"

@@ -26,9 +26,11 @@ from trialfolio.contracts.acknowledgment import AcknowledgmentRecord
 from trialfolio.contracts.attempt import AttemptRecord, StartRecord
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.contracts.plan import Plan
+from trialfolio.contracts.review_configuration import ReviewConfiguration
+from trialfolio.contracts.review_manifest import ReviewManifest
 from trialfolio.contracts.screen_configuration import ScreenConfiguration
-from trialfolio.contracts.summary import JsonSummary
-from trialfolio.contracts.tables import MetricsRow, SettingsRow
+from trialfolio.contracts.summary import JsonSummary, JsonSummaryV1_1
+from trialfolio.contracts.tables import DifferencesRow, MetricsRow, SettingsRow
 
 JSON_SCHEMA_DIALECT: Final = "https://json-schema.org/draft/2020-12/schema"
 
@@ -46,13 +48,18 @@ SCHEMA_FILES: Final = (
     # A configuration is input, so its schema is what validation accepts. Every other contract
     # is written by Trial Folio, so its schema is what serialization writes.
     SchemaFile("screen-configuration-1.0.0.schema.json", ScreenConfiguration, "validation"),
+    SchemaFile("review-configuration-1.0.0.schema.json", ReviewConfiguration, "validation"),
     SchemaFile("plan-1.0.0.schema.json", Plan, "serialization"),
     SchemaFile("start-record-1.0.0.schema.json", StartRecord, "serialization"),
     SchemaFile("attempt-record-1.0.0.schema.json", AttemptRecord, "serialization"),
     SchemaFile("run-manifest-1.0.0.schema.json", RunManifest, "serialization"),
+    SchemaFile("review-manifest-1.0.0.schema.json", ReviewManifest, "serialization"),
     SchemaFile("metrics-row-1.0.0.schema.json", MetricsRow, "serialization"),
     SchemaFile("settings-row-1.0.0.schema.json", SettingsRow, "serialization"),
+    SchemaFile("differences-row-1.0.0.schema.json", DifferencesRow, "serialization"),
+    # 1.0.0 is what Trial Folio 0.1.0 writes, kept with its bytes unchanged; 0.2.0 writes 1.1.0.
     SchemaFile("json-summary-1.0.0.schema.json", JsonSummary, "serialization"),
+    SchemaFile("json-summary-1.1.0.schema.json", JsonSummaryV1_1, "serialization"),
     SchemaFile("license-acknowledgment.schema.json", AcknowledgmentRecord, "serialization"),
 )
 """Every published schema: one for each contract and each schema version that has a reader."""

@@ -50,7 +50,7 @@ from trialfolio.configuration import read_screen_configuration
 from trialfolio.contracts.common import ErrorDetail
 from trialfolio.contracts.manifest import CommandRecord
 from trialfolio.contracts.plan import Plan
-from trialfolio.contracts.summary import JsonSummary, NoCounts, RunCounts, SummaryIds
+from trialfolio.contracts.summary import JsonSummaryV1_1, NoCounts, RunCounts, SummaryIdsV1_1
 from trialfolio.display import visible
 from trialfolio.errors import EXIT_CODES, TrialFolioError
 from trialfolio.logs import LOGS_DIRECTORY, CommandLogs
@@ -78,7 +78,7 @@ API_KEY_VARIABLE: Final = "TRIALFOLIO_P123_API_KEY"
 KEY_LOG_VARIABLE: Final = "SSLKEYLOGFILE"
 """`urllib3` writes TLS session keys to the file it names, so the CLI removes it (credentials)."""
 
-SUMMARY_SCHEMA_VERSION: Final = "1.0.0"
+SUMMARY_SCHEMA_VERSION: Final = "1.1.0"
 
 
 def utc_now() -> datetime:
@@ -253,7 +253,7 @@ class _Invocation:
     clock: Clock
     store_factory: StoreFactory
     logs: CommandLogs | None = None
-    ids: SummaryIds = field(default_factory=lambda: SummaryIds())
+    ids: SummaryIdsV1_1 = field(default_factory=lambda: SummaryIdsV1_1())
     output_dir: str | None = None
     """The output directory as given, once the command has claimed it."""
     execution: "Execution | None" = None
@@ -325,7 +325,7 @@ class _Invocation:
         except (OSError, ValueError):  # A closed stream: nothing more can be shown.
             pass
 
-    def _summary(self, error: TrialFolioError | None, exit_code: int) -> JsonSummary:
+    def _summary(self, error: TrialFolioError | None, exit_code: int) -> JsonSummaryV1_1:
         outcome = (
             "completed"
             if error is None
@@ -333,7 +333,7 @@ class _Invocation:
             if error.code == "execution.partial"
             else "failed"
         )
-        return JsonSummary.model_validate(
+        return JsonSummaryV1_1.model_validate(
             {
                 "schema_version": SUMMARY_SCHEMA_VERSION,
                 "command": self.name,
@@ -352,8 +352,8 @@ class _Invocation:
             }
         )
 
-    def _ids(self) -> SummaryIds:
-        ids = SummaryIds(**self.ids)
+    def _ids(self) -> SummaryIdsV1_1:
+        ids = SummaryIdsV1_1(**self.ids)
         attempt = self.execution.attempt if self.execution is not None else None
         result = self.execution.result if self.execution is not None else None
         if attempt is not None and (

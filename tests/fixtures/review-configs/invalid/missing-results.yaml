@@ -1,0 +1,8 @@
+# Invalid: `results` is required.
+# Key: results
+# Value: -
+kind: review
+schema_version: 1.0.0
+title: Holdings 25 versus 50
+purpose: Check whether doubling holdings changes risk as expected.
+baseline: hold25

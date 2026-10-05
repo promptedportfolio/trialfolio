@@ -2,7 +2,7 @@
 
 import re
 from datetime import UTC, date, datetime, timedelta
-from typing import Annotated, Final, Literal
+from typing import Annotated, Final, Literal, cast
 
 from pydantic import (
     UUID4,
@@ -13,6 +13,7 @@ from pydantic import (
     Field,
     StringConstraints,
 )
+from pydantic.config import JsonDict
 
 from trialfolio.errors import ErrorCode
 
@@ -72,8 +73,45 @@ def _canonical_uuid(value: object) -> object:
 AttemptId = Annotated[UUID4, BeforeValidator(_canonical_uuid)]
 """A random version 4 UUID, written in canonical form (identity)."""
 
-ResultLabel = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")]
-"""A result label (identity)."""
+ReviewId = Annotated[UUID4, BeforeValidator(_canonical_uuid)]
+"""A random version 4 UUID for one review written, in canonical form (identity)."""
+
+LABEL_PATTERN: Final = r"^[a-z0-9][a-z0-9_-]{0,63}$"
+"""A label's form: 1 to 64 characters, lowercase letters, digits, `_`, and `-`, starting with a
+letter or a digit (identity)."""
+
+ResultLabel = Annotated[str, StringConstraints(pattern=LABEL_PATTERN)]
+"""A result label (identity). `metrics.csv` and `settings.csv` hold a run's `case_id` in it."""
+
+WINDOWS_DEVICE_NAMES: Final = (
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    *(f"com{digit}" for digit in "123456789"),
+    *(f"lpt{digit}" for digit in "123456789"),
+)
+"""The names Windows reserves for devices, as a label can write them: lowercase, and with no
+superscript digit, which the label pattern excludes (review configuration)."""
+
+
+def _not_a_device_name(value: str) -> str:
+    if value in WINDOWS_DEVICE_NAMES:
+        raise ValueError(
+            "is a name Windows reserves for a device, and a label names its result's directory "
+            "in the review. Choose another label"
+        )
+    return value
+
+
+ReviewLabel = Annotated[
+    str,
+    StringConstraints(pattern=LABEL_PATTERN),
+    AfterValidator(_not_a_device_name),
+    Field(json_schema_extra={"not": {"enum": list(WINDOWS_DEVICE_NAMES)}}),
+]
+"""The label of one result of a review: a result label that isn't a Windows device name,
+because it names the result's directory under `inputs/` (identity, review configuration)."""
 
 SettingName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]*$")]
 """A normalized setting name, in snake_case (settings.csv)."""
@@ -105,6 +143,35 @@ Title = Annotated[str, StringConstraints(min_length=1, max_length=200, pattern=N
 
 Purpose = Annotated[str, StringConstraints(min_length=1, max_length=2000, pattern=NOT_BLANK)]
 """A configuration's declared purpose: 1 to 2,000 characters, not all whitespace."""
+
+ShortText = Annotated[str, StringConstraints(min_length=1, max_length=500, pattern=NOT_BLANK)]
+"""Text of 1 to 500 characters, not all whitespace: a review result's description, or a declared
+change's reason."""
+
+
+def optional_key(schema: JsonDict) -> None:
+    """Shows an optional configuration key as it's written: left out, never null. Its schema then
+    has no null and no default."""
+    schema.pop("default", None)
+    branches = schema.pop("anyOf", [])
+    if isinstance(branches, list):
+        for branch in branches:
+            if isinstance(branch, dict) and branch != {"type": "null"}:
+                schema.update(branch)
+
+
+def present(value: object) -> object:
+    """Rejects a configuration value of null: an optional key is left out instead."""
+    if value is None:
+        raise ValueError("has no value. Give it one, or leave the key out.")
+    return value
+
+
+def ordered(value: object) -> object:
+    """Rejects anything but a list or a tuple where a configuration gives an ordered list."""
+    if not isinstance(value, list | tuple):
+        raise ValueError("must be a list")
+    return cast("list[object] | tuple[object, ...]", value)
 
 
 def valid_date_text(value: str) -> str:

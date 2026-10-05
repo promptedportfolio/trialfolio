@@ -1,0 +1,16 @@
+# Invalid: A label isn't a name Windows reserves for a device (`nul`; the contract test checks the other 21).
+# Key: results[0].label
+# Value: nul
+kind: review
+schema_version: 1.0.0
+title: Holdings 25 versus 50
+purpose: Check whether doubling holdings changes risk as expected.
+baseline: hold25
+results:
+  - label: nul
+    run: runs/hold25
+  - label: hold50
+    run: runs/hold50
+    intended_changes:
+      - setting: max_holdings
+        reason: Doubling holdings is the change under review.
