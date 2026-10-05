@@ -953,7 +953,9 @@ A failure or an interrupt after the claim leaves no manifest, so the output is v
 
 A review's manifest has no `plan_hash`, `approval`, `parsers`, or `reproducibility`. A review sends nothing and parses no provider response: it reads a run's saved response only to check its size and `artifact_id`, and no parser interprets it. Each copied run manifest records its own run's parsers and reproducibility, which the report shows. `schemas/review-manifest-1.0.0.schema.json` will give every field (R02-T04).
 
-**The JSON summary's counts.** For `review`, `results` is the manifest's, `settings_flagged` is its flagged setting rows, and `metrics_unavailable` its `unavailable` metric rows. `warnings` counts the warnings logged, as for any command. When the review fails, `results` is the number of results a valid configuration names, or 0. `settings_flagged` and `metrics_unavailable` are 0 when no `differences.csv` was written. Once it's written, they're its counts, even when the review then fails, as a run's `metrics_unavailable` is once its tables are written.
+**The JSON summary's `review_id` and counts.** As an [open question](releases/0.2.0-review.md#open-questions) proposes, `ids` holds the `review_id` once the review has claimed its output directory: on success, and on a failure after the claim. A failure before the claim writes nothing, so its `ids` has none. For `review`, `results` is the manifest's, `settings_flagged` is its flagged setting rows, and `metrics_unavailable` its `unavailable` metric rows. `warnings` counts the warnings logged, as for any command. When the review fails, `results` is the number of results a valid configuration names, or 0. `settings_flagged` and `metrics_unavailable` are 0 when no `differences.csv` was written. Once it's written, they're its counts, even when the review then fails, as a run's `metrics_unavailable` is once its tables are written.
+
+**Labels in logs.** As an [open question](releases/0.2.0-review.md#open-questions) proposes, a label is the user's own text, a configuration value, which [logs](#logging-and-local-diagnostics) never hold. A logged event, and so a warning on stderr, names a result by its position in `results`, such as "result 2", and the report and the manifest give its label. An error's full message names the label, and its logged message gives the position instead ([errors](#errors)).
 
 ## Canonical hashing
 
@@ -1107,6 +1109,8 @@ Exit codes:
 ### JSON summary
 
 With `--json`, every command writes exactly one JSON object to stdout, followed by a newline. It does so whether the command succeeds or fails. The summary has its own `schema_version`, starting at 1.0.0. New keys may be added in minor versions; existing keys don't change meaning.
+
+**The review's summary.** The committed 1.0.0 schema allows no key it doesn't list, and its `command` has no `review`, its `ids` no `review_id`, and its `counts` none of the review's counts. So, as an [open question](releases/0.2.0-review.md#open-questions) proposes, 0.2.0 writes version 1.1.0 for every command: 1.0.0 with those keys added, each 1.0.0 key keeping its meaning. `schemas/json-summary-1.0.0.schema.json` stays committed, beside `json-summary-1.1.0.schema.json`, generated from a model kept for it, because it says what 0.1.0 prints.
 
 | Key | Meaning |
 |---|---|
