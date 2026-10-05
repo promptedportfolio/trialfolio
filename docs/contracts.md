@@ -957,6 +957,8 @@ A review's manifest has no `plan_hash`, `approval`, `parsers`, or `reproducibili
 
 **Labels in logs.** As an [open question](releases/0.2.0-review.md#open-questions) proposes, a label is the user's own text, a configuration value, which [logs](#logging-and-local-diagnostics) never hold. A logged event, and so a warning on stderr, names a result by its position in `results`, such as "result 2", and the report and the manifest give its label. An error's full message names the label, and its logged message gives the position instead ([errors](#errors)).
 
+A copy's path holds its label too. The `ArtifactStore` logs each file it writes by its path, in `artifact.write.completed`, and its errors, such as `storage.write_failed`, name the path in their logged message. So the review gives the store, with each copy, a name for logs with the result's position in place of `inputs/<label>/`, such as "`manifest.json` of result 2". The store's events, and its errors' logged messages, use that name, and the errors' full messages keep the path. A run's paths hold no configuration value, so the store logs a run's files as before. R02-T08 makes this change to the store.
+
 ## Canonical hashing
 
 These rules are `canonicalization_version` 1, a requirement since 0.1.0's sign-off (2026-10-01). Plan 1.0.0 and `case_id` use them (R01-T04), and any later change makes a new version.
