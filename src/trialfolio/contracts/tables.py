@@ -290,6 +290,9 @@ class DifferencesRow(ContractModel):
         expected = {
             "critical_unexplained_mismatch": critical
             and self.classification == "unexplained_mismatch",
+            # Only in a critical category, even for a declared change that can't be confirmed
+            # (owner's decision, 2026-10-05): no flag covers precision, the one declarable
+            # setting outside them.
             "critical_unknown": critical and self.classification == "unknown",
             "intended_change_not_observed": self.classification == "same"
             and self.declared_reason is not None,

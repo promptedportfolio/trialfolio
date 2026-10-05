@@ -272,7 +272,7 @@ Schema version 1.0.0, introduced in 0.2.0. It names saved runs written by `trial
 **Rules that span keys:**
 
 - **Intended change not observed.** If a declared change isn't there because the two values are equal, the result is still valid. The difference is classified `same` and flagged `intended_change_not_observed`.
-- **Intended change that can't be confirmed.** If the setting is missing from either run, the difference is `unknown` and is flagged.
+- **Intended change that can't be confirmed.** If the setting is missing from either run, the difference is `unknown`, and it keeps its `declared_reason`. In a critical category it's flagged `critical_unknown`, as any `unknown` there is. `precision`, the one declarable setting outside the critical categories, isn't flagged.
 - **Identical responses.** Two entries may name runs whose saved responses are byte-identical. That is flagged `identical_source`, as a warning.
 
 Example:

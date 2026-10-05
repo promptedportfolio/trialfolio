@@ -476,6 +476,11 @@ SETTING_ACCEPTS: dict[str, Change] = {
     "a declared change that can't be confirmed": steps(
         lambda d: d.update(value=None), classified("unknown", "critical_unknown")
     ),
+    "a declared change to precision that can't be confirmed, unflagged": steps(
+        PRECISION,
+        lambda d: d.update(baseline_value=None, declared_reason="Not yet variable."),
+        classified("unknown"),
+    ),
 }
 
 
