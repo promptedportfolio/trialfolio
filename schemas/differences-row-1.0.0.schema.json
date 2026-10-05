@@ -269,7 +269,7 @@
           "type": "null"
         }
       ],
-      "description": "For a setting declared as an intended change, its reason, whatever the classification.",
+      "description": "For a setting declared as an intended change, its reason, whatever the classification.\nOnly a declarable setting has one.",
       "title": "Declared Reason"
     },
     "flagged": {

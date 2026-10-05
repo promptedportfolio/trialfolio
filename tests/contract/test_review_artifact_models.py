@@ -505,7 +505,21 @@ SETTING_REJECTS: dict[str, Change] = {
     "same though the values differ": classified("same"),
     "a change though the values are the same": lambda d: d.update(value="25"),
     "a missing value that isn't unknown": lambda d: d.update(value=None),
+    "unknown though both values are known": steps(
+        lambda d: d.update(value="25"), classified("unknown", "critical_unknown")
+    ),
+    "unknown though both values are known, not critical": steps(PRECISION, classified("unknown")),
     "an intended change without its reason": lambda d: d.update(declared_reason=None),
+    "a declared reason on a setting that can't be declared": steps(
+        setting("commission", "costs", None, "not_modeled", "not_modeled"),
+        lambda d: d.update(declared_reason="Commission isn't modeled."),
+        classified("same", "intended_change_not_observed"),
+    ),
+    "a declared reason on a parameter that isn't sent": steps(
+        setting("carry_cost", "costs", None, "not_sent", "not_sent"),
+        lambda d: d.update(declared_reason="Carry cost isn't sent."),
+        classified("same", "intended_change_not_observed"),
+    ),
     "a declared change that's unexplained": classified(
         "unexplained_mismatch", "critical_unexplained_mismatch"
     ),

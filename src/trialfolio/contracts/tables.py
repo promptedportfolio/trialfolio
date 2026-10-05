@@ -225,7 +225,8 @@ class DifferencesRow(ContractModel):
     reason: DifferenceReason | None
     """For `not_comparable` and `unavailable` metrics. Null otherwise."""
     declared_reason: ShortText | None
-    """For a setting declared as an intended change, its reason, whatever the classification."""
+    """For a setting declared as an intended change, its reason, whatever the classification.
+    Only a declarable setting has one."""
     flagged: bool
     """True exactly when a flag in `FLAGGING` applies."""
     flags: tuple[FlagCode, ...]
@@ -268,12 +269,15 @@ class DifferencesRow(ContractModel):
             )
         values = (self.baseline_value, self.value)
         read = [None if text is None else check_value_text(setting, text) for text in values]
+        # A value that can't be interpreted can't be written, so an unknown one is missing.
+        if (None in values) != (self.classification == "unknown"):
+            raise ValueError("a setting is unknown exactly when one of its values is missing")
         if self.classification != "unknown":
-            if None in values:
-                raise ValueError("a setting row has both values unless it's unknown")
             same = read[0] == read[1]
             if same != (self.classification == "same"):
                 raise ValueError("a setting is same exactly when its two values are the same")
+        if self.declared_reason is not None and not setting.declarable:
+            raise ValueError(f"{self.name} isn't a setting a review can declare")
         if (self.classification == "intended_change") and self.declared_reason is None:
             raise ValueError("an intended change gives its declared_reason")
         if self.classification == "unexplained_mismatch" and self.declared_reason is not None:
