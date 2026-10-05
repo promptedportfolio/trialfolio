@@ -173,7 +173,7 @@ Trial Folio sends nothing else. The documented parameters it leaves out are `ris
 
 #### Screen settings
 
-`settings.csv` has these rows for a screen run, in this order. Every category here except `other` is critical. A review configuration's `intended_changes` accepts only the settings marked declarable: the ones a screen configuration can set to different values.
+`settings.csv` has these rows for a screen run, in this order. Every category here except `other` is critical. A review configuration's `intended_changes` accepts only the 12 settings marked declarable: the ones whose value comes from a screen configuration key and is sent in the request. The other settings are fixed, inferred, or not sent, so no configuration changes them. Three declarable settings, `transaction_price`, `pit_method`, and `precision`, take only one value in screen configuration 1.0.0, so a change declared to one of them can't be observed yet: it's `same`, flagged `intended_change_not_observed`. They stay declarable so that a release that verifies more of their values doesn't have to change the review configuration.
 
 | # | `setting` | `category` | Declarable | Unit | Value and provenance |
 |---|---|---|---|---|---|
@@ -266,7 +266,7 @@ Schema version 1.0.0, introduced in 0.2.0. It names saved runs written by `trial
 
 | Key | Type | Required | Rules |
 |---|---|---|---|
-| `setting` | string | Yes | A setting marked declarable in the [screen settings](#screen-settings). An unknown name fails with `config.invalid`, and the message lists the valid names. A result may list each setting at most once. |
+| `setting` | string | Yes | One of the 12 settings marked declarable in the [screen settings](#screen-settings). Any other name, including a setting that isn't declarable, fails with `config.invalid`, and the message lists the valid names. A result may list each setting at most once. |
 | `reason` | string | Yes | 1–500 characters, shown in the report |
 
 **Rules that span keys:**
@@ -537,12 +537,42 @@ One row for each setting and each metric of each non-baseline result, compared w
 | `unit` | Unit of the two values |
 | `classification` | For settings: `same`, `intended_change`, `unexplained_mismatch`, or `unknown`. For metrics: `differenced`, `not_comparable`, or `unavailable`. |
 | `difference` | For `differenced` metrics: `value − baseline_value`. Empty otherwise. |
-| `difference_unit` | `pp` for percent metrics, otherwise the metric's unit. Empty when there's no difference. |
-| `difference_decimals` | The smaller of the two source decimal counts |
-| `reason` | For `not_comparable` or `unavailable`: `different_benchmark`, `different_period`, `different_unit`, or `input_unavailable`. Empty otherwise. |
-| `declared_reason` | For `intended_change`, the reason the configuration gives |
+| `difference_unit` | `pp` for percent metrics, `days` for dates, otherwise the metric's unit. Empty when there's no difference. |
+| `difference_decimals` | The smaller of the two source decimal counts, and 0 for dates and counts. Empty when there's no difference. |
+| `reason` | For `not_comparable` or `unavailable`: `different_benchmark`, `different_period`, `unknown_period`, `different_unit`, or `input_unavailable`. Empty otherwise. |
+| `declared_reason` | For a setting the configuration declares as an intended change, the reason it gives, whatever the classification, so a change that wasn't observed still shows what was intended. Empty otherwise. |
 | `flagged` | `true` when the row needs the reader's attention: a critical `unexplained_mismatch` or `unknown`, or any row with a warning flag |
 | `flags` | Flag codes, separated by semicolons |
+
+#### Differences between screen runs
+
+R02-T01 took these names from 0.1.0's [screen settings](#screen-settings) and [metrics](#p123api-screen-backtest-version-1). Like the rest of 0.2.0's contracts, they're proposed until [0.2.0](releases/0.2.0-review.md) is Ready, and the choices in its [open questions](releases/0.2.0-review.md#open-questions) await the owner's decision.
+
+For each result except the baseline, in the order the review configuration lists them, `differences.csv` has:
+
+- **Its labels.** `label` and `baseline_label` are the review configuration's labels. The copied `metrics.csv` and `settings.csv` keep their own `label`, the run's `case_id`, because they're copied byte for byte. The review manifest records which run each label names (R02-T02). Two results may name runs of the same case, such as two runs of one configuration, and their labels tell them apart.
+- **23 setting rows,** one for each screen setting, in that table's order. `name` is the setting, and `category`, `critical`, and `unit` are its row's in `settings.csv`. `baseline_value` and `value` are the two runs' `value` cells.
+  - **A run without tables.** If a review can include a run whose attempt didn't succeed, or whose response was invalid, as an [open question](releases/0.2.0-review.md#open-questions) proposes, that run's [plan](#plan-contents) stands in for its `settings.csv`. Each setting's `category`, `critical`, `unit`, and `flags` are its plan row's, and its value is written as `settings.csv` writes it. So its date rows never carry `coverage_mismatch`, which needs a response.
+  - **Same values.** Two values are the same when they read as the same value: a list or a ranking as JSON, and anything else as its text. A decimal is normalized before it's written, so `0.250` and `0.25` are both written `0.25`. A list keeps its order, as a case's identity does, so the same rules in another order differ. Two runs that both leave a parameter unsent have the same token, `not_sent`, and are `same`.
+  - **Not differenced.** A setting row's `difference`, `difference_unit`, and `difference_decimals` are empty.
+- **20 metric rows,** one for each of the layout's metrics, in that table's order. A metric is named by `subject` and `metric_id` together, because rows 15–20 reuse the identifiers of rows 4–9 for the benchmark.
+
+A metric row is `unavailable`, with `input_unavailable`, when either value is unavailable. That run's copied `metrics.csv` holds the value's own reason, which the report gives. Otherwise the row is `differenced` when the table below allows it, and `not_comparable` when it doesn't:
+
+| Rows | Metrics | Differenced only when | Difference unit |
+|---|---|---|---|
+| 1–2 | `coverage_start` and `coverage_end` | Always. Coverage is the period, so the period rule doesn't apply to it. | `days`: the calendar days from the baseline's date to the result's |
+| 3 | `coverage_periods` | Always, as rows 1–2 | `count` |
+| 4–9, 14 | The strategy's `total_return`, `annualized_return`, `max_drawdown`, `standard_deviation`, `sharpe_ratio`, `sortino_ratio`, and `risk_samples` | The two periods are the same | `pp`; `ratio` for `sharpe_ratio` and `sortino_ratio`; `count` for `risk_samples` |
+| 10–13 | `correlation`, `r_squared`, `beta`, and `alpha`, the benchmark-relative metrics, which name the benchmark in their `benchmark` cell | The periods are the same, and so are the `benchmark` cells | `ratio`; `pp` for `alpha` |
+| 15–20 | Rows 4–9 for the benchmark, which describe the benchmark itself | The periods are the same, and so are the runs' `benchmark` settings | As rows 4–9 |
+
+- **Periods.** A metric's period is its `period_start` and `period_end`, which are its run's coverage. Two periods are the same when both are known and equal. A different period gives `different_period`. A period that's unknown in either run gives `unknown_period`, so coverage that couldn't be established is never shown as matching.
+- **Benchmarks.** A different benchmark gives `different_benchmark`. The strategy's other metrics don't depend on the benchmark, so they're differenced whatever it is.
+- **Units.** Layout version 1 fixes each metric's unit, so two runs read with it never differ in unit. `different_unit` is for a later layout that changes one.
+- **One reason.** When several reasons apply, `reason` gives the first of `different_unit`, `different_benchmark`, and `different_period` or `unknown_period`. The setting rows show every difference behind it.
+- **Decimals.** `difference_decimals` is the smaller of the two values' `source_decimals`, and 0 for dates and counts. A difference with more decimal places is rounded to it, half to even. `source_decimals` counts the digits the saved value has ([numbers and precision](#p123api-screen-backtest-version-1)). Saving drops trailing zeros, but a whole number saved as a float keeps its `.0`. So `12.5` has one decimal place even when it was requested at 4, and so does `12.0`: `12.46` against a baseline of `12.0` gives `0.5`, never `0`.
+- **Writing a difference.** `difference` has exactly `difference_decimals` digits after the decimal point, as a value in `metrics.csv` has its `source_decimals`, so `12.35` against `12.25` gives `0.10`. A difference of zero is written without a sign: `151.68` against `151.7` rounds to `-0.0`, which is written `0.0`, and so is `-0.0` against `0.0`.
 
 ### Flag codes
 
