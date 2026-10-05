@@ -920,7 +920,11 @@ Introduced in 0.2.0 (R02-T02). Like the rest of 0.2.0's contracts, it's a requir
 **Writing it.** After the [license acknowledgment](#license-acknowledgment), `trialfolio review`:
 
 1. Validates the configuration (`config.invalid`).
-2. Reads and checks each run, in the configuration's order (`input.not_found` for a directory that doesn't exist, `input.not_a_run`, or `artifact.unknown_schema_version`). Nothing is written until every run passes.
+2. Reads and checks each run, in the configuration's order (`input.not_found` for a directory that doesn't exist, `input.not_a_run`, or `artifact.unknown_schema_version`). Nothing is written until every run passes. The first result that fails is reported. R02-T05 wrote this check, `check_review_inputs` in `src/trialfolio/review_inputs.py`:
+   - **Finding the run.** A `run` path is read from the configuration's directory, unless it's absolute, as [every configuration's file paths](#configuration-files) are. When nothing exists there, it's `input.not_found`, as for `trialfolio report`. The run is found and read at the one path the file system resolves, so a `..` after a symbolic link, such as a linked configuration directory, leads to the parent of the link's target, as opening the path does.
+   - **Checking it.** Each run is read and checked as `trialfolio report` checks one, with each file read once, and the check keeps the bytes of the files the review copies. Two results that name the same run each read it.
+   - **What a review also needs.** A run is also `input.not_a_run` when its manifest lists `plan.json` or a table without a schema version, which the review records for each copy, or when its attempts saved more than one response, because `results` gives one, and a screen run sends its request at most once. A run Trial Folio wrote has neither problem.
+   - **Messages.** The message names the result by its label, and its `run` path as the configuration gives it: "Result `hold50`'s run directory (`runs/hold50`) isn't a complete Trial Folio run: it has no manifest.json. …". The logged message names the result by its position instead, "Result 2's run directory", as [labels in logs](#review-output) below says. Each run that passes is logged as `review.input.loaded`, by its result's position, with the `artifact_id` of its manifest, its `plan_hash`, and its `case_id`.
 3. Checks that the output directory is absent or empty (`output.not_empty`). As for `trialfolio report`, a run that fails its check is reported even when the output directory isn't empty.
 4. [Claims the output directory](#cli-behavior) with `configuration.yaml`, from the bytes read in step 1. Logging to `<out>/logs/` starts once the claim succeeds.
 5. Writes each result's copies, in the configuration's order: `manifest.json`, `plan.json`, and then the tables. The first is the first [atomic write](#artifact-storage). So on Linux and macOS, a file system without hard links, such as FAT or exFAT, fails there, with `storage.write_failed`. On Windows, which publishes with `os.rename`, those file systems work.
@@ -1036,6 +1040,8 @@ Reports count as output under [D-07](spec.md#decisions). Users may share them wi
 - It lists both normalized tables, or neither. Each table reads back as a valid table, its rows are labeled with the plan's `case_id`, and they were drawn from the run's own `configuration.yaml` and saved response. `metrics.csv` holds one row for each of the layout's metrics, and `settings.csv` one for each of the plan's settings, in their documented order: a table missing a row, or with one repeated, isn't complete.
 
 A schema version with no reader, in the manifest, `plan.json`, a start record, an attempt record, or the manifest's entry for one of them or for a table, is `artifact.unknown_schema_version`.
+
+The message names the run: `trialfolio report` calls it "the run directory", and a review names it by its result ([review output](#review-output)). A table that can't be read is one of the problems above, so its message names the run too.
 
 ## CLI behavior
 

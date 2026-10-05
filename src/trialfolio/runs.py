@@ -16,7 +16,12 @@ reads the same way wherever it's stored. A directory is a complete run when:
   are drawn from the run's own configuration and saved response.
 
 Otherwise `read_run` raises `input.not_a_run`, or `artifact.unknown_schema_version` for a schema
-version with no reader. The message names the problem, never a value.
+version with no reader. The message names the problem, never a value, and names the run as a
+`RunName` says: `trialfolio report` reads one run, "the run directory", and a review names each
+result's run by its label and path, and in logs by its position.
+
+`check_run` reads it the same way, and also gives back the bytes it checked, from which a review
+writes its copies, so a file changed after the check can't be copied.
 
 A `SavedRun` is also what the report renders when `run` writes it, before the manifest.
 """
@@ -24,7 +29,9 @@ A `SavedRun` is also what the report renders when `run` writes it, before the ma
 import json
 import re
 import uuid
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Final, cast
 
 from pydantic import BaseModel, ValidationError
@@ -42,7 +49,7 @@ from trialfolio.contracts.manifest import ArtifactRole, ManifestArtifact, RunMan
 from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, SettingsRow
 from trialfolio.display import visible
-from trialfolio.errors import TrialFolioError
+from trialfolio.errors import ErrorCode, TrialFolioError
 from trialfolio.normalization import METRICS, METRICS_PATH, SETTINGS_PATH
 from trialfolio.planning import plan_hash
 from trialfolio.storage import ArtifactStore
@@ -112,6 +119,28 @@ class SavedRun:
             raise ValueError("a run has both normalized tables, or neither")
 
 
+@dataclass(frozen=True)
+class RunName:
+    """How a refusal names the run it read: in its message, and in its logged message, which
+    holds no configuration value. Each starts lowercase, as in "the run directory"."""
+
+    shown: str
+    logged: str
+
+
+THE_RUN_DIRECTORY: Final = RunName("the run directory", "the run directory")
+"""How `trialfolio report`, which reads one run, names it."""
+
+
+@dataclass(frozen=True)
+class CheckedRun:
+    """A saved run, and the bytes `check_run` read and checked."""
+
+    saved: SavedRun
+    contents: Mapping[str, bytes]
+    """By path in the run: `manifest.json`'s bytes, and each listed file's."""
+
+
 def read_run(store: ArtifactStore) -> SavedRun:
     """Reads a saved run from `store`, rooted at its output directory, and checks it's complete.
 
@@ -119,17 +148,34 @@ def read_run(store: ArtifactStore) -> SavedRun:
     `artifact.unknown_schema_version` when one of its artifacts has a schema version with no
     reader. Writes nothing.
     """
-    manifest = _manifest(store)
-    contents = {artifact.path: _listed(store, artifact) for artifact in manifest.artifacts}
-    plan = _plan(manifest, contents)
-    attempts = _attempts(manifest, contents, plan)
-    metrics, settings = _tables(manifest, contents, plan, attempts)
-    return SavedRun(manifest, plan, attempts, metrics, settings)
+    return check_run(store).saved
 
 
-def _manifest(store: ArtifactStore) -> RunManifest:
+def check_run(store: ArtifactStore, name: RunName = THE_RUN_DIRECTORY) -> CheckedRun:
+    """Reads and checks a saved run as `read_run` does, reading each file once, and returns it
+    with the bytes it checked. Its errors name the run as `name` says."""
     try:
-        content = store.read(MANIFEST_PATH)
+        content = _read_manifest(store)
+        manifest = _manifest(content)
+        contents = {artifact.path: _listed(store, artifact) for artifact in manifest.artifacts}
+        plan = _plan(manifest, contents)
+        attempts = _attempts(manifest, contents, plan)
+        metrics, settings = _tables(manifest, contents, plan, attempts)
+    except _Refused as refused:
+        raise refused.error(name) from None
+    saved = SavedRun(manifest, plan, attempts, metrics, settings)
+    return CheckedRun(saved, MappingProxyType({MANIFEST_PATH: content, **contents}))
+
+
+def not_a_run(name: RunName, problem: str) -> TrialFolioError:
+    """The `input.not_a_run` error for the run `name` names, for `problem`: a sentence that names
+    no value, such as "it has no manifest.json."."""
+    return _not_a_run(problem).error(name)
+
+
+def _read_manifest(store: ArtifactStore) -> bytes:
+    try:
+        return store.read(MANIFEST_PATH)
     except FileNotFoundError:
         raise _not_a_run(
             "it has no manifest.json. Trial Folio writes a run's manifest last, so a run without"
@@ -139,6 +185,9 @@ def _manifest(store: ArtifactStore) -> RunManifest:
         raise _not_a_run("it isn't a directory.") from None
     except OSError as error:
         raise _not_a_run(f"its manifest.json can't be read ({_reason(error)}).") from None
+
+
+def _manifest(content: bytes) -> RunManifest:
     fields = _json_object(content, MANIFEST_PATH)
     if fields.get("artifact_type") != "run":
         raise _not_a_run("its manifest.json isn't a run's manifest.")
@@ -266,8 +315,12 @@ def _tables(
         return None, None
     _only(manifest, "metrics", METRICS_PATH)
     _only(manifest, "settings", SETTINGS_PATH)
-    metrics = read_metrics_csv(contents[METRICS_PATH], METRICS_PATH)
-    settings = read_settings_csv(contents[SETTINGS_PATH], SETTINGS_PATH)
+    try:
+        metrics = read_metrics_csv(contents[METRICS_PATH], f"its {_named(METRICS_PATH)}")
+        settings = read_settings_csv(contents[SETTINGS_PATH], f"its {_named(SETTINGS_PATH)}")
+    except TrialFolioError as error:
+        # The tables' messages name the line and the column, never a value.
+        raise _not_a_run(error.message) from None
     (case,) = plan.cases
     if any(row.label != case.case_id for row in (*metrics, *settings)):
         raise _not_a_run(
@@ -315,11 +368,13 @@ def _check_version(version: object, path: str, kind: str, *, listed: bool = Fals
     if not isinstance(version, str):
         raise _not_a_run(f"{_named(path)} has no schema version.")
     where = "its manifest gives it" if listed else "it has"
-    raise TrialFolioError(
+    raise _Refused(
         "artifact.unknown_schema_version",
-        f"Trial Folio can't read {_named(path)}: {where} a schema version this version has no"
-        f" reader for. It reads {name} {' or '.join(readable)}. Read the run"
-        " with a version of Trial Folio that has one. Nothing was written.",
+        lambda run: (
+            f"Trial Folio can't read {_named(path)} in {run}: {where} a schema version this"
+            f" version has no reader for. It reads {name} {' or '.join(readable)}. Read the run"
+            " with a version of Trial Folio that has one. Nothing was written."
+        ),
     )
 
 
@@ -348,10 +403,25 @@ def _reason(error: OSError) -> str:
     return error.strerror or type(error).__name__
 
 
-def _not_a_run(problem: str) -> TrialFolioError:
-    return TrialFolioError(
+class _Refused(Exception):
+    """Why a run can't be read, before the error names the run: `message` gives the error's
+    message for the run's name."""
+
+    def __init__(self, code: ErrorCode, message: Callable[[str], str]) -> None:
+        super().__init__(code)
+        self.code: ErrorCode = code
+        self.message = message
+
+    def error(self, name: RunName) -> TrialFolioError:
+        return TrialFolioError(self.code, self.message(name.shown), self.message(name.logged))
+
+
+def _not_a_run(problem: str) -> _Refused:
+    return _Refused(
         "input.not_a_run",
-        f"The run directory isn't a complete Trial Folio run: {problem} Nothing was written. Give"
-        " the output directory of a run that finished, as `trialfolio run` or `trialfolio demo`"
-        " wrote it.",
+        lambda run: (
+            f"{run[:1].upper()}{run[1:]} isn't a complete Trial Folio run: {problem}"
+            " Nothing was written. Give the output directory of a run that finished, as"
+            " `trialfolio run` or `trialfolio demo` wrote it."
+        ),
     )
