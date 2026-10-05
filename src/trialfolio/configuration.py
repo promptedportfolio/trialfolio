@@ -195,12 +195,19 @@ def _unquoted_text(path: KeyPath) -> str:
 
 
 def _follows(detail: ErrorDetails, details: list[ErrorDetails]) -> bool:
-    """A list that's too short only because its items failed: `rules: [5]` holds one rule."""
+    """A list that's too short only because its items failed: `rules: [5]` holds one rule.
+    Pydantic counts only the items that passed, so a list that holds too few even with its failed
+    items, as `results` with one entry, keeps its error."""
+    if detail["type"] != "too_short":
+        return False
     location = detail["loc"]
-    return detail["type"] == "too_short" and any(
-        other["loc"][: len(location)] == location and len(other["loc"]) > len(location)
+    failed = {
+        other["loc"][len(location)]
         for other in details
-    )
+        if other["loc"][: len(location)] == location and len(other["loc"]) > len(location)
+    }
+    context = detail.get("ctx", {})
+    return bool(failed) and context["actual_length"] + len(failed) >= context["min_length"]
 
 
 def _fail(source_name: str, problems: Sequence[str]) -> NoReturn:

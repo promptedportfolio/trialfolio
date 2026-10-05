@@ -292,6 +292,19 @@ def test_an_empty_list_of_changes_says_to_leave_the_key_out() -> None:
     )
 
 
+def test_one_invalid_result_is_also_too_few() -> None:
+    """The message lists each problem: an invalid result doesn't hide that one result is too
+    few, as an invalid rule hides that `rules` is empty in a screen configuration."""
+    path = INVALID / "one-result.yaml"
+    content = path.read_text(encoding="utf-8").replace("  - label: hold25", "  - label: Hold25")
+
+    message = rejection(content, path.name)
+
+    assert message.count("\n- ") == 2
+    assert "`results[0].label` must be a label of 1 to 64 characters" in message
+    assert "`results` must hold at least 2 items." in message
+
+
 def test_a_third_result_repeating_a_label_names_both() -> None:
     content = documented_example() + "  - label: hold25\n    run: runs/hold25-again\n"
 
