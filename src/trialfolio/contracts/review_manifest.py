@@ -77,6 +77,12 @@ class ReviewedResult(ContractModel):
     """The `artifact_id` of the run's saved response, `response.json` or `response.raw`; null when
     it has none. Two results with the same one have byte-identical saved responses."""
 
+    @model_validator(mode="after")
+    def _tables_have_a_response(self) -> Self:
+        if self.normalized_tables and self.response is None:
+            raise ValueError("a run's tables are written only from its response, so it has one")
+        return self
+
 
 class ReviewArtifact(ContractModel):
     """One file of the review, by path, content address, and role."""

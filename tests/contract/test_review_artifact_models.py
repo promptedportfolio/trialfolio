@@ -329,6 +329,7 @@ MANIFEST_CHANGES: dict[str, Change] = {
     "a result without its manifest": lambda d: remove(d, "hold50", "run_manifest"),
     "tables missing from a run that has them": lambda d: remove(d, "hold25", "metrics"),
     "tables for a run that has none": lambda d: d["results"][1].update(normalized_tables=True),
+    "tables without a response": lambda d: d["results"][0].update(response=None),
     "run_manifest not the copy's": lambda d: d["results"][0].update(run_manifest=digest("f6")),
     "a copy without its schema version": lambda d: artifacts_of(d, "hold25", "plan").update(
         schema_version=None
