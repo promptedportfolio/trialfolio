@@ -1,0 +1,17 @@
+kind: review
+schema_version: 1.0.0
+title: Runs without normalized tables
+purpose: Show runs whose attempt failed or whose response was invalid.
+baseline: baseline
+results:
+  - label: baseline
+    run: runs/baseline
+  - label: rejected
+    run: runs/rejected
+    description: Portfolio123 rejected the backtest request.
+  - label: invalid-structure
+    run: runs/invalid-structure
+    description: The response lacks the layout's required structure.
+  - label: not-json
+    run: runs/not-json
+    description: The response isn't JSON, so it was saved undecoded.

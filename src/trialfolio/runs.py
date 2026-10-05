@@ -12,8 +12,8 @@ reads the same way wherever it's stored. A directory is a complete run when:
 - each attempt's records are valid, belong to their directory, and name the plan's case and hash,
   and each file they reference is listed with the same `artifact_id`.
 - its normalized tables, if it has them, are both listed and valid, labeled with the plan's case,
-  hold one row for each of the layout's metrics and each of the plan's settings, in order, and
-  are drawn from the run's own configuration and saved response.
+  hold one row for each of the layout's metrics, in its unit, and each of the plan's settings, in
+  order, and are drawn from the run's own configuration and saved response.
 
 Otherwise `read_run` raises `input.not_a_run`, or `artifact.unknown_schema_version` for a schema
 version with no reader. The message names the problem, never a value, and names the run as a
@@ -74,8 +74,8 @@ _ATTEMPT_DIRECTORY: Final = re.compile(
     r"cases/(?P<case_id>case-[0-9a-f]{16})/attempts/"
     r"(?P<attempt_id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
 )
-_METRIC_ROWS: Final = tuple((metric.subject, metric.metric_id) for metric in METRICS)
-"""`metrics.csv`'s rows, in order, by subject and `metric_id`."""
+_METRIC_ROWS: Final = tuple((metric.subject, metric.metric_id, metric.unit) for metric in METRICS)
+"""`metrics.csv`'s rows, in order, by subject and `metric_id`, with the unit the layout fixes."""
 _RESPONSE_ROLES: Final[dict[str, ArtifactRole]] = {
     "decoded": "provider_response",
     "undecoded": "provider_response_undecoded",
@@ -326,9 +326,10 @@ def _tables(
         raise _not_a_run(
             "its normalized tables label their rows with another case than the plan's."
         )
-    if tuple((row.subject, row.metric_id) for row in metrics) != _METRIC_ROWS:
+    if tuple((row.subject, row.metric_id, row.unit) for row in metrics) != _METRIC_ROWS:
         raise _not_a_run(
-            "its metrics.csv doesn't hold one row for each of the layout's metrics, in order."
+            "its metrics.csv doesn't hold one row for each of the layout's metrics, in order,"
+            " each in the metric's unit."
         )
     if tuple(row.setting for row in settings) != tuple(s.setting for s in case.settings):
         raise _not_a_run(

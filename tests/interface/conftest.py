@@ -27,6 +27,7 @@ import pytest
 
 from tests.support import canaries, launcher
 from tests.support.clock import FixedClock
+from tests.support.environment import VARIABLES
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.storage_faults import StorageFaults
 from tests.support.terminal import Terminal
@@ -40,22 +41,6 @@ from trialfolio.storage import ArtifactStore, LocalArtifactStore
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 CONFIGS = FIXTURES / "screen-configs"
 RESPONSES = FIXTURES / "responses"
-
-_VARIABLES = (
-    "TRIALFOLIO_CONFIG_DIR",
-    "TRIALFOLIO_LOG_DIR",
-    "TRIALFOLIO_LOG_LEVEL",
-    "XDG_CONFIG_HOME",
-    "XDG_STATE_HOME",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "USERPROFILE",
-    ACCEPT_VARIABLE,
-    API_ID_VARIABLE,
-    API_KEY_VARIABLE,
-    "SSLKEYLOGFILE",
-)
-"""The variables Trial Folio reads, which each test starts without, apart from `HOME`."""
 
 
 def config(name: str) -> Path:
@@ -136,7 +121,7 @@ class Cli:
         self.home.mkdir()
         self.server = server
         monkeypatch.setenv("HOME", str(self.home))
-        for name in _VARIABLES:
+        for name in VARIABLES:
             monkeypatch.delenv(name, raising=False)
 
     def accept_license(self) -> None:

@@ -1,0 +1,17 @@
+kind: review
+schema_version: 1.0.0
+title: Undeclared changes
+purpose: Show differences from the baseline that no result declares.
+baseline: baseline
+results:
+  - label: baseline
+    run: runs/baseline
+  - label: slippage
+    run: runs/slippage
+    description: Another slippage, with the baseline's metrics.
+  - label: benchmark
+    run: runs/benchmark
+    description: Another benchmark.
+  - label: ranking-name
+    run: runs/ranking-name
+    description: Ranked by a ranking system's name, with missing metrics.

@@ -1,0 +1,11 @@
+kind: review
+schema_version: 1.0.0
+title: Another period and another benchmark
+purpose: Show which reason a metric gets when several apply.
+baseline: baseline
+results:
+  - label: baseline
+    run: runs/baseline
+  - label: benchmark
+    run: runs/benchmark
+    description: Another benchmark, and coverage that differs from the baseline's.
