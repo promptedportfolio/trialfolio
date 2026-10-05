@@ -570,7 +570,8 @@ A metric row is `unavailable`, with `input_unavailable`, when either value is un
 - **Benchmarks.** A different benchmark gives `different_benchmark`. The strategy's other metrics don't depend on the benchmark, so they're differenced whatever it is.
 - **Units.** Layout version 1 fixes each metric's unit, so two runs read with it never differ in unit. `different_unit` is for a later layout that changes one.
 - **One reason.** When several reasons apply, `reason` gives the first of `different_unit`, `different_benchmark`, and `different_period` or `unknown_period`. The setting rows show every difference behind it.
-- **Decimals.** `difference_decimals` is the smaller of the two values' `source_decimals`, and 0 for dates and counts. A difference with more decimal places is rounded to it, half to even. A saved value has no trailing zeros ([numbers and precision](#p123api-screen-backtest-version-1)), so `12.5` has one decimal place even when it was requested at 4, and a difference with it keeps one.
+- **Decimals.** `difference_decimals` is the smaller of the two values' `source_decimals`, and 0 for dates and counts. A difference with more decimal places is rounded to it, half to even. `source_decimals` counts the digits the saved value has ([numbers and precision](#p123api-screen-backtest-version-1)). Saving drops trailing zeros, but a whole number saved as a float keeps its `.0`. So `12.5` has one decimal place even when it was requested at 4, and so does `12.0`: `12.46` against a baseline of `12.0` gives `0.5`, never `0`.
+- **Writing a difference.** `difference` has exactly `difference_decimals` digits after the decimal point, as a value in `metrics.csv` has its `source_decimals`, so `12.35` against `12.25` gives `0.10`. A difference of zero is written without a sign: `151.68` against `151.7` rounds to `-0.0`, which is written `0.0`, and so is `-0.0` against `0.0`.
 
 ### Flag codes
 
