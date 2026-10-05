@@ -30,7 +30,7 @@ For example, the proposed 0.4.0 scenario is: open a saved experiment, identify t
 
 Use actual research to refine subsequent priorities. A proposed product checkpoint is completing three substantially different reproduction studies with their evidence and reports assembled in Trial Folio, then recording the remaining manual steps. This is a planning exercise, not a requirement that their findings be positive, a statistical validation, or an additional 1.0.0 gate. Reference payloads stay local; committed examples and fixtures are synthetic under [REQ-11](spec.md#enduring-requirements).
 
-Release specifications continue to own their scope and status. This planning direction leaves 0.1.0's criteria and the settled scope of the 0.2.0 and 0.3.0 outlines intact. Future specifications remain Draft until their dependencies, contracts, acceptance evidence, and owner decisions are resolved.
+Release specifications continue to own their scope and status. This planning direction leaves 0.1.0's criteria and the settled scope of 0.2.0 and the 0.3.0 outline intact. Future specifications remain Draft until their dependencies, contracts, acceptance evidence, and owner decisions are resolved.
 
 ## Releases 0.1.0 to 0.3.0
 
