@@ -942,7 +942,7 @@ A failure or an interrupt after the claim leaves no manifest, so the output is v
   - `synthetic`: as the run's manifest gives it, true for the run `trialfolio demo` writes.
   - `plan_hash` and `case_id`: the run's. Two runs of one configuration have the same `case_id`, and their labels tell them apart.
   - `normalized_tables`: whether the run has normalized tables. When it hasn't, its settings are compared from its plan, and its metrics are unavailable.
-  - `response`: the `artifact_id` of the run's saved response, `response.json` or `response.raw`, or `null` when it has none. Two results with the same one have byte-identical saved responses (`identical_source`).
+  - `response`: the `artifact_id` of the run's saved response, `response.json` or `response.raw`, or `null` when it has none. Two results with the same one have byte-identical saved responses (`identical_source`). Two with `null` don't: neither has a response to share.
 - `artifacts`: each file of the review except its own `manifest.json` and the logs, with its path, `artifact_id`, size, role, and schema version when it has one, as in a run's manifest. The roles are `configuration`, `run_manifest`, `plan`, `metrics`, `settings`, `differences`, and `report`.
   - **`configuration.yaml`** is the review's one source artifact. Its [source record](#source-artifacts) gives the format `review-configuration`, version 1.0.0, `user_supplied` provenance, no parser version, and no provider operation. It's acquired when the command starts.
   - **Each copy** also gives the `label` of the result it was copied from. Its path is `inputs/<label>/` followed by its path in the run. Its `artifact_id` and size are the run's for that file ([R02-AC02](releases/0.2.0-review.md#acceptance-criteria)), and its schema version is the one the run records: the copied manifest's own `schema_version`, and for each other copy, the run manifest's entry's.
@@ -953,7 +953,11 @@ A failure or an interrupt after the claim leaves no manifest, so the output is v
 
 A review's manifest has no `plan_hash`, `approval`, `parsers`, or `reproducibility`. A review sends nothing and parses no provider response: it reads a run's saved response only to check its size and `artifact_id`, and no parser interprets it. Each copied run manifest records its own run's parsers and reproducibility, which the report shows. `schemas/review-manifest-1.0.0.schema.json` will give every field (R02-T04).
 
-**The JSON summary's counts.** For `review`, `results` is the manifest's, `settings_flagged` is its flagged setting rows, and `metrics_unavailable` its `unavailable` metric rows. `warnings` counts the warnings logged, as for any command. When the review fails, `results` is the number of results a valid configuration names, or 0. `settings_flagged` and `metrics_unavailable` are 0 when no `differences.csv` was written. Once it's written, they're its counts, even when the review then fails, as a run's `metrics_unavailable` is once its tables are written.
+**The JSON summary's `review_id` and counts.** As an [open question](releases/0.2.0-review.md#open-questions) proposes, `ids` holds the `review_id` once the review has claimed its output directory: on success, and on a failure after the claim. A failure before the claim writes nothing, so its `ids` has none. For `review`, `results` is the manifest's, `settings_flagged` is its flagged setting rows, and `metrics_unavailable` its `unavailable` metric rows. `warnings` counts the warnings logged, as for any command. When the review fails, `results` is the number of results a valid configuration names, or 0. `settings_flagged` and `metrics_unavailable` are 0 when no `differences.csv` was written. Once it's written, they're its counts, even when the review then fails, as a run's `metrics_unavailable` is once its tables are written.
+
+**Labels in logs.** As an [open question](releases/0.2.0-review.md#open-questions) proposes, a label is the user's own text, a configuration value, which [logs](#logging-and-local-diagnostics) never hold. A logged event, and so a warning on stderr, names a result by its position in `results`, such as "result 2", and the report and the manifest give its label. An error's full message names the label, and its logged message gives the position instead ([errors](#errors)).
+
+A copy's path holds its label too. The `ArtifactStore` logs each file it writes by its path, in `artifact.write.completed`, and its errors, such as `storage.write_failed`, name the path in their logged message. So the review gives the store, with each copy, a name for logs with the result's position in place of `inputs/<label>/`, such as "`manifest.json` of result 2". The store's events, and its errors' logged messages, use that name, and the errors' full messages keep the path. A run's paths hold no configuration value, so the store logs a run's files as before. R02-T08 makes this change to the store.
 
 ## Canonical hashing
 
@@ -1107,6 +1111,8 @@ Exit codes:
 ### JSON summary
 
 With `--json`, every command writes exactly one JSON object to stdout, followed by a newline. It does so whether the command succeeds or fails. The summary has its own `schema_version`, starting at 1.0.0. New keys may be added in minor versions; existing keys don't change meaning.
+
+**The review's summary.** The committed 1.0.0 schema allows no key it doesn't list, and its `command` has no `review`, its `ids` no `review_id`, and its `counts` none of the review's counts. So, as an [open question](releases/0.2.0-review.md#open-questions) proposes, 0.2.0 writes version 1.1.0 for every command: 1.0.0 with those keys added, each 1.0.0 key keeping its meaning. `schemas/json-summary-1.0.0.schema.json` stays committed, beside `json-summary-1.1.0.schema.json`, because it says what 0.1.0 prints, and its bytes don't change. Its `$comment` and its titles name the models that generate it, so the model that generates it now, `trialfolio.contracts.summary.JsonSummary`, keeps its module and name, and so does each model it uses. The 1.1.0 model takes a new name.
 
 | Key | Meaning |
 |---|---|
