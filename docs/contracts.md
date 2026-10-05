@@ -59,7 +59,7 @@ Identifiers are introduced with the release that can define their semantics.
 | `experiment_id` | 0.3.0 | One declared experiment | User-declared slug, same pattern as `label` |
 | `study_id`, `candidate_id`, `assessment_id` | Later | Defined when their increment is specified | — |
 
-The forms of the identifiers 0.1.0 introduces are requirements since 0.1.0's sign-off (2026-10-01). The others are proposed until their release is Ready.
+The forms of the identifiers 0.1.0 introduces are requirements since 0.1.0's sign-off (2026-10-01), and those 0.2.0 introduces since 0.2.0's (2026-10-05). The others are proposed until their release is Ready.
 
 Configuration identity and attempt identity MUST stay separate. Re-running the same resolved configuration creates a new attempt of the same case. Changing any resolved setting creates a different case.
 
@@ -546,13 +546,13 @@ One row for each setting and each metric of each non-baseline result, compared w
 
 #### Differences between screen runs
 
-R02-T01 took these names from 0.1.0's [screen settings](#screen-settings) and [metrics](#p123api-screen-backtest-version-1). Like the rest of 0.2.0's contracts, they're proposed until [0.2.0](releases/0.2.0-review.md) is Ready, and the choices in its [open questions](releases/0.2.0-review.md#open-questions) await the owner's decision.
+R02-T01 took these names from 0.1.0's [screen settings](#screen-settings) and [metrics](#p123api-screen-backtest-version-1). Like the rest of 0.2.0's contracts, they're requirements since [0.2.0](releases/0.2.0-review.md)'s sign-off (2026-10-05), which confirmed the choices in its [open questions](releases/0.2.0-review.md#open-questions).
 
 For each result except the baseline, in the order the review configuration lists them, `differences.csv` has:
 
 - **Its labels.** `label` and `baseline_label` are the review configuration's labels. The copied `metrics.csv` and `settings.csv` keep their own `label`, the run's `case_id`, because they're copied byte for byte. The review manifest's `results` record which run each label names ([review output](#review-output)). Two results may name runs of the same case, such as two runs of one configuration, and their labels tell them apart.
 - **23 setting rows,** one for each screen setting, in that table's order. `name` is the setting, and `category`, `critical`, and `unit` are its row's in `settings.csv`. `baseline_value` and `value` are the two runs' `value` cells.
-  - **A run without tables.** If a review can include a run whose attempt didn't succeed, or whose response was invalid, as an [open question](releases/0.2.0-review.md#open-questions) proposes, that run's [plan](#plan-contents) stands in for its `settings.csv`. Each setting's `category`, `critical`, `unit`, and `flags` are its plan row's, and its value is written as `settings.csv` writes it. So its date rows never carry `coverage_mismatch`, which needs a response.
+  - **A run without tables.** A review can include a run whose attempt didn't succeed, or whose response was invalid, as an [open question](releases/0.2.0-review.md#open-questions) settled. That run's [plan](#plan-contents) stands in for its `settings.csv`. Each setting's `category`, `critical`, `unit`, and `flags` are its plan row's, and its value is written as `settings.csv` writes it. So its date rows never carry `coverage_mismatch`, which needs a response.
   - **Same values.** Two values are the same when they read as the same value: a list or a ranking as JSON, and anything else as its text. A decimal is normalized before it's written, so `0.250` and `0.25` are both written `0.25`. A list keeps its order, as a case's identity does, so the same rules in another order differ. Two runs that both leave a parameter unsent have the same token, `not_sent`, and are `same`.
   - **Not differenced.** A setting row's `difference`, `difference_unit`, and `difference_decimals` are empty.
 - **20 metric rows,** one for each of the layout's metrics, in that table's order. A metric is named by `subject` and `metric_id` together, because rows 15–20 reuse the identifiers of rows 4–9 for the benchmark.
@@ -885,7 +885,7 @@ Raw files and JSON metadata come first, and normalized tables are CSV. Parquet M
 
 ### Review output
 
-Introduced in 0.2.0 (R02-T02). Like the rest of 0.2.0's contracts, it's proposed until [0.2.0](releases/0.2.0-review.md) is Ready, and the choices in its [open questions](releases/0.2.0-review.md#open-questions) await the owner's decision. `trialfolio review` writes:
+Introduced in 0.2.0 (R02-T02). Like the rest of 0.2.0's contracts, it's a requirement since [0.2.0](releases/0.2.0-review.md)'s sign-off (2026-10-05), which confirmed the choices in its [open questions](releases/0.2.0-review.md#open-questions). `trialfolio review` writes:
 
 ```text
 <out>/
@@ -920,7 +920,7 @@ Introduced in 0.2.0 (R02-T02). Like the rest of 0.2.0's contracts, it's proposed
 **Writing it.** After the [license acknowledgment](#license-acknowledgment), `trialfolio review`:
 
 1. Validates the configuration (`config.invalid`).
-2. Reads and checks each run, in the configuration's order (`input.not_a_run`, or `artifact.unknown_schema_version`; an [open question](releases/0.2.0-review.md#open-questions) proposes `input.not_found` for a directory that doesn't exist). Nothing is written until every run passes.
+2. Reads and checks each run, in the configuration's order (`input.not_found` for a directory that doesn't exist, `input.not_a_run`, or `artifact.unknown_schema_version`). Nothing is written until every run passes.
 3. Checks that the output directory is absent or empty (`output.not_empty`). As for `trialfolio report`, a run that fails its check is reported even when the output directory isn't empty.
 4. [Claims the output directory](#cli-behavior) with `configuration.yaml`, from the bytes read in step 1. Logging to `<out>/logs/` starts once the claim succeeds.
 5. Writes each result's copies, in the configuration's order: `manifest.json`, `plan.json`, and then the tables. The first is the first [atomic write](#artifact-storage). So on Linux and macOS, a file system without hard links, such as FAT or exFAT, fails there, with `storage.write_failed`. On Windows, which publishes with `os.rename`, those file systems work.
@@ -953,9 +953,9 @@ A failure or an interrupt after the claim leaves no manifest, so the output is v
 
 A review's manifest has no `plan_hash`, `approval`, `parsers`, or `reproducibility`. A review sends nothing and parses no provider response: it reads a run's saved response only to check its size and `artifact_id`, and no parser interprets it. Each copied run manifest records its own run's parsers and reproducibility, which the report shows. `schemas/review-manifest-1.0.0.schema.json` will give every field (R02-T04).
 
-**The JSON summary's `review_id` and counts.** As an [open question](releases/0.2.0-review.md#open-questions) proposes, `ids` holds the `review_id` once the review has claimed its output directory: on success, and on a failure after the claim. A failure before the claim writes nothing, so its `ids` has none. For `review`, `results` is the manifest's, `settings_flagged` is its flagged setting rows, and `metrics_unavailable` its `unavailable` metric rows. `warnings` counts the warnings logged, as for any command. When the review fails, `results` is the number of results a valid configuration names, or 0. `settings_flagged` and `metrics_unavailable` are 0 when no `differences.csv` was written. Once it's written, they're its counts, even when the review then fails, as a run's `metrics_unavailable` is once its tables are written.
+**The JSON summary's `review_id` and counts.** As an [open question](releases/0.2.0-review.md#open-questions) settled, `ids` holds the `review_id` once the review has claimed its output directory: on success, and on a failure after the claim. A failure before the claim writes nothing, so its `ids` has none. For `review`, `results` is the manifest's, `settings_flagged` is its flagged setting rows, and `metrics_unavailable` its `unavailable` metric rows. `warnings` counts the warnings logged, as for any command. When the review fails, `results` is the number of results a valid configuration names, or 0. `settings_flagged` and `metrics_unavailable` are 0 when no `differences.csv` was written. Once it's written, they're its counts, even when the review then fails, as a run's `metrics_unavailable` is once its tables are written.
 
-**Labels in logs.** As an [open question](releases/0.2.0-review.md#open-questions) proposes, a label is the user's own text, a configuration value, which [logs](#logging-and-local-diagnostics) never hold. A logged event, and so a warning on stderr, names a result by its position in `results`, such as "result 2", and the report and the manifest give its label. An error's full message names the label, and its logged message gives the position instead ([errors](#errors)).
+**Labels in logs.** As an [open question](releases/0.2.0-review.md#open-questions) settled, a label is the user's own text, a configuration value, which [logs](#logging-and-local-diagnostics) never hold. A logged event, and so a warning on stderr, names a result by its position in `results`, such as "result 2", and the report and the manifest give its label. An error's full message names the label, and its logged message gives the position instead ([errors](#errors)).
 
 A copy's path holds its label too. The `ArtifactStore` logs each file it writes by its path, in `artifact.write.completed`, and its errors, such as `storage.write_failed`, name the path in their logged message. So the review gives the store, with each copy, a name for logs with the result's position in place of `inputs/<label>/`, such as "`manifest.json` of result 2". The store's events, and its errors' logged messages, use that name, and the errors' full messages keep the path. A run's paths hold no configuration value, so the store logs a run's files as before. R02-T08 makes this change to the store.
 
@@ -1112,7 +1112,7 @@ Exit codes:
 
 With `--json`, every command writes exactly one JSON object to stdout, followed by a newline. It does so whether the command succeeds or fails. The summary has its own `schema_version`, starting at 1.0.0. New keys may be added in minor versions; existing keys don't change meaning.
 
-**The review's summary.** The committed 1.0.0 schema allows no key it doesn't list, and its `command` has no `review`, its `ids` no `review_id`, and its `counts` none of the review's counts. So, as an [open question](releases/0.2.0-review.md#open-questions) proposes, 0.2.0 writes version 1.1.0 for every command: 1.0.0 with those keys added, each 1.0.0 key keeping its meaning. `schemas/json-summary-1.0.0.schema.json` stays committed, beside `json-summary-1.1.0.schema.json`, because it says what 0.1.0 prints, and its bytes don't change. Its `$comment` and its titles name the models that generate it, so the model that generates it now, `trialfolio.contracts.summary.JsonSummary`, keeps its module and name, and so does each model it uses. The 1.1.0 model takes a new name.
+**The review's summary.** The committed 1.0.0 schema allows no key it doesn't list, and its `command` has no `review`, its `ids` no `review_id`, and its `counts` none of the review's counts. So, as an [open question](releases/0.2.0-review.md#open-questions) settled, 0.2.0 writes version 1.1.0 for every command: 1.0.0 with those keys added, each 1.0.0 key keeping its meaning. `schemas/json-summary-1.0.0.schema.json` stays committed, beside `json-summary-1.1.0.schema.json`, because it says what 0.1.0 prints, and its bytes don't change. Its `$comment` and its titles name the models that generate it, so the model that generates it now, `trialfolio.contracts.summary.JsonSummary`, keeps its module and name, and so does each model it uses. The 1.1.0 model takes a new name.
 
 | Key | Meaning |
 |---|---|
