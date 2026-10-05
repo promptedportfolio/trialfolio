@@ -1112,7 +1112,7 @@ Exit codes:
 
 With `--json`, every command writes exactly one JSON object to stdout, followed by a newline. It does so whether the command succeeds or fails. The summary has its own `schema_version`, starting at 1.0.0. New keys may be added in minor versions; existing keys don't change meaning.
 
-**The review's summary.** The committed 1.0.0 schema allows no key it doesn't list, and its `command` has no `review`, its `ids` no `review_id`, and its `counts` none of the review's counts. So, as an [open question](releases/0.2.0-review.md#open-questions) proposes, 0.2.0 writes version 1.1.0 for every command: 1.0.0 with those keys added, each 1.0.0 key keeping its meaning. `schemas/json-summary-1.0.0.schema.json` stays committed, beside `json-summary-1.1.0.schema.json`, generated from a model kept for it, because it says what 0.1.0 prints.
+**The review's summary.** The committed 1.0.0 schema allows no key it doesn't list, and its `command` has no `review`, its `ids` no `review_id`, and its `counts` none of the review's counts. So, as an [open question](releases/0.2.0-review.md#open-questions) proposes, 0.2.0 writes version 1.1.0 for every command: 1.0.0 with those keys added, each 1.0.0 key keeping its meaning. `schemas/json-summary-1.0.0.schema.json` stays committed, beside `json-summary-1.1.0.schema.json`, because it says what 0.1.0 prints, and its bytes don't change. Its `$comment` and its titles name the models that generate it, so the model that generates it now, `trialfolio.contracts.summary.JsonSummary`, keeps its module and name, and so does each model it uses. The 1.1.0 model takes a new name.
 
 | Key | Meaning |
 |---|---|
