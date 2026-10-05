@@ -89,15 +89,21 @@ def local_run_stores(configuration_path: str | os.PathLike[str]) -> RunStores:
     directory = Path(configuration_path).parent
 
     def store(run: str) -> ArtifactStore | None:
-        # The path the file system resolves, which both finds the run and reads it. A `..` after
-        # a symbolic link leads to the parent of the link's target, as opening the path does,
-        # not where the store's abspath would lead, by removing it with the segment before it.
+        path = directory / run
         try:
-            path = os.path.realpath(directory / run, strict=True)
-        except OSError:
-            # Nothing exists there, a link leads to nothing, or a part can't be read.
+            # Whether anything exists there, as opening the path finds it. realpath alone can't
+            # tell: Python 3.12's removes a `..` after a file, which the file system refuses.
+            os.stat(path)
+            # The path the file system resolves, which then reads the run. A `..` after a
+            # symbolic link leads to the parent of the link's target, as opening the path does,
+            # not where the store's abspath would lead, by removing it with the segment before
+            # it.
+            resolved = os.path.realpath(path, strict=True)
+        except (OSError, ValueError):
+            # Nothing exists there: a link leads to nothing, a part can't be read or is a file,
+            # or the path holds a NUL, which no path can.
             return None
-        return LocalArtifactStore(path)
+        return LocalArtifactStore(resolved)
 
     return store
 

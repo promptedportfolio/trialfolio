@@ -416,6 +416,38 @@ def test_a_symbolic_link_to_nothing_is_not_found(tmp_path: Path) -> None:
     assert_names_the_result(error, 2)
 
 
+@pytest.mark.parametrize(
+    ("run", "shown"),
+    [
+        pytest.param(
+            f"notes.txt/../{run_path(1)}",
+            f"notes.txt/../{run_path(1)}",
+            id="after-a-file",
+            marks=pytest.mark.skipif(
+                os.name == "nt", reason="Windows removes a `..` as text, before the file system"
+            ),
+        ),
+        pytest.param(f"{run_path(1)}\0", f"{run_path(1)}\\u0000", id="with-a-nul"),
+    ],
+)
+def test_a_run_path_the_file_system_refuses_is_not_found(
+    tmp_path: Path, run: str, shown: str
+) -> None:
+    # A corrected defect: on Python 3.12, the check removed a `..` after a file and read the run
+    # beyond it, and a NUL raised an error that named no result.
+    committed(tmp_path, 1)
+    (tmp_path / "notes.txt").write_bytes(b"A file, not a directory.\n")
+    path, content = configure(tmp_path, [run_path(1), run])
+
+    error = refused(tmp_path, path, content)
+
+    assert error.code == "input.not_found"
+    assert error.message.startswith(
+        f"Result `{label(2)}`'s run directory (`{shown}`) doesn't exist."
+    )
+    assert error.log_message.startswith("Result 2's run directory doesn't exist.")
+
+
 def test_the_first_result_that_fails_is_reported(tmp_path: Path) -> None:
     remove(committed(tmp_path, 1), "manifest.json")
     path, content = configure(tmp_path, [run_path(1), run_path(2)])
