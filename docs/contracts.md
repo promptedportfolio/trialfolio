@@ -923,10 +923,10 @@ Introduced in 0.2.0 (R02-T02). Like the rest of 0.2.0's contracts, it's proposed
 2. Reads and checks each run, in the configuration's order (`input.not_a_run`, or `artifact.unknown_schema_version`; an [open question](releases/0.2.0-review.md#open-questions) proposes `input.not_found` for a directory that doesn't exist). Nothing is written until every run passes.
 3. Checks that the output directory is absent or empty (`output.not_empty`). As for `trialfolio report`, a run that fails its check is reported even when the output directory isn't empty.
 4. [Claims the output directory](#cli-behavior) with `configuration.yaml`, from the bytes read in step 1. Logging to `<out>/logs/` starts once the claim succeeds.
-5. Writes each result's copies, in the configuration's order: `manifest.json`, `plan.json`, and then the tables. The first is the first [atomic write](#artifact-storage), so a file system without hard links fails there, with `storage.write_failed`.
+5. Writes each result's copies, in the configuration's order: `manifest.json`, `plan.json`, and then the tables. The first is the first [atomic write](#artifact-storage). So on Linux and macOS, a file system without hard links, such as FAT or exFAT, fails there, with `storage.write_failed`. On Windows, which publishes with `os.rename`, those file systems work.
 6. Writes `normalized/differences.csv`, then `report.html`, then `manifest.json`. As for a run, the report is rendered from what the manifest will record, without its own entry.
 
-A failure or an interrupt after the claim leaves no manifest, so the output is visibly incomplete, as for a run, including a failure while the manifest itself is written ([running the commands](#cli-behavior)). The message says that the review is incomplete. A review sends nothing, so, unlike a run's, it has no request to account for.
+A failure or an interrupt after the claim leaves no manifest, so the output is visibly incomplete, as for a run ([running the commands](#cli-behavior)). That includes a failure while `manifest.json` itself is written, even after the store published it, as when the sync of its directory fails: the review then discards it, through the `ArtifactStore`'s `discard`, which removes a file only while it holds exactly the failed write's bytes. The message says that the review is incomplete or, if the manifest can't be removed, that the review reads as complete although the command failed. A review sends nothing, so, unlike a run's, it has no request to account for.
 
 **The review manifest.** `manifest.json`, with `artifact_type: review` and schema version 1.0.0, records:
 
@@ -953,7 +953,7 @@ A failure or an interrupt after the claim leaves no manifest, so the output is v
 
 A review's manifest has no `plan_hash`, `approval`, `parsers`, or `reproducibility`. A review sends nothing and reads no provider response, and each copied run manifest records its own run's parsers and reproducibility, which the report shows. `schemas/review-manifest-1.0.0.schema.json` will give every field (R02-T04).
 
-**The JSON summary's counts.** For `review`, `results` is the manifest's, `settings_flagged` is its flagged setting rows, and `metrics_unavailable` its `unavailable` metric rows. `warnings` counts the warnings logged, as for any command. When the review fails, `results` is the number of results a valid configuration names, or 0, and `settings_flagged` and `metrics_unavailable` are 0, since no `differences.csv` was written.
+**The JSON summary's counts.** For `review`, `results` is the manifest's, `settings_flagged` is its flagged setting rows, and `metrics_unavailable` its `unavailable` metric rows. `warnings` counts the warnings logged, as for any command. When the review fails, `results` is the number of results a valid configuration names, or 0. `settings_flagged` and `metrics_unavailable` are 0 when no `differences.csv` was written. Once it's written, they're its counts, even when the review then fails, as a run's `metrics_unavailable` is once its tables are written.
 
 ## Canonical hashing
 
