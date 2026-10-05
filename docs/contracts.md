@@ -51,7 +51,7 @@ Identifiers are introduced with the release that can define their semantics.
 |---|---|---|---|
 | `artifact_id` | 0.1.0 | Content address of one stored file | `sha256:<64 hex>` of the file's bytes |
 | `review_id` | 0.2.0 | One `trialfolio review` output | Random UUID, version 4 |
-| `label` | 0.2.0 | User-declared name of one compared result, unique within a review | `[a-z0-9][a-z0-9_-]{0,63}` |
+| `label` | 0.2.0 | User-declared name of one compared result, unique within a review | `[a-z0-9][a-z0-9_-]{0,63}`, other than a device name Windows reserves ([review configuration](#review-configuration)) |
 | `plan_hash` | 0.1.0 | Identity of a plan, which execution requires as approval | `sha256:` of the plan's canonical form ([plan hashing](#plan-hashing)) |
 | `case_id` | 0.1.0 | Stable identity of one fully resolved configuration | `case-` plus the first 16 hex digits of the SHA-256 of the canonical resolved settings ([plan hashing](#plan-hashing)) |
 | `case_key` | 0.3.0 | User-declared readable name for a planned case | Same pattern as `label` |
@@ -257,7 +257,7 @@ Schema version 1.0.0, introduced in 0.2.0. It names saved runs written by `trial
 
 | Key | Type | Required | Rules |
 |---|---|---|---|
-| `label` | string | Yes | Matches `[a-z0-9][a-z0-9_-]{0,63}`, and is unique within the file |
+| `label` | string | Yes | Matches `[a-z0-9][a-z0-9_-]{0,63}`, and is unique within the file. It isn't `con`, `prn`, `aux`, `nul`, `com1` to `com9`, or `lpt1` to `lpt9`: a label names its result's directory in the review ([review output](#review-output)), and Windows reserves those names for devices, whatever their letter case, for directories as well as files ([Naming Files, Paths, and Namespaces](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file), checked 2026-10-05). |
 | `run` | path | Yes | A complete run directory written by `trialfolio run` |
 | `description` | string | No | Up to 500 characters, shown in the report |
 | `intended_changes` | list | No | Not allowed on the baseline entry |
@@ -550,7 +550,7 @@ R02-T01 took these names from 0.1.0's [screen settings](#screen-settings) and [m
 
 For each result except the baseline, in the order the review configuration lists them, `differences.csv` has:
 
-- **Its labels.** `label` and `baseline_label` are the review configuration's labels. The copied `metrics.csv` and `settings.csv` keep their own `label`, the run's `case_id`, because they're copied byte for byte. The review manifest records which run each label names (R02-T02). Two results may name runs of the same case, such as two runs of one configuration, and their labels tell them apart.
+- **Its labels.** `label` and `baseline_label` are the review configuration's labels. The copied `metrics.csv` and `settings.csv` keep their own `label`, the run's `case_id`, because they're copied byte for byte. The review manifest's `results` record which run each label names ([review output](#review-output)). Two results may name runs of the same case, such as two runs of one configuration, and their labels tell them apart.
 - **23 setting rows,** one for each screen setting, in that table's order. `name` is the setting, and `category`, `critical`, and `unit` are its row's in `settings.csv`. `baseline_value` and `value` are the two runs' `value` cells.
   - **A run without tables.** If a review can include a run whose attempt didn't succeed, or whose response was invalid, as an [open question](releases/0.2.0-review.md#open-questions) proposes, that run's [plan](#plan-contents) stands in for its `settings.csv`. Each setting's `category`, `critical`, `unit`, and `flags` are its plan row's, and its value is written as `settings.csv` writes it. So its date rows never carry `coverage_mismatch`, which needs a response.
   - **Same values.** Two values are the same when they read as the same value: a list or a ranking as JSON, and anything else as its text. A decimal is normalized before it's written, so `0.250` and `0.25` are both written `0.25`. A list keeps its order, as a case's identity does, so the same rules in another order differ. Two runs that both leave a parameter unsent have the same token, `not_sent`, and are `same`.
@@ -864,9 +864,9 @@ The layout of a 0.1.0 run, which [0.1.0's required outputs](releases/0.1.0-api-e
   logs/                                             diagnostics; excluded from hashes and from the manifest's evidence
 ```
 
-Release 0.2.0 defines the review layout. The proposal is `inputs/<label>/`, holding byte-for-byte copies of each compared run's manifest and normalized tables, plus `normalized/differences.csv`. Release 0.3.0 adds `experiment.json` and a lock file.
+A review's layout is in [review output](#review-output). Release 0.3.0 adds `experiment.json` and a lock file.
 
-The manifest records:
+A run's manifest records the following. A review's records what [review output](#review-output) lists.
 
 - `schema_version`, `artifact_type` (`review`, `run`, or `experiment`), `trialfolio_version`, and the creation time in UTC.
 - The command, `run` or `demo`, its non-secret options, and when it started, so that the manifest gives the run's duration.
@@ -882,6 +882,78 @@ The manifest records:
 `schemas/run-manifest-1.0.0.schema.json` gives every field.
 
 Raw files and JSON metadata come first, and normalized tables are CSV. Parquet MAY be added for large tables when needed. SQLite MAY later index outputs, but it MUST NOT become a first-release prerequisite or the only copy of any evidence.
+
+### Review output
+
+Introduced in 0.2.0 (R02-T02). Like the rest of 0.2.0's contracts, it's proposed until [0.2.0](releases/0.2.0-review.md) is Ready, and the choices in its [open questions](releases/0.2.0-review.md#open-questions) await the owner's decision. `trialfolio review` writes:
+
+```text
+<out>/
+  manifest.json                                     the review manifest, written last
+  configuration.yaml                                byte-for-byte copy of the review configuration; claims the directory
+  inputs/<label>/                                   one for each result, in the configuration's order
+    manifest.json                                   byte-for-byte copies of the run's files, at their paths in the run
+    plan.json
+    normalized/metrics.csv                          only when the run has normalized tables
+    normalized/settings.csv                         only when the run has normalized tables
+  normalized/differences.csv
+  report.html
+  logs/                                             diagnostics; excluded from hashes and from the manifest's evidence
+```
+
+**What it copies from each run.**
+
+- **Its manifest, its plan, and its normalized tables, byte for byte.**
+  - **The manifest** identifies the run, and lists each of its files with its hash, the ones the review doesn't copy included.
+  - **The plan** holds the run's title and purpose, which the report shows; its resolved settings, from which a run without tables is compared ([differences between screen runs](#differences-between-screen-runs)); and the versions of `p123api`, `requests`, and `urllib3` it was planned with, which the run's manifest doesn't record.
+  - **The tables** are what `differences.csv` compares. A run without them, because its attempt didn't succeed or its response was invalid, has none to copy.
+- **Each copy keeps its path in the run,** under `inputs/<label>/`. So the copied manifest names each copied file by its path relative to `inputs/<label>/`, with its `artifact_id`, and the copies can be checked against it without the run.
+- **Copies come from the bytes checked.** The review reads each run once, through the `ArtifactStore`, and checks that it's a [complete run](#reports), as `trialfolio report` does: each file its manifest lists, the response included, has the size and `artifact_id` the manifest records. It writes each copy from the bytes it read and checked, never by reading the run's file again, so a file changed after the check can't be copied.
+- **Nothing else.** It doesn't copy the run's `configuration.yaml`, whose settings the plan and `settings.csv` hold; its start and attempt records, whose outcome the run's manifest gives; its request; its response; or its report. A response holds Portfolio123's data, including per-period series a review doesn't compare, and a review may be shared ([D-14](spec.md#decisions)). The copied manifest records the hash of each file left out, so anyone holding the run can check that it's the run reviewed.
+
+**Its own files.**
+
+- **`configuration.yaml`** is the review configuration, byte for byte: the source of the baseline, the labels, and each declared change and its reason. It holds each `run` path as the user wrote it. The manifest and the report never repeat those paths.
+- **`normalized/differences.csv`** is the [`differences.csv`](#differencescsv) table, schema version 1.0.0.
+- **`report.html`** follows [reports](#reports). It links `manifest.json` and each file that manifest lists, apart from itself, by its path in the review, and never links the runs. So a review that's moved or shared on its own keeps its links.
+
+**Writing it.** After the [license acknowledgment](#license-acknowledgment), `trialfolio review`:
+
+1. Validates the configuration (`config.invalid`).
+2. Reads and checks each run, in the configuration's order (`input.not_a_run`, or `artifact.unknown_schema_version`; an [open question](releases/0.2.0-review.md#open-questions) proposes `input.not_found` for a directory that doesn't exist). Nothing is written until every run passes.
+3. Checks that the output directory is absent or empty (`output.not_empty`). As for `trialfolio report`, a run that fails its check is reported even when the output directory isn't empty.
+4. [Claims the output directory](#cli-behavior) with `configuration.yaml`, from the bytes read in step 1. Logging to `<out>/logs/` starts once the claim succeeds.
+5. Writes each result's copies, in the configuration's order: `manifest.json`, `plan.json`, and then the tables. The first is the first [atomic write](#artifact-storage). So on Linux and macOS, a file system without hard links, such as FAT or exFAT, fails there, with `storage.write_failed`. On Windows, which publishes with `os.rename`, those file systems work.
+6. Writes `normalized/differences.csv`, then `report.html`, then `manifest.json`. As for a run, the report is rendered from what the manifest will record, without its own entry.
+
+A failure or an interrupt after the claim leaves no manifest, so the output is visibly incomplete, as for a run ([running the commands](#cli-behavior)). That includes a failure while `manifest.json` itself is written, even after the store published it, as when the sync of its directory fails: the review then discards it, through the `ArtifactStore`'s `discard`, which removes a file only while it holds exactly the failed write's bytes. The message says that the review is incomplete or, if the manifest can't be removed, that the review reads as complete although the command failed. A review sends nothing, so, unlike a run's, it has no request to account for.
+
+**The review manifest.** `manifest.json`, with `artifact_type: review` and schema version 1.0.0, records:
+
+- `schema_version`, `artifact_type`, `trialfolio_version`, and `created_at`, as a run's manifest does.
+- `review_id`: a new random UUID, version 4, for each review written. The [JSON summary](#json-summary) and the logs carry it too.
+- `command`: `review`, its options, and when it started. As for a run, the options are `json`, as given, and neither the configuration's path nor `--out` is recorded ([running the commands](#cli-behavior)).
+- `synthetic`: true when any result is synthetic.
+- `outcome` and `error`: always `completed` and `null`, because a review writes its manifest only when it completes.
+- `baseline`: the baseline's label.
+- `results`: which run each label names, one entry for each result, in the configuration's order. Each entry agrees with the result's copies:
+  - `label`
+  - `run_manifest`: the `artifact_id` of the run's `manifest.json`, which identifies the run. Two results that name the same run have the same one.
+  - `synthetic`: as the run's manifest gives it, true for the run `trialfolio demo` writes.
+  - `plan_hash` and `case_id`: the run's. Two runs of one configuration have the same `case_id`, and their labels tell them apart.
+  - `normalized_tables`: whether the run has normalized tables. When it hasn't, its settings are compared from its plan, and its metrics are unavailable.
+  - `response`: the `artifact_id` of the run's saved response, `response.json` or `response.raw`, or `null` when it has none. Two results with the same one have byte-identical saved responses (`identical_source`).
+- `artifacts`: each file of the review except its own `manifest.json` and the logs, with its path, `artifact_id`, size, role, and schema version when it has one, as in a run's manifest. The roles are `configuration`, `run_manifest`, `plan`, `metrics`, `settings`, `differences`, and `report`.
+  - **`configuration.yaml`** is the review's one source artifact. Its [source record](#source-artifacts) gives the format `review-configuration`, version 1.0.0, `user_supplied` provenance, no parser version, and no provider operation. It's acquired when the command starts.
+  - **Each copy** also gives the `label` of the result it was copied from. Its path is `inputs/<label>/` followed by its path in the run. Its `artifact_id` and size are the run's for that file ([R02-AC02](releases/0.2.0-review.md#acceptance-criteria)), and its schema version is the one the run records: the copied manifest's own `schema_version`, and for each other copy, the run manifest's entry's.
+- `methods`: each analytical method applied, with its version. A 1.0.0 review applies one, `screen-run-differences`, version 1: the rules of [differences between screen runs](#differences-between-screen-runs). A change to those rules that could change a row of `differences.csv` makes a new version ([versioning](#versioning)).
+- `license_id` and `notice_version`.
+- `capabilities`: `return_series` is `absent`, since a review holds no per-period series, and `statistical_validation` and `trading_readiness` are `not_assessed`. Each copied run manifest says whether its run preserved per-period series.
+- `counts`: `results`, the baseline included; the setting rows of `differences.csv` by classification, `same`, `intended_change`, `unexplained_mismatch`, and `unknown`, and how many are `flagged`; and its metric rows by classification, `differenced`, `not_comparable`, and `unavailable`, and how many are `flagged`.
+
+A review's manifest has no `plan_hash`, `approval`, `parsers`, or `reproducibility`. A review sends nothing and parses no provider response: it reads a run's saved response only to check its size and `artifact_id`, and no parser interprets it. Each copied run manifest records its own run's parsers and reproducibility, which the report shows. `schemas/review-manifest-1.0.0.schema.json` will give every field (R02-T04).
+
+**The JSON summary's counts.** For `review`, `results` is the manifest's, `settings_flagged` is its flagged setting rows, and `metrics_unavailable` its `unavailable` metric rows. `warnings` counts the warnings logged, as for any command. When the review fails, `results` is the number of results a valid configuration names, or 0. `settings_flagged` and `metrics_unavailable` are 0 when no `differences.csv` was written. Once it's written, they're its counts, even when the review then fails, as a run's `metrics_unavailable` is once its tables are written.
 
 ## Canonical hashing
 
@@ -1046,7 +1118,7 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
 | `ids` | Identifiers the command created, for example `{"review_id": "…"}`. For `run`: `plan_hash` and `case_id` once the plan is built, even if it isn't approved, and `attempt_id` whenever an attempt record or a start record exists, including after a failed authentication. Empty when it created none. |
 | `output_dir` | The output directory as given on the command line, and `.` for `trialfolio init` given none. `null` if none was created. |
 | `outputs` | Output files relative to `output_dir`, keyed by role: `configuration` (the starter configuration `trialfolio init` writes), `manifest`, `report`, `metrics`, `settings`, `differences` |
-| `counts` | For `run`: `attempts`; `provider_requests`, the sends of the planned request that may have reached Portfolio123, never authentication ([HTTP exchanges](#http-exchanges)), which the [budget](#budget-and-retries) limits; `metrics_unavailable`; `warnings`; and the credit `cost` when the provider reports it. For `review` (0.2.0): `results`, `settings_flagged`, `metrics_unavailable`, `warnings`. |
+| `counts` | For `run`: `attempts`; `provider_requests`, the sends of the planned request that may have reached Portfolio123, never authentication ([HTTP exchanges](#http-exchanges)), which the [budget](#budget-and-retries) limits; `metrics_unavailable`; `warnings`; and the credit `cost` when the provider reports it. For `review` (0.2.0): `results`, `settings_flagged`, `metrics_unavailable`, `warnings` ([review output](#review-output)). |
 | `statistical_validation`, `trading_readiness` | `not_assessed` in every 0.x release that doesn't assess them |
 | `error` | `null`, or `{"code": …, "message": …}` using the codes in [errors](#errors) |
 
