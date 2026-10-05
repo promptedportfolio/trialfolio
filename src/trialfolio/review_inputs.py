@@ -4,7 +4,8 @@ before anything is written (release 0.2.0, R02-T05; docs/contracts.md, review ou
 A result's `run` path names its run's directory, relative to the review configuration's
 directory unless it's absolute, as every configuration's file paths are. The check:
 
-- refuses a path where nothing exists with `input.not_found`, as `trialfolio report` does.
+- refuses a path where nothing exists with `input.not_found`, as `trialfolio report` does. The
+  file system resolves the path, so a `..` after a symbolic link leads where opening it would.
 - reads each run once, through an `ArtifactStore`, and checks it's a complete run, as
   `trialfolio report` does (`check_run`): `input.not_a_run`, or `artifact.unknown_schema_version`
   for a schema version with no reader.
@@ -88,8 +89,15 @@ def local_run_stores(configuration_path: str | os.PathLike[str]) -> RunStores:
     directory = Path(configuration_path).parent
 
     def store(run: str) -> ArtifactStore | None:
-        path = directory / run
-        return LocalArtifactStore(path) if os.path.exists(path) else None
+        # The path the file system resolves, which both finds the run and reads it. A `..` after
+        # a symbolic link leads to the parent of the link's target, as opening the path does,
+        # not where the store's abspath would lead, by removing it with the segment before it.
+        try:
+            path = os.path.realpath(directory / run, strict=True)
+        except OSError:
+            # Nothing exists there, a link leads to nothing, or a part can't be read.
+            return None
+        return LocalArtifactStore(path)
 
     return store
 

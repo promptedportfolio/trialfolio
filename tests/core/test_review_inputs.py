@@ -287,6 +287,38 @@ def test_a_run_path_is_read_from_the_configurations_directory(
     assert_names_the_result(error, 1)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="creating a symbolic link needs a privilege there")
+def test_a_run_path_after_a_symbolic_link_is_read_where_the_file_system_leads(
+    tmp_path: Path,
+) -> None:
+    # A corrected defect: the check found the run where the file system leads, but read it
+    # where `..` leads when it's removed as text, with the segment before it.
+    shared, project = tmp_path / "shared", tmp_path / "project"
+    committed(shared, 1)
+    committed(shared, 2)
+    # Where `..` leads as text from the linked directory: an incomplete run at result 1's path,
+    # and the only run at result 3's.
+    remove(committed(project, 1), "manifest.json")
+    committed(project, 3)
+    (shared / "reviews").mkdir()
+    (project / "reviews").symlink_to(shared / "reviews", target_is_directory=True)
+    runs = [f"../{run_path(1)}", f"../{run_path(2)}"]
+    path, content = configure(project / "reviews", runs)
+
+    inputs = check(path, content)
+
+    for checked in inputs:
+        for copy in checked.copies:
+            assert copy.content == (FIXTURE / copy.path).read_bytes()
+    path, content = configure(project / "reviews", [*runs, f"../{run_path(3)}"])
+    error = refused(tmp_path, path, content)
+    assert error.code == "input.not_found"
+    assert error.message.startswith(
+        f"Result `{label(3)}`'s run directory (`../{run_path(3)}`) doesn't exist."
+    )
+    assert error.log_message.startswith("Result 3's run directory doesn't exist.")
+
+
 # What isn't a complete run (R02-AC06)
 
 
