@@ -1,0 +1,16 @@
+# Invalid: `title` has 1 to 200 characters.
+# Key: title
+# Value: -
+kind: review
+schema_version: 1.0.0
+title: ''
+purpose: Check whether doubling holdings changes risk as expected.
+baseline: hold25
+results:
+  - label: hold25
+    run: runs/hold25
+  - label: hold50
+    run: runs/hold50
+    intended_changes:
+      - setting: max_holdings
+        reason: Doubling holdings is the change under review.

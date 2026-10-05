@@ -1,0 +1,17 @@
+# Invalid: A key has a value; null is rejected.
+# Key: results[1].description
+# Value: -
+kind: review
+schema_version: 1.0.0
+title: Holdings 25 versus 50
+purpose: Check whether doubling holdings changes risk as expected.
+baseline: hold25
+results:
+  - label: hold25
+    run: runs/hold25
+  - label: hold50
+    run: runs/hold50
+    description:
+    intended_changes:
+      - setting: max_holdings
+        reason: Doubling holdings is the change under review.

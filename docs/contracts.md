@@ -1,6 +1,6 @@
 # Trial Folio contracts
 
-**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures, R01-T08 the `ArtifactStore` and the output directory claim, R01-T09 the `ScreenBacktestClient` and its transport adapter, R01-T10 plans, canonical hashing, and approval, R01-T11 attempt recording, R01-T12 normalization and the normalized tables, and R01-T13 the report, its notices, and reading a saved run back for `trialfolio report`. Nothing else here is implemented yet.
+**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures, R01-T08 the `ArtifactStore` and the output directory claim, R01-T09 the `ScreenBacktestClient` and its transport adapter, R01-T10 plans, canonical hashing, and approval, R01-T11 attempt recording, R01-T12 normalization and the normalized tables, and R01-T13 the report, its notices, and reading a saved run back for `trialfolio report`. For 0.2.0, R02-T04 implemented the review configuration and its reader, the review manifest, the rows of `differences.csv`, and the JSON summary's version 1.1.0, as models and generated schemas. Nothing else here is implemented yet.
 **Date:** 2026-10-01
 
 This document owns the meaning of Trial Folio's interfaces and artifacts: configuration files, saved artifacts, identifiers, metric values, errors, CLI behavior, reports, and logs. Pydantic models under `src/trialfolio/contracts/` define the executable structures, JSON Schemas generated from them under `schemas/` publish those structures, and tests with fixtures under `tests/fixtures/` provide conformance evidence. This prose stays authoritative for meaning. If a model accepts something this document says is invalid, the model has a defect.
@@ -272,7 +272,7 @@ Schema version 1.0.0, introduced in 0.2.0. It names saved runs written by `trial
 **Rules that span keys:**
 
 - **Intended change not observed.** If a declared change isn't there because the two values are equal, the result is still valid. The difference is classified `same` and flagged `intended_change_not_observed`.
-- **Intended change that can't be confirmed.** If the setting is missing from either run, the difference is `unknown` and is flagged.
+- **Intended change that can't be confirmed.** If the setting is missing from either run, the difference is `unknown`, and it keeps its `declared_reason`. In a critical category it's flagged `critical_unknown`, as any `unknown` there is. `precision`, the one declarable setting outside the critical categories, isn't flagged.
 - **Identical responses.** Two entries may name runs whose saved responses are byte-identical. That is flagged `identical_source`, as a warning.
 
 Example:
@@ -465,7 +465,7 @@ Schema version 1.0.0. `metrics.csv` and `settings.csv` are introduced in 0.1.0, 
 - **Empty cells.** A cell is empty only where a column allows it. An empty value always comes with a reason in the row's reason column.
 - **Row order.** Results appear in the order the configuration lists them. Within a result, rows follow the layout mapping's order, so the output is deterministic.
 - **Compatibility.** New columns are appended only, and adding one is a schema change under [artifact compatibility](#artifact-compatibility).
-- **Schemas.** `schemas/metrics-row-1.0.0.schema.json` and `schemas/settings-row-1.0.0.schema.json` each describe one row, after a CSV adapter step has read its cells: an empty cell is `null`, `critical` is a boolean, `source_decimals` is an integer, the period dates are dates, and `flags` is an array of codes. A property's position is its column's.
+- **Schemas.** `schemas/metrics-row-1.0.0.schema.json`, `schemas/settings-row-1.0.0.schema.json`, and `schemas/differences-row-1.0.0.schema.json` each describe one row, after a CSV adapter step has read its cells: an empty cell is `null`, `critical` and `flagged` are booleans, `source_decimals` and `difference_decimals` are integers, the period dates are dates, and `flags` is an array of codes. A property's position is its column's.
 
 **Writing and reading them.** `src/trialfolio/normalization.py` normalizes a saved response, and `src/trialfolio/tables.py` writes the tables and reads them back (R01-T12):
 
@@ -533,8 +533,8 @@ One row for each setting and each metric of each non-baseline result, compared w
 | `name` | Setting name or `metric_id` |
 | `subject` | For metrics, `strategy` or `benchmark`. Empty for settings. |
 | `category`, `critical` | For settings, as in `settings.csv`. Empty for metrics. |
-| `baseline_value`, `value` | The two values being compared |
-| `unit` | Unit of the two values |
+| `baseline_value`, `value` | The two values being compared, as the runs' tables write them. Empty for a metric value that's unavailable, or a setting missing from a run, which is `unknown`. |
+| `unit` | Unit of the two values. Empty for a setting without one, as in `settings.csv`. |
 | `classification` | For settings: `same`, `intended_change`, `unexplained_mismatch`, or `unknown`. For metrics: `differenced`, `not_comparable`, or `unavailable`. |
 | `difference` | For `differenced` metrics: `value − baseline_value`. Empty otherwise. |
 | `difference_unit` | `pp` for percent metrics, `days` for dates, otherwise the metric's unit. Empty when there's no difference. |
@@ -542,7 +542,7 @@ One row for each setting and each metric of each non-baseline result, compared w
 | `reason` | For `not_comparable` or `unavailable`: `different_benchmark`, `different_period`, `unknown_period`, `different_unit`, or `input_unavailable`. Empty otherwise. |
 | `declared_reason` | For a setting the configuration declares as an intended change, the reason it gives, whatever the classification, so a change that wasn't observed still shows what was intended. Empty otherwise. |
 | `flagged` | `true` when the row needs the reader's attention: a critical `unexplained_mismatch` or `unknown`, or any row with a warning flag |
-| `flags` | Flag codes, separated by semicolons |
+| `flags` | Flag codes, separated by semicolons. Empty when none apply. |
 
 #### Differences between screen runs
 
@@ -943,7 +943,7 @@ A failure or an interrupt after the claim leaves no manifest, so the output is v
   - `plan_hash` and `case_id`: the run's. Two runs of one configuration have the same `case_id`, and their labels tell them apart.
   - `normalized_tables`: whether the run has normalized tables. When it hasn't, its settings are compared from its plan, and its metrics are unavailable.
   - `response`: the `artifact_id` of the run's saved response, `response.json` or `response.raw`, or `null` when it has none. Two results with the same one have byte-identical saved responses (`identical_source`). Two with `null` don't: neither has a response to share.
-- `artifacts`: each file of the review except its own `manifest.json` and the logs, with its path, `artifact_id`, size, role, and schema version when it has one, as in a run's manifest. The roles are `configuration`, `run_manifest`, `plan`, `metrics`, `settings`, `differences`, and `report`.
+- `artifacts`: each file of the review except its own `manifest.json` and the logs, with its path, `artifact_id`, size, role, and schema version when it has one, as in a run's manifest. Every file but the report has one. The roles are `configuration`, `run_manifest`, `plan`, `metrics`, `settings`, `differences`, and `report`.
   - **`configuration.yaml`** is the review's one source artifact. Its [source record](#source-artifacts) gives the format `review-configuration`, version 1.0.0, `user_supplied` provenance, no parser version, and no provider operation. It's acquired when the command starts.
   - **Each copy** also gives the `label` of the result it was copied from. Its path is `inputs/<label>/` followed by its path in the run. Its `artifact_id` and size are the run's for that file ([R02-AC02](releases/0.2.0-review.md#acceptance-criteria)), and its schema version is the one the run records: the copied manifest's own `schema_version`, and for each other copy, the run manifest's entry's.
 - `methods`: each analytical method applied, with its version. A 1.0.0 review applies one, `screen-run-differences`, version 1: the rules of [differences between screen runs](#differences-between-screen-runs). A change to those rules that could change a row of `differences.csv` makes a new version ([versioning](#versioning)).
@@ -951,7 +951,7 @@ A failure or an interrupt after the claim leaves no manifest, so the output is v
 - `capabilities`: `return_series` is `absent`, since a review holds no per-period series, and `statistical_validation` and `trading_readiness` are `not_assessed`. Each copied run manifest says whether its run preserved per-period series.
 - `counts`: `results`, the baseline included; the setting rows of `differences.csv` by classification, `same`, `intended_change`, `unexplained_mismatch`, and `unknown`, and how many are `flagged`; and its metric rows by classification, `differenced`, `not_comparable`, and `unavailable`, and how many are `flagged`.
 
-A review's manifest has no `plan_hash`, `approval`, `parsers`, or `reproducibility`. A review sends nothing and parses no provider response: it reads a run's saved response only to check its size and `artifact_id`, and no parser interprets it. Each copied run manifest records its own run's parsers and reproducibility, which the report shows. `schemas/review-manifest-1.0.0.schema.json` will give every field (R02-T04).
+A review's manifest has no `plan_hash`, `approval`, `parsers`, or `reproducibility`. A review sends nothing and parses no provider response: it reads a run's saved response only to check its size and `artifact_id`, and no parser interprets it. Each copied run manifest records its own run's parsers and reproducibility, which the report shows. `schemas/review-manifest-1.0.0.schema.json` gives every field.
 
 **The JSON summary's `review_id` and counts.** As an [open question](releases/0.2.0-review.md#open-questions) settled, `ids` holds the `review_id` once the review has claimed its output directory: on success, and on a failure after the claim. A failure before the claim writes nothing, so its `ids` has none. For `review`, `results` is the manifest's, `settings_flagged` is its flagged setting rows, and `metrics_unavailable` its `unavailable` metric rows. `warnings` counts the warnings logged, as for any command. When the review fails, `results` is the number of results a valid configuration names, or 0. `settings_flagged` and `metrics_unavailable` are 0 when no `differences.csv` was written. Once it's written, they're its counts, even when the review then fails, as a run's `metrics_unavailable` is once its tables are written.
 
@@ -1112,7 +1112,7 @@ Exit codes:
 
 With `--json`, every command writes exactly one JSON object to stdout, followed by a newline. It does so whether the command succeeds or fails. The summary has its own `schema_version`, starting at 1.0.0. New keys may be added in minor versions; existing keys don't change meaning.
 
-**The review's summary.** The committed 1.0.0 schema allows no key it doesn't list, and its `command` has no `review`, its `ids` no `review_id`, and its `counts` none of the review's counts. So, as an [open question](releases/0.2.0-review.md#open-questions) settled, 0.2.0 writes version 1.1.0 for every command: 1.0.0 with those keys added, each 1.0.0 key keeping its meaning. `schemas/json-summary-1.0.0.schema.json` stays committed, beside `json-summary-1.1.0.schema.json`, because it says what 0.1.0 prints, and its bytes don't change. Its `$comment` and its titles name the models that generate it, so the model that generates it now, `trialfolio.contracts.summary.JsonSummary`, keeps its module and name, and so does each model it uses. The 1.1.0 model takes a new name.
+**The review's summary.** The committed 1.0.0 schema allows no key it doesn't list, and its `command` has no `review`, its `ids` no `review_id`, and its `counts` none of the review's counts. So, as an [open question](releases/0.2.0-review.md#open-questions) settled, 0.2.0 writes version 1.1.0 for every command: 1.0.0 with those keys added, each 1.0.0 key keeping its meaning. `schemas/json-summary-1.0.0.schema.json` stays committed, beside `json-summary-1.1.0.schema.json`, because it says what 0.1.0 prints, and its bytes don't change. Its `$comment` and its titles name the models that generate it, so the model that generates it now, `trialfolio.contracts.summary.JsonSummary`, keeps its module and name, and so does each model it uses. The 1.1.0 model takes a new name, `JsonSummaryV1_1`, and so does its `ids`, `SummaryIdsV1_1`.
 
 | Key | Meaning |
 |---|---|
@@ -1128,7 +1128,7 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
 | `statistical_validation`, `trading_readiness` | `not_assessed` in every 0.x release that doesn't assess them |
 | `error` | `null`, or `{"code": …, "message": …}` using the codes in [errors](#errors) |
 
-`ids` and `outputs` leave out a key that has no value, rather than writing `null`. `counts` is `{}` for `init`, `report`, and `license`. When `outcome` is `completed`, `exit_code` is 0 and `error` is `null`. Otherwise `exit_code` is the error code's exit code, and `outcome` is `partial` exactly for `execution.partial`. `schemas/json-summary-1.0.0.schema.json` gives every field.
+`ids` and `outputs` leave out a key that has no value, rather than writing `null`. `counts` is `{}` for `init`, `report`, and `license`. When `outcome` is `completed`, `exit_code` is 0 and `error` is `null`. Otherwise `exit_code` is the error code's exit code, and `outcome` is `partial` exactly for `execution.partial`. `schemas/json-summary-1.1.0.schema.json` gives every field of version 1.1.0, and `schemas/json-summary-1.0.0.schema.json` every field of 1.0.0.
 
 ### License acknowledgment
 
@@ -1298,11 +1298,13 @@ JSON Schemas are generated from the models, never maintained by hand, and commit
 | File | Contract |
 |---|---|
 | `screen-configuration-1.0.0.schema.json` | [Screen configuration](#screen-configuration) |
+| `review-configuration-1.0.0.schema.json` | [Review configuration](#review-configuration) |
 | `plan-1.0.0.schema.json` | [Plan](#plan-contents) |
 | `start-record-1.0.0.schema.json`, `attempt-record-1.0.0.schema.json` | [Start and attempt records](#execution-outcomes-and-attempts) |
 | `run-manifest-1.0.0.schema.json` | [Run manifest](#artifact-storage) |
-| `metrics-row-1.0.0.schema.json`, `settings-row-1.0.0.schema.json` | One row of each [normalized table](#normalized-tables) |
-| `json-summary-1.0.0.schema.json` | [JSON summary](#json-summary) |
+| `review-manifest-1.0.0.schema.json` | [Review manifest](#review-output) |
+| `metrics-row-1.0.0.schema.json`, `settings-row-1.0.0.schema.json`, `differences-row-1.0.0.schema.json` | One row of each [normalized table](#normalized-tables) |
+| `json-summary-1.0.0.schema.json`, `json-summary-1.1.0.schema.json` | [JSON summary](#json-summary): 1.0.0, which 0.1.0 writes, with its bytes unchanged, and 1.1.0, which 0.2.0 writes |
 | `license-acknowledgment.schema.json` | [License acknowledgment record](#license-acknowledgment), which has no schema version |
 
 ## Open questions

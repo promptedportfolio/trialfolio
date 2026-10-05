@@ -1,0 +1,16 @@
+# Invalid: A label matches `[a-z0-9][a-z0-9_-]{0,63}`: lowercase only.
+# Key: results[0].label
+# Value: Hold25
+kind: review
+schema_version: 1.0.0
+title: Holdings 25 versus 50
+purpose: Check whether doubling holdings changes risk as expected.
+baseline: hold25
+results:
+  - label: Hold25
+    run: runs/hold25
+  - label: hold50
+    run: runs/hold50
+    intended_changes:
+      - setting: max_holdings
+        reason: Doubling holdings is the change under review.

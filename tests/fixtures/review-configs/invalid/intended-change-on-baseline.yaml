@@ -1,0 +1,19 @@
+# Invalid: The baseline declares no intended change.
+# Key: results[0].intended_changes
+# Value: -
+kind: review
+schema_version: 1.0.0
+title: Holdings 25 versus 50
+purpose: Check whether doubling holdings changes risk as expected.
+baseline: hold25
+results:
+  - label: hold25
+    run: runs/hold25
+    intended_changes:
+      - setting: max_holdings
+        reason: Doubling holdings is the change under review.
+  - label: hold50
+    run: runs/hold50
+    intended_changes:
+      - setting: max_holdings
+        reason: Doubling holdings is the change under review.
