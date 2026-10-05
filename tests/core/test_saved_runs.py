@@ -317,6 +317,25 @@ def test_a_schema_version_without_a_reader_is_unknown(
 
     assert error.code == "artifact.unknown_schema_version"
     assert "1.1.0" not in error.message
+    assert error.message.startswith("Trial Folio can't read `")
+    assert "` in the run directory: " in error.message
+
+
+def test_a_table_that_cant_be_read_is_named_as_the_runs_problem(
+    complete: Written, tmp_path: Path
+) -> None:
+    path = "normalized/metrics.csv"
+    rewrite(complete.out, path, b"\xef\xbb\xbf" + (complete.out / path).read_bytes())
+
+    error = refused(complete.out, tmp_path / "report")
+
+    assert error.code == "input.not_a_run"
+    assert error.message == (
+        "The run directory isn't a complete Trial Folio run: its `normalized/metrics.csv` isn't a"
+        " normalized table Trial Folio can read: it starts with a byte-order mark. Nothing was"
+        " written. Give the output directory of a run that finished, as `trialfolio run` or"
+        " `trialfolio demo` wrote it."
+    )
 
 
 def test_a_manifest_that_isnt_a_valid_run_manifest_is_refused(
