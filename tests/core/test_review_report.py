@@ -659,6 +659,35 @@ def test_the_coverage_shows_each_results_dates_and_how_far_they_moved(review: Re
     ]
 
 
+def test_the_reasons_a_metric_isnt_differenced_are_listed_in_the_order_they_apply(
+    review: Review,
+) -> None:
+    """A metric gives the first reason that applies, and the report lists the reasons in that
+    order. A period that couldn't be established isn't compared as a different one, so
+    `unknown_period` comes before `different_period` (docs/contracts.md, differences between
+    screen runs)."""
+    document = review("coverage.yaml").document
+    definitions = document.root.by_id("definitions")
+    (reasons,) = (
+        [li.text for li in ul.find_all("li")]
+        for ul in definitions.find_all("ul")
+        if ul.find_all("li")[0].text.startswith("input_unavailable:")
+    )
+
+    assert [reason.split(":")[0] for reason in reasons] == [
+        "input_unavailable",
+        "different_unit",
+        "different_benchmark",
+        "unknown_period",
+        "different_period",
+    ]
+    # Its period is unknown, and it isn't the baseline's either.
+    assert compared(document, "no-periods")[("total_return", "strategy")][7] == (
+        "Not compared (unknown_period): A run's period couldn't be established, so it isn't"
+        " shown as matching."
+    )
+
+
 # Runs without tables (R02-AC15)
 
 

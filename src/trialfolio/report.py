@@ -1407,8 +1407,8 @@ _DIFFERENCE_REASONS: Final[dict[DifferenceReason, str]] = {
     "input_unavailable": "A value is unavailable.",
     "different_unit": "The two values are in different units.",
     "different_benchmark": "The runs' benchmarks differ.",
-    "different_period": "The runs' periods differ.",
     "unknown_period": "A run's period couldn't be established, so it isn't shown as matching.",
+    "different_period": "The runs' periods differ.",
 }
 """Why a metric isn't differenced, as `differences.csv`'s `reason` gives it, in the order the
 comparison applies them."""
