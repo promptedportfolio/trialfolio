@@ -521,6 +521,42 @@ def test_coverage_that_couldnt_be_established_is_never_shown_as_matching(
         assert setting(differences, "no-periods", name).flags == ()
 
 
+@pytest.mark.parametrize("lacking", [("hold25", "hold50"), ("hold25",), ("hold50",)])
+def test_a_period_with_one_unknown_date_is_unknown(
+    review: Review, lacking: tuple[str, ...]
+) -> None:
+    """A period is known only when both its dates are. A run whose every `Tran Dt` parses but
+    one `End Dt` doesn't has a known start and an unknown end. No response fixture gives one, so
+    the runs' rows are built here, as normalization would give them."""
+    original = review("example.yaml")
+
+    def without_end(run: ComparedRun) -> ComparedRun:
+        rows = {
+            key: row.model_copy(update={"period_end": None}) for key, row in run.metrics.items()
+        }
+        end = ("strategy", "coverage_end")
+        rows[end] = rows[end].model_copy(
+            update={
+                "value": None,
+                "availability": "unavailable",
+                "unavailable_reason": "unparseable_in_source",
+            }
+        )
+        return dataclasses.replace(run, metrics=rows)
+
+    runs = tuple(without_end(run) if run.label in lacking else run for run in original.runs)
+
+    differences = compare("hold25", runs)
+
+    for number in PERIOD_DEPENDENT:
+        row = metric(differences, "hold50", number)
+        assert (row.classification, row.reason) == ("not_comparable", "unknown_period")
+        assert row.difference is None
+    end = metric(differences, "hold50", 2)
+    assert (end.classification, end.reason) == ("unavailable", "input_unavailable")
+    assert [metric(differences, "hold50", n).difference for n in (1, 3)] == ["0", "0"]
+
+
 def test_the_first_reason_that_applies_is_given(review: Review) -> None:
     differences = review("coverage-and-benchmark.yaml").differences
 
