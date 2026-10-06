@@ -1,0 +1,11 @@
+kind: review
+schema_version: 1.0.0
+title: Synthetic results only
+purpose: Show a review of the run trialfolio demo writes against itself.
+baseline: demo
+results:
+  - label: demo
+    run: runs/demo
+  - label: demo-again
+    run: runs/demo
+    description: The same run, named again.

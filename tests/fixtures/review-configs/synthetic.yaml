@@ -1,0 +1,15 @@
+kind: review
+schema_version: 1.0.0
+title: A synthetic baseline
+purpose: Show a review whose baseline is the run trialfolio demo writes.
+baseline: demo
+results:
+  - label: demo
+    run: runs/demo
+    description: The run trialfolio demo wrote, from invented values.
+  - label: hold50
+    run: runs/hold50
+    description: A run that isn't synthetic.
+    intended_changes:
+      - setting: max_holdings
+        reason: Doubling holdings is the change under review.
