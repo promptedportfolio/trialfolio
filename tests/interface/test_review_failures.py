@@ -13,23 +13,21 @@ the test process. tests/core/test_review_inputs.py checks the same breaks at the
 tests/contract/test_review_configuration.py every invalid configuration.
 
 The runs that fail are copies of the committed `runs/synthetic-run-1.0.0/`, each broken one way,
-as R01-AC23's are; the run builder writes the others, over the fake server, once for the module.
+by `tests/support/broken_runs.py`, as R01-AC23's are; the run builder writes the others, over the
+fake server, once for the module.
 """
 
-import json
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 
 from tests.interface.conftest import Cli, Outcome, metadata, occupied, snapshot
+from tests.support.broken_runs import BROKEN, UNKNOWN_SCHEMA_VERSIONS, Json, newer_schema
 from tests.support.run_builder import REVIEW_CONFIGS, SYNTHETIC_RUN
-from trialfolio.canonical import sha256_hex
 
 type Built = Callable[[str], Path]
-type Json = dict[str, Any]
 
 CONFIGURATION = """\
 kind: review
@@ -80,76 +78,7 @@ def failed(outcome: Outcome, code: str, exit_code: int) -> str:
     return message
 
 
-def write_manifest(run: Path, manifest: Json) -> None:
-    (run / "manifest.json").write_bytes((json.dumps(manifest, indent=2) + "\n").encode())
-
-
-def rewrite(run: Path, path: str, data: bytes) -> None:
-    """Replaces a file of a saved run, and its manifest entry to match, so only the checks beyond
-    the hashes can tell."""
-    (run / path).write_bytes(data)
-    manifest = json.loads((run / "manifest.json").read_bytes())
-    for artifact in manifest["artifacts"]:
-        if artifact["path"] == path:
-            artifact.update(artifact_id="sha256:" + sha256_hex(data), size=len(data))
-    write_manifest(run, manifest)
-
-
-def edit_json(run: Path, path: str, change: Callable[[Json], None]) -> None:
-    content = json.loads((run / path).read_bytes())
-    change(content)
-    data = (json.dumps(content, indent=2) + "\n").encode()
-    if path == "manifest.json":
-        (run / path).write_bytes(data)
-    else:
-        rewrite(run, path, data)
-
-
-def path_of(run: Path, role: str) -> str:
-    manifest = json.loads((run / "manifest.json").read_bytes())
-    (path,) = (a["path"] for a in manifest["artifacts"] if a["role"] == role)
-    return path
-
-
-def change_bytes(run: Path, path: str) -> None:
-    """Changes a file without updating its manifest entry."""
-    content = (run / path).read_bytes()
-    changed = content.replace(b"SPY", b"QQQ")
-    assert changed != content
-    (run / path).write_bytes(changed)
-
-
-def empty(run: Path) -> None:
-    shutil.rmtree(run)
-    run.mkdir()
-
-
-def regular_file(run: Path) -> None:
-    shutil.rmtree(run)
-    run.write_text("not a run")
-
-
 # What isn't a complete run (R02-AC06)
-
-BROKEN: dict[str, tuple[Callable[[Path], None], str]] = {
-    "no manifest": (lambda run: (run / "manifest.json").unlink(), "it has no manifest.json."),
-    "a listed file missing": (
-        lambda run: (run / "normalized/settings.csv").unlink(),
-        "its manifest lists `normalized/settings.csv`, which is missing.",
-    ),
-    "bytes that don't match": (
-        lambda run: change_bytes(run, "configuration.yaml"),
-        "`configuration.yaml` doesn't match its artifact_id in the manifest",
-    ),
-    # Its artifact_id in the manifest is updated to match, so only the plan-hash check catches it.
-    "a plan that doesn't recompute to its hash": (
-        lambda run: edit_json(run, "plan.json", lambda plan: plan.update(title="Another title")),
-        "its plan.json doesn't recompute to its plan_hash",
-    ),
-    "an empty directory": (empty, "it has no manifest.json."),
-    "a regular file": (regular_file, "it isn't a directory."),
-}
-"""R01-AC23's breaks, each with the problem the message gives."""
 
 
 @RESULTS
@@ -254,38 +183,17 @@ def test_an_invalid_configuration_fails_and_creates_no_output(cli: Cli, name: st
 # A schema version without a reader (R02-AC14)
 
 
-def newer(content: Json) -> None:
-    content["schema_version"] = "1.1.0"
-
-
-def newer_entry(role: str) -> Callable[[Json], None]:
-    """Gives the manifest's entry for the file of `role` a newer schema version."""
-
-    def change(manifest: Json) -> None:
-        (entry,) = (a for a in cast("list[Json]", manifest["artifacts"]) if a["role"] == role)
-        newer(entry)
-
-    return change
-
-
 @RESULTS
 @pytest.mark.parametrize(
     ("target", "change", "named"),
-    [
-        ("manifest.json", newer, "manifest.json"),
-        ("plan", newer, "plan.json"),
-        ("attempt_record", newer, "attempt.json"),
-        ("manifest.json", newer_entry("metrics"), "normalized/metrics.csv"),
-        ("manifest.json", newer_entry("attempt_record"), "attempt.json"),
-    ],
-    ids=["manifest", "plan", "attempt record", "a table's entry", "an attempt record's entry"],
+    UNKNOWN_SCHEMA_VERSIONS.values(),
+    ids=UNKNOWN_SCHEMA_VERSIONS.keys(),
 )
 def test_a_schema_version_without_a_reader_fails_naming_its_result(
     cli: Cli, label: str, target: str, change: Callable[[Json], None], named: str
 ) -> None:
     path = two_runs(cli)
-    run = path.parent / "runs" / label
-    edit_json(run, target if target == "manifest.json" else path_of(run, target), change)
+    newer_schema(path.parent / "runs" / label, target, change)
     out = cli.tmp / "review"
 
     outcome = review(cli, path, out)

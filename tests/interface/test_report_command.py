@@ -11,18 +11,16 @@ committed `runs/synthetic-run-1.0.0/`; the runs that are broken one way are copi
 network guard is on throughout, so a re-render that connected anywhere but localhost would fail.
 """
 
-import json
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 from urllib.parse import unquote, urlsplit
 
 import pytest
 
 from tests.interface.conftest import Cli, config, plan_hash_for, serve_success, snapshot
+from tests.support import broken_runs
 from tests.support.html_report import Document, parse
-from trialfolio.canonical import sha256_hex
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.tables import read_metrics_csv, read_settings_csv
 
@@ -138,40 +136,12 @@ def test_rerendered_links_reach_the_runs_files_from_the_reports_directory(cli: C
 # What isn't a complete run (R01-AC23)
 
 
-def rewrite(run: Path, path: str, data: bytes) -> None:
-    """Replaces a file of a saved run, and its manifest entry to match, so only the checks
-    beyond the hashes can tell."""
-    (run / path).write_bytes(data)
-    manifest = json.loads((run / "manifest.json").read_bytes())
-    for artifact in manifest["artifacts"]:
-        if artifact["path"] == path:
-            artifact.update(artifact_id="sha256:" + sha256_hex(data), size=len(data))
-    (run / "manifest.json").write_bytes((json.dumps(manifest, indent=2) + "\n").encode())
-
-
-def edit_plan(run: Path, change: Callable[[dict[str, Any]], None]) -> None:
-    plan = json.loads((run / "plan.json").read_bytes())
-    change(plan)
-    rewrite(run, "plan.json", (json.dumps(plan, indent=2) + "\n").encode())
-
-
-def change_bytes(run: Path, path: str) -> None:
-    """Changes a file without updating its manifest entry."""
-    content = (run / path).read_bytes()
-    changed = content.replace(b"SPY", b"QQQ")
-    assert changed != content
-    (run / path).write_bytes(changed)
-
-
-BROKEN: dict[str, Callable[[Path], None]] = {
-    "no manifest": lambda run: (run / "manifest.json").unlink(),
-    "a listed file missing": lambda run: (run / "normalized/settings.csv").unlink(),
-    "bytes that don't match": lambda run: change_bytes(run, "configuration.yaml"),
-    # Its artifact_id in the manifest is updated to match, so only the plan-hash check catches it.
-    "a plan that doesn't recompute to its hash": lambda run: edit_plan(
-        run, lambda plan: plan.update(title="Another title")
-    ),
+BROKEN = {
+    name: break_run
+    for name, (break_run, _) in broken_runs.BROKEN.items()
+    if name not in ("an empty directory", "a regular file")
 }
+"""R01-AC23's broken copies of a run. An empty directory and a regular file are below."""
 
 
 @pytest.mark.parametrize("break_run", BROKEN.values(), ids=BROKEN.keys())
