@@ -109,8 +109,8 @@ class _AfterWriteStore:
     def claim(self, path: str, data: bytes) -> StoredFile:
         return self._store.claim(path, data)
 
-    def write(self, path: str, data: bytes) -> StoredFile:
-        stored = self._store.write(path, data)
+    def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
+        stored = self._store.write(path, data, logged_as=logged_as)
         if path.rsplit("/", 1)[-1] == self._name:
             self._action()
         return stored

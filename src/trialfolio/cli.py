@@ -12,6 +12,8 @@ to exit codes (REQ-03). Commands:
   backtest, once its plan is approved, in the order of steps docs/contracts.md's approval gives.
 - `trialfolio report <run-dir> --out <dir>` re-renders a saved run's report offline.
 - `trialfolio demo --out <dir>` writes a synthetic example run offline, labeled synthetic.
+- `trialfolio review <config> --out <dir>` compares saved runs with a baseline offline, as a
+  review configuration names them (release 0.2.0).
 - `trialfolio license [--accept]` prints the license, the full notice, and the acknowledgment
   status; `--accept` records the acknowledgment.
 - `trialfolio --version` and `--help`, which, with `init` and `license`, need no acknowledgment.
@@ -21,13 +23,14 @@ success and on failure. stderr carries progress, warnings, and errors, and the p
 prompts, which are never logged. `TrialFolioError` codes map to exit codes through `EXIT_CODES`;
 an unexpected exception is `internal.unexpected`, exit 1, and its message names the log file
 and, once `run` or `demo` has claimed its output directory, says what the run's records say about
-the request and the manifest, as an interrupt's does.
+the request and the manifest, as an interrupt's does, and once `review` has, that the review has
+no manifest.
 
 `run` and `demo` import the modules that import `p123api`, `requests`, or `urllib3` only once
 `installed_versions` has checked and imported them, so a missing or broken one is
 `environment.unsupported`, never an `ImportError`. `report` sends nothing, so it checks no
 versions, but it reads runs with modules that import them: an `ImportError` there is
-`environment.unsupported` too.
+`environment.unsupported` too, as it is for `review`.
 """
 
 import argparse
@@ -46,11 +49,18 @@ from typing import TYPE_CHECKING, Final, Literal, NoReturn, TextIO
 
 from trialfolio import acknowledgment
 from trialfolio.approval import obtain_approval
-from trialfolio.configuration import read_screen_configuration
+from trialfolio.configuration import read_review_configuration, read_screen_configuration
 from trialfolio.contracts.common import ErrorDetail
 from trialfolio.contracts.manifest import CommandRecord
 from trialfolio.contracts.plan import Plan
-from trialfolio.contracts.summary import JsonSummaryV1_1, NoCounts, RunCounts, SummaryIdsV1_1
+from trialfolio.contracts.review_manifest import ReviewCommandRecord
+from trialfolio.contracts.summary import (
+    JsonSummaryV1_1,
+    NoCounts,
+    ReviewCounts,
+    RunCounts,
+    SummaryIdsV1_1,
+)
 from trialfolio.display import visible
 from trialfolio.errors import EXIT_CODES, TrialFolioError
 from trialfolio.logs import LOGS_DIRECTORY, CommandLogs
@@ -62,6 +72,7 @@ from trialfolio.storage import ArtifactStore, LocalArtifactStore
 if TYPE_CHECKING:
     from trialfolio.execution import Execution
     from trialfolio.provider import Credentials
+    from trialfolio.review import Review
 
 _logger = logging.getLogger(__name__)
 
@@ -71,7 +82,7 @@ type Clock = Callable[[], datetime]
 type StoreFactory = Callable[[str], ArtifactStore]
 """Makes the `ArtifactStore` of an output directory, from the path given on the command line."""
 
-type CommandName = Literal["init", "run", "report", "demo", "license"]
+type CommandName = Literal["init", "run", "report", "demo", "review", "license"]
 
 API_ID_VARIABLE: Final = "TRIALFOLIO_P123_API_ID"
 API_KEY_VARIABLE: Final = "TRIALFOLIO_P123_API_KEY"
@@ -189,6 +200,13 @@ def _parser(version: str) -> argparse.ArgumentParser:
     _out(demo, "the new output directory for the synthetic run")
     _json(demo)
 
+    review = command("review", "Compare saved runs with a baseline offline.")
+    review.add_argument(
+        "config", help="the review configuration, a YAML file naming the runs and the baseline"
+    )
+    _out(review, "the new output directory for the review")
+    _json(review)
+
     license_ = command(
         "license",
         "Print the license, the full notice, and whether you've acknowledged them.",
@@ -259,6 +277,9 @@ class _Invocation:
     execution: "Execution | None" = None
     report: str | None = None
     """`report.html`, once `trialfolio report` has written it."""
+    review: "Review | None" = None
+    results: int = 0
+    """The results a valid review configuration names, once it's read."""
     result: list[str] = field(default_factory=list[str])
     """The human summary, for stdout on success."""
 
@@ -341,7 +362,7 @@ class _Invocation:
                 "outcome": outcome,
                 "exit_code": exit_code,
                 "ids": self._ids(),
-                "output_dir": self.output_dir,
+                "output_dir": self._output_dir(),
                 "outputs": self._outputs(),
                 "counts": self._counts(),
                 "statistical_validation": "not_assessed",
@@ -352,8 +373,18 @@ class _Invocation:
             }
         )
 
+    def _output_dir(self) -> str | None:
+        """`output_dir`, or a review's once it has claimed its directory. A review's claim is
+        read from the review, as its `review_id` is, so the summary gives both even when an
+        interrupt stops the review before `claimed` has run."""
+        if self.review is not None and self.review.claimed:
+            return self.args.out
+        return self.output_dir
+
     def _ids(self) -> SummaryIdsV1_1:
         ids = SummaryIdsV1_1(**self.ids)
+        if self.review is not None and self.review.claimed:
+            ids["review_id"] = self.review.review_id
         attempt = self.execution.attempt if self.execution is not None else None
         result = self.execution.result if self.execution is not None else None
         if attempt is not None and (
@@ -363,13 +394,22 @@ class _Invocation:
         return ids
 
     def _outputs(self) -> dict[str, str]:
-        if self.output_dir is None:
+        if self._output_dir() is None:
             return {}
         if self.name == "init":
             return {"configuration": CONFIGURATION}
         if self.report is not None:
             return {"report": self.report}
         outputs: dict[str, str] = {}
+        if self.review is not None:
+            for role, stored in (
+                ("manifest", self.review.manifest),
+                ("report", self.review.report),
+                ("differences", self.review.differences_file),
+            ):
+                if stored is not None:
+                    outputs[role] = stored.path
+            return outputs
         execution = self.execution
         if execution is None:
             return outputs
@@ -382,7 +422,17 @@ class _Invocation:
             outputs["settings"] = execution.tables.settings.path
         return outputs
 
-    def _counts(self) -> RunCounts | NoCounts:
+    def _counts(self) -> RunCounts | ReviewCounts | NoCounts:
+        if self.name == "review":
+            differences = None if self.review is None else self.review.differences
+            return ReviewCounts(
+                results=self.results,
+                settings_flagged=0 if differences is None else differences.setting_counts.flagged,
+                metrics_unavailable=(
+                    0 if differences is None else differences.metric_counts.unavailable
+                ),
+                warnings=self.log.warnings,
+            )
         if self.name not in ("run", "demo"):
             return NoCounts()
         attempts = sent = unavailable = 0
@@ -420,13 +470,14 @@ class _Invocation:
 
     def _unexpected(self, failure: Exception) -> TrialFolioError:
         """`internal.unexpected` for a defect. Its log gives the exception's type and frames,
-        never its message, which could hold a value. After the claim, its message says what the
-        run's records say, so a request that may have been charged is never hidden."""
+        never its message, which could hold a value, and the IDs the command has so far, such as
+        a review's `review_id` after its claim. After the claim, its message says what the run's
+        records say, so a request that may have been charged is never hidden."""
         _logger.error(
             "Unexpected %s, at:\n%s",
             type(failure).__name__,
             "".join(traceback.format_tb(failure.__traceback__)),
-            extra=_event("cli.command.unexpected", False),
+            extra={**_event("cli.command.unexpected", False), **self._linked_ids()},
         )
         detail = self._execution_detail()
         return TrialFolioError(
@@ -438,7 +489,10 @@ class _Invocation:
 
     def _execution_detail(self) -> str | None:
         """What the run's records say about the request and the manifest, once `run` or `demo`
-        has claimed its output directory; None before."""
+        has claimed its output directory, and whether the review has its manifest, once `review`
+        has; None before."""
+        if self.review is not None:
+            return self.review.ending_detail() if self.review.claimed else None
         execution = self.execution
         if execution is None or not execution.claimed:
             return None
@@ -602,15 +656,7 @@ def _report(invocation: _Invocation) -> TrialFolioError | None:
     try:
         from trialfolio.report import HtmlReportRenderer, rerender_report
     except ImportError as failure:
-        missing = "a package it needs" if failure.name is None else failure.name
-        raise TrialFolioError(
-            "environment.unsupported",
-            f"Trial Folio can't read runs in this environment: {missing} can't be imported,"
-            " because its files, or a package it needs, are missing or broken. No output was"
-            " created. Reinstall Trial Folio, whose package pins its dependencies exactly, for"
-            " example in a new virtual environment. If you run it from a copy of its repository,"
-            " run uv sync there instead.",
-        ) from None
+        raise _cant_read_runs(failure) from None
 
     report = rerender_report(
         LocalArtifactStore(args.run_dir),
@@ -622,6 +668,42 @@ def _report(invocation: _Invocation) -> TrialFolioError | None:
     invocation.claimed(args.out)
     invocation.result = [f"Report written: {os.path.join(args.out, report.path)}"]
     return None
+
+
+def _review(invocation: _Invocation) -> TrialFolioError | None:
+    """Compares saved runs with a baseline, in the order of steps docs/contracts.md's review
+    output gives: the configuration, each run, the output directory, and then the review's files,
+    which `Review` writes."""
+    args = invocation.args
+    _require_acknowledgment(invocation)
+    started_at = _started(invocation)
+    content = _read_input(args.config)
+    configuration = read_review_configuration(content, _shown(args.config))
+    invocation.results = len(configuration.results)
+    try:
+        from trialfolio.review import Review
+        from trialfolio.review_inputs import check_review_inputs, local_run_stores
+    except ImportError as failure:
+        raise _cant_read_runs(failure) from None
+
+    inputs = check_review_inputs(configuration, local_run_stores(args.config))
+    store = invocation.store_factory(args.out)
+    store.check_empty()
+    review = Review(
+        configuration,
+        content,
+        inputs,
+        store,
+        # No path: one can name the user, and the manifest is in the output directory.
+        ReviewCommandRecord(name="review", options={"json": args.json}, started_at=started_at),
+        trialfolio_version=invocation.version,
+        clock=invocation.clock,
+    )
+    invocation.review = review
+    error = review.write(on_claimed=lambda: invocation.claimed(args.out))
+    if error is None:
+        invocation.result = _review_result(args.out, review)
+    return error
 
 
 def _license(invocation: _Invocation) -> TrialFolioError | None:
@@ -655,6 +737,7 @@ _COMMANDS: Final[dict[CommandName, Callable[[_Invocation], TrialFolioError | Non
     "run": _run,
     "report": _report,
     "demo": _demo,
+    "review": _review,
     "license": _license,
 }
 
@@ -675,9 +758,9 @@ def _ignore_key_log(environ: MutableMapping[str, str]) -> None:
 
 
 def _started(invocation: _Invocation) -> datetime:
-    """When `run` or `demo` started, as the manifest records it, and when it acquired the
-    configuration: once the license is acknowledged, before the configuration is read, so the
-    run's duration includes planning and any wait for approval."""
+    """When `run`, `demo`, or `review` started, as the manifest records it, and when it
+    acquired the configuration: once the license is acknowledged, before the configuration is
+    read, so a run's duration includes planning and any wait for approval."""
     return invocation.clock()
 
 
@@ -753,6 +836,43 @@ def _run_result(out: str, plan: Plan, execution: "Execution", *, synthetic: bool
         "Statistical validation and trading readiness: not assessed.",
     ]
     return lines
+
+
+def _review_result(out: str, review: "Review") -> list[str]:
+    differences = review.differences
+    report = review.report
+    lines = [f"Review completed: {out}"]
+    if report is not None:
+        lines.append(f"Report: {os.path.join(out, report.path)}")
+    if differences is not None:
+        lines.append(
+            f"Flagged setting rows: {differences.setting_counts.flagged}. Unavailable metric"
+            f" rows: {differences.metric_counts.unavailable}."
+        )
+    if review.synthetic:
+        lines.append(
+            "It includes synthetic results, whose values are invented, never Portfolio123's. The"
+            " report names them."
+        )
+    lines += [
+        f"Review ID: {review.review_id}",
+        "Statistical validation and trading readiness: not assessed.",
+    ]
+    return lines
+
+
+def _cant_read_runs(failure: ImportError) -> TrialFolioError:
+    """`environment.unsupported` for a module that reads runs, which imports `p123api`,
+    `requests`, or `urllib3`, but can't be imported."""
+    missing = "a package it needs" if failure.name is None else failure.name
+    return TrialFolioError(
+        "environment.unsupported",
+        f"Trial Folio can't read runs in this environment: {missing} can't be imported,"
+        " because its files, or a package it needs, are missing or broken. No output was"
+        " created. Reinstall Trial Folio, whose package pins its dependencies exactly, for"
+        " example in a new virtual environment. If you run it from a copy of its repository,"
+        " run uv sync there instead.",
+    )
 
 
 def _run_path(run_dir: str, out: str) -> str | None:

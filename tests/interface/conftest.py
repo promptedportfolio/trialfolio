@@ -11,6 +11,9 @@ the test launcher, with the fake server's endpoint and no other double.
 Each test gets a temporary home, so the per-user configuration and log directories are under it,
 and an environment without the variables Trial Folio reads, so nothing on the machine running the
 tests leaks in. stdin is empty and isn't a terminal, unless a test gives a pseudo-terminal.
+
+A review's tests read runs that the run builder writes, once for each module, beside a copy of the
+review configuration that names them (`built`). A review only reads them.
 """
 
 import io
@@ -29,6 +32,7 @@ from tests.support import canaries, launcher
 from tests.support.clock import FixedClock
 from tests.support.environment import VARIABLES
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.run_builder import RunBuilder
 from tests.support.storage_faults import StorageFaults
 from tests.support.terminal import Terminal
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
@@ -216,6 +220,23 @@ def cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, server: FakePortfolio12
 @pytest.fixture
 def faults(monkeypatch: pytest.MonkeyPatch) -> FaultyStores:
     return FaultyStores(monkeypatch)
+
+
+@pytest.fixture(scope="module")
+def built(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Callable[[str], Path]]:
+    """Builds the runs a review configuration in `review-configs/` names, once for the module,
+    beside a copy of it, and gives the copy's path. A test must leave the runs as they are."""
+    root = tmp_path_factory.mktemp("runs")
+    paths: dict[str, Path] = {}
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        builder = RunBuilder(monkeypatch, root / "home")
+
+        def get(name: str) -> Path:
+            if name not in paths:
+                paths[name] = builder.review(name, root / name.removesuffix(".yaml"))
+            return paths[name]
+
+        yield get
 
 
 def serve_success(server: FakePortfolio123, body: str = "complete.json") -> None:
