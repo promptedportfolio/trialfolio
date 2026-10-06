@@ -1,6 +1,7 @@
 """The run builder: writes the runs a review compares, with `trialfolio run`, through the CLI's
 entry function in the test process (release 0.2.0, test pairing). It isn't a double: each run is
-real `trialfolio run` output.
+real `trialfolio run` output, or a copy of the committed run `trialfolio demo` wrote,
+`runs/synthetic-run-1.0.0/`.
 
 Each run is approved with `--approve` and its plan's hash, and written with the fixed clock. The
 fake Portfolio123 server answers its backtest request with a response from `responses/`, with a
@@ -10,7 +11,8 @@ builder returns, so none runs when a review starts.
 The runs' values are invented, but nothing labels them synthetic, so a committed copy would read
 as a Portfolio123 backtest (DSC-04). They exist only in the test's temporary directory.
 
-R02-T06 wrote it ahead of R02-T09, for the comparison core's tests.
+R02-T06 wrote it ahead of R02-T09, for the comparison core's tests, and R02-T07 added the
+committed synthetic run, for the review report's.
 """
 
 import io
@@ -35,6 +37,10 @@ FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
 SCREEN_CONFIGS: Final = FIXTURES / "screen-configs"
 RESPONSES: Final = FIXTURES / "responses"
 REVIEW_CONFIGS: Final = FIXTURES / "review-configs"
+
+SYNTHETIC_RUN: Final = FIXTURES / "runs" / "synthetic-run-1.0.0"
+"""The committed run `trialfolio demo` wrote, labeled synthetic. A review gets a copy of it at the
+`run` path that names it."""
 
 REJECTED: Final = Reply(400, b"Unsupported value")
 """Portfolio123's 400 for a request the provider path doesn't support. The run saves no
@@ -62,7 +68,7 @@ BASELINE: Final = Run("formula.yaml", "complete.json")
 HOLDINGS_50: Final = Run("holdings-50.yaml", "changed-metrics.json")
 BENCHMARK_OTHER: Final = Run("benchmark-other.yaml", "changed-metrics.json")
 
-RUNS: Final[dict[str, dict[str, Run]]] = {
+RUNS: Final[dict[str, dict[str, Run | Path]]] = {
     "example.yaml": {"runs/hold25": BASELINE, "runs/hold50": HOLDINGS_50},
     "undeclared.yaml": {
         "runs/baseline": BASELINE,
@@ -101,9 +107,11 @@ RUNS: Final[dict[str, dict[str, Run]]] = {
         "runs/hold50-second": HOLDINGS_50,
         "runs/slippage": Run("slippage-whole.yaml", "same-metrics.json"),
     },
+    "synthetic.yaml": {"runs/demo": SYNTHETIC_RUN, "runs/hold50": HOLDINGS_50},
+    "synthetic-only.yaml": {"runs/demo": SYNTHETIC_RUN},
 }
 """The runs each review configuration names, by its `run` path, as `review-configs/README.md`
-gives them."""
+gives them: a run to write, or the committed run to copy."""
 
 
 class RunBuilder:
@@ -148,10 +156,13 @@ class RunBuilder:
         return out
 
     def review(self, name: str, directory: Path) -> Path:
-        """Copies the review configuration `name` into `directory`, writes each run it names at
-        its `run` path, and returns the configuration's path."""
+        """Copies the review configuration `name` into `directory`, writes or copies each run it
+        names at its `run` path, and returns the configuration's path."""
         directory.mkdir(parents=True, exist_ok=True)
         path = Path(shutil.copy(REVIEW_CONFIGS / name, directory / name))
         for run_path, run in RUNS[name].items():
-            self.run(run, directory / run_path)
+            if isinstance(run, Path):
+                shutil.copytree(run, directory / run_path)
+            else:
+                self.run(run, directory / run_path)
         return path

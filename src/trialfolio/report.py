@@ -1,21 +1,26 @@
-"""The report: one self-contained, script-free HTML file showing a run's evidence, with the
-notices (docs/contracts.md, reports; docs/disclaimers.md, DSC-02, DSC-03, and DSC-06; REQ-08 and
-REQ-13).
+"""The report: one self-contained, script-free HTML file showing a run's or a review's evidence,
+with the notices (docs/contracts.md, reports; docs/disclaimers.md, DSC-02, DSC-03, and DSC-06;
+REQ-08 and REQ-13).
 
 `ReportRenderer` is the protocol, and `HtmlReportRenderer` its implementation. Rendering reads
-only the `SavedRun` it's given, so it needs no provider or network access.
+only the `SavedRun` or the `ReviewEvidence` it's given, so it needs no provider or network
+access.
 
 - `write_report` writes `report.html` into the output directory of the run being written. `run`
   and `demo` do that just before the manifest.
 - `rerender_report` is the core of `trialfolio report`: it reads and checks a saved run, renders
   its report, and claims a new output directory with it.
+- `write_review_report` writes a review's `report.html`, just before its manifest (release 0.2.0,
+  R02-T07). The review report compares each result with the baseline: intended changes apart from
+  unexplained mismatches, and each result's metrics beside the baseline's, with the difference
+  where they're comparable.
 
 What a report holds:
 
 - **Nothing that runs or loads.** Inline CSS only: no script, event-handler attribute, or
   external resource. Its only links are in-page fragments, relative paths to the run's artifacts,
-  and the two outside links D-21 allows: the LICENSE of the version that rendered it, and
-  Portfolio123's terms.
+  or to the review's files, and the two outside links D-21 allows: the LICENSE of the version
+  that rendered it, and Portfolio123's terms. A review report never links a run.
 - **The notices.** The concise notice near the top, before any result, linking to the full
   notice. The Portfolio123 data statement in the closing section, and after it the full notice in
   a `<details>` element, with the license's name and identifier, the notice version, and the
@@ -23,7 +28,8 @@ What a report holds:
 - **The ten sections docs/contracts.md lists,** in order. A section the run's evidence can't
   support says it's unavailable, or not assessed, and why. Nothing is filled in.
 - **Values exactly as the normalized tables hold them,** with their units, never padded or
-  rounded. An unavailable metric shows its reason.
+  rounded. An unavailable metric shows its reason. A synthetic result's values are labeled
+  wherever they appear, and never called Portfolio123's (DSC-04).
 - **Text Trial Folio didn't write,** such as the title, the formulas, or a provider message,
   HTML-escaped, with its control and formatting characters written as escapes such as `\\u202e`,
   so it can't add markup or reorder what's shown.
@@ -31,8 +37,8 @@ What a report holds:
 - **Neutral status.** No status is styled as a pass; execution success is kept apart from any
   statement about the strategy.
 
-Rendering is deterministic: the same run and version give the same bytes. Nothing here logs the
-report's contents.
+Rendering is deterministic: the same run, or review, and version give the same bytes. Nothing
+here logs the report's contents.
 """
 
 import html
@@ -44,13 +50,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Final, Protocol
 from urllib.parse import quote
+from uuid import UUID
 
 from trialfolio.contracts.attempt import SavedResponse
 from trialfolio.contracts.common import UnavailableReason
 from trialfolio.contracts.manifest import ArtifactRole, ManifestArtifact
-from trialfolio.contracts.tables import MetricsRow
+from trialfolio.contracts.review_configuration import ReviewConfiguration
+from trialfolio.contracts.review_manifest import ReviewArtifact, ReviewArtifactRole
+from trialfolio.contracts.tables import DifferenceReason, DifferencesRow, MetricsRow
+from trialfolio.differences import METHOD, METHOD_VERSION, Differences
 from trialfolio.display import visible
-from trialfolio.normalization import LAYOUT, setting_text
+from trialfolio.normalization import LAYOUT, METRICS, setting_text
 from trialfolio.notices import (
     CONCISE_NOTICE,
     CONCISE_NOTICE_LINK,
@@ -64,6 +74,7 @@ from trialfolio.notices import (
     PORTFOLIO123_TERMS_URL,
     license_url,
 )
+from trialfolio.review_inputs import ReviewInput
 from trialfolio.runs import MANIFEST_PATH, SavedAttempt, SavedRun, read_run
 from trialfolio.storage import ArtifactStore, StoredFile
 
@@ -77,6 +88,32 @@ FULL_NOTICE_ID: Final = "full-notice"
 NOT_ASSESSED: Final = "Not assessed"
 
 _VERSION: Final = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+
+
+@dataclass(frozen=True)
+class ReviewEvidence:
+    """What a review's report shows: its configuration, each result's run as the input check read
+    it, the comparison, and what the review manifest will record.
+
+    The report is written before the manifest, so `artifacts` holds each file the manifest will
+    list apart from the report itself: `configuration.yaml`, the copies, and `differences.csv`.
+    """
+
+    configuration: ReviewConfiguration
+    inputs: tuple[ReviewInput, ...]
+    """One for each result, in the configuration's order."""
+    differences: Differences
+    review_id: UUID
+    started_at: datetime
+    """When the command started, as the manifest's `command.started_at`."""
+    artifacts: tuple[ReviewArtifact, ...]
+
+    def __post_init__(self) -> None:
+        labels = tuple(result.label for result in self.configuration.results)
+        if tuple(checked.result.label for checked in self.inputs) != labels:
+            raise ValueError("each result has one input, in the configuration's order")
+        if any(artifact.role == "report" for artifact in self.artifacts):
+            raise ValueError("the artifacts are the ones the report links, so not the report")
 
 
 class ReportRenderer(Protocol):
@@ -94,6 +131,12 @@ class ReportRenderer(Protocol):
 
         Raises `ValueError` if `run_path` is absolute or has an empty segment.
         """
+        ...
+
+    def render_review(self, review: ReviewEvidence) -> str:
+        """The report of `review`, as an HTML document, for `report.html` in the review's output
+        directory. It links `manifest.json` and each of `review.artifacts` by its path in the
+        review, and never links a run."""
         ...
 
 
@@ -133,6 +176,25 @@ def rerender_report(
     return report
 
 
+def write_review_report(
+    store: ArtifactStore, review: ReviewEvidence, renderer: ReportRenderer
+) -> StoredFile:
+    """Renders the report of the review being written into `store`, and writes it as
+    `report.html`.
+
+    The review manifest is written after the report, so `review.artifacts` are the files it will
+    list, without the report. Raises `TrialFolioError` with `storage.write_failed` when the report
+    can't be written.
+    """
+    report = store.write(REPORT_PATH, renderer.render_review(review).encode("utf-8"))
+    _logger.info(
+        "Rendered the review's report, %s.",
+        report.artifact_id,
+        extra={"event": "report.render.completed", "review_id": str(review.review_id)},
+    )
+    return report
+
+
 def _logged(report: StoredFile, run: SavedRun) -> None:
     _logger.info(
         "Rendered the report, %s.",
@@ -157,6 +219,9 @@ class HtmlReportRenderer:
 
     def render(self, run: SavedRun, run_path: str | None) -> str:
         return _Report(run, _base(run_path), self._version).document()
+
+    def render_review(self, review: ReviewEvidence) -> str:
+        return _ReviewReport(review, self._version).document()
 
 
 def _base(run_path: str | None) -> tuple[str, ...] | None:
@@ -397,42 +462,119 @@ class _Setting:
     """Whether `provenance` is the plan's expectation, because `settings.csv` wasn't written."""
 
 
+def _settings_of(run: SavedRun) -> tuple[_Setting, ...]:
+    """The run's resolved settings: its `settings.csv` rows, or, without them, its plan's."""
+    if run.settings is not None:
+        return tuple(
+            _Setting(
+                row.setting,
+                row.category,
+                row.value,
+                row.unit,
+                row.provenance,
+                row.inference_rule,
+                row.flags,
+                row.original_value,
+                expected=False,
+            )
+            for row in run.settings
+        )
+    return tuple(
+        _Setting(
+            row.setting,
+            row.category,
+            setting_text(row.value),
+            row.unit,
+            row.expected_provenance,
+            row.inference_rule,
+            row.flags,
+            None,
+            expected=True,
+        )
+        for row in run.plan.cases[0].settings
+    )
+
+
+def _setting_brief(setting: _Setting) -> str:
+    expected = "expected to be " if setting.expected else ""
+    brief = f"{_code(setting.value)} ({expected}{setting.provenance})"
+    if setting.inference_rule is not None:
+        brief += f". {_text(setting.inference_rule)}"
+    return brief
+
+
+def _metric_label(row: MetricsRow) -> str:
+    name = _METRICS.get(row.metric_id, (row.metric_id, ""))[0]
+    return f"{_text(name)}, {row.subject} ({_code(row.metric_id)})"
+
+
+def _unavailable(reason: UnavailableReason | None) -> str:
+    if reason is None:
+        return "Unavailable"
+    return f"Unavailable ({_code(reason)}): {_REASONS[reason]}"
+
+
+# The parts every report shares
+
+
+def _concise_notice() -> str:
+    lead = CONCISE_NOTICE.removesuffix(f"{CONCISE_NOTICE_LINK}.")
+    link = f'<a href="#{FULL_NOTICE_ID}">{html.escape(CONCISE_NOTICE_LINK)}</a>'
+    return f'<p class="notice" id="notice">{html.escape(lead)}{link}.</p>'
+
+
+def _contents(sections: Sequence[tuple[str, str]]) -> list[str]:
+    items = [f'<li><a href="#{key}">{heading}</a></li>' for key, heading in sections]
+    return [
+        '<nav aria-label="Contents">',
+        "<ol>",
+        *items,
+        '<li><a href="#closing">Portfolio123 data, notices, and license</a></li>',
+        "</ol>",
+        "</nav>",
+    ]
+
+
+def _heading(key: str, sections: Sequence[tuple[str, str]] = _SECTIONS) -> str:
+    number = next(i for i, (k, _) in enumerate(sections, 1) if k == key)
+    return f'<section id="{key}">\n<h2>{number}. {dict(sections)[key]}</h2>'
+
+
+def _closing(version: str, records: str) -> list[str]:
+    """The closing section, by the report of `version`, rendered from `records`, such as "the
+    run's saved records"."""
+    statement_lead, _, statement_rest = PORTFOLIO123_DATA_STATEMENT.partition(
+        PORTFOLIO123_TERMS_LINK
+    )
+    terms = f'<a href="{PORTFOLIO123_TERMS_URL}">{html.escape(PORTFOLIO123_TERMS_LINK)}</a>'
+    notice = [f"<p>{html.escape(paragraph)}</p>" for paragraph in FULL_NOTICE]
+    return [
+        '<footer id="closing">',
+        (
+            f'<p id="portfolio123-data"><strong>{html.escape(PORTFOLIO123_DATA_LABEL)}</strong>'
+            f" {html.escape(statement_lead)}{terms}{html.escape(statement_rest)}</p>"
+        ),
+        f'<details id="{FULL_NOTICE_ID}">',
+        "<summary>Full research and financial-result notice, and license</summary>",
+        *notice,
+        (
+            f"<p>License: {html.escape(LICENSE_NAME)}, <code>{LICENSE_ID}</code>. Notice version"
+            f' {NOTICE_VERSION}. Read <a href="{license_url(version)}">the LICENSE'
+            f" published with Trial Folio {version}</a>.</p>"
+        ),
+        "</details>",
+        f'<p class="muted">Rendered by Trial Folio {version} from {records}.</p>',
+        "</footer>",
+    ]
+
+
 class _Report:
     def __init__(self, run: SavedRun, base: tuple[str, ...] | None, version: str) -> None:
         self._run = run
         self._base = base
         self._version = version
         self._case = run.plan.cases[0]
-        if run.settings is not None:
-            self._settings = tuple(
-                _Setting(
-                    row.setting,
-                    row.category,
-                    row.value,
-                    row.unit,
-                    row.provenance,
-                    row.inference_rule,
-                    row.flags,
-                    row.original_value,
-                    expected=False,
-                )
-                for row in run.settings
-            )
-        else:
-            self._settings = tuple(
-                _Setting(
-                    row.setting,
-                    row.category,
-                    setting_text(row.value),
-                    row.unit,
-                    row.expected_provenance,
-                    row.inference_rule,
-                    row.flags,
-                    None,
-                    expected=True,
-                )
-                for row in self._case.settings
-            )
+        self._settings = _settings_of(run)
         self._by_name = {setting.name: setting for setting in self._settings}
         self._metrics = {(row.subject, row.metric_id): row for row in run.metrics or ()}
 
@@ -456,10 +598,10 @@ class _Report:
             + (" · Synthetic example" if manifest.synthetic else "")
             + "</p>",
             f"<h1>{_text(title)}</h1>",
-            self._concise_notice(),
+            _concise_notice(),
             *self._synthetic_banner(),
             *self._status(),
-            *self._contents(),
+            *_contents(_SECTIONS),
             "</header>",
             "<main>",
             *self._objective(),
@@ -473,7 +615,7 @@ class _Report:
             *self._feasibility(),
             *self._conclusion(),
             "</main>",
-            *self._closing(),
+            *_closing(self._version, "the run's saved records"),
             "</div>",
             "</body>",
             "</html>",
@@ -481,11 +623,6 @@ class _Report:
         return "\n".join(parts) + "\n"
 
     # The top of the report
-
-    def _concise_notice(self) -> str:
-        lead = CONCISE_NOTICE.removesuffix(f"{CONCISE_NOTICE_LINK}.")
-        link = f'<a href="#{FULL_NOTICE_ID}">{html.escape(CONCISE_NOTICE_LINK)}</a>'
-        return f'<p class="notice" id="notice">{html.escape(lead)}{link}.</p>'
 
     def _synthetic_banner(self) -> list[str]:
         if not self._run.manifest.synthetic:
@@ -521,22 +658,6 @@ class _Report:
             " trades."
         )
 
-    def _contents(self) -> list[str]:
-        items = [f'<li><a href="#{key}">{heading}</a></li>' for key, heading in _SECTIONS]
-        return [
-            '<nav aria-label="Contents">',
-            "<ol>",
-            *items,
-            '<li><a href="#closing">Portfolio123 data, notices, and license</a></li>',
-            "</ol>",
-            "</nav>",
-        ]
-
-    @staticmethod
-    def _heading(key: str) -> str:
-        number = next(i for i, (k, _) in enumerate(_SECTIONS, 1) if k == key)
-        return f'<section id="{key}">\n<h2>{number}. {dict(_SECTIONS)[key]}</h2>'
-
     # 1. Objective
 
     def _objective(self) -> list[str]:
@@ -548,7 +669,7 @@ class _Report:
         )
         benchmark = self._by_name.get("benchmark")
         return [
-            self._heading("objective"),
+            _heading("objective"),
             "<dl>",
             (
                 "<dt>Objective</dt><dd>Unavailable: a screen run declares no research objective,"
@@ -580,7 +701,7 @@ class _Report:
             else f"Portfolio123's response, laid out as {_code(LAYOUT)} version 1"
         )
         return [
-            self._heading("definitions"),
+            _heading("definitions"),
             (
                 f"<p>The metrics are read from {source}. The benchmark's metrics are defined as the"
                 " strategy's.</p>"
@@ -618,15 +739,15 @@ class _Report:
         pit = self._by_name.get("pit_method")
         meanings = _PROVENANCE | ({"verified": _SYNTHETIC_VERIFIED} if manifest.synthetic else {})
         return [
-            self._heading("data"),
+            _heading("data"),
             "<dl>",
             f"<dt>Source</dt><dd>{source}</dd>",
             f"<dt>Response layout</dt><dd>{parsers or 'Unavailable: no response was read.'}</dd>",
             "<dt>Data vendor</dt><dd>"
-            + (self._setting_brief(vendor) if vendor else "Unavailable")
+            + (_setting_brief(vendor) if vendor else "Unavailable")
             + "</dd>",
             "<dt>Point-in-time method</dt><dd>"
-            + (self._setting_brief(pit) if pit else "Unavailable")
+            + (_setting_brief(pit) if pit else "Unavailable")
             + "</dd>",
             "</dl>",
             "<h3>Coverage</h3>",
@@ -673,13 +794,6 @@ class _Report:
         found.update(row.provenance for row in self._metrics.values())
         return found
 
-    def _setting_brief(self, setting: _Setting) -> str:
-        expected = "expected to be " if setting.expected else ""
-        brief = f"{_code(setting.value)} ({expected}{setting.provenance})"
-        if setting.inference_rule is not None:
-            brief += f". {_text(setting.inference_rule)}"
-        return brief
-
     def _coverage(self) -> list[str]:
         if self._run.metrics is None:
             return [
@@ -698,7 +812,7 @@ class _Report:
             requested = _code(setting.value) if setting else "Unavailable"
             if metric is None or metric.value is None:
                 reason = metric.unavailable_reason if metric else None
-                actual = self._unavailable(reason)
+                actual = _unavailable(reason)
                 status = "Couldn't be established"
             else:
                 established = True
@@ -721,7 +835,7 @@ class _Report:
             count = (
                 _code(periods.value)
                 if periods.value is not None
-                else self._unavailable(periods.unavailable_reason)
+                else _unavailable(periods.unavailable_reason)
             )
             rows.append(
                 f"<tr><td>{_METRICS['coverage_periods'][0]}</td><td></td><td>{count}</td>"
@@ -753,7 +867,7 @@ class _Report:
         if not missing:
             return ["<p>None: every metric is available.</p>"]
         items = [
-            f"<li>{self._metric_label(row)}: {self._unavailable(row.unavailable_reason)}</li>"
+            f"<li>{_metric_label(row)}: {_unavailable(row.unavailable_reason)}</li>"
             for row in missing
         ]
         return [
@@ -784,19 +898,10 @@ class _Report:
             return "the run wrote no normalized tables."
         return "no attempt succeeded, so there's no response to normalize."
 
-    def _unavailable(self, reason: UnavailableReason | None) -> str:
-        if reason is None:
-            return "Unavailable"
-        return f"Unavailable ({_code(reason)}): {_REASONS[reason]}"
-
-    def _metric_label(self, row: MetricsRow) -> str:
-        name = _METRICS.get(row.metric_id, (row.metric_id, ""))[0]
-        return f"{_text(name)}, {row.subject} ({_code(row.metric_id)})"
-
     # 4. Results
 
     def _results(self) -> list[str]:
-        parts = [self._heading("results")]
+        parts = [_heading("results")]
         if self._run.metrics is None:
             parts.append(f"<p>The normalized result is unavailable: {self._no_tables_reason()}</p>")
         else:
@@ -850,7 +955,7 @@ class _Report:
         body: list[str] = []
         for row in rows:
             if row.value is None:
-                value = self._unavailable(row.unavailable_reason)
+                value = _unavailable(row.unavailable_reason)
             else:
                 value = _code(row.value)
             name = _text(_METRICS.get(row.metric_id, (row.metric_id, ""))[0])
@@ -944,7 +1049,7 @@ class _Report:
             else "Not reported"
         )
         parts = [
-            self._heading("cases"),
+            _heading("cases"),
             (
                 "<p>A run has one case: the resolved settings, identified by their case ID. Every"
                 " attempt of it is listed, whatever its outcome.</p>"
@@ -1080,7 +1185,7 @@ class _Report:
 
     def _robustness(self) -> list[str]:
         return [
-            self._heading("robustness"),
+            _heading("robustness"),
             (
                 f"<p>{NOT_ASSESSED}. Robustness results and the concentration of contributions need"
                 " more than one run's summary statistics, and Trial Folio doesn't assess them.</p>"
@@ -1090,7 +1195,7 @@ class _Report:
 
     def _statistics(self) -> list[str]:
         return [
-            self._heading("statistics"),
+            _heading("statistics"),
             (
                 f"<p>Statistical validation: {NOT_ASSESSED}. No statistical method was applied, so"
                 " the report states no uncertainty, multiple-testing adjustment, or power. Summary"
@@ -1103,7 +1208,7 @@ class _Report:
     def _evidence(self) -> list[str]:
         run = "one synthetic example" if self._run.manifest.synthetic else "one backtest"
         return [
-            self._heading("evidence"),
+            _heading("evidence"),
             (
                 f"<p>Unavailable: the run is {run} over the requested dates. It has no separate"
                 " development, selection, holdout, or forward period.</p>"
@@ -1130,7 +1235,7 @@ class _Report:
                 " response, but not interpreted.</li>"
             )
         return [
-            self._heading("feasibility"),
+            _heading("feasibility"),
             f"<p>Trading readiness: {NOT_ASSESSED}. Feasibility and capacity aren't assessed.</p>",
             "<p>Execution evidence this run doesn't have:</p>",
             "<ul>",
@@ -1160,7 +1265,7 @@ class _Report:
             " could be achieved."
         )
         return [
-            self._heading("conclusion"),
+            _heading("conclusion"),
             "<h3>Permitted conclusion</h3>",
             f"<p>{conclusion}</p>",
             "<h3>Limitations</h3>",
@@ -1261,32 +1366,1228 @@ class _Report:
         segments = (*self._base, *(quote(part, safe="") for part in path.split("/")))
         return f'<a href="{html.escape("/".join(segments))}">{_code(path)}</a>'
 
-    # The closing section
 
-    def _closing(self) -> list[str]:
-        statement_lead, _, statement_rest = PORTFOLIO123_DATA_STATEMENT.partition(
-            PORTFOLIO123_TERMS_LINK
+# The review report (R02-T07)
+
+_REVIEW_SECTIONS: Final = (
+    ("objective", "Objective, purpose, and research status"),
+    ("definitions", "Definitions, and changes from the baseline"),
+    ("data", "Data sources, coverage, provenance, and missing values"),
+    ("results", "Returns, risks, costs, and assumptions"),
+    ("cases", "Results compared, and their runs"),
+    ("robustness", "Robustness and concentration"),
+    ("statistics", "Statistical methods and uncertainty"),
+    ("evidence", "Development, selection, holdout, and forward evidence"),
+    ("feasibility", "Feasibility, capacity, and missing execution evidence"),
+    ("conclusion", "Conclusion, limitations, and artifacts"),
+)
+"""A review report's sections: a run report's, with the same `id`s, and headings for a
+review."""
+
+_SETTING_CLASSES: Final = (
+    ("same", "The two values read the same."),
+    ("intended_change", "The values differ, and the result declares the change."),
+    ("unexplained_mismatch", "The values differ, and the result doesn't declare the change."),
+    ("unknown", "The setting is missing from one of the two runs, so it can't be compared."),
+)
+
+_METRIC_CLASSES: Final = (
+    ("differenced", "Both values are available and comparable, so their difference is given."),
+    (
+        "not_comparable",
+        (
+            "Both values are available, but their contexts differ, so both are shown, without a"
+            " difference."
+        ),
+    ),
+    ("unavailable", "A value is unavailable, so there's no difference."),
+)
+
+_DIFFERENCE_REASONS: Final[dict[DifferenceReason, str]] = {
+    "input_unavailable": "A value is unavailable.",
+    "different_unit": "The two values are in different units.",
+    "different_benchmark": "The runs' benchmarks differ.",
+    "unknown_period": "A run's period couldn't be established, so it isn't shown as matching.",
+    "different_period": "The runs' periods differ.",
+}
+"""Why a metric isn't differenced, as `differences.csv`'s `reason` gives it, in the order the
+comparison applies them."""
+
+_REVIEW_ROLES: Final[dict[ReviewArtifactRole, str]] = {
+    "configuration": "Review configuration, byte for byte",
+    "run_manifest": "Run manifest, copied",
+    "plan": "Plan, copied",
+    "metrics": "Normalized metrics, copied",
+    "settings": "Normalized settings, copied",
+    "differences": "Differences from the baseline",
+    "report": "Report",
+}
+
+_LAYOUT_METRICS: Final[dict[str, str]] = {
+    "total_return": "Cumulative return over the response's periods.",
+    "sharpe_ratio": (
+        "The Sharpe ratio, as the response layout defines it. Its risk-free rate isn't documented."
+    ),
+    "sortino_ratio": (
+        "The Sortino ratio, as the response layout defines it. Its risk-free rate and target"
+        " aren't documented."
+    ),
+    "alpha": (
+        "Alpha against the benchmark, as the response layout defines it. Its unit is inferred from"
+        " the value's magnitude, and its method isn't documented."
+    ),
+}
+"""A review with a synthetic result gives these definitions in place of a run report's, which call
+a value Portfolio123's or a backtest's. They hold for a synthetic result's values and a backtested
+one's alike (DSC-04)."""
+
+_SYNTHETIC_NOT_SENT: Final = (
+    "Not sent: where a real run leaves it to Portfolio123's default, which isn't documented. Here"
+    " nothing was sent, and no value came from Portfolio123."
+)
+"""What `not_sent` means in a review whose results are all synthetic, whose runs sent nothing."""
+
+_SETTING_COUNT: Final = 23
+"""The screen settings each result's rows compare."""
+
+_COMPARISON_FLAGS: Final = frozenset(
+    {"critical_unexplained_mismatch", "critical_unknown", "intended_change_not_observed"}
+)
+"""The flags a setting row's comparison gives it, rather than its runs' rows."""
+
+
+def _flag_list(flags: Sequence[str]) -> str:
+    """Each flag code, with what it means, one to a line."""
+    return "<br>".join(f"{_code(flag)}: {_FLAGS.get(flag, '')}" for flag in flags)
+
+
+def _series(items: Sequence[str]) -> str:
+    """`a`, `a and b`, or `a, b, and c`."""
+    if len(items) <= 2:
+        return " and ".join(items)
+    return f"{', '.join(items[:-1])}, and {items[-1]}"
+
+
+class _ReviewReport:
+    def __init__(self, review: ReviewEvidence, version: str) -> None:
+        self._review = review
+        self._version = version
+        self._baseline = review.configuration.baseline
+        self._others = tuple(
+            checked for checked in review.inputs if checked.result.label != self._baseline
         )
-        terms = f'<a href="{PORTFOLIO123_TERMS_URL}">{html.escape(PORTFOLIO123_TERMS_LINK)}</a>'
-        notice = [f"<p>{html.escape(paragraph)}</p>" for paragraph in FULL_NOTICE]
-        return [
-            '<footer id="closing">',
-            (
-                f'<p id="portfolio123-data"><strong>{html.escape(PORTFOLIO123_DATA_LABEL)}</strong>'
-                f" {html.escape(statement_lead)}{terms}{html.escape(statement_rest)}</p>"
-            ),
-            f'<details id="{FULL_NOTICE_ID}">',
-            "<summary>Full research and financial-result notice, and license</summary>",
-            *notice,
-            (
-                f"<p>License: {html.escape(LICENSE_NAME)}, <code>{LICENSE_ID}</code>. Notice version"
-                f' {NOTICE_VERSION}. Read <a href="{license_url(self._version)}">the LICENSE'
-                f" published with Trial Folio {self._version}</a>.</p>"
-            ),
-            "</details>",
-            (
-                f'<p class="muted">Rendered by Trial Folio {self._version} from the run\'s saved'
-                " records.</p>"
-            ),
-            "</footer>",
+        self._synthetic = tuple(
+            checked.result.label for checked in review.inputs if checked.run.manifest.synthetic
+        )
+        self._settings = {
+            checked.result.label: {setting.name: setting for setting in _settings_of(checked.run)}
+            for checked in review.inputs
+        }
+        self._metrics = {
+            checked.result.label: {
+                (row.subject, row.metric_id): row for row in checked.run.metrics or ()
+            }
+            for checked in review.inputs
+        }
+        self._rows = {
+            (row.label, row.kind, row.subject, row.name): row for row in review.differences.rows
+        }
+
+    def document(self) -> str:
+        title = self._review.configuration.title
+        kind = ""
+        if self._synthetic:
+            everything = len(self._synthetic) == len(self._review.inputs)
+            kind = " · Synthetic results" if everything else " · Includes synthetic results"
+        parts = [
+            "<!DOCTYPE html>",
+            '<html lang="en">',
+            "<head>",
+            '<meta charset="utf-8">',
+            '<meta name="viewport" content="width=device-width, initial-scale=1">',
+            f'<meta name="generator" content="Trial Folio {self._version}">',
+            f"<title>{_text(title)} · Trial Folio review report</title>",
+            f"<style>\n{_CSS}</style>",
+            "</head>",
+            "<body>",
+            '<div class="page">',
+            "<header>",
+            f'<p class="kind">Trial Folio review report{kind}</p>',
+            f"<h1>{_text(title)}</h1>",
+            _concise_notice(),
+            *self._synthetic_banner(),
+            *self._status(),
+            *_contents(_REVIEW_SECTIONS),
+            "</header>",
+            "<main>",
+            *self._objective(),
+            *self._definitions(),
+            *self._data(),
+            *self._results(),
+            *self._cases(),
+            *self._robustness(),
+            *self._statistics(),
+            *self._evidence(),
+            *self._feasibility(),
+            *self._conclusion(),
+            "</main>",
+            *_closing(self._version, "the review's records"),
+            "</div>",
+            "</body>",
+            "</html>",
         ]
+        return "\n".join(parts) + "\n"
+
+    # How results are named
+
+    def _name(self, label: str) -> str:
+        """A result's label, marked when it's synthetic, as it appears beside its values."""
+        return _code(label) + (" (synthetic)" if label in self._synthetic else "")
+
+    def _labels(self, labels: Sequence[str]) -> str:
+        return _series([_code(label) for label in labels])
+
+    def _sharing(self, label: str) -> tuple[str, ...]:
+        """The other results whose runs saved the response `label`'s run did."""
+        for shared in self._review.differences.shared_responses:
+            if label in shared.labels:
+                return tuple(other for other in shared.labels if other != label)
+        return ()
+
+    # The top of the report
+
+    def _synthetic_banner(self) -> list[str]:
+        if not self._synthetic:
+            return []
+        one = len(self._synthetic) == 1
+        return [
+            (
+                '<p class="synthetic"><strong>Synthetic results.</strong>'
+                f" {self._labels(self._synthetic)} {'is' if one else 'are'} synthetic: written by"
+                " <code>trialfolio demo</code> from invented values. None of"
+                f" {'its' if one else 'their'} values comes from Portfolio123, and nothing was"
+                f" sent to it. {'It is' if one else 'Each is'} marked synthetic wherever its"
+                " values appear.</p>"
+            )
+        ]
+
+    def _status(self) -> list[str]:
+        return [
+            "<dl>",
+            (
+                "<dt>Review outcome</dt><dd>completed: each result was compared with the"
+                " baseline. An execution status, not a research finding.</dd>"
+            ),
+            f"<dt>Statistical validation</dt><dd>{NOT_ASSESSED}</dd>",
+            f"<dt>Trading readiness</dt><dd>{NOT_ASSESSED}</dd>",
+            f"<dt>Results</dt><dd>{self._nature()}</dd>",
+            "</dl>",
+        ]
+
+    def _nature(self) -> str:
+        """What kind of results the review compares (DSC-04)."""
+        synthetic = "invented values, neither backtested nor actual results"
+        backtested = "from applying each screen's rules to historical data, not from actual trades"
+        if not self._synthetic:
+            return f"Backtested: {backtested}."
+        if len(self._synthetic) == len(self._review.inputs):
+            return f"Synthetic: {synthetic}."
+        return (
+            f"Backtested, {backtested}, apart from {self._labels(self._synthetic)}: synthetic,"
+            f" {synthetic}."
+        )
+
+    # 1. Objective
+
+    def _objective(self) -> list[str]:
+        configuration = self._review.configuration
+        purpose = (
+            f"<p>{_text(configuration.purpose)}</p>"
+            if configuration.purpose is not None
+            else '<p class="muted">No purpose was declared.</p>'
+        )
+        return [
+            _heading("objective", _REVIEW_SECTIONS),
+            "<dl>",
+            (
+                "<dt>Objective</dt><dd>Unavailable: a review declares no research objective,"
+                " only a title and an optional purpose.</dd>"
+            ),
+            f"<dt>Title</dt><dd>{_text(configuration.title)}</dd>",
+            f"<dt>Baseline</dt><dd>{self._name(self._baseline)}</dd>",
+            f"<dt>Statistical validation</dt><dd>{NOT_ASSESSED}</dd>",
+            f"<dt>Trading readiness</dt><dd>{NOT_ASSESSED}</dd>",
+            "</dl>",
+            "<h3>Declared purpose</h3>",
+            purpose,
+            "<h3>Benchmarks</h3>",
+            *self._benchmarks(),
+            "</section>",
+        ]
+
+    def _benchmarks(self) -> list[str]:
+        rows: list[str] = []
+        for checked in self._review.inputs:
+            label = checked.result.label
+            setting = self._settings[label].get("benchmark")
+            value = _code(setting.value) if setting is not None else "Missing"
+            if label == self._baseline:
+                comparison = "The baseline's"
+            else:
+                comparison = self._setting_comparison(self._setting_row(label, "benchmark"))
+            rows.append(
+                f"<tr><td>{self._name(label)}</td><td>{value}</td><td>{comparison}</td></tr>"
+            )
+        return [
+            "<p>Each result's benchmark, compared with the baseline's.</p>",
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Result</th><th>Benchmark</th><th>Against the baseline</th>"
+                "</tr></thead>"
+            ),
+            "<tbody>",
+            *rows,
+            "</tbody></table></div>",
+        ]
+
+    def _setting_row(self, label: str, name: str) -> DifferencesRow:
+        return self._rows[(label, "setting", None, name)]
+
+    def _setting_comparison(self, row: DifferencesRow) -> str:
+        meanings = {
+            "same": "Same",
+            "intended_change": "Differs: an intended change",
+            "unexplained_mismatch": "Differs: an unexplained mismatch",
+            "unknown": "Unknown: missing from a run",
+        }
+        shown = meanings[row.classification]
+        flagged = [flag for flag in row.flags if flag in _COMPARISON_FLAGS]
+        if flagged:
+            shown += ", flagged " + _series([_code(flag) for flag in flagged])
+        return shown
+
+    # 2. Definitions
+
+    def _definitions(self) -> list[str]:
+        own = _LAYOUT_METRICS if self._synthetic else {}
+        definitions = [
+            f"<tr><td>{name}</td><td>{_code(metric_id)}</td>"
+            f"<td>{own.get(metric_id, definition)}</td></tr>"
+            for metric_id, (name, definition) in _METRICS.items()
+        ]
+        return [
+            _heading("definitions", _REVIEW_SECTIONS),
+            (
+                f"<p>Each result is compared with the baseline, {self._name(self._baseline)}, by"
+                f" the rules of {_code(METHOD)} version {METHOD_VERSION}: its 23 settings, and"
+                " then its 20 metrics. <code>normalized/differences.csv</code> holds a row for"
+                " each.</p>"
+            ),
+            "<h3>How settings are compared</h3>",
+            "<ul>",
+            *(f"<li>{_code(code)}: {meaning}</li>" for code, meaning in _SETTING_CLASSES),
+            "</ul>",
+            (
+                "<p>A list or a ranking reads as JSON, and anything else as its text. The critical"
+                " settings are the dates, the benchmark, the currency, the costs, the execution,"
+                " the universe, the data source, and the strategy: an unexplained mismatch or an"
+                " unknown value in one is flagged. An intended change to one is shown, but not as"
+                " a defect.</p>"
+            ),
+            "<h3>How metrics are compared</h3>",
+            "<ul>",
+            *(f"<li>{_code(code)}: {meaning}</li>" for code, meaning in _METRIC_CLASSES),
+            "</ul>",
+            (
+                "<p>A difference is the result's value minus the baseline's: in percentage points"
+                " (<code>pp</code>) for percent metrics, in days for dates, and otherwise in the"
+                " metric's unit. It has the smaller of the two values' decimal places, rounded"
+                " half to even, so it never shows more precision than its source. The coverage"
+                " rows are differenced whatever the periods are, because they're the period."
+                " Every other metric is differenced only when the two periods are the same, and a"
+                " benchmark-relative metric, or the benchmark's own, only when the two benchmarks"
+                " are too. A metric that isn't differenced gives one reason, the first of these"
+                " that applies:</p>"
+            ),
+            "<ul>",
+            *(
+                f"<li>{_code(reason)}: {meaning}</li>"
+                for reason, meaning in _DIFFERENCE_REASONS.items()
+            ),
+            "</ul>",
+            "<h3>Metric definitions</h3>",
+            (
+                f"<p>{self._metric_source()} The benchmark's metrics are defined as the"
+                " strategy's.</p>"
+            ),
+            '<div class="wide"><table>',
+            "<thead><tr><th>Metric</th><th>Identifier</th><th>Definition</th></tr></thead>",
+            "<tbody>",
+            *definitions,
+            "</tbody></table></div>",
+            *self._intended_changes(),
+            *self._mismatches(),
+            *self._unknown(),
+            *self._same(),
+            *self._baseline_settings(),
+            "</section>",
+        ]
+
+    def _metric_source(self) -> str:
+        layout = f"laid out as {_code(LAYOUT)} version 1"
+        if not self._synthetic:
+            return f"The metrics are read from each run's response from Portfolio123, {layout}."
+        if len(self._synthetic) == len(self._review.inputs):
+            return (
+                f"The metrics are read from each run's invented response, {layout}: none comes"
+                " from Portfolio123. Each is defined as that layout defines it."
+            )
+        return (
+            f"The metrics are read from each run's response, {layout}: Portfolio123's for a"
+            f" backtested result, and an invented one for {self._labels(self._synthetic)}, whose"
+            " values don't come from Portfolio123. Each is defined as that layout defines it."
+        )
+
+    def _setting_rows(self) -> list[DifferencesRow]:
+        return [row for row in self._review.differences.rows if row.kind == "setting"]
+
+    def _baseline_value(self) -> str:
+        """The heading of a column of the baseline's values, which names it, so a synthetic
+        baseline's values are marked there too."""
+        return f"<th>Baseline value, {self._name(self._baseline)}</th>"
+
+    def _intended_changes(self) -> list[str]:
+        declared = [row for row in self._setting_rows() if row.declared_reason is not None]
+        parts = [
+            "<h3>Intended changes</h3>",
+            "<p>The changes each result declares, against the baseline, with its reason.</p>",
+        ]
+        if not declared:
+            return [*parts, "<p>None: no result declares a change.</p>"]
+        observed = {
+            "intended_change": "Yes: the values differ.",
+            "same": "No: the values are equal.",
+            "unknown": "Can't be confirmed: the setting is missing from a run.",
+            "unexplained_mismatch": "",
+        }
+        body = [
+            f"<tr><td>{self._name(row.label)}</td><td>{_code(row.name)}</td>"
+            f"<td>{self._value(row.baseline_value)}</td><td>{self._value(row.value)}</td>"
+            f"<td>{self._unit(row.unit)}</td><td>{_text(row.declared_reason or '')}</td>"
+            f"<td>{observed[row.classification]}</td><td>{self._flags(row)}</td></tr>"
+            for row in declared
+        ]
+        return [
+            *parts,
+            '<div class="wide"><table>',
+            (
+                f"<thead><tr><th>Result</th><th>Setting</th>{self._baseline_value()}<th>Value</th>"
+                "<th>Unit</th><th>Declared reason</th><th>Observed</th><th>Flags</th></tr></thead>"
+            ),
+            "<tbody>",
+            *body,
+            "</tbody></table></div>",
+        ]
+
+    def _mismatches(self) -> list[str]:
+        rows = [row for row in self._setting_rows() if row.classification == "unexplained_mismatch"]
+        parts = [
+            "<h3>Unexplained mismatches</h3>",
+            (
+                "<p>Settings that differ from the baseline's without a declared change. In a"
+                " critical category, each is flagged.</p>"
+            ),
+        ]
+        if not rows:
+            return [*parts, "<p>None: every setting that differs is declared.</p>"]
+        body = [
+            f"<tr><td>{self._name(row.label)}</td><td>{_code(row.name)}</td>"
+            f"<td>{_code(row.category or '')}</td><td>{self._value(row.baseline_value)}</td>"
+            f"<td>{self._value(row.value)}</td><td>{self._unit(row.unit)}</td>"
+            f"<td>{self._flags(row)}</td></tr>"
+            for row in rows
+        ]
+        return [
+            *parts,
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Result</th><th>Setting</th><th>Category</th>"
+                f"{self._baseline_value()}<th>Value</th><th>Unit</th><th>Flags</th></tr></thead>"
+            ),
+            "<tbody>",
+            *body,
+            "</tbody></table></div>",
+        ]
+
+    def _unknown(self) -> list[str]:
+        rows = [
+            row
+            for row in self._setting_rows()
+            if row.classification == "unknown" and row.declared_reason is None
+        ]
+        if not rows:
+            return []
+        body = [
+            f"<tr><td>{self._name(row.label)}</td><td>{_code(row.name)}</td>"
+            f"<td>{_code(row.category or '')}</td><td>{self._value(row.baseline_value)}</td>"
+            f"<td>{self._value(row.value)}</td><td>{self._flags(row)}</td></tr>"
+            for row in rows
+        ]
+        return [
+            "<h3>Unknown settings</h3>",
+            "<p>Settings missing from one of the two runs, so they can't be compared.</p>",
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Result</th><th>Setting</th><th>Category</th>"
+                f"{self._baseline_value()}<th>Value</th><th>Flags</th></tr></thead>"
+            ),
+            "<tbody>",
+            *body,
+            "</tbody></table></div>",
+        ]
+
+    def _same(self) -> list[str]:
+        rows = self._setting_rows()
+        counts = [
+            f"{sum(row.label == label and row.classification == 'same' for row in rows)}"
+            f" of {_SETTING_COUNT} for {self._name(label)}"
+            for label in (checked.result.label for checked in self._others)
+        ]
+        flagged = [
+            row
+            for row in rows
+            if row.classification == "same" and row.flagged and row.declared_reason is None
+        ]
+        parts = [
+            "<h3>Settings that are the same</h3>",
+            f"<p>The settings that read the same as the baseline's: {_series(counts)}.</p>",
+        ]
+        if not flagged:
+            return parts
+        body = [
+            f"<tr><td>{self._name(row.label)}</td><td>{_code(row.name)}</td>"
+            f"<td>{self._value(row.value)}</td><td>{self._unit(row.unit)}</td>"
+            f"<td>{self._flags(row)}</td></tr>"
+            for row in flagged
+        ]
+        return [
+            *parts,
+            "<p>These are the same, but flagged:</p>",
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Result</th><th>Setting</th><th>Value</th><th>Unit</th>"
+                "<th>Flags</th></tr></thead>"
+            ),
+            "<tbody>",
+            *body,
+            "</tbody></table></div>",
+        ]
+
+    def _baseline_settings(self) -> list[str]:
+        checked = next(c for c in self._review.inputs if c.result.label == self._baseline)
+        settings = self._settings[self._baseline].values()
+        expected = checked.run.settings is None
+        intro = (
+            "Its run has no settings.csv, so these are its plan's resolved settings, each with the"
+            " provenance the plan expects it to have once the request is sent."
+            if expected
+            else "As its settings.csv records them."
+        )
+        body = [
+            f"<tr><td>{_code(setting.name)}</td><td>{_code(setting.category)}</td>"
+            f"<td>{_code(setting.value)}</td><td>{self._unit(setting.unit)}</td>"
+            f"<td>{_code(setting.provenance)}</td>"
+            f"<td>{_flag_list(setting.flags)}</td></tr>"
+            for setting in settings
+        ]
+        return [
+            f"<h3>The baseline's settings, {self._name(self._baseline)}</h3>",
+            f"<p>{intro}</p>",
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Setting</th><th>Category</th><th>Value</th><th>Unit</th>"
+                f"<th>{'Expected provenance' if expected else 'Provenance'}</th><th>Flags</th>"
+                "</tr></thead>"
+            ),
+            "<tbody>",
+            *body,
+            "</tbody></table></div>",
+        ]
+
+    @staticmethod
+    def _value(value: str | None) -> str:
+        return "Missing" if value is None else _code(value)
+
+    @staticmethod
+    def _unit(unit: str | None) -> str:
+        return "" if unit is None else _code(unit)
+
+    @staticmethod
+    def _flags(row: DifferencesRow) -> str:
+        if not row.flags:
+            return ""
+        flags = _flag_list(row.flags)
+        return f"<strong>Flagged.</strong> {flags}" if row.flagged else flags
+
+    # 3. Data sources
+
+    def _data(self) -> list[str]:
+        return [
+            _heading("data", _REVIEW_SECTIONS),
+            "<h3>Sources</h3>",
+            *self._sources(),
+            "<h3>Coverage</h3>",
+            *self._coverage(),
+            "<h3>Provenance</h3>",
+            "<p>Each setting and metric records where its value came from:</p>",
+            "<ul>",
+            *self._provenance(),
+            "</ul>",
+            "<h3>External references</h3>",
+            *self._references(),
+            "<h3>Missing values</h3>",
+            *self._missing(),
+            "<h3>Exclusions</h3>",
+            (
+                "<p>The review copies each run's manifest, plan, and normalized tables, byte for"
+                " byte, and excludes nothing from them. Each run's screen configuration, start and"
+                " attempt records, request, response, and report stay in the run, and its copied"
+                " manifest records the hash of each.</p>"
+            ),
+            "</section>",
+        ]
+
+    def _sources(self) -> list[str]:
+        rows: list[str] = []
+        for checked in self._review.inputs:
+            label = checked.result.label
+            manifest = checked.run.manifest
+            if manifest.synthetic:
+                source = (
+                    "Invented values, written by <code>trialfolio demo</code> in the layout of"
+                    " Portfolio123's screen backtest response. Nothing was sent to Portfolio123."
+                )
+            else:
+                source = (
+                    "Portfolio123's screen backtest, through <code>p123api</code>'s"
+                    " <code>screen_backtest</code>."
+                )
+            layouts = ", ".join(
+                f"{_code(parser.layout)} version {parser.layout_version}, parser version"
+                f" {parser.parser_version}"
+                for parser in manifest.parsers
+            )
+            settings = self._settings[label]
+            vendor, pit = settings.get("data_vendor"), settings.get("pit_method")
+            rows.append(
+                f"<tr><td>{self._name(label)}</td><td>{source}</td>"
+                f"<td>{layouts or 'Unavailable: no response was read.'}</td>"
+                f"<td>{_setting_brief(vendor) if vendor else 'Missing'}</td>"
+                f"<td>{_setting_brief(pit) if pit else 'Missing'}</td></tr>"
+            )
+        return [
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Result</th><th>Source</th><th>Response layout</th>"
+                "<th>Data vendor</th><th>Point-in-time method</th></tr></thead>"
+            ),
+            "<tbody>",
+            *rows,
+            "</tbody></table></div>",
+        ]
+
+    def _coverage(self) -> list[str]:
+        rows: list[str] = []
+        for checked in self._review.inputs:
+            label = checked.result.label
+            if checked.run.metrics is None:
+                cells = ["Unavailable"] * 3
+            else:
+                cells = [
+                    self._coverage_cell(label, "coverage_start", "start_date"),
+                    self._coverage_cell(label, "coverage_end", "end_date"),
+                    self._coverage_cell(label, "coverage_periods", None),
+                ]
+            if label == self._baseline:
+                against = "The baseline"
+            elif checked.run.metrics is None:
+                against = "Unavailable: its run has no normalized tables."
+            elif not self._metrics[self._baseline]:
+                against = "Unavailable: the baseline's run has no normalized tables."
+            else:
+                against = self._coverage_against(label)
+            rows.append(
+                f"<tr><td>{self._name(label)}</td>"
+                + "".join(f"<td>{cell}</td>" for cell in cells)
+                + f"<td>{against}</td></tr>"
+            )
+        return [
+            (
+                "<p>Each result's coverage is read from the dates of its response's periods. A"
+                " run without normalized tables has none. The coverage rows are compared with the"
+                " baseline's whatever the periods are, because they're the period: dates in days,"
+                " and periods as a count. Coverage that couldn't be established is never shown as"
+                " matching.</p>"
+            ),
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Result</th><th>Coverage start</th><th>Coverage end</th>"
+                "<th>Coverage periods</th><th>Against the baseline</th></tr></thead>"
+            ),
+            "<tbody>",
+            *rows,
+            "</tbody></table></div>",
+        ]
+
+    def _coverage_cell(self, label: str, metric_id: str, requested: str | None) -> str:
+        row = self._metrics[label][("strategy", metric_id)]
+        if row.value is None:
+            return f"Couldn't be established. {_unavailable(row.unavailable_reason)}"
+        cell = _code(row.value)
+        setting = self._settings[label].get(requested) if requested is not None else None
+        if setting is not None and "coverage_mismatch" in setting.flags:
+            cell += f": requested {_code(setting.value)}, flagged <code>coverage_mismatch</code>"
+        return cell
+
+    def _coverage_against(self, label: str) -> str:
+        parts: list[str] = []
+        for metric_id, name in (
+            ("coverage_start", "Start"),
+            ("coverage_end", "End"),
+            ("coverage_periods", "Periods"),
+        ):
+            row = self._rows[(label, "metric", "strategy", metric_id)]
+            if row.difference is None:
+                parts.append(f"{name}: {self._comparison(row)}")
+            else:
+                unit = "" if row.difference_unit == "count" else f" {row.difference_unit}"
+                parts.append(f"{name}: {_code(row.difference)}{unit}")
+        return "<br>".join(parts)
+
+    def _provenance(self) -> list[str]:
+        found: set[str] = set()
+        for label, settings in self._settings.items():
+            found.update(setting.provenance for setting in settings.values())
+            found.update(row.provenance for row in self._metrics[label].values())
+        meanings = dict(_PROVENANCE)
+        meanings["verified"] = (
+            "Sent in the request, or captured from Portfolio123's response, by the result's run."
+        )
+        if len(self._synthetic) == len(self._review.inputs):
+            meanings["verified"] = _SYNTHETIC_VERIFIED
+        elif self._synthetic:
+            meanings["verified"] += (
+                f" For {self._labels(self._synthetic)}, which"
+                f" {'is' if len(self._synthetic) == 1 else 'are'} synthetic, it marks where a"
+                " real run's value would be: nothing was sent, and no value came from"
+                " Portfolio123."
+            )
+        return [
+            f"<li>{_code(name)}: {meaning}</li>"
+            for name, meaning in meanings.items()
+            if name in found
+        ]
+
+    def _references(self) -> list[str]:
+        items: list[str] = []
+        for checked in self._review.inputs:
+            label = checked.result.label
+            for reference in checked.run.manifest.reproducibility.external_references:
+                setting = self._settings[label].get(reference.setting)
+                value = f" {_code(setting.value)}" if setting is not None else ""
+                state = (
+                    "snapshotted"
+                    if reference.snapshotted
+                    else "not snapshotted: its definition wasn't captured"
+                )
+                items.append(
+                    f"<li>{self._name(label)}: {_code(reference.setting)}{value}, {state}.</li>"
+                )
+        intro = (
+            "<p>Settings that name an object in the Portfolio123 account. A change to one that"
+            " wasn't snapshotted between two runs doesn't show as a change in the settings.</p>"
+        )
+        if not items:
+            return [intro, "<p>None.</p>"]
+        return [intro, "<ul>", *items, "</ul>"]
+
+    def _missing(self) -> list[str]:
+        items: list[str] = []
+        unavailable = 0
+        for checked in self._review.inputs:
+            label = checked.result.label
+            if checked.run.metrics is None:
+                items.append(
+                    f"<li>{self._name(label)}: every metric, because its run has no normalized"
+                    " tables.</li>"
+                )
+                continue
+            for row in checked.run.metrics:
+                if row.value is None:
+                    unavailable += 1
+                    items.append(
+                        f"<li>{self._name(label)}: {_metric_label(row)}:"
+                        f" {_unavailable(row.unavailable_reason)}</li>"
+                    )
+        if not items:
+            return ["<p>None: every metric of every result is available.</p>"]
+        summary = (
+            f"{unavailable} metric {'value is' if unavailable == 1 else 'values are'} unavailable,"
+            " each with the reason its copied metrics.csv gives."
+            if unavailable
+            else "Every value in the copied metrics.csv files is available."
+        )
+        return [
+            (
+                f"<p>{summary} A result without normalized tables has no values. None is shown as"
+                " zero, and a comparison with an unavailable value is unavailable too, with"
+                f" {_code('input_unavailable')}.</p>"
+            ),
+            "<ul>",
+            *items,
+            "</ul>",
+        ]
+
+    # 4. Results
+
+    def _results(self) -> list[str]:
+        parts = [
+            _heading("results", _REVIEW_SECTIONS),
+            (
+                "<p>Each result's metrics beside the baseline's, as the copied metrics.csv files"
+                " hold them, never padded or rounded, and the difference where the two values are"
+                " comparable. The coverage rows are in the coverage table above.</p>"
+            ),
+        ]
+        for checked in self._others:
+            parts.extend(self._compared(checked.result.label))
+        parts.extend(
+            [
+                "<h3>Costs</h3>",
+                *self._settings_across(("slippage_percent", "commission", "carry_cost")),
+                "<h3>Exposures</h3>",
+                "<p>Unavailable: the responses report no exposures.</p>",
+                "<h3>Implementation assumptions</h3>",
+                *self._settings_across(
+                    ("transaction_price", "rebalance_weeks", "max_holdings", "pit_method")
+                ),
+                "</section>",
+            ]
+        )
+        return parts
+
+    def _compared(self, label: str) -> list[str]:
+        parts = [f"<h3>{self._name(label)} against the baseline, {self._name(self._baseline)}</h3>"]
+        sharing = self._sharing(label)
+        if sharing:
+            parts.append(
+                "<p>Every metric row is flagged <code>identical_source</code>: its run's saved"
+                f" response is byte-identical to {self._labels(sharing)}'s.</p>"
+            )
+        body: list[str] = []
+        for metric in METRICS:
+            if metric.metric_id in _COVERAGE:
+                continue
+            row = self._rows[(label, "metric", metric.subject, metric.metric_id)]
+            name = _text(_METRICS[metric.metric_id][0])
+            difference = ""
+            decimals = ""
+            if row.difference is not None:
+                difference = f"{_code(row.difference)} {_code(row.difference_unit or '')}"
+                decimals = str(row.difference_decimals)
+            body.append(
+                f"<tr><td>{name}<br>{_code(metric.metric_id)}</td><td>{metric.subject}</td>"
+                f"<td>{self._metric_value(self._baseline, metric.subject, metric.metric_id)}</td>"
+                f"<td>{self._metric_value(label, metric.subject, metric.metric_id)}</td>"
+                f"<td>{_code(metric.unit)}</td><td>{difference}</td><td>{decimals}</td>"
+                f"<td>{self._comparison(row)}</td></tr>"
+            )
+        return [
+            *parts,
+            '<div class="wide"><table>',
+            (
+                f"<thead><tr><th>Metric</th><th>Subject</th><th>{self._name(self._baseline)}"
+                f"</th><th>{self._name(label)}</th><th>Unit</th><th>Difference</th>"
+                "<th>Decimals</th><th>Comparison</th></tr></thead>"
+            ),
+            "<tbody>",
+            *body,
+            "</tbody></table></div>",
+        ]
+
+    def _metric_value(self, label: str, subject: str, metric_id: str) -> str:
+        """A result's value of a metric, as its metrics.csv holds it, with the benchmark it
+        concerns, or its own reason it's unavailable."""
+        row = self._metrics[label].get((subject, metric_id))
+        if row is None:
+            return "Unavailable: the run has no normalized tables."
+        if row.value is None:
+            return _unavailable(row.unavailable_reason)
+        value = _code(row.value)
+        if row.benchmark is not None:
+            value += f" vs. {_code(row.benchmark)}"
+        elif subject == "benchmark":
+            benchmark = self._settings[label].get("benchmark")
+            if benchmark is not None:
+                value += f" for {_code(benchmark.value)}"
+        return value
+
+    def _comparison(self, row: DifferencesRow) -> str:
+        if row.classification == "differenced":
+            return "Differenced"
+        reason = row.reason or "input_unavailable"
+        shown = "Not compared" if row.classification == "not_comparable" else "Unavailable"
+        return f"{shown} ({_code(reason)}): {_DIFFERENCE_REASONS[reason]}"
+
+    def _settings_across(self, names: Sequence[str]) -> list[str]:
+        """The settings `names`, for each result."""
+        rows: list[str] = []
+        tokens: set[str] = set()
+        for checked in self._review.inputs:
+            label = checked.result.label
+            cells: list[str] = []
+            for name in names:
+                setting = self._settings[label].get(name)
+                if setting is None:
+                    cells.append("Missing")
+                    continue
+                tokens.add(setting.value)
+                cells.append(f"{_code(setting.value)} {self._unit(setting.unit)}".rstrip())
+            rows.append(
+                f"<tr><td>{self._name(label)}</td>"
+                + "".join(f"<td>{cell}</td>" for cell in cells)
+                + "</tr>"
+            )
+        notes = [
+            f"<li>{_code(token)}: {self._token(token)}</li>" for token in _TOKENS if token in tokens
+        ]
+        return [
+            '<div class="wide"><table>',
+            "<thead><tr><th>Result</th>"
+            + "".join(f"<th>{_code(name)}</th>" for name in names)
+            + "</tr></thead>",
+            "<tbody>",
+            *rows,
+            "</tbody></table></div>",
+            *(["<ul>", *notes, "</ul>"] if notes else []),
+        ]
+
+    def _token(self, token: str) -> str:
+        """What a setting's token means. A synthetic result's run sent nothing, so no default of
+        Portfolio123's applied to it (DSC-04)."""
+        meaning = _TOKENS[token]
+        if token != "not_sent" or not self._synthetic:
+            return meaning
+        if len(self._synthetic) == len(self._review.inputs):
+            return _SYNTHETIC_NOT_SENT
+        one = len(self._synthetic) == 1
+        return (
+            "Not sent. For a backtested result, Portfolio123's default applies, and it isn't"
+            f" documented. For {self._labels(self._synthetic)}, which {'is' if one else 'are'}"
+            " synthetic, nothing was sent."
+        )
+
+    # 5. Results compared, and their runs
+
+    def _cases(self) -> list[str]:
+        count = len(self._review.inputs)
+        parts = [
+            _heading("cases", _REVIEW_SECTIONS),
+            (
+                f"<p>The review compares {count} results, in the configuration's order, and lists"
+                " each, whatever its run's outcome. Under <code>inputs/</code>, each has a copy of"
+                " its run's manifest, plan, and normalized tables, when it has them.</p>"
+            ),
+        ]
+        for checked in self._review.inputs:
+            parts.extend(self._result(checked))
+        parts.extend(
+            [
+                "<h3>Shared responses</h3>",
+                *self._shared(),
+                "<h3>Versions</h3>",
+                "<dl>",
+                (
+                    f"<dt>Review written by</dt><dd>Trial Folio {self._version}, command"
+                    f" <code>review</code>, started {_moment(self._review.started_at)}</dd>"
+                ),
+                f"<dt>Review ID</dt><dd>{_code(str(self._review.review_id))}</dd>",
+                f"<dt>Method</dt><dd>{_code(METHOD)} version {METHOD_VERSION}</dd>",
+                (
+                    f"<dt>License and notice</dt><dd>Recorded with the review: {_code(LICENSE_ID)},"
+                    f" notice version {NOTICE_VERSION}</dd>"
+                ),
+                f"<dt>Report rendered by</dt><dd>Trial Folio {self._version}</dd>",
+                "</dl>",
+                "</section>",
+            ]
+        )
+        return parts
+
+    def _result(self, checked: ReviewInput) -> list[str]:
+        label = checked.result.label
+        run = checked.run
+        manifest = run.manifest
+        reviewed = checked.reviewed
+        baseline = label == self._baseline
+        outcome = _code(manifest.outcome)
+        if manifest.error is not None:
+            outcome += f" ({_code(manifest.error.code)})"
+        if run.metrics is not None:
+            tables = "Yes: its metrics.csv and settings.csv are copied."
+        elif manifest.error is not None:
+            tables = (
+                f"No. Its run ended with {_code(manifest.error.code)}, and its manifest says:"
+                f" {_text(manifest.error.message)}"
+            )
+        else:
+            tables = "No: its run wrote no normalized tables."
+        if reviewed.response is None:
+            response = "None: the run saved no response."
+        else:
+            response = _code(reviewed.response)
+            sharing = self._sharing(label)
+            if sharing:
+                response += f". Byte-identical to {self._labels(sharing)}'s."
+        nature = (
+            "Synthetic: invented values, neither backtested nor actual results."
+            if manifest.synthetic
+            else (
+                "Backtested: from applying the screen's rules to historical data, not from actual"
+                " trades."
+            )
+        )
+        description = checked.result.description
+        purpose = run.plan.purpose
+        facts = [
+            (
+                "<dt>Role</dt><dd>"
+                + ("The baseline" if baseline else "Compared with the baseline")
+                + "</dd>"
+            ),
+            "<dt>Description</dt><dd>"
+            + (_text(description) if description is not None else "None given.")
+            + "</dd>",
+            f"<dt>Run title</dt><dd>{_text(run.plan.title)}</dd>",
+            "<dt>Run purpose</dt><dd>"
+            + (_text(purpose) if purpose is not None else "No purpose was declared.")
+            + "</dd>",
+            f"<dt>Results</dt><dd>{nature}</dd>",
+            f"<dt>Run outcome</dt><dd>{outcome}. An execution status, not a research finding.</dd>",
+            f"<dt>Normalized tables</dt><dd>{tables}</dd>",
+            f"<dt>Run manifest</dt><dd>{_code(reviewed.run_manifest)}</dd>",
+            f"<dt>Plan hash</dt><dd>{_code(reviewed.plan_hash)}</dd>",
+            f"<dt>Case</dt><dd>{_code(reviewed.case_id)}</dd>",
+            f"<dt>Saved response</dt><dd>{response}</dd>",
+            (
+                f"<dt>Run written by</dt><dd>Trial Folio {_text(manifest.trialfolio_version)},"
+                f" command {_code(manifest.command.name)}, started"
+                f" {_moment(manifest.command.started_at)}</dd>"
+            ),
+        ]
+        return [
+            f"<h3>{self._name(label)}" + (", the baseline" if baseline else "") + "</h3>",
+            "<dl>",
+            *facts,
+            "</dl>",
+        ]
+
+    def _shared(self) -> list[str]:
+        shared = self._review.differences.shared_responses
+        if not shared:
+            return ["<p>None: no two results have byte-identical saved responses.</p>"]
+        items = [
+            f"<li>{self._labels(group.labels)}: {_code(group.response)}</li>" for group in shared
+        ]
+        return [
+            (
+                "<p>Results whose runs saved one response, byte for byte. Their metrics come from"
+                " that one response, so equal values between them say nothing about whether two"
+                " runs agree. Every metric row of each, apart from the baseline's, is flagged"
+                " <code>identical_source</code>.</p>"
+            ),
+            "<ul>",
+            *items,
+            "</ul>",
+        ]
+
+    # 6 to 9
+
+    def _robustness(self) -> list[str]:
+        return [
+            _heading("robustness", _REVIEW_SECTIONS),
+            (
+                f"<p>{NOT_ASSESSED}. Robustness results and the concentration of contributions need"
+                " more than the runs' summary statistics, and Trial Folio doesn't assess them.</p>"
+            ),
+            "</section>",
+        ]
+
+    def _statistics(self) -> list[str]:
+        return [
+            _heading("statistics", _REVIEW_SECTIONS),
+            (
+                f"<p>Statistical validation: {NOT_ASSESSED}. A difference is one summary statistic"
+                " minus another. No statistical method was applied, so the report states no"
+                " uncertainty, significance, multiple-testing adjustment, or power. Summary"
+                " statistics alone don't support intervals, a return series, or a drawdown"
+                " history, so none is shown or reconstructed.</p>"
+            ),
+            "</section>",
+        ]
+
+    def _evidence(self) -> list[str]:
+        if not self._synthetic:
+            each = "each result is one backtest"
+        elif len(self._synthetic) == len(self._review.inputs):
+            each = "each result is one synthetic example"
+        else:
+            each = "each backtested result is one backtest, and each synthetic one an example,"
+        return [
+            _heading("evidence", _REVIEW_SECTIONS),
+            (
+                f"<p>Unavailable: {each} over its requested dates. None has a separate"
+                " development, selection, holdout, or forward period, and the review makes no"
+                " result another's holdout.</p>"
+            ),
+            f"<p>{self._nature()}</p>",
+            "</section>",
+        ]
+
+    def _feasibility(self) -> list[str]:
+        missing = ["<li>Actual trades: none.</li>"]
+        commissions = {
+            setting.value
+            for settings in self._settings.values()
+            if (setting := settings.get("commission")) is not None
+        }
+        if "not_modeled" in commissions:
+            missing.append(f"<li>Commission: {_TOKENS['not_modeled']}</li>")
+        missing.append(
+            "<li>Turnover, positions, and per-period returns: a review copies no response, and"
+            " compares none.</li>"
+        )
+        return [
+            _heading("feasibility", _REVIEW_SECTIONS),
+            f"<p>Trading readiness: {NOT_ASSESSED}. Feasibility and capacity aren't assessed.</p>",
+            "<p>Execution evidence the results don't have:</p>",
+            "<ul>",
+            *missing,
+            "</ul>",
+            "</section>",
+        ]
+
+    # 10. Conclusion
+
+    def _conclusion(self) -> list[str]:
+        others = len(self._others)
+        conclusion = (
+            f"The review compared {others} {'result' if others == 1 else 'results'} with the"
+            f" baseline, {self._name(self._baseline)}: it shows which settings differ, and the"
+            " difference between each pair of comparable metrics. That's a statement about what"
+            " differs, not about which strategy is better: the review ranks no result."
+            " Statistical validation and trading readiness are not assessed, so this report"
+            " permits no conclusion about whether any strategy is useful, or whether its results"
+            " could be achieved."
+        )
+        return [
+            _heading("conclusion", _REVIEW_SECTIONS),
+            "<h3>Permitted conclusion</h3>",
+            f"<p>{conclusion}</p>",
+            "<h3>Limitations</h3>",
+            "<ul>",
+            *(f"<li>{item}</li>" for item in self._limitations()),
+            "</ul>",
+            "<h3>Artifacts</h3>",
+            *self._artifacts(),
+            "</section>",
+        ]
+
+    def _limitations(self) -> list[str]:
+        differences = self._review.differences
+        settings, metrics = differences.setting_counts, differences.metric_counts
+        items = [self._nature()]
+        if settings.flagged:
+            items.append(
+                f"{settings.flagged} setting"
+                f" {'comparison is' if settings.flagged == 1 else 'comparisons are'} flagged,"
+                " each listed with the changes from the baseline."
+            )
+        incomplete = [
+            checked.result.label
+            for checked in self._review.inputs
+            if checked.run.manifest.reproducibility.status == "incomplete"
+        ]
+        if incomplete:
+            items.append(
+                f"Reproducibility is incomplete for {self._labels(incomplete)}: each names an"
+                " object in the Portfolio123 account whose definition wasn't captured, as the"
+                " external references list. If one changed between two runs, the review can't"
+                " show it."
+            )
+        if len(self._synthetic) < len(self._review.inputs):
+            items.append(
+                "Portfolio123's data and engines change, so running a configuration again may"
+                " give different results, and two runs of one configuration may differ for that"
+                " reason alone."
+            )
+        if metrics.not_comparable:
+            items.append(
+                f"{metrics.not_comparable} metric comparisons aren't differenced, because a"
+                " context differs. Each gives its reason."
+            )
+        if metrics.unavailable:
+            items.append(
+                f"{metrics.unavailable} metric comparisons are unavailable, because a value is."
+            )
+        without = [c.result.label for c in self._review.inputs if c.run.metrics is None]
+        if without:
+            one = len(without) == 1
+            items.append(
+                f"{self._labels(without)} {'has' if one else 'have'} no normalized tables, so"
+                f" {'its' if one else 'their'} metrics are unavailable."
+            )
+        if differences.shared_responses:
+            items.append(
+                "Some results share a saved response, so their metrics come from one response."
+            )
+        items.append(
+            "Only summary statistics are compared: no return series, drawdown history, or"
+            " interval is shown."
+        )
+        return items
+
+    def _artifacts(self) -> list[str]:
+        rows = [
+            (
+                f"<tr><td>{self._link(MANIFEST_PATH)}</td><td>Review manifest, written last</td>"
+                "<td></td><td></td><td></td></tr>"
+            ),
+            *(
+                f'<tr><td class="long">{self._link(artifact.path)}</td>'
+                f"<td>{_REVIEW_ROLES[artifact.role]}</td>"
+                f"<td>{'' if artifact.label is None else self._name(artifact.label)}</td>"
+                f'<td>{artifact.size}</td><td class="long">{_code(artifact.artifact_id)}</td></tr>'
+                for artifact in self._review.artifacts
+            ),
+        ]
+        return [
+            (
+                "<p>Each file links to the review's copy, by its path relative to this report. None"
+                " links to a run. An <code>artifact_id</code> is the SHA-256 of the file's"
+                " bytes.</p>"
+            ),
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>File</th><th>Role</th><th>Result</th><th>Size, bytes</th>"
+                "<th>artifact_id</th></tr></thead>"
+            ),
+            "<tbody>",
+            *rows,
+            "</tbody></table></div>",
+        ]
+
+    @staticmethod
+    def _link(path: str) -> str:
+        href = "/".join(quote(part, safe="") for part in path.split("/"))
+        return f'<a href="{html.escape(href)}">{_code(path)}</a>'

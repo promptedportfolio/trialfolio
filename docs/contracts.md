@@ -1032,6 +1032,23 @@ Reports count as output under [D-07](spec.md#decisions). Users may share them wi
 - **Links to the run's artifacts.** A report links `manifest.json` and each file the manifest lists, apart from reports, by a path relative to the report's own directory, with each segment percent-encoded. In the run, that's the path in the manifest. A report `trialfolio report` writes elsewhere links through the run's directory, by its path relative to the new output directory, such as `../../runs/baseline/plan.json`, which the CLI works out. Each of its segments is percent-encoded from its bytes in the file system, so a directory whose name isn't UTF-8 is still linked. Where there's no relative path, as between two Windows drives, the files are named without links.
 - **Deterministic.** The report holds no time of its own rendering. So rendering the same run with the same version gives the same bytes, and re-rendering a run into its own directory reproduces its report.
 
+**The review report (R02-T07).** `src/trialfolio/report.py` renders a review's report too, with `ReportRenderer`'s `render_review`, from the review's configuration, each result's run as the [input check](#review-output) read it, the comparison, and what the review manifest will record, without the report's own entry. A run report's rules above hold for it, apart from where it links, and these add to them:
+
+- **Its structure.** A run report's: the header, then the ten sections, with the same `id`s, and the closing section. The header's kind line reads "Trial Folio review report".
+- **Changes from the baseline,** in section 2, the [differences between screen runs](#differences-between-screen-runs) rules, and then every flagged setting row of `differences.csv`, in tables of their own:
+  - **Intended changes:** each declared change, observed or not, with its reason.
+  - **Unexplained mismatches,** apart from the intended changes.
+  - **Unknown settings,** that no result declares.
+  - **The settings that are the same,** counted for each result. Those that are the same but flagged, such as a date with `coverage_mismatch`, are listed with their flags.
+
+  The baseline's own settings follow.
+- **Metrics,** in section 4: each result's beside the baseline's, with the difference, its unit, and its decimal places when they're differenced, or the reason when they're not. A benchmark-relative value names its benchmark, and the benchmark's own value the run's `benchmark` setting, so values across two benchmarks show both. An unavailable value gives the reason the copied `metrics.csv` gives it, such as `blank_in_source`, and its comparison is `unavailable`, with `input_unavailable`.
+- **The coverage,** in section 3: each result's dates and periods, with any `coverage_mismatch`, and how far each moved from the baseline's: dates in days, and periods as a count.
+- **Each result,** in section 5: its role, description, run title, run purpose, outcome, and whether it has normalized tables. A run without them says why, with its copied manifest's `error`: its code, and its message as recorded. Each result also names its run's manifest, plan hash, case, and saved response, and the results that share each response.
+- **Synthetic results.** When any result is synthetic, a banner before any result names each one, and every table cell or heading that names one marks it, as in "`demo` (synthetic)". A column of the baseline's values names the baseline in its heading, so a synthetic baseline's values are marked there too. A synthetic result's values are never called Portfolio123's or a backtest's ([DSC-04](disclaimers.md#dsc-04-actual-simulated-and-hypothetical-results)).
+- **Its links.** The report is in the review's output directory, so it links `manifest.json` and each file the manifest lists, apart from itself, by its path in the review. It never links a run, and no `run` path appears in it.
+- **Its conclusion** says what differs, and never which result is better: a review ranks no result.
+
 **A complete run.** `trialfolio report` reads only through the `ArtifactStore`, and only the files the manifest lists. A directory is a complete run when all of these hold; otherwise it's `input.not_a_run`, and the message names the problem, never a value:
 
 - Its `manifest.json` is a run manifest, `artifact_type: run`, valid against its model.
