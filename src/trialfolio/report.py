@@ -1751,6 +1751,11 @@ class _ReviewReport:
     def _setting_rows(self) -> list[DifferencesRow]:
         return [row for row in self._review.differences.rows if row.kind == "setting"]
 
+    def _baseline_value(self) -> str:
+        """The heading of a column of the baseline's values, which names it, so a synthetic
+        baseline's values are marked there too."""
+        return f"<th>Baseline value, {self._name(self._baseline)}</th>"
+
     def _intended_changes(self) -> list[str]:
         declared = [row for row in self._setting_rows() if row.declared_reason is not None]
         parts = [
@@ -1776,7 +1781,7 @@ class _ReviewReport:
             *parts,
             '<div class="wide"><table>',
             (
-                "<thead><tr><th>Result</th><th>Setting</th><th>Baseline value</th><th>Value</th>"
+                f"<thead><tr><th>Result</th><th>Setting</th>{self._baseline_value()}<th>Value</th>"
                 "<th>Unit</th><th>Declared reason</th><th>Observed</th><th>Flags</th></tr></thead>"
             ),
             "<tbody>",
@@ -1807,7 +1812,7 @@ class _ReviewReport:
             '<div class="wide"><table>',
             (
                 "<thead><tr><th>Result</th><th>Setting</th><th>Category</th>"
-                "<th>Baseline value</th><th>Value</th><th>Unit</th><th>Flags</th></tr></thead>"
+                f"{self._baseline_value()}<th>Value</th><th>Unit</th><th>Flags</th></tr></thead>"
             ),
             "<tbody>",
             *body,
@@ -1834,7 +1839,7 @@ class _ReviewReport:
             '<div class="wide"><table>',
             (
                 "<thead><tr><th>Result</th><th>Setting</th><th>Category</th>"
-                "<th>Baseline value</th><th>Value</th><th>Flags</th></tr></thead>"
+                f"{self._baseline_value()}<th>Value</th><th>Flags</th></tr></thead>"
             ),
             "<tbody>",
             *body,

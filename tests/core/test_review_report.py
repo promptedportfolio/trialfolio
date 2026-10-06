@@ -796,6 +796,25 @@ def test_a_synthetic_results_values_are_labeled_wherever_they_appear(
         assert not [after for after in marks[label] if "synthetic" in after]
 
 
+@pytest.mark.parametrize(
+    ("name", "heading", "column"),
+    [
+        ("synthetic.yaml", "Intended changes", "Baseline value, demo (synthetic)"),
+        ("example.yaml", "Intended changes", "Baseline value, hold25"),
+        ("undeclared.yaml", "Unexplained mismatches", "Baseline value, baseline"),
+    ],
+)
+def test_a_column_of_the_baselines_values_names_the_baseline(
+    review: Review, name: str, heading: str, column: str
+) -> None:
+    """A row names its result, and the baseline's values beside it are in a column whose heading
+    names the baseline, so a synthetic baseline's values are marked there too."""
+    document = review(name).document
+    (header, *_) = document.rows(document.table_after(heading))
+
+    assert column in [cell.text for cell in header]
+
+
 ATTRIBUTED = [
     "Portfolio123's Sharpe ratio",
     "Portfolio123's Sortino ratio",
