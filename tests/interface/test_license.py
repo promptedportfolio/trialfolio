@@ -103,7 +103,8 @@ def test_version_and_help_work_without_an_acknowledgment(cli: Cli) -> None:
     helped = cli("--help")
     run_help = cli("run", "--help")
 
-    assert (version.exit_code, version.stdout) == (0, "trialfolio 0.1.0\n")
+    # 0.2.0 since its specification was completed (D-26).
+    assert (version.exit_code, version.stdout) == (0, "trialfolio 0.2.0\n")
     assert helped.exit_code == 0
     assert "run" in helped.stdout
     assert "license" in helped.stdout

@@ -151,7 +151,8 @@ def test_each_log_line_is_one_json_object_with_the_documented_fields(cli: Cli) -
         assert isinstance(event["timestamp"], str)
         assert event["timestamp"].endswith("Z")
         assert event["level"] in ("DEBUG", "INFO", "WARNING", "ERROR")
-        assert event["trialfolio_version"] == "0.1.0"
+        # 0.2.0 since its specification was completed (D-26).
+        assert event["trialfolio_version"] == "0.2.0"
         assert isinstance(event["event"], str)
         assert "." in event["event"]
     names = [event["event"] for event in events]

@@ -1,15 +1,15 @@
 {
   "schema_version": "1.0.0",
   "artifact_type": "review",
-  "trialfolio_version": "0.1.0",
-  "created_at": "2026-10-06T21:32:42.365298Z",
-  "review_id": "75db5141-8ecf-4bc4-a014-f16e158c5c4b",
+  "trialfolio_version": "0.2.0",
+  "created_at": "2026-10-06T22:17:14.208877Z",
+  "review_id": "54222314-ab59-48f1-9109-8c55c94f9fca",
   "command": {
     "name": "review",
     "options": {
       "json": false
     },
-    "started_at": "2026-10-06T21:32:42.225839Z"
+    "started_at": "2026-10-06T22:17:14.045849Z"
   },
   "synthetic": true,
   "outcome": "completed",
@@ -43,7 +43,7 @@
       "role": "configuration",
       "schema_version": "1.0.0",
       "source": {
-        "acquired_at": "2026-10-06T21:32:42.225839Z",
+        "acquired_at": "2026-10-06T22:17:14.045849Z",
         "format": "review-configuration",
         "format_version": "1.0.0",
         "parser_version": null,
@@ -135,7 +135,7 @@
     },
     {
       "path": "report.html",
-      "artifact_id": "sha256:79fcc1c181ab8b69fe982fecebd3c32d7f68cf035ca446d045bbcfec32ee4b52",
+      "artifact_id": "sha256:6ad2f712d17430b8602c87a6e69f1d66ed39f9b4aa69c46987bac4ae4dbcfc74",
       "size": 37817,
       "role": "report",
       "schema_version": null,
