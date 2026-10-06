@@ -1,0 +1,23 @@
+kind: review
+schema_version: 1.0.0
+title: canary-review-title-07df75ea
+purpose: canary-review-purpose-f861bb17
+baseline: canary-label-5a66f676
+results:
+  - label: canary-label-5a66f676
+    run: runs/canary-run-da943a28
+    description: canary-description-one-c7ef6dc9
+  - label: canary-label-bec3da08
+    run: runs/canary-run-bdcb5a6c
+    description: canary-description-two-17f855b8
+    intended_changes:
+      - setting: max_holdings
+        reason: canary-reason-one-afcbcf87
+  - label: canary-label-0aa24019
+    run: runs/canary-run-993a190a
+    description: canary-description-three-db79e5ab
+    intended_changes:
+      - setting: universe
+        reason: canary-reason-two-33b9b50a
+      - setting: precision
+        reason: canary-reason-three-9ab8d5c5
