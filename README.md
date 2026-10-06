@@ -14,12 +14,12 @@ Portfolio123 does the backtesting. Trial Folio plans each request, records exact
 
 ## Status
 
-**Pre-release. Nothing is installable yet.** Release 0.1.0 is built, has passed its tests, including a live run through the Portfolio123 API, and is in private use. It hasn't been released.
+**Pre-release. Nothing is installable yet.** Release 0.1.0 is built, has passed its tests, including a live run through the Portfolio123 API, and is in private use. Release 0.2.0, which compares saved runs, is built and has passed its tests, including a review of that live run. Neither has been released.
 
 | Capability | Planned release | Status |
 |---|---|---|
 | Run one screen backtest through the Portfolio123 API and keep the settings with the results | [0.1.0](docs/releases/0.1.0-api-execution.md) | Implemented: built, tested, and used privately; not yet released |
-| Compare saved runs, offline, against a baseline | [0.2.0](docs/releases/0.2.0-review.md) | Specified (Ready) |
+| Compare saved runs, offline, against a baseline | [0.2.0](docs/releases/0.2.0-review.md) | Built and tested; not yet in private use or released |
 | Run a small, planned experiment of screen variants, with safe resume | [0.3.0](docs/releases/0.3.0-experiments.md) | Outlined (Draft) |
 | Descriptive return analytics, robustness diagnostics, statistical evaluation, forward tracking | [Roadmap](docs/roadmap.md) | Not specified |
 
@@ -31,17 +31,19 @@ Portfolio123 does the backtesting. Trial Folio plans each request, records exact
 - rebalancing every week or every 4 weeks, open prices, complete point-in-time data, and results to 4 decimal places
 - Portfolio123's standard FactSet data, in US dollars. You may leave the data vendor out.
 
-Anything else is rejected with a clear error before anything is sent. The text Portfolio123 receives goes in quotes: the rules, a ranking formula or name, the universe, and the benchmark, as in `universe: 'SP500'`. So YAML can't read a `#` in it as the start of a comment. [The screen configuration](docs/contracts.md#screen-configuration) gives every setting, with an example. Trial Folio doesn't import results produced elsewhere.
+Anything else is rejected with a clear error before anything is sent. The text Portfolio123 receives goes in quotes: the rules, a ranking formula or name, the universe, and the benchmark, as in `universe: 'SP500'`. So YAML can't read a `#` in it as the start of a comment. [The screen configuration](docs/contracts.md#screen-configuration) gives every setting, with an example.
+
+Release 0.2.0 compares two or more saved runs that `trialfolio run` or `trialfolio demo` wrote, offline, against a baseline you name. A review configuration, also a YAML file, names the runs, and the changes you meant to make. [The review configuration](docs/contracts.md#review-configuration) gives its keys, with an example. Trial Folio doesn't import results produced elsewhere.
 
 Statistical validation and trading readiness are **not assessed** by any planned release before the statistical evaluation increment.
 
 ## Installation
 
-No installation is available yet. When 0.1.0 is released, this section will give the verified installation steps. Releases will be downloaded from [promptedportfolio.com](https://promptedportfolio.com), not from PyPI, and installed with `uv` or `pipx`. Until then, you can run 0.1.0 from a copy of this repository, as the [user guide](docs/user-guide.md#1-set-up) describes.
+No installation is available yet. When 0.1.0 is released, this section will give the verified installation steps. Releases will be downloaded from [promptedportfolio.com](https://promptedportfolio.com), not from PyPI, and installed with `uv` or `pipx`. Until then, you can run Trial Folio from a copy of this repository, as the [user guide](docs/user-guide.md#1-set-up) describes.
 
 ## Usage
 
-These are release 0.1.0's commands. The [user guide](docs/user-guide.md) walks through each workflow, from setting up to reading the report, with what to check at each step. Put your Portfolio123 API ID and API key in the environment variables `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`. The user guide's [credentials section](docs/user-guide.md#6-set-your-credentials) shows how to keep the key in your system's keychain or password manager, never in a file or your shell's history. Then run a screen configuration:
+These are the commands of releases 0.1.0 and 0.2.0. The [user guide](docs/user-guide.md) walks through each workflow, from setting up to reading the report, with what to check at each step. Put your Portfolio123 API ID and API key in the environment variables `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`. The user guide's [credentials section](docs/user-guide.md#6-set-your-credentials) shows how to keep the key in your system's keychain or password manager, never in a file or your shell's history. Then run a screen configuration:
 
 ```text
 trialfolio run screen.yaml --out runs/baseline/
@@ -60,17 +62,19 @@ The other commands:
 
 ```text
 trialfolio init research/
+trialfolio review review.yaml --out reviews/holdings/
 trialfolio report runs/baseline/ --out reports/baseline/
 trialfolio demo --out demo/
 trialfolio license
 ```
 
 - `init` sets up a workspace: a new or empty folder with a starter screen configuration, a README of next steps, and a `.gitignore` that keeps credential files, runs, and reports out of Git. It sends nothing, and needs no license acknowledgment.
+- `review` compares saved runs with a baseline, offline, as a review configuration names them. It shows which settings differ, as changes you declared or as unexplained mismatches, and the difference between each pair of comparable metrics, in `differences.csv` and a report. It ranks no run. It copies each run's manifest, plan, and tables, so a review of real runs holds Portfolio123 data, as a run does.
 - `report` re-renders a saved run's report, offline.
 - `demo` writes a synthetic example run, labeled synthetic, with its report. It needs no Portfolio123 subscription or credentials: it sends nothing, and every value in it is invented.
-- `license` prints the license and the full research notice. The first time, `run`, `report`, and `demo` ask you at the terminal to acknowledge them, by typing `accept`. `trialfolio license --accept` acknowledges them ahead of time, and setting `TRIALFOLIO_ACCEPT_LICENSE` to `LicenseRef-NSPRL-1.0/1.0` acknowledges them for one command without recording anything, which suits scripts.
+- `license` prints the license and the full research notice. The first time, `run`, `report`, `demo`, and `review` ask you at the terminal to acknowledge them, by typing `accept`. `trialfolio license --accept` acknowledges them ahead of time, and setting `TRIALFOLIO_ACCEPT_LICENSE` to `LicenseRef-NSPRL-1.0/1.0` acknowledges them for one command without recording anything, which suits scripts.
 
-Add `--json` to any command for one JSON summary on stdout. Release 0.2.0 adds `trialfolio review` to compare saved runs.
+Add `--json` to any command for one JSON summary on stdout.
 
 ## Limitations
 
@@ -84,7 +88,7 @@ Add `--json` to any command for one JSON summary on stdout. Release 0.2.0 adds `
 
 - Trial Folio contacts Portfolio123 only for requests you approve.
 - Your API ID and key go only to Portfolio123's API, and are never saved or logged. If `SSLKEYLOGFILE` is set, `trialfolio run` ignores it, with a warning, and removes it from its own environment, so the TLS session keys that would let someone decrypt its traffic, your API key included, are never written to a file. Your shell keeps the setting.
-- Re-rendering reports, the demo, and (from 0.2.0) reviews run offline.
+- Re-rendering reports, the demo, and reviews run offline.
 - Logs stay local and never contain credentials, strategy definitions, configuration values, or results. A command with an output directory writes its log, `trialfolio.log`, to `logs/` inside that directory. `trialfolio init`, commands without an output directory, such as `trialfolio license`, and an internal error before the output directory is ready write to a per-user log directory instead: `~/.local/state/trialfolio/logs` on Linux (or `$XDG_STATE_HOME/trialfolio/logs`), `~/Library/Logs/trialfolio` on macOS, and `%LOCALAPPDATA%\trialfolio\logs` on Windows, unless `TRIALFOLIO_LOG_DIR` names another. A log file is rotated at 1 MB, and the 3 older files are kept. Delete those directories to delete the logs.
 - Acknowledging the license writes one file, `acknowledgment.json`, holding only the license identifier, the notice version, when you acknowledged, and how. It's in `~/.config/trialfolio` on Linux (or `$XDG_CONFIG_HOME/trialfolio`), `~/Library/Application Support/trialfolio` on macOS, and `%APPDATA%\trialfolio` on Windows, unless `TRIALFOLIO_CONFIG_DIR` names another.
 - Optional LLM features are planned for a later increment. They will be off by default, and remote model providers will process data under their own terms.
