@@ -765,6 +765,15 @@ def test_a_synthetic_results_values_are_labeled_wherever_they_appear(
         assert not [after for after in marks[label] if "synthetic" in after]
 
 
+ATTRIBUTED = [
+    "Portfolio123's Sharpe ratio",
+    "Portfolio123's Sortino ratio",
+    "Portfolio123's alpha",
+    "Cumulative return over the backtest",
+]
+"""A run report's metric definitions that call a value Portfolio123's or a backtest's."""
+
+
 def test_a_synthetic_results_values_are_never_called_portfolio123s_or_a_backtests(
     review: Review,
 ) -> None:
@@ -777,6 +786,8 @@ def test_a_synthetic_results_values_are_never_called_portfolio123s_or_a_backtest
         "each result is one backtest",
         "Backtested:",
         "Portfolio123's data and engines change",
+        *ATTRIBUTED,
+        "Portfolio123's default applies",
     ]
 
     for claim in claims:
@@ -784,6 +795,11 @@ def test_a_synthetic_results_values_are_never_called_portfolio123s_or_a_backtest
         assert claim not in synthetic
     assert "each run's invented response" in synthetic
     assert "each result is one synthetic example" in synthetic
+    assert "carry_cost" in synthetic
+    assert (
+        "not_sent: Not sent: where a real run leaves it to Portfolio123's default, which isn't"
+        " documented. Here nothing was sent, and no value came from Portfolio123."
+    ) in synthetic
 
 
 def test_a_review_of_both_says_which_values_are_synthetic(review: Review) -> None:
@@ -802,9 +818,18 @@ def test_a_review_of_both_says_which_values_are_synthetic(review: Review) -> Non
         "Synthetic: invented values, neither backtested nor actual results.",
         "Backtested: from applying the screen's rules to historical data, not from actual trades.",
     ]
-    assert "an invented one for demo, whose values don't come from Portfolio123." in (
-        document.root.by_id("definitions").text
-    )
+    definitions = document.root.by_id("definitions").text
+    assert (
+        "an invented one for demo, whose values don't come from Portfolio123. Each is defined as"
+        " that layout defines it."
+    ) in definitions
+    for claim in ATTRIBUTED:
+        assert claim not in definitions
+    assert "The Sharpe ratio, as the response layout defines it." in definitions
+    assert (
+        "not_sent: Not sent. For a backtested result, Portfolio123's default applies, and it"
+        " isn't documented. For demo, which is synthetic, nothing was sent."
+    ) in document.root.by_id("results").text
 
 
 # Shared responses (R02-AC17)

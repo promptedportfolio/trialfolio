@@ -1423,6 +1423,30 @@ _REVIEW_ROLES: Final[dict[ReviewArtifactRole, str]] = {
     "report": "Report",
 }
 
+_LAYOUT_METRICS: Final[dict[str, str]] = {
+    "total_return": "Cumulative return over the response's periods.",
+    "sharpe_ratio": (
+        "The Sharpe ratio, as the response layout defines it. Its risk-free rate isn't documented."
+    ),
+    "sortino_ratio": (
+        "The Sortino ratio, as the response layout defines it. Its risk-free rate and target"
+        " aren't documented."
+    ),
+    "alpha": (
+        "Alpha against the benchmark, as the response layout defines it. Its unit is inferred from"
+        " the value's magnitude, and its method isn't documented."
+    ),
+}
+"""A review with a synthetic result gives these definitions in place of a run report's, which call
+a value Portfolio123's or a backtest's. They hold for a synthetic result's values and a backtested
+one's alike (DSC-04)."""
+
+_SYNTHETIC_NOT_SENT: Final = (
+    "Not sent: where a real run leaves it to Portfolio123's default, which isn't documented. Here"
+    " nothing was sent, and no value came from Portfolio123."
+)
+"""What `not_sent` means in a review whose results are all synthetic, whose runs sent nothing."""
+
 _SETTING_COUNT: Final = 23
 """The screen settings each result's rows compare."""
 
@@ -1645,8 +1669,10 @@ class _ReviewReport:
     # 2. Definitions
 
     def _definitions(self) -> list[str]:
+        own = _LAYOUT_METRICS if self._synthetic else {}
         definitions = [
-            f"<tr><td>{name}</td><td>{_code(metric_id)}</td><td>{definition}</td></tr>"
+            f"<tr><td>{name}</td><td>{_code(metric_id)}</td>"
+            f"<td>{own.get(metric_id, definition)}</td></tr>"
             for metric_id, (name, definition) in _METRICS.items()
         ]
         return [
@@ -1719,7 +1745,7 @@ class _ReviewReport:
         return (
             f"The metrics are read from each run's response, {layout}: Portfolio123's for a"
             f" backtested result, and an invented one for {self._labels(self._synthetic)}, whose"
-            " values don't come from Portfolio123."
+            " values don't come from Portfolio123. Each is defined as that layout defines it."
         )
 
     def _setting_rows(self) -> list[DifferencesRow]:
@@ -2228,9 +2254,7 @@ class _ReviewReport:
                 + "</tr>"
             )
         notes = [
-            f"<li>{_code(token)}: {meaning}</li>"
-            for token, meaning in _TOKENS.items()
-            if token in tokens
+            f"<li>{_code(token)}: {self._token(token)}</li>" for token in _TOKENS if token in tokens
         ]
         return [
             '<div class="wide"><table>',
@@ -2242,6 +2266,21 @@ class _ReviewReport:
             "</tbody></table></div>",
             *(["<ul>", *notes, "</ul>"] if notes else []),
         ]
+
+    def _token(self, token: str) -> str:
+        """What a setting's token means. A synthetic result's run sent nothing, so no default of
+        Portfolio123's applied to it (DSC-04)."""
+        meaning = _TOKENS[token]
+        if token != "not_sent" or not self._synthetic:
+            return meaning
+        if len(self._synthetic) == len(self._review.inputs):
+            return _SYNTHETIC_NOT_SENT
+        one = len(self._synthetic) == 1
+        return (
+            "Not sent. For a backtested result, Portfolio123's default applies, and it isn't"
+            f" documented. For {self._labels(self._synthetic)}, which {'is' if one else 'are'}"
+            " synthetic, nothing was sent."
+        )
 
     # 5. Results compared, and their runs
 
