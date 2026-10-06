@@ -20,6 +20,7 @@ manifest itself, because the command that writes them is R02-T08's, as R01-T13's
 
 import logging
 import re
+import shutil
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -29,8 +30,9 @@ from uuid import UUID
 import pytest
 
 from tests.support.clock import STARTED
+from tests.support.fake_portfolio123 import Reply
 from tests.support.html_report import Document, Element, parse
-from tests.support.run_builder import RunBuilder
+from tests.support.run_builder import Run, RunBuilder
 from trialfolio.configuration import read_review_configuration
 from trialfolio.contracts.manifest import SourceRecord
 from trialfolio.contracts.review_configuration import ReviewConfiguration
@@ -873,12 +875,20 @@ def test_no_shared_response_is_named_when_none_is_shared(review: Review) -> None
 # What the report holds, and how it's written
 
 
-def test_text_from_the_configuration_cant_add_markup_or_reorder_whats_shown(
-    built: Callable[[str], Path], tmp_path: Path
+def test_text_from_the_configuration_or_portfolio123_cant_add_markup_or_reorder_whats_shown(
+    built: Callable[[str], Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The configuration's text, and Portfolio123's own message in a run's error (decision 3 of
+    R02-T07), are shown as text."""
     override = chr(0x202E)
     hostile = f"<script>alert(1)</script> & {override}evil"
     example = built("example.yaml")
+    directory = tmp_path / "configuration"
+    shutil.copytree(example.parent / "runs", directory / "runs")
+    rejected = Reply(400, b"</dd><b>bold</b> <script>alert(2)</script>")
+    RunBuilder(monkeypatch, tmp_path / "home").run(
+        Run("formula.yaml", rejected), directory / "runs" / "rejected"
+    )
     content = (
         example.read_text(encoding="utf-8")
         .replace("title: Holdings 25 versus 50", f"title: '{hostile}'")
@@ -887,12 +897,13 @@ def test_text_from_the_configuration_cant_add_markup_or_reorder_whats_shown(
             f"reason: '</td><b>bold</b>{override}'",
         )
         .replace("    run: runs/hold50\n", f"    run: runs/hold50\n    description: '{hostile}'\n")
-    )
-    path = example.parent / "hostile.yaml"
+    ) + "  - label: rejected\n    run: runs/rejected\n"
+    path = directory / "hostile.yaml"
     path.write_text(content, encoding="utf-8")
     written = write_review(path, tmp_path / "review")
     document = written.document
     shown = "<script>alert(1)</script> & \\u202eevil"
+    error = written.evidence.inputs[2].run.manifest.error
 
     assert not document.root.find_all("script")
     assert not document.root.find_all("b")
@@ -901,6 +912,12 @@ def test_text_from_the_configuration_cant_add_markup_or_reorder_whats_shown(
     assert document.root.find_all("title")[0].text.startswith(shown)
     assert document.dd("Description")[1] == shown
     assert table_after(document, "Intended changes")[0][5] == "</td><b>bold</b>\\u202e"
+    assert error is not None
+    assert "</dd><b>bold</b> <script>alert(2)</script>" in error.message
+    assert document.dd("Normalized tables")[2] == (
+        "No. Its run ended with provider.unsupported_capability, and its manifest says:"
+        f" {error.message}"
+    )
 
 
 def test_rendering_is_deterministic_and_names_its_version(review: Review) -> None:
