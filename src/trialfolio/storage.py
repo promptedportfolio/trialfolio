@@ -21,6 +21,9 @@ A store serves one output directory, its root, and takes paths relative to it.
 - **Discarding.** A write can fail after it has published its file. `discard` removes that file,
   when it holds exactly the write's bytes, for a caller whose file says something by being
   there, such as the manifest.
+- **Names in logs.** The store logs each file it writes by its path, and names it in its errors'
+  logged messages, unless the caller gives another name for logs, because the path holds a
+  configuration value: a review's copies are under `inputs/<label>/` (release 0.2.0, R02-T08).
 
 R01-T08 checked what each platform reports, on macOS 26.6.2 with Python 3.12.13:
 
@@ -146,12 +149,17 @@ class ArtifactStore(Protocol):
         """
         ...
 
-    def write(self, path: str, data: bytes) -> StoredFile:
+    def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
         """Writes a new file atomically and durably, and returns it.
 
         Creates any missing directories on the way. The file is published under its final name
         complete, or not at all. When this returns, the file and the entries of the directories
         the store created are durable, as far as the platform allows.
+
+        `logged_as` is the name the store's log events, and its errors' logged messages, give the
+        file, when its path holds a configuration value, which logs never hold: a review's copy
+        is under `inputs/<label>/`, so it's named by its result's position instead, such as
+        `manifest.json of result 2`. Its path by default. The errors' full messages give the path.
 
         Raises `RuntimeError` before the store has claimed its root, and `TrialFolioError` with
         `storage.write_failed` if the name exists, the file system can't take an atomic write
@@ -245,10 +253,11 @@ class LocalArtifactStore:
         self._claimed = True
         return _stored(path, data)
 
-    def write(self, path: str, data: bytes) -> StoredFile:
+    def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
         parts = valid_relative_path(path).split("/")
         if not self._claimed:
             raise RuntimeError("claim the output directory before writing to it")
+        logged = path if logged_as is None else logged_as
         directory = self._root.joinpath(*parts[:-1])
         final = directory / parts[-1]
         # Unique, so that it's safe to remove whatever has this name; hidden, so that a crash
@@ -257,24 +266,28 @@ class LocalArtifactStore:
         try:
             _make_directories(directory, self._unsynced, stop=self._root)
             self._write_new(temporary, data)
-            _publish(temporary, final, path)
+            _publish(temporary, final, path, logged)
             if sys.platform != "win32":
                 os.unlink(temporary)
             temporary = None
             self._sync_new_entries(final)
         except OSError as error:
-            raise TrialFolioError(
-                "storage.write_failed",
-                f"Couldn't write {path} durably: {_reason(error)}. Check the output directory's"
-                " free space and permissions.",
-            ) from error
+            reason = _reason(error)
+
+            def problem(name: str) -> str:
+                return (
+                    f"Couldn't write {name} durably: {reason}. Check the output directory's free"
+                    " space and permissions."
+                )
+
+            raise TrialFolioError("storage.write_failed", problem(path), problem(logged)) from error
         finally:
             if temporary is not None:
                 _remove(temporary)
         stored = _stored(path, data)
         _logger.debug(
             "Wrote %s (%s).",
-            stored.path,
+            logged,
             stored.artifact_id,
             extra={"event": "artifact.write.completed"},
         )
@@ -496,29 +509,37 @@ def _make_directories(directory: Path, made: list[Path], stop: Path | None = Non
     return missing
 
 
-def _publish(temporary: Path, final: Path, path: str) -> None:
-    """Gives the temporary file its final name, never replacing a file."""
+def _publish(temporary: Path, final: Path, path: str, logged: str) -> None:
+    """Gives the temporary file its final name, never replacing a file. An error's message names
+    the file by `path`, and its logged message by `logged`."""
     try:
         if sys.platform == "win32":
             os.rename(temporary, final)
         else:
             os.link(temporary, final)
     except FileExistsError as error:
-        raise TrialFolioError(
-            "storage.write_failed",
-            f"Couldn't write {path}: a file with that name already exists in the output"
-            " directory, and Trial Folio never replaces a file.",
-        ) from error
+
+        def exists(name: str) -> str:
+            return (
+                f"Couldn't write {name}: a file with that name already exists in the output"
+                " directory, and Trial Folio never replaces a file."
+            )
+
+        raise TrialFolioError("storage.write_failed", exists(path), exists(logged)) from error
     except OSError as error:
         if sys.platform == "win32" or error.errno not in _NO_HARD_LINKS:
             raise
-        raise TrialFolioError(
-            "storage.write_failed",
-            f"Couldn't write {path}: the output directory's file system doesn't support hard"
-            f" links ({_reason(error)}). FAT and exFAT don't. Trial Folio publishes each file"
-            " with a hard link, so that it never replaces one. Choose an output directory on"
-            " another file system.",
-        ) from error
+        reason = _reason(error)
+
+        def no_links(name: str) -> str:
+            return (
+                f"Couldn't write {name}: the output directory's file system doesn't support hard"
+                f" links ({reason}). FAT and exFAT don't. Trial Folio publishes each file"
+                " with a hard link, so that it never replaces one. Choose an output directory on"
+                " another file system."
+            )
+
+        raise TrialFolioError("storage.write_failed", no_links(path), no_links(logged)) from error
 
 
 def _part_of(name: str, claimed: str) -> bool:

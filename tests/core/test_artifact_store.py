@@ -5,8 +5,10 @@ Traces to docs/contracts.md, artifact storage (REQ-05): relative paths, immutabi
 writes, never replacing, no hard links, and syncing, including new directories and macOS's
 fallback from `F_FULLFSYNC`. Also to R01-AC29: a file system without hard links fails the first
 atomic write with `storage.write_failed`. And to R01-T14's rule that a manifest whose write failed
-leaves no manifest: `discard` removes a file that a failed write published. The claim has its own
-tests, in test_output_claim.py.
+leaves no manifest: `discard` removes a file that a failed write published. And to release
+0.2.0's labels in logs (docs/contracts.md, review output): a name given for logs replaces a file's
+path in the store's log event and its errors' logged messages, and the full messages keep the
+path. The claim has its own tests, in test_output_claim.py.
 """
 
 import errno
@@ -504,3 +506,78 @@ def test_macos_fails_the_write_when_a_full_sync_fails_otherwise(
     assert raised.value.code == "storage.write_failed"
     assert "Input/output error" in raised.value.message
     assert os.listdir(store.root) == ["plan.json"]
+
+
+# Names in logs (release 0.2.0, R02-T08)
+
+COPY = "inputs/hold50/normalized/metrics.csv"
+"""A review's copy, whose path holds its result's label, `hold50`, a configuration value."""
+COPY_LOGGED = "normalized/metrics.csv of result 2"
+
+
+def test_a_name_for_logs_replaces_the_path_in_the_write_event(
+    store: LocalArtifactStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.DEBUG, logger="trialfolio.storage"):
+        stored = store.write(COPY, b"metric\n", logged_as=COPY_LOGGED)
+        default = store.write("normalized/differences.csv", b"kind\n")
+
+    assert stored.path == COPY
+    assert store.read(COPY) == b"metric\n"
+    events = [
+        record.getMessage()
+        for record in caplog.records
+        if getattr(record, "event", None) == "artifact.write.completed"
+    ]
+    assert events == [
+        f"Wrote {COPY_LOGGED} ({stored.artifact_id}).",
+        f"Wrote normalized/differences.csv ({default.artifact_id}).",
+    ]
+
+
+def _disk_full(store: LocalArtifactStore, faults: Faults, monkeypatch: pytest.MonkeyPatch) -> None:
+    faults.on_open("metrics.csv", raises(OSError(errno.ENOSPC, "No space left on device")))
+
+
+def _exists(store: LocalArtifactStore, faults: Faults, monkeypatch: pytest.MonkeyPatch) -> None:
+    (store.root / "inputs" / "hold50" / "normalized").mkdir(parents=True)
+    (store.root / COPY).write_bytes(b"another process's\n")
+
+
+def _no_hard_links(
+    store: LocalArtifactStore, faults: Faults, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def link(source: object, destination: object) -> None:
+        raise OSError(errno.ENOTSUP, os.strerror(errno.ENOTSUP))
+
+    monkeypatch.setattr(os, "link", link)
+
+
+FAILURES = {
+    "disk-full": (_disk_full, "durably: No space left on device"),
+    "exists": (_exists, "a file with that name already exists"),
+    "no-hard-links": (_no_hard_links, "doesn't support hard links"),
+}
+
+
+@pytest.mark.parametrize("failure", FAILURES)
+def test_a_name_for_logs_replaces_the_path_in_the_errors_logged_message(
+    store: LocalArtifactStore, faults: Faults, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    if failure == "no-hard-links" and sys.platform == "win32":
+        pytest.skip("Windows publishes files by renaming them")
+    cause, problem = FAILURES[failure]
+    cause(store, faults, monkeypatch)
+
+    with pytest.raises(TrialFolioError) as raised:
+        store.write(COPY, b"metric\n", logged_as=COPY_LOGGED)
+
+    error = raised.value
+    assert error.code == "storage.write_failed"
+    # The terminal's message names the file by its path; the logged one never holds the label.
+    assert f"Couldn't write {COPY}" in error.message
+    assert problem in error.message
+    assert f"Couldn't write {COPY_LOGGED}" in error.log_message
+    assert problem in error.log_message
+    assert "hold50" not in error.log_message
+    assert str(error) == error.log_message

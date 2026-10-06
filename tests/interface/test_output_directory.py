@@ -118,8 +118,8 @@ class Intruded:
         (self._root / "other.txt").write_bytes(b"another process's file\n")
         return self._store.claim(path, data)
 
-    def write(self, path: str, data: bytes) -> StoredFile:
-        return self._store.write(path, data)
+    def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
+        return self._store.write(path, data, logged_as=logged_as)
 
     def discard(self, path: str, data: bytes) -> None:
         self._store.discard(path, data)

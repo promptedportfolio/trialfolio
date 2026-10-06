@@ -10,14 +10,14 @@ Each configuration names its runs by paths relative to itself, and a test puts i
 
 | File | Contents | Criteria |
 |---|---|---|
-| `example.yaml` | The [documented example](../../../docs/contracts.md#review-configuration), byte for byte: `hold25`, the baseline, and `hold50`, which declares `max_holdings` | R02-AC01, R02-AC02, R02-AC05, R02-AC07, R02-AC08, R02-AC09, R02-AC18, R02-AC19 |
+| `example.yaml` | The [documented example](../../../docs/contracts.md#review-configuration), byte for byte: `hold25`, the baseline, and `hold50`, which declares `max_holdings` | R02-AC01, R02-AC02, R02-AC05, R02-AC07, R02-AC08, R02-AC09, R02-AC13, R02-AC18, R02-AC19 |
 | `undeclared.yaml` | A baseline, and three results that declare nothing: one whose run has another slippage, with the baseline's metrics; one whose run has another benchmark; and one whose run ranks by a ranking system's name, with missing metrics | R02-AC03, R02-AC07, R02-AC13, R02-AC18 |
 | `declared-benchmark.yaml` | A baseline, and a result whose run has another benchmark, declared | R02-AC03 |
 | `not-observed.yaml` | A baseline, and a result that declares `max_holdings` and `precision`, whose run has the baseline's settings | R02-AC11, R02-AC18 |
 | `coverage.yaml` | A baseline, and two results: one whose run's coverage differs from the baseline's, and one whose run's coverage couldn't be established | R02-AC08, R02-AC18 |
 | `coverage-and-benchmark.yaml` | A baseline, and a result whose run has another benchmark and coverage that differs from the baseline's | R02-AC08 |
 | `missing-metrics.yaml` | A baseline, and a result whose run has missing metrics | R02-AC04 |
-| `without-tables.yaml` | A baseline, and three results whose runs have no normalized tables: Portfolio123 rejected one's request, one's response lacks the required structure, and one's isn't JSON | R02-AC15, R02-AC18 |
+| `without-tables.yaml` | A baseline, and three results whose runs have no normalized tables: Portfolio123 rejected one's request, one's response lacks the required structure, and one's isn't JSON | R02-AC13, R02-AC15, R02-AC18 |
 | `shared-response.yaml` | A baseline; a result whose run, of the baseline's settings written differently, has the baseline's saved response; two results that name two runs of one configuration, which share another response; and a result whose run has the baseline's metrics, from a response no other result has. The three results with a changed setting declare it. | R02-AC07, R02-AC17, R02-AC18 |
 | `synthetic.yaml` | The run `trialfolio demo` wrote as the baseline, `demo`, and a result whose run isn't synthetic, `hold50`, which declares `max_holdings` | R02-AC09, R02-AC16 |
 | `synthetic-only.yaml` | Two results, `demo` and `demo-again`, that both name the run `trialfolio demo` wrote, so they share its saved response | R02-AC16 |

@@ -13,8 +13,11 @@ named file, once:
   Linux and macOS, the store publishes each file with `os.link`; on Windows it renames it, so
   this fault doesn't apply there.
 
-A name matches a path's last segment, such as `response.json`. R01-T11 created this ahead of
-R01-T15, which added the failed `os.link`.
+A name matches a path's last segment, such as `response.json`. A name that starts with `/`
+matches a whole path instead, for `fail_os`, `fail_before`, and `fail_after`: `/manifest.json` is a
+review's own manifest, written after its copies of each run's, `inputs/<label>/manifest.json`.
+R01-T11 created this ahead of R01-T15, which added the failed `os.link`, and R02-T08 added whole
+paths.
 
 `placeholder_identities` stands for the other way FAT and exFAT differ on macOS: each new, empty
 file has a temporary inode of its own until its first write gives it a lasting one. It patches
@@ -25,6 +28,7 @@ import errno
 import os
 import stat
 import sys
+from collections.abc import Collection
 from pathlib import Path
 
 import pytest
@@ -78,6 +82,9 @@ class StorageFaults:
         self._before: dict[str, BaseException] = {}
         self._after: dict[str, BaseException] = {}
         self._os_errors: set[str] = set()
+        self._armed = False
+        """Whether the write under way fails as it creates its temporary file: a whole path's
+        `fail_os`."""
         self._links_fail_at: str | None = None
         self._links_failing = False
         self.published: list[str] = []
@@ -95,7 +102,8 @@ class StorageFaults:
             parts = Path(path).name.split(".")
             if len(parts) > 3 and parts[0] == "" and parts[-1] == "tmp":
                 name = ".".join(parts[1:-2])
-                if name in self._os_errors:
+                if self._armed or name in self._os_errors:
+                    self._armed = False
                     self._os_errors.discard(name)
                     raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
             return real_open(path, flags, mode, dir_fd=dir_fd)
@@ -150,14 +158,20 @@ class StorageFaults:
         self.published.append(path)
         return stored
 
-    def write(self, path: str, data: bytes) -> StoredFile:
-        name = path.rsplit("/", 1)[-1]
-        before = self._before.pop(name, None)
+    def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
+        before = self._before.pop(_key(path, self._before), None)
         if before is not None:
             raise before
-        stored = self._store.write(path, data)
+        whole = "/" + path
+        if whole in self._os_errors:
+            self._os_errors.discard(whole)
+            self._armed = True
+        try:
+            stored = self._store.write(path, data, logged_as=logged_as)
+        finally:
+            self._armed = False
         self.published.append(path)
-        after = self._after.pop(name, None)
+        after = self._after.pop(_key(path, self._after), None)
         if after is not None:
             raise after
         return stored
@@ -167,3 +181,10 @@ class StorageFaults:
 
     def read(self, path: str) -> bytes:
         return self._store.read(path)
+
+
+def _key(path: str, faults: Collection[str]) -> str:
+    """The name a fault for `path` is set under: its whole path, `/` first, when one is set, and
+    otherwise its last segment."""
+    whole = "/" + path
+    return whole if whole in faults else path.rsplit("/", 1)[-1]
