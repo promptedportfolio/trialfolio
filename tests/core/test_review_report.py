@@ -21,7 +21,7 @@ manifest itself, because the command that writes them is R02-T08's, as R01-T13's
 import logging
 import re
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from uuid import UUID
@@ -398,6 +398,50 @@ def test_the_title_and_purpose_are_the_configurations(review: Review) -> None:
         document.root.by_id("objective").text
     )
     assert document.dd("Baseline") == ["hold25"]
+
+
+@pytest.mark.parametrize(
+    ("name", "title", "purpose"),
+    [
+        (
+            "example.yaml",
+            "Earnings yield with a liquidity floor",
+            "Reference backtest for the 0.1.0 response layout.",
+        ),
+        (
+            "synthetic-only.yaml",
+            "Synthetic example: earnings yield with a liquidity floor",
+            "Shows a run's files and report offline, from invented values.",
+        ),
+    ],
+)
+def test_each_result_shows_its_runs_title_and_purpose(
+    review: Review, name: str, title: str, purpose: str
+) -> None:
+    """A run's plan holds its title and purpose, which the report shows, apart from the review's
+    own (docs/contracts.md, review output)."""
+    written = review(name)
+    document = written.document
+    declared = written.configuration.purpose
+
+    assert document.dd("Run title") == [title, title]
+    assert document.dd("Run purpose") == [purpose, purpose]
+    assert declared is not None
+    assert declared != purpose
+    assert declared not in document.root.by_id("cases").text
+
+
+def test_a_run_without_a_purpose_says_none_was_declared(review: Review) -> None:
+    evidence = review("example.yaml").evidence
+    first, second = evidence.inputs
+    run = replace(second.run, plan=second.run.plan.model_copy(update={"purpose": None}))
+    without = replace(evidence, inputs=(first, replace(second, run=run)))
+    document = parse(HtmlReportRenderer(VERSION).render_review(without))
+
+    assert document.dd("Run purpose") == [
+        "Reference backtest for the 0.1.0 response layout.",
+        "No purpose was declared.",
+    ]
 
 
 # Benchmarks (R02-AC03)

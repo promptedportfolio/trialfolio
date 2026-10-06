@@ -2314,6 +2314,7 @@ class _ReviewReport:
             )
         )
         description = checked.result.description
+        purpose = run.plan.purpose
         facts = [
             (
                 "<dt>Role</dt><dd>"
@@ -2324,6 +2325,9 @@ class _ReviewReport:
             + (_text(description) if description is not None else "None given.")
             + "</dd>",
             f"<dt>Run title</dt><dd>{_text(run.plan.title)}</dd>",
+            "<dt>Run purpose</dt><dd>"
+            + (_text(purpose) if purpose is not None else "No purpose was declared.")
+            + "</dd>",
             f"<dt>Results</dt><dd>{nature}</dd>",
             f"<dt>Run outcome</dt><dd>{outcome}. An execution status, not a research finding.</dd>",
             f"<dt>Normalized tables</dt><dd>{tables}</dd>",
