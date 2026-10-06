@@ -10,7 +10,7 @@ Each configuration names its runs by paths relative to itself, and a test puts i
 
 | File | Contents | Criteria |
 |---|---|---|
-| `example.yaml` | The [documented example](../../../docs/contracts.md#review-configuration), byte for byte: `hold25`, the baseline, and `hold50`, which declares `max_holdings` | R02-AC01, R02-AC02, R02-AC05, R02-AC07, R02-AC08, R02-AC09, R02-AC13, R02-AC18, R02-AC19 |
+| `example.yaml` | The [documented example](../../../docs/contracts.md#review-configuration), byte for byte: `hold25`, the baseline, and `hold50`, which declares `max_holdings` | R02-AC01, R02-AC02, R02-AC05, R02-AC07, R02-AC08, R02-AC09, R02-AC10, R02-AC13, R02-AC18, R02-AC19 |
 | `undeclared.yaml` | A baseline, and three results that declare nothing: one whose run has another slippage, with the baseline's metrics; one whose run has another benchmark; and one whose run ranks by a ranking system's name, with missing metrics | R02-AC03, R02-AC07, R02-AC13, R02-AC18 |
 | `declared-benchmark.yaml` | A baseline, and a result whose run has another benchmark, declared | R02-AC03 |
 | `not-observed.yaml` | A baseline, and a result that declares `max_holdings` and `precision`, whose run has the baseline's settings | R02-AC11, R02-AC18 |
@@ -20,7 +20,7 @@ Each configuration names its runs by paths relative to itself, and a test puts i
 | `without-tables.yaml` | A baseline, and three results whose runs have no normalized tables: Portfolio123 rejected one's request, one's response lacks the required structure, and one's isn't JSON | R02-AC13, R02-AC15, R02-AC18 |
 | `shared-response.yaml` | A baseline; a result whose run, of the baseline's settings written differently, has the baseline's saved response; two results that name two runs of one configuration, which share another response; and a result whose run has the baseline's metrics, from a response no other result has. The three results with a changed setting declare it. | R02-AC07, R02-AC17, R02-AC18 |
 | `synthetic.yaml` | The run `trialfolio demo` wrote as the baseline, `demo`, and a result whose run isn't synthetic, `hold50`, which declares `max_holdings` | R02-AC09, R02-AC16 |
-| `synthetic-only.yaml` | Two results, `demo` and `demo-again`, that both name the run `trialfolio demo` wrote, so they share its saved response | R02-AC16 |
+| `synthetic-only.yaml` | Two results, `demo` and `demo-again`, that both name the run `trialfolio demo` wrote, so they share its saved response | R02-AC16; [artifact compatibility](../../../docs/contracts.md#artifact-compatibility), as the configuration of the historical review [`reviews/synthetic-review-1.0.0/`](../reviews/README.md) |
 | `canaries.yaml` | A distinct canary string in the title, the purpose, each result's description, and each reason; canary labels, such as `canary-label-5a66f676`; and `run` paths whose directory names are canaries, such as `runs/canary-run-da943a28`. Its three results name three runs of one screen configuration with one response, so they share it, and the two after the baseline declare changes their runs don't have. [`tests/support/canaries.py`](../../support/canaries.py) lists its canaries. | R02-AC12 |
 
 ## The runs each configuration names

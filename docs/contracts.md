@@ -28,6 +28,7 @@ Python functions are internal during 0.x.y development. A core function becomes 
 - Breaking changes and migration instructions are documented, including during 0.x.y.
 - 1.0.0 is adopted when the public contract above is intentionally declared stable.
 - **Writing versions.** A version is written bare, with no prefix, everywhere it appears: package metadata, `trialfolio --version`, artifacts, release specifications, file names, and prose (`0.2.0`). The only exception is git release tags. They are named `v` plus the version, as in `v0.2.0`, following the [Semantic Versioning FAQ](https://semver.org/#is-v123-a-semantic-version): the tag name is `v0.2.0`, and the version is `0.2.0`. Artifact schema versions are never prefixed.
+- **The package's version** is the next release's once that release's specification is complete ([D-26](spec.md#decisions)). So `trialfolio --version`, and every artifact written from `main`, give it before the release is tagged, and a release's tag may sit on a commit older than `main`'s head.
 
 Every artifact records these versions separately:
 

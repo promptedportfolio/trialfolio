@@ -4,7 +4,12 @@ to stderr.
 
 Traces to R01-AC18, over the scenarios of R01-AC01 (no approval), R01-AC05 (provider failures and
 missing credentials), and R01-AC15 (an output directory that isn't empty), and for `report`,
-`demo`, `license`, and `init` (R01-AC33); and to docs/contracts.md, JSON summary: `ids` and
+`demo`, `license`, and `init` (R01-AC33); to R02-AC13, for `review`, over the scenarios of
+R02-AC01 (a review that completes), R02-AC06 (an input that isn't a complete run, or doesn't
+exist), R02-AC10 (an output directory that isn't empty), R02-AC11 (a configuration that isn't
+valid), R02-AC14 (a schema version without a reader), and R02-AC19 (a storage failure and an
+interrupt after the claim): a failure before the claim has no `review_id` and a `null`
+`output_dir`, and one after it has both; and to docs/contracts.md, JSON summary: `ids` and
 `outputs` leave out a key that has no value, `counts` is `{}` for `init`, `report`, and `license`,
 and `outcome`, `exit_code`, and
 `error` agree; and to R01-T14's rules that a blank `--out`, or one that isn't valid UTF-8 text,
@@ -20,18 +25,30 @@ keeps its meaning, so these checks are otherwise 0.1.0's.
 """
 
 import json
+import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome, config, plan_hash_for, serve_success
+from tests.interface.conftest import (
+    Cli,
+    FaultyStores,
+    Outcome,
+    config,
+    occupied,
+    plan_hash_for,
+    serve_success,
+)
 from tests.support.fake_portfolio123 import Reply
+from tests.support.run_builder import REVIEW_CONFIGS, SYNTHETIC_RUN
 from trialfolio.contracts.summary import JsonSummaryV1_1
 from trialfolio.errors import EXIT_CODES
 
 SCHEMA = Path(__file__).resolve().parents[2] / "schemas" / "json-summary-1.1.0.schema.json"
 
 RUN_COUNTS = {"attempts", "provider_requests", "metrics_unavailable", "warnings", "cost"}
+REVIEW_COUNTS = {"results", "settings_flagged", "metrics_unavailable", "warnings"}
 
 
 def summary_of(outcome: Outcome, command: str) -> dict[str, object]:
@@ -79,6 +96,8 @@ def summary_of(outcome: Outcome, command: str) -> dict[str, object]:
     assert isinstance(counts, dict)
     if command in ("run", "demo"):
         assert set(counts) == RUN_COUNTS  # pyright: ignore[reportUnknownArgumentType]
+    elif command == "review":
+        assert set(counts) == REVIEW_COUNTS  # pyright: ignore[reportUnknownArgumentType]
     else:
         assert counts == {}
     return summary
@@ -334,6 +353,160 @@ def test_license(cli: Cli, accept: bool) -> None:
     assert "License" not in outcome.stdout
 
 
+# review
+
+
+def review(cli: Cli, path: Path, out: Path, **options: object) -> dict[str, object]:
+    """The summary of `trialfolio review` of the configuration at `path` into `out`."""
+    cli.accept_license()
+    outcome = cli(
+        "review",
+        path,
+        "--out",
+        out,
+        "--json",
+        **options,  # pyright: ignore[reportArgumentType]
+    )
+    return summary_of(outcome, "review")
+
+
+def two_copies(cli: Cli, break_second: Callable[[Path], None] = lambda run: None) -> Path:
+    """A review configuration of two copies of the committed run, the second broken by
+    `break_second`."""
+    directory = cli.tmp / "review-config"
+    for label in ("first", "second"):
+        shutil.copytree(SYNTHETIC_RUN, directory / "runs" / label)
+    break_second(directory / "runs" / "second")
+    path = directory / "review.yaml"
+    path.write_text(
+        "kind: review\nschema_version: 1.0.0\ntitle: Two copies\nbaseline: first\nresults:\n"
+        "  - label: first\n    run: runs/first\n  - label: second\n    run: runs/second\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def newer_manifest(run: Path) -> None:
+    manifest = json.loads((run / "manifest.json").read_bytes())
+    manifest["schema_version"] = "1.1.0"
+    (run / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_a_review_that_completes(cli: Cli, built: Callable[[str], Path]) -> None:
+    out = cli.tmp / "review"
+
+    summary = review(cli, built("example.yaml"), out)
+
+    assert summary["outcome"] == "completed"
+    assert summary["output_dir"] == str(out)
+    manifest = json.loads((out / "manifest.json").read_bytes())
+    assert summary["ids"] == {"review_id": manifest["review_id"]}
+    assert summary["outputs"] == {
+        "manifest": "manifest.json",
+        "report": "report.html",
+        "differences": "normalized/differences.csv",
+    }
+    assert summary["counts"] == {
+        "results": 2,
+        "settings_flagged": 0,
+        "metrics_unavailable": 0,
+        "warnings": 0,
+    }
+    assert cli.server.requests() == []
+
+
+BEFORE_THE_CLAIM: dict[str, tuple[Callable[[Cli], Path], str, int]] = {
+    "an input that isn't a run": (
+        lambda cli: two_copies(cli, lambda run: (run / "manifest.json").unlink()),
+        "input.not_a_run",
+        2,
+    ),
+    "an input that doesn't exist": (
+        lambda cli: two_copies(cli, shutil.rmtree),
+        "input.not_found",
+        2,
+    ),
+    "a schema version without a reader": (
+        lambda cli: two_copies(cli, newer_manifest),
+        "artifact.unknown_schema_version",
+        2,
+    ),
+    "a configuration that isn't valid": (
+        lambda cli: REVIEW_CONFIGS / "invalid" / "misspelled-key.yaml",
+        "config.invalid",
+        0,
+    ),
+}
+"""Each failure before the claim: the configuration, the error code, and the results counted,
+which a configuration that isn't valid names none of."""
+
+
+@pytest.mark.parametrize(
+    ("configure", "code", "results"), BEFORE_THE_CLAIM.values(), ids=BEFORE_THE_CLAIM.keys()
+)
+def test_a_review_that_fails_before_the_claim(
+    cli: Cli, configure: Callable[[Cli], Path], code: str, results: int
+) -> None:
+    out = cli.tmp / "review"
+
+    summary = review(cli, configure(cli), out)
+
+    assert summary["error"]["code"] == code  # pyright: ignore[reportIndexIssue]
+    assert summary["ids"] == {}
+    assert summary["output_dir"] is None
+    assert summary["counts"] == {
+        "results": results,
+        "settings_flagged": 0,
+        "metrics_unavailable": 0,
+        "warnings": 0,
+    }
+    assert not out.exists()
+
+
+def test_a_review_into_an_output_directory_that_isnt_empty(
+    cli: Cli, built: Callable[[str], Path]
+) -> None:
+    out = occupied(cli, "results.txt")
+
+    summary = review(cli, built("example.yaml"), out)
+
+    assert summary["error"]["code"] == "output.not_empty"  # pyright: ignore[reportIndexIssue]
+    assert summary["ids"] == {}
+    assert summary["output_dir"] is None
+
+
+AFTER_THE_CLAIM: dict[str, tuple[Callable[[FaultyStores], None], str]] = {
+    "a storage failure": (lambda faults: faults.fail_os("report.html"), "storage.write_failed"),
+    "an interrupt": (
+        lambda faults: faults.fail_before("report.html", KeyboardInterrupt()),
+        "command.interrupted",
+    ),
+}
+"""Each failure after the claim, at the report: how it fails, and the error code."""
+
+
+@pytest.mark.parametrize(("fail", "code"), AFTER_THE_CLAIM.values(), ids=AFTER_THE_CLAIM.keys())
+def test_a_review_that_fails_after_the_claim(
+    cli: Cli,
+    built: Callable[[str], Path],
+    faults: FaultyStores,
+    fail: Callable[[FaultyStores], None],
+    code: str,
+) -> None:
+    fail(faults)
+    out = cli.tmp / "review"
+
+    summary = review(cli, built("example.yaml"), out, store_factory=faults)
+
+    assert summary["error"]["code"] == code  # pyright: ignore[reportIndexIssue]
+    assert summary["output_dir"] == str(out)
+    ids = summary["ids"]
+    assert isinstance(ids, dict)
+    assert set(ids) == {"review_id"}  # pyright: ignore[reportUnknownArgumentType]
+    assert summary["outputs"] == {"differences": "normalized/differences.csv"}
+    assert not (out / "manifest.json").exists()
+
+
 # Without --json
 
 
@@ -379,7 +552,7 @@ def test_without_json_report_and_demo_write_their_result(cli: Cli) -> None:
 
 
 @pytest.mark.parametrize("out", [" ", ""], ids=["whitespace", "empty"])
-@pytest.mark.parametrize("command", ["run", "report", "demo"])
+@pytest.mark.parametrize("command", ["run", "report", "demo", "review"])
 def test_a_blank_output_directory_is_a_usage_error(
     cli: Cli, monkeypatch: pytest.MonkeyPatch, command: str, out: str
 ) -> None:
@@ -388,7 +561,12 @@ def test_a_blank_output_directory_is_a_usage_error(
     cli.ready()
     monkeypatch.chdir(cli.tmp)
     before = sorted(p.name for p in cli.tmp.iterdir())
-    inputs = {"run": [str(config("formula.yaml"))], "report": [str(cli.tmp)], "demo": []}
+    inputs = {
+        "run": [str(config("formula.yaml"))],
+        "report": [str(cli.tmp)],
+        "demo": [],
+        "review": [str(REVIEW_CONFIGS / "example.yaml")],
+    }
 
     outcome = cli(command, *inputs[command], "--out", out, "--json")
 
@@ -406,14 +584,19 @@ ESCAPED = "\\udcff"
 """How an error message shows it."""
 
 
-@pytest.mark.parametrize("command", ["run", "report", "demo"])
+@pytest.mark.parametrize("command", ["run", "report", "demo", "review"])
 def test_an_output_directory_that_isnt_utf8_text_is_a_usage_error(
     cli: Cli, monkeypatch: pytest.MonkeyPatch, command: str
 ) -> None:
     cli.ready()
     monkeypatch.chdir(cli.tmp)
     before = sorted(p.name for p in cli.tmp.iterdir())
-    inputs = {"run": [str(config("formula.yaml"))], "report": [str(cli.tmp)], "demo": []}
+    inputs = {
+        "run": [str(config("formula.yaml"))],
+        "report": [str(cli.tmp)],
+        "demo": [],
+        "review": [str(REVIEW_CONFIGS / "example.yaml")],
+    }
 
     outcome = cli(command, *inputs[command], "--out", f"out-{NOT_UTF8}", "--json")
 

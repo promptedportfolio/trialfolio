@@ -54,7 +54,7 @@ Steps:
 
 **Check:**
 
-- `trialfolio --version` prints `trialfolio 0.1.0`.
+- `trialfolio --version` prints `trialfolio 0.1.0` from the tag `v0.1.0`. A copy of `main` prints the next release's version, `0.2.0`, which the package takes once that release's specification is complete ([D-26](spec.md#decisions)).
 - `trialfolio --help` lists `init`, `run`, `report`, `demo`, and `license`.
 - `trialfolio init ~/research` exits 0 without asking you to acknowledge the license. The folder holds exactly `screen.yaml`, `README.md`, and `.gitignore`, with no `logs/` folder.
 - Running it again on the same folder fails with `output.not_empty`, exit code 4, and changes nothing.
@@ -276,7 +276,7 @@ A run's directory holds:
 - Commission shows as not modeled: the API documents no commission setting, and slippage is the only cost sent.
 - If the response covers different dates than you asked for, the report shows both, and `settings.csv` flags the date as `coverage_mismatch`.
 - Statistical validation and trading readiness read "Not assessed".
-- The closing section carries the Portfolio123 data statement and two outside links: the license and Portfolio123's terms. The license link names the release's tag, `v0.1.0`, so it works only once 0.1.0 is tagged.
+- The closing section carries the Portfolio123 data statement and two outside links: the license and Portfolio123's terms. The license link names the tag of the version that rendered the report, such as `v0.1.0`, so it works only once that version is tagged.
 
 [The flag codes](contracts.md#flag-codes) explain each flag in `settings.csv`.
 

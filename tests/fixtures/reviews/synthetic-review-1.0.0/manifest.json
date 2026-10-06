@@ -1,0 +1,175 @@
+{
+  "schema_version": "1.0.0",
+  "artifact_type": "review",
+  "trialfolio_version": "0.2.0",
+  "created_at": "2026-10-06T22:17:14.208877Z",
+  "review_id": "54222314-ab59-48f1-9109-8c55c94f9fca",
+  "command": {
+    "name": "review",
+    "options": {
+      "json": false
+    },
+    "started_at": "2026-10-06T22:17:14.045849Z"
+  },
+  "synthetic": true,
+  "outcome": "completed",
+  "error": null,
+  "baseline": "demo",
+  "results": [
+    {
+      "label": "demo",
+      "run_manifest": "sha256:319b68e44d13428f51b69aba83851348b8ac22c1711a922a1c4b4de12321dfb0",
+      "synthetic": true,
+      "plan_hash": "sha256:26c7930bdc4cb8880a70657c69cf2c3e28afc0faea32686e88c44f71dd1f8261",
+      "case_id": "case-e29404ddebf86363",
+      "normalized_tables": true,
+      "response": "sha256:ee269d536bf73c7c1846bd24240f4b1d460e7867a7c935c486c656228077f4b8"
+    },
+    {
+      "label": "demo-again",
+      "run_manifest": "sha256:319b68e44d13428f51b69aba83851348b8ac22c1711a922a1c4b4de12321dfb0",
+      "synthetic": true,
+      "plan_hash": "sha256:26c7930bdc4cb8880a70657c69cf2c3e28afc0faea32686e88c44f71dd1f8261",
+      "case_id": "case-e29404ddebf86363",
+      "normalized_tables": true,
+      "response": "sha256:ee269d536bf73c7c1846bd24240f4b1d460e7867a7c935c486c656228077f4b8"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "configuration.yaml",
+      "artifact_id": "sha256:a513087c11fa5a9b04d7136219b7547cfd5b142b077f81616be4cdd8e69e1332",
+      "size": 282,
+      "role": "configuration",
+      "schema_version": "1.0.0",
+      "source": {
+        "acquired_at": "2026-10-06T22:17:14.045849Z",
+        "format": "review-configuration",
+        "format_version": "1.0.0",
+        "parser_version": null,
+        "provenance": "user_supplied",
+        "operation": null
+      },
+      "label": null
+    },
+    {
+      "path": "inputs/demo/manifest.json",
+      "artifact_id": "sha256:319b68e44d13428f51b69aba83851348b8ac22c1711a922a1c4b4de12321dfb0",
+      "size": 4409,
+      "role": "run_manifest",
+      "schema_version": "1.0.0",
+      "source": null,
+      "label": "demo"
+    },
+    {
+      "path": "inputs/demo/plan.json",
+      "artifact_id": "sha256:b5f205c04848195647a0f53314fb0a4de4640318c3ca7c4e470e4b3ebec5e1e7",
+      "size": 10649,
+      "role": "plan",
+      "schema_version": "1.0.0",
+      "source": null,
+      "label": "demo"
+    },
+    {
+      "path": "inputs/demo/normalized/metrics.csv",
+      "artifact_id": "sha256:9511cdb7795868b480e22a8ccc90753fdab84cb4fe6110d75ea7fe6a1465981d",
+      "size": 4469,
+      "role": "metrics",
+      "schema_version": "1.0.0",
+      "source": null,
+      "label": "demo"
+    },
+    {
+      "path": "inputs/demo/normalized/settings.csv",
+      "artifact_id": "sha256:c7a15bc0d88f716d3ba5694a69d81a07f57008f11a319d07d38d03603bb8fd04",
+      "size": 4576,
+      "role": "settings",
+      "schema_version": "1.0.0",
+      "source": null,
+      "label": "demo"
+    },
+    {
+      "path": "inputs/demo-again/manifest.json",
+      "artifact_id": "sha256:319b68e44d13428f51b69aba83851348b8ac22c1711a922a1c4b4de12321dfb0",
+      "size": 4409,
+      "role": "run_manifest",
+      "schema_version": "1.0.0",
+      "source": null,
+      "label": "demo-again"
+    },
+    {
+      "path": "inputs/demo-again/plan.json",
+      "artifact_id": "sha256:b5f205c04848195647a0f53314fb0a4de4640318c3ca7c4e470e4b3ebec5e1e7",
+      "size": 10649,
+      "role": "plan",
+      "schema_version": "1.0.0",
+      "source": null,
+      "label": "demo-again"
+    },
+    {
+      "path": "inputs/demo-again/normalized/metrics.csv",
+      "artifact_id": "sha256:9511cdb7795868b480e22a8ccc90753fdab84cb4fe6110d75ea7fe6a1465981d",
+      "size": 4469,
+      "role": "metrics",
+      "schema_version": "1.0.0",
+      "source": null,
+      "label": "demo-again"
+    },
+    {
+      "path": "inputs/demo-again/normalized/settings.csv",
+      "artifact_id": "sha256:c7a15bc0d88f716d3ba5694a69d81a07f57008f11a319d07d38d03603bb8fd04",
+      "size": 4576,
+      "role": "settings",
+      "schema_version": "1.0.0",
+      "source": null,
+      "label": "demo-again"
+    },
+    {
+      "path": "normalized/differences.csv",
+      "artifact_id": "sha256:12281be96714664dbe982f1962508eff57920f89880e53087d7c5e2263a9a064",
+      "size": 4606,
+      "role": "differences",
+      "schema_version": "1.0.0",
+      "source": null,
+      "label": null
+    },
+    {
+      "path": "report.html",
+      "artifact_id": "sha256:6ad2f712d17430b8602c87a6e69f1d66ed39f9b4aa69c46987bac4ae4dbcfc74",
+      "size": 37817,
+      "role": "report",
+      "schema_version": null,
+      "source": null,
+      "label": null
+    }
+  ],
+  "methods": [
+    {
+      "name": "screen-run-differences",
+      "version": 1
+    }
+  ],
+  "license_id": "LicenseRef-NSPRL-1.0",
+  "notice_version": "1.0",
+  "capabilities": {
+    "return_series": "absent",
+    "statistical_validation": "not_assessed",
+    "trading_readiness": "not_assessed"
+  },
+  "counts": {
+    "results": 2,
+    "settings": {
+      "same": 23,
+      "intended_change": 0,
+      "unexplained_mismatch": 0,
+      "unknown": 0,
+      "flagged": 0
+    },
+    "metrics": {
+      "differenced": 20,
+      "not_comparable": 0,
+      "unavailable": 0,
+      "flagged": 20
+    }
+  }
+}

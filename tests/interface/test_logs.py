@@ -10,10 +10,19 @@ over the fake server, which answers with `responses/canaries.json`: `complete.js
 strings in an extra key and in the chart, and canary numbers as a metric and in a period. The
 canaries' scan looks for them in every log file. The per-user directories are under a temporary
 home.
+
+`trialfolio review`'s logs follow the same rules. Those checks trace to R02-AC12: with
+`review-configs/canaries.yaml`, whose runs the run builder writes from `screen-configs/canaries.yaml`
+with `canaries.json`, no canary appears in any log file after a review that completes, one whose
+input isn't a complete run, and one that fails with a storage fault at a copy. The review's own
+canaries are its title, purpose, descriptions, reasons, labels, and `run` paths' directory names,
+and each of its results' runs holds the screen configuration's and the response's.
 """
 
 import json
 import os
+import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -22,6 +31,7 @@ from tests.interface.conftest import (
     AUTHENTICATED,
     CONFIGS,
     Cli,
+    FaultyStores,
     Outcome,
     plan_hash_for,
     response,
@@ -141,7 +151,8 @@ def test_each_log_line_is_one_json_object_with_the_documented_fields(cli: Cli) -
         assert isinstance(event["timestamp"], str)
         assert event["timestamp"].endswith("Z")
         assert event["level"] in ("DEBUG", "INFO", "WARNING", "ERROR")
-        assert event["trialfolio_version"] == "0.1.0"
+        # 0.2.0 since its specification was completed (D-26).
+        assert event["trialfolio_version"] == "0.2.0"
         assert isinstance(event["event"], str)
         assert "." in event["event"]
     names = [event["event"] for event in events]
@@ -249,3 +260,87 @@ def test_the_warning_level_leaves_info_out_of_the_log_file(
     ]
     # stderr still shows progress, whatever the log file's level.
     assert "Claimed the output directory." in outcome.stderr
+
+
+# A review (R02-AC12)
+
+REVIEW_RUNS = [f"runs/{name}" for name in canaries.REVIEW if name.startswith("canary-run-")]
+"""`review-configs/canaries.yaml`'s `run` paths, in its results' order."""
+
+
+def review(cli: Cli, path: Path, out: Path, **options: object) -> Outcome:
+    cli.accept_license()
+    return cli(
+        "review",
+        path,
+        "--out",
+        out,
+        "--json",
+        **options,  # pyright: ignore[reportArgumentType]
+    )
+
+
+def test_a_review_logs_only_under_its_output_directory_and_no_canary(
+    cli: Cli, built: Callable[[str], Path]
+) -> None:
+    out = cli.tmp / "review"
+
+    outcome = review(cli, built("canaries.yaml"), out)
+
+    assert outcome.exit_code == 0, outcome.stderr
+    assert log_files(cli) == [out / "logs" / "trialfolio.log"]
+    assert not log_directory(os.environ).exists()
+    assert logged_canaries(cli) == []
+    events = [event["event"] for event in lines(out / "logs" / "trialfolio.log")]
+    # DEBUG is recorded, and so is the warning that the three results share one response.
+    assert "artifact.write.completed" in events
+    assert "review.response.shared" in events
+    # Every canary does reach the review's outputs, so the scan of the logs means something:
+    # the review's own in its configuration and, but the run paths, its report, and the runs'
+    # in the copied plans and tables.
+    configuration = (out / "configuration.yaml").read_text(encoding="utf-8")
+    assert all(canary in configuration for canary in canaries.REVIEW)
+    report = (out / "report.html").read_text(encoding="utf-8")
+    assert all(canary in report for canary in canaries.REVIEW if canary not in "".join(REVIEW_RUNS))
+    copies = "".join(
+        path.read_text(encoding="utf-8") for path in sorted((out / "inputs").rglob("*.*"))
+    )
+    assert all(canary in copies for canary in canaries.CONFIGURATION)
+    assert "87654.3219" in copies
+
+
+def test_a_review_whose_input_isnt_a_complete_run_writes_no_log_file_anywhere(
+    cli: Cli, built: Callable[[str], Path], tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    # A copy outside the test's directory, so the scan of it sees only what the review wrote.
+    built_path = built("canaries.yaml")
+    directory = tmp_path_factory.mktemp("broken") / "canaries"
+    shutil.copytree(built_path.parent, directory)
+    (directory / REVIEW_RUNS[1] / "plan.json").unlink()
+    out = cli.tmp / "review"
+
+    outcome = review(cli, directory / built_path.name, out)
+
+    assert outcome.exit_code == 3
+    assert outcome.summary["error"]["code"] == "input.not_a_run"  # pyright: ignore[reportIndexIssue]
+    assert not out.exists()
+    assert log_files(cli) == []
+    assert not log_directory(os.environ).exists()
+
+
+def test_a_review_that_fails_at_a_copy_logs_no_canary(
+    cli: Cli, built: Callable[[str], Path], faults: FaultyStores
+) -> None:
+    faults.fail_os("plan.json")
+    out = cli.tmp / "review"
+
+    outcome = review(cli, built("canaries.yaml"), out, store_factory=faults)
+
+    assert outcome.exit_code == 4
+    assert outcome.summary["error"]["code"] == "storage.write_failed"  # pyright: ignore[reportIndexIssue]
+    # The first result's copied manifest, before its plan.
+    assert faults.published[-1].endswith("/manifest.json")
+    assert log_files(cli) == [out / "logs" / "trialfolio.log"]
+    assert logged_canaries(cli) == []
+    events = lines(out / "logs" / "trialfolio.log")
+    assert [event["event"] for event in events][-1] == "cli.command.completed"
