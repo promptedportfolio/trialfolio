@@ -5,9 +5,10 @@ discarded; one that can't be removed is named, because the review then reads as 
 and macOS, a file system without hard links fails at the first copy.
 
 Traces to R02-AC19, and to the parts of R02-AC13 about a failure after the claim: the summary
-holds the `review_id`, and counts `differences.csv` once it's written. Also to docs/contracts.md's
-labels in logs: a failed copy's logged message names its result by its position, while the
-message on stderr gives its path. R02-T08 wrote these ahead of R02-T10.
+holds the `review_id`, even when an interrupt comes before the command has recorded the claim, and
+counts `differences.csv` once it's written. Also to docs/contracts.md's labels in logs: a failed
+copy's logged message names its result by its position, while the message on stderr gives its
+path. R02-T08 wrote these ahead of R02-T10.
 
 The review runs through the CLI's entry function in the test process, with storage faults
 wrapping the real store. A fault named `/manifest.json` is the review's own manifest, and
@@ -122,6 +123,34 @@ def test_an_interrupt_leaves_no_manifest_and_says_the_review_is_incomplete(
     assert faults.published[-1] == LAST_PUBLISHED[at]
     assert not (out / "manifest.json").exists()
     claimed(outcome, out)
+
+
+def test_an_interrupt_before_the_command_records_the_claim_still_names_the_review(
+    cli: Cli, built: Built, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Ctrl-C can arrive once the review has claimed its directory, before the command has
+    # recorded the claim, which starts its log there. Nothing at a boundary runs in between, so
+    # the interrupt is raised as the command's callback starts. The runs are built first, with
+    # the callback as it is.
+    path = built("example.yaml")
+
+    def interrupted(*_: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("trialfolio.cli._Invocation.claimed", interrupted)
+    out = cli.tmp / "review"
+
+    outcome = review(cli, path, out, LocalArtifactStore)
+
+    message = failed(outcome, "command.interrupted", 130)
+    assert INCOMPLETE in message
+    assert sorted(path.name for path in out.iterdir()) == ["configuration.yaml"]
+    # The summary still names the directory the review claimed, with its review_id.
+    summary = outcome.summary
+    assert summary["output_dir"] == str(out)
+    ids = summary["ids"]
+    assert isinstance(ids, dict)
+    assert list(ids) == ["review_id"]  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_a_failed_copy_is_named_by_its_path_on_stderr_and_by_its_position_in_the_log(

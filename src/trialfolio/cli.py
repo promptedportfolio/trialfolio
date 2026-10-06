@@ -362,7 +362,7 @@ class _Invocation:
                 "outcome": outcome,
                 "exit_code": exit_code,
                 "ids": self._ids(),
-                "output_dir": self.output_dir,
+                "output_dir": self._output_dir(),
                 "outputs": self._outputs(),
                 "counts": self._counts(),
                 "statistical_validation": "not_assessed",
@@ -372,6 +372,14 @@ class _Invocation:
                 else ErrorDetail(code=error.code, message=error.message),
             }
         )
+
+    def _output_dir(self) -> str | None:
+        """`output_dir`, or a review's once it has claimed its directory. A review's claim is
+        read from the review, as its `review_id` is, so the summary gives both even when an
+        interrupt stops the review before `claimed` has run."""
+        if self.review is not None and self.review.claimed:
+            return self.args.out
+        return self.output_dir
 
     def _ids(self) -> SummaryIdsV1_1:
         ids = SummaryIdsV1_1(**self.ids)
@@ -386,7 +394,7 @@ class _Invocation:
         return ids
 
     def _outputs(self) -> dict[str, str]:
-        if self.output_dir is None:
+        if self._output_dir() is None:
             return {}
         if self.name == "init":
             return {"configuration": CONFIGURATION}
