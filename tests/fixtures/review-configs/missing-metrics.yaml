@@ -1,0 +1,11 @@
+kind: review
+schema_version: 1.0.0
+title: Missing metrics
+purpose: Show metrics that are unavailable in one run.
+baseline: baseline
+results:
+  - label: baseline
+    run: runs/baseline
+  - label: missing
+    run: runs/missing
+    description: Three metrics are missing from its response.

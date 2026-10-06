@@ -1,0 +1,13 @@
+kind: review
+schema_version: 1.0.0
+title: Another benchmark, declared
+purpose: Show a declared change to the benchmark.
+baseline: baseline
+results:
+  - label: baseline
+    run: runs/baseline
+  - label: benchmark
+    run: runs/benchmark
+    intended_changes:
+      - setting: benchmark
+        reason: Compare the strategy with another benchmark.

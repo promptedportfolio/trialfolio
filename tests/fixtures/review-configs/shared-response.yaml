@@ -1,0 +1,28 @@
+kind: review
+schema_version: 1.0.0
+title: Shared responses
+purpose: Show results whose runs saved byte-identical responses.
+baseline: baseline
+results:
+  - label: baseline
+    run: runs/baseline
+  - label: written-differently
+    run: runs/written-differently
+    description: The baseline's settings, written differently, with the baseline's response.
+  - label: hold50-first
+    run: runs/hold50-first
+    intended_changes:
+      - setting: max_holdings
+        reason: Doubling holdings is the change under review.
+  - label: hold50-second
+    run: runs/hold50-second
+    description: A second run of the same configuration, with the same response.
+    intended_changes:
+      - setting: max_holdings
+        reason: Doubling holdings is the change under review.
+  - label: slippage
+    run: runs/slippage
+    description: The baseline's metrics, from a response no other result has.
+    intended_changes:
+      - setting: slippage_percent
+        reason: A higher slippage is the change under review.

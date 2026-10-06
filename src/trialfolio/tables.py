@@ -11,21 +11,29 @@ documented order. A cell is written as follows:
 - text as it is
 
 Reading is the named CSV adapter step before model validation (ADR 0002): it reverses the above,
-so an empty cell is `None`, `critical` a boolean, `source_decimals` an integer, the period dates
-dates, and `flags` a tuple of codes, and then validates each row with its model.
+so an empty cell is `None`, `critical` and `flagged` booleans, `source_decimals` and
+`difference_decimals` integers, the period dates dates, and `flags` a tuple of codes, and then
+validates each row with its model.
 """
 
 import csv
 import io
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date
 from typing import Final, cast
 
 from pydantic import BaseModel, ValidationError
 
 from trialfolio.contracts.common import INTEGER_PATTERN, valid_date_text
-from trialfolio.contracts.tables import METRICS_COLUMNS, SETTINGS_COLUMNS, MetricsRow, SettingsRow
+from trialfolio.contracts.tables import (
+    DIFFERENCES_COLUMNS,
+    METRICS_COLUMNS,
+    SETTINGS_COLUMNS,
+    DifferencesRow,
+    MetricsRow,
+    SettingsRow,
+)
 from trialfolio.errors import TrialFolioError
 
 _BOM: Final = "\ufeff"
@@ -45,6 +53,11 @@ def metrics_csv(rows: Sequence[MetricsRow]) -> bytes:
 def settings_csv(rows: Sequence[SettingsRow]) -> bytes:
     """`settings.csv`, with `rows` in the order given."""
     return _write(SETTINGS_COLUMNS, rows)
+
+
+def differences_csv(rows: Sequence[DifferencesRow]) -> bytes:
+    """`differences.csv`, with `rows` in the order given."""
+    return _write(DIFFERENCES_COLUMNS, rows)
 
 
 def _write(columns: tuple[str, ...], rows: Sequence[BaseModel]) -> bytes:
@@ -86,9 +99,20 @@ def read_settings_csv(content: bytes, source_name: str) -> tuple[SettingsRow, ..
     return _read(content, source_name, SETTINGS_COLUMNS, SettingsRow)
 
 
+def read_differences_csv(content: bytes, source_name: str) -> tuple[DifferencesRow, ...]:
+    """Reads `differences.csv` from its bytes, as `read_metrics_csv` reads `metrics.csv`. Its
+    `critical` is empty on a metric's row."""
+    return _read(content, source_name, DIFFERENCES_COLUMNS, DifferencesRow, _DIFFERENCES_READERS)
+
+
 def _read[M: BaseModel](
-    content: bytes, source_name: str, columns: tuple[str, ...], model: type[M]
+    content: bytes,
+    source_name: str,
+    columns: tuple[str, ...],
+    model: type[M],
+    readers: Mapping[str, Callable[[str], object]] | None = None,
 ) -> tuple[M, ...]:
+    readers = _READERS if readers is None else readers
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError:
@@ -105,7 +129,7 @@ def _read[M: BaseModel](
         fields: dict[str, object] = {}
         for column, cell in zip(columns, cells, strict=True):
             try:
-                fields[column] = _READERS.get(column, _text)(cell)
+                fields[column] = readers.get(column, _text)(cell)
             except ValueError:
                 raise _not_a_table(source_name, f"line {number}'s `{column}` is invalid.") from None
         try:
@@ -182,6 +206,10 @@ def _boolean(cell: str) -> bool:
     return cell == "true"
 
 
+def _optional_boolean(cell: str) -> bool | None:
+    return _boolean(cell) if cell else None
+
+
 def _integer(cell: str) -> int | None:
     if not cell:
         return None
@@ -206,3 +234,11 @@ _READERS: Final[dict[str, Callable[[str], object]]] = {
     "flags": _flags,
 }
 """How each column that isn't text is read; any other column is text, or `None` when empty."""
+
+_DIFFERENCES_READERS: Final[dict[str, Callable[[str], object]]] = {
+    "critical": _optional_boolean,
+    "difference_decimals": _integer,
+    "flagged": _boolean,
+    "flags": _flags,
+}
+"""How `differences.csv`'s columns that aren't text are read."""

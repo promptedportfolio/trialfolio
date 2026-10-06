@@ -546,7 +546,7 @@ One row for each setting and each metric of each non-baseline result, compared w
 
 #### Differences between screen runs
 
-R02-T01 took these names from 0.1.0's [screen settings](#screen-settings) and [metrics](#p123api-screen-backtest-version-1). Like the rest of 0.2.0's contracts, they're requirements since [0.2.0](releases/0.2.0-review.md)'s sign-off (2026-10-05), which confirmed the choices in its [open questions](releases/0.2.0-review.md#open-questions).
+R02-T01 took these names from 0.1.0's [screen settings](#screen-settings) and [metrics](#p123api-screen-backtest-version-1). Like the rest of 0.2.0's contracts, they're requirements since [0.2.0](releases/0.2.0-review.md)'s sign-off (2026-10-05), which confirmed the choices in its [open questions](releases/0.2.0-review.md#open-questions). R02-T06 wrote them as the comparison core, `compare` in `src/trialfolio/differences.py`, which compares the runs the [input check](#review-output) read. `src/trialfolio/tables.py` writes the table, and reads it back as the other tables.
 
 For each result except the baseline, in the order the review configuration lists them, `differences.csv` has:
 
@@ -567,12 +567,13 @@ A metric row is `unavailable`, with `input_unavailable`, when either value is un
 | 10–13 | `correlation`, `r_squared`, `beta`, and `alpha`, the benchmark-relative metrics, which name the benchmark in their `benchmark` cell | The periods are the same, and so are the `benchmark` cells | `ratio`; `pp` for `alpha` |
 | 15–20 | Rows 4–9 for the benchmark, which describe the benchmark itself | The periods are the same, and so are the runs' `benchmark` settings | As rows 4–9 |
 
-- **Periods.** A metric's period is its `period_start` and `period_end`, which are its run's coverage. Two periods are the same when both are known and equal. A different period gives `different_period`. A period that's unknown in either run gives `unknown_period`, so coverage that couldn't be established is never shown as matching.
+- **Periods.** A metric's period is its `period_start` and `period_end`, which are its run's coverage. A period is known when both its dates are, and two periods are the same when both are known and equal. A different period gives `different_period`. A period that's unknown in either run gives `unknown_period`, so coverage that couldn't be established is never shown as matching.
 - **Benchmarks.** A different benchmark gives `different_benchmark`. The strategy's other metrics don't depend on the benchmark, so they're differenced whatever it is.
 - **Units.** Layout version 1 fixes each metric's unit, so two runs read with it never differ in unit. `different_unit` is for a later layout that changes one.
 - **One reason.** When several reasons apply, `reason` gives the first of `different_unit`, `different_benchmark`, and `different_period` or `unknown_period`. The setting rows show every difference behind it.
 - **Decimals.** `difference_decimals` is the smaller of the two values' `source_decimals`, and 0 for dates and counts. A difference with more decimal places is rounded to it, half to even. `source_decimals` counts the digits the saved value has ([numbers and precision](#p123api-screen-backtest-version-1)). Saving drops trailing zeros, but a whole number saved as a float keeps its `.0`. So `12.5` has one decimal place even when it was requested at 4, and so does `12.0`: `12.46` against a baseline of `12.0` gives `0.5`, never `0`.
 - **Writing a difference.** `difference` has exactly `difference_decimals` digits after the decimal point, as a value in `metrics.csv` has its `source_decimals`, so `12.35` against `12.25` gives `0.10`. A difference of zero is written without a sign: `151.68` against `151.7` rounds to `-0.0`, which is written `0.0`, and so is `-0.0` against `0.0`.
+- **Flags.** A row's flags are written in the order of the [flag codes](#flag-codes) table, so the same runs always give the same cell.
 
 ### Flag codes
 
@@ -1037,7 +1038,7 @@ Reports count as output under [D-07](spec.md#decisions). Users may share them wi
 - Each file the manifest lists exists, with the size and `artifact_id` the manifest records.
 - It lists `plan.json` and `configuration.yaml`, once each. `plan.json` recomputes to its `plan_hash` ([plan hashing](#plan-hashing)), and the manifest names the same hash.
 - Each start record and attempt record it lists is in an attempt's directory of the plan's case, is valid, names that attempt, its case, and its plan's hash, and agrees with the attempt's other record. Each file an attempt record references is listed, with the same `artifact_id` and the matching role.
-- It lists both normalized tables, or neither. Each table reads back as a valid table, its rows are labeled with the plan's `case_id`, and they were drawn from the run's own `configuration.yaml` and saved response. `metrics.csv` holds one row for each of the layout's metrics, and `settings.csv` one for each of the plan's settings, in their documented order: a table missing a row, or with one repeated, isn't complete.
+- It lists both normalized tables, or neither. Each table reads back as a valid table, its rows are labeled with the plan's `case_id`, and they were drawn from the run's own `configuration.yaml` and saved response. `metrics.csv` holds one row for each of the layout's metrics, each in the unit the layout gives it, and `settings.csv` one for each of the plan's settings, in their documented order: a table missing a row, with one repeated, or with a metric in another unit, isn't complete.
 
 A schema version with no reader, in the manifest, `plan.json`, a start record, an attempt record, or the manifest's entry for one of them or for a table, is `artifact.unknown_schema_version`.
 

@@ -1,0 +1,14 @@
+kind: review
+schema_version: 1.0.0
+title: Coverage that differs or is unknown
+purpose: Show how a review compares runs whose periods differ from the baseline's.
+baseline: baseline
+results:
+  - label: baseline
+    run: runs/baseline
+  - label: coverage-mismatch
+    run: runs/coverage-mismatch
+    description: Coverage that starts later and ends earlier than the baseline's.
+  - label: no-periods
+    run: runs/no-periods
+    description: No periods, so its coverage couldn't be established.

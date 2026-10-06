@@ -1,0 +1,16 @@
+kind: review
+schema_version: 1.0.0
+title: Declared changes not observed
+purpose: Show declared changes whose values equal the baseline's.
+baseline: baseline
+results:
+  - label: baseline
+    run: runs/baseline
+  - label: declared
+    run: runs/declared
+    description: Run with the baseline's settings, although it declares two changes.
+    intended_changes:
+      - setting: max_holdings
+        reason: Doubling holdings was meant to be the change under review.
+      - setting: precision
+        reason: Another precision was meant to be requested.

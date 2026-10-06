@@ -454,6 +454,13 @@ INCOMPLETE_TABLES: dict[str, tuple[str, Callable[[list[Any]], list[Any]]]] = {
     ),
     "a metric repeated": ("normalized/metrics.csv", lambda rows: [*rows, rows[-1]]),
     "metrics out of order": ("normalized/metrics.csv", lambda rows: rows[::-1]),
+    "a metric in another unit": (
+        "normalized/metrics.csv",
+        lambda rows: [
+            row.model_copy(update={"unit": "ratio"}) if row.metric_id == "total_return" else row
+            for row in rows
+        ],
+    ),
     "no metrics": ("normalized/metrics.csv", lambda rows: []),
     "a setting missing": ("normalized/settings.csv", lambda rows: rows[1:]),
     "a setting repeated": ("normalized/settings.csv", lambda rows: [rows[0], *rows]),
