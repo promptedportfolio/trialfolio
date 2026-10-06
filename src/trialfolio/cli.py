@@ -470,13 +470,14 @@ class _Invocation:
 
     def _unexpected(self, failure: Exception) -> TrialFolioError:
         """`internal.unexpected` for a defect. Its log gives the exception's type and frames,
-        never its message, which could hold a value. After the claim, its message says what the
-        run's records say, so a request that may have been charged is never hidden."""
+        never its message, which could hold a value, and the IDs the command has so far, such as
+        a review's `review_id` after its claim. After the claim, its message says what the run's
+        records say, so a request that may have been charged is never hidden."""
         _logger.error(
             "Unexpected %s, at:\n%s",
             type(failure).__name__,
             "".join(traceback.format_tb(failure.__traceback__)),
-            extra=_event("cli.command.unexpected", False),
+            extra={**_event("cli.command.unexpected", False), **self._linked_ids()},
         )
         detail = self._execution_detail()
         return TrialFolioError(

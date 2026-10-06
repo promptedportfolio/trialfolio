@@ -1,14 +1,17 @@
 """A storage failure or an interrupt after `trialfolio review` claims its output directory exits
 with `storage.write_failed` and 4, or `command.interrupted` and 130, leaves no review manifest,
-and says the review is incomplete. A manifest the store published before its write failed is
+and says the review is incomplete. So does an unexpected exception, a defect, with
+`internal.unexpected` and 1. A manifest the store published before its write failed is
 discarded; one that can't be removed is named, because the review then reads as complete. On Linux
 and macOS, a file system without hard links fails at the first copy.
 
 Traces to R02-AC19, and to the parts of R02-AC13 about a failure after the claim: the summary
 holds the `review_id`, even when an interrupt comes before the command has recorded the claim, and
-counts `differences.csv` once it's written. Also to docs/contracts.md's labels in logs: a failed
-copy's logged message names its result by its position, while the message on stderr gives its
-path. R02-T08 wrote these ahead of R02-T10.
+counts `differences.csv` once it's written. Also to docs/contracts.md's running the commands: an
+unexpected exception after the claim says the review has no manifest, and the command's events
+carry the `review_id` from the claim on, `cli.command.unexpected` included. And to its labels in
+logs: a failed copy's logged message names its result by its position, while the message on
+stderr gives its path. R02-T08 wrote these ahead of R02-T10.
 
 The review runs through the CLI's entry function in the test process, with storage faults
 wrapping the real store. A fault named `/manifest.json` is the review's own manifest, and
@@ -151,6 +154,37 @@ def test_an_interrupt_before_the_command_records_the_claim_still_names_the_revie
     ids = summary["ids"]
     assert isinstance(ids, dict)
     assert list(ids) == ["review_id"]  # pyright: ignore[reportUnknownArgumentType]
+
+
+@pytest.mark.parametrize("published", [False, True], ids=["report", "published-manifest"])
+def test_an_unexpected_exception_leaves_no_manifest_and_says_the_review_is_incomplete(
+    cli: Cli, built: Built, faults: FaultyStores, published: bool
+) -> None:
+    out = cli.tmp / "review"
+    defect = RuntimeError("its own message")
+    if published:
+        # Raised once the store has published the manifest, which the review then discards.
+        faults.fail_after("/manifest.json", defect)
+    else:
+        faults.fail_before("report.html", defect)
+
+    outcome = review(cli, built("example.yaml"), out, faults)
+
+    message = failed(outcome, "internal.unexpected", 1)
+    assert message.startswith("Trial Folio failed unexpectedly (RuntimeError).")
+    assert INCOMPLETE in message
+    assert "its own message" not in message
+    assert faults.published[-1] == ("manifest.json" if published else "normalized/differences.csv")
+    assert not (out / "manifest.json").exists()
+    claimed(outcome, out)
+    log = (out / "logs" / "trialfolio.log").read_text(encoding="utf-8")
+    (unexpected,) = (
+        event
+        for event in (json.loads(line) for line in log.splitlines())
+        if event["event"] == "cli.command.unexpected"
+    )
+    assert unexpected["review_id"] == outcome.summary["ids"]["review_id"]  # pyright: ignore[reportIndexIssue]
+    assert "its own message" not in log
 
 
 def test_a_failed_copy_is_named_by_its_path_on_stderr_and_by_its_position_in_the_log(
