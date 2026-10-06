@@ -4,14 +4,14 @@ looks for them, and the scans that look.
 - **The credentials and the token** the fake server issues belong in no output at all. `leaks`
   scans every file in the directories it's given, such as the output, configuration, and log
   directories, and stdout and stderr, for them.
-- **The canary fixtures' values,** from `screen-configs/canaries.yaml` and
-  `responses/canaries.json`, belong in some outputs, such as `configuration.yaml`,
-  `settings.csv`, the report, and the plan display. `logged` scans only log files for them, and
-  stderr where a criterion says so.
+- **The canary fixtures' values,** from `screen-configs/canaries.yaml`,
+  `responses/canaries.json`, and `review-configs/canaries.yaml`, belong in some outputs, such as
+  `configuration.yaml`, `settings.csv`, the report, and the plan display. `logged` scans only log
+  files for them, and stderr where a criterion says so.
 
 R01-T09 created the credential and token values; R01-T15 added the fixtures' values and the
-scans. Each value is ASCII without characters JSON escapes, so a scan of the bytes finds it
-however a file encodes it.
+scans, and R02-T09 the review configuration's. Each value is ASCII without characters JSON
+escapes, so a scan of the bytes finds it however a file encodes it.
 """
 
 from collections.abc import Iterable
@@ -47,6 +47,26 @@ RESPONSE: Final = (
 """Every canary in `responses/canaries.json`: a string in the extra key `canaryExtra`, a string
 in `chart`, a number as `stats.port.total_return`, and a number as the newest period's `Ret%`."""
 
+REVIEW: Final = (
+    "canary-review-title-07df75ea",
+    "canary-review-purpose-f861bb17",
+    "canary-description-one-c7ef6dc9",
+    "canary-description-two-17f855b8",
+    "canary-description-three-db79e5ab",
+    "canary-reason-one-afcbcf87",
+    "canary-reason-two-33b9b50a",
+    "canary-reason-three-9ab8d5c5",
+    "canary-label-5a66f676",
+    "canary-label-bec3da08",
+    "canary-label-0aa24019",
+    "canary-run-da943a28",
+    "canary-run-bdcb5a6c",
+    "canary-run-993a190a",
+)
+"""Every canary in `review-configs/canaries.yaml`: the title, the purpose, each result's
+description, each reason, each label, and each `run` path's directory name, where the run
+builder writes the result's run."""
+
 LOG_FILE: Final = "trialfolio.log"
 """A log file's name, and with a number after it, a rotated one's."""
 
@@ -75,7 +95,7 @@ def logged(
 ) -> list[str]:
     """Where a canary fixture's value, or one of `more`, appears in a log file under `roots`,
     and in `stderr` when it's given. Each finding names the file or stream and the canary."""
-    canaries = (*CONFIGURATION, *RESPONSE, *more)
+    canaries = (*CONFIGURATION, *RESPONSE, *REVIEW, *more)
     found = [
         f"{path}: {canary}"
         for path in log_files(roots)

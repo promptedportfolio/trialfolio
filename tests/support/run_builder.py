@@ -11,8 +11,8 @@ builder returns, so none runs when a review starts.
 The runs' values are invented, but nothing labels them synthetic, so a committed copy would read
 as a Portfolio123 backtest (DSC-04). They exist only in the test's temporary directory.
 
-R02-T06 wrote it ahead of R02-T09, for the comparison core's tests, and R02-T07 added the
-committed synthetic run, for the review report's.
+R02-T06 wrote it ahead of R02-T09, for the comparison core's tests, R02-T07 added the committed
+synthetic run, for the review report's, and R02-T09 added `canaries.yaml`'s runs.
 """
 
 import io
@@ -67,6 +67,8 @@ BASELINE: Final = Run("formula.yaml", "complete.json")
 
 HOLDINGS_50: Final = Run("holdings-50.yaml", "changed-metrics.json")
 BENCHMARK_OTHER: Final = Run("benchmark-other.yaml", "changed-metrics.json")
+CANARIES: Final = Run("canaries.yaml", "canaries.json")
+"""Each result's run in `canaries.yaml`, so its results share one response."""
 
 RUNS: Final[dict[str, dict[str, Run | Path]]] = {
     "example.yaml": {"runs/hold25": BASELINE, "runs/hold50": HOLDINGS_50},
@@ -109,6 +111,11 @@ RUNS: Final[dict[str, dict[str, Run | Path]]] = {
     },
     "synthetic.yaml": {"runs/demo": SYNTHETIC_RUN, "runs/hold50": HOLDINGS_50},
     "synthetic-only.yaml": {"runs/demo": SYNTHETIC_RUN},
+    "canaries.yaml": {
+        "runs/canary-run-da943a28": CANARIES,
+        "runs/canary-run-bdcb5a6c": CANARIES,
+        "runs/canary-run-993a190a": CANARIES,
+    },
 }
 """The runs each review configuration names, by its `run` path, as `review-configs/README.md`
 gives them: a run to write, or the committed run to copy."""
