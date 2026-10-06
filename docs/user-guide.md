@@ -1,16 +1,16 @@
 # Trial Folio user guide
 
-This guide walks through release 0.1.0's workflows, from setting up to reading a report. Each workflow ends with what to check, so you can confirm it works as described.
+This guide walks through Trial Folio's workflows, from setting up to reading a report: release 0.1.0's, and the review 0.2.0 adds, which compares saved runs. Each workflow ends with what to check, so you can confirm it works as described.
 
-It describes behavior; it doesn't define it. Where it and an owning document disagree, such as [contracts.md](contracts.md) or the [release specification](releases/0.1.0-api-execution.md), the owning document wins, and this guide is the one to fix.
+It describes behavior; it doesn't define it. Where it and an owning document disagree, such as [contracts.md](contracts.md) or a release specification, [0.1.0's](releases/0.1.0-api-execution.md) or [0.2.0's](releases/0.2.0-review.md), the owning document wins, and this guide is the one to fix.
 
-**Platforms.** So far, 0.1.0 has been tested on macOS only. The commands below are for macOS and Linux shells.
+**Platforms.** So far, Trial Folio has been tested on macOS only. The commands below are for macOS and Linux shells.
 
 **Your license.** [LICENSE](../LICENSE) governs every copy of Trial Folio, including one you run from this repository. The README's [License section](../README.md#license) summarizes who may use it.
 
 ## 1. Set up
 
-Until 0.1.0 is released as a package, run it from a copy of this repository.
+Until Trial Folio is released as a package, run it from a copy of this repository.
 
 You need:
 
@@ -55,17 +55,17 @@ Steps:
 **Check:**
 
 - `trialfolio --version` prints `trialfolio 0.1.0` from the tag `v0.1.0`. A copy of `main` prints the next release's version, `0.2.0`, which the package takes once that release's specification is complete ([D-26](spec.md#decisions)).
-- `trialfolio --help` lists `init`, `run`, `report`, `demo`, and `license`.
+- `trialfolio --help` lists `init`, `run`, `report`, `demo`, `review`, and `license`.
 - `trialfolio init ~/research` exits 0 without asking you to acknowledge the license. The folder holds exactly `screen.yaml`, `README.md`, and `.gitignore`, with no `logs/` folder.
 - Running it again on the same folder fails with `output.not_empty`, exit code 4, and changes nothing.
 
 ## 2. Acknowledge the license
 
-`run`, `report`, and `demo` need a one-time acknowledgment of the license and the research notice. `--version`, `--help`, `trialfolio init`, and `trialfolio license` don't.
+`run`, `report`, `demo`, and `review` need a one-time acknowledgment of the license and the research notice. `--version`, `--help`, `trialfolio init`, and `trialfolio license` don't.
 
 1. Read them: `trialfolio license`. It prints the license, the full research notice, and whether you've acknowledged them.
 2. Acknowledge them, in one of three ways:
-   - **At the terminal.** The first time you run `run`, `report`, or `demo`, it shows the concise notice and asks you to type `accept`.
+   - **At the terminal.** The first time you run `run`, `report`, `demo`, or `review`, it shows the concise notice and asks you to type `accept`.
    - **Ahead of time.** `trialfolio license --accept`.
    - **For one command, recording nothing.** Set `TRIALFOLIO_ACCEPT_LICENSE=LicenseRef-NSPRL-1.0/1.0`, which suits scripts.
 
@@ -302,9 +302,81 @@ trialfolio report runs/first/ --out reports/first/
 - The new report's values match the original's.
 - A directory that isn't a complete run fails with `input.not_a_run`, and one that doesn't exist with `input.not_found`, both with exit code 3, and nothing is written.
 
-## 10. Use it from a script
+## 10. Compare runs with a review
 
-Add `--json` to any command. stdout then holds exactly one JSON object, on success and on failure, and everything else goes to stderr. The object gives the outcome, the exit code, the IDs, such as the plan hash, the output files, the counts, such as `provider_requests` and the credit `cost`, and the error, if any. Its schema is `schemas/json-summary-1.1.0.schema.json`. Trial Folio 0.1.0 writes version 1.0.0, whose schema, `schemas/json-summary-1.0.0.schema.json`, is kept beside it: 1.1.0 only adds to it.
+`trialfolio review` compares saved runs with a baseline you choose. It shows which settings differ, as changes you declared or as unexplained mismatches, and how each metric moved. It reads runs that `trialfolio run` or `trialfolio demo` wrote, offline: it sends nothing, and needs no credentials. It doesn't rank the runs, or say which strategy is better.
+
+1. Write a review configuration, a YAML file that names the runs and the baseline. Put it in your workspace, and name each run by its path from there:
+
+   ```yaml
+   kind: review
+   schema_version: 1.0.0
+   title: Holdings 25 versus 50
+   purpose: Check whether doubling holdings changes risk as expected.   # optional
+   baseline: hold25
+   results:
+     - label: hold25
+       run: runs/hold25
+     - label: hold50
+       run: runs/hold50
+       description: The same screen, with 50 holdings.                 # optional
+       intended_changes:
+         - setting: max_holdings
+           reason: Doubling holdings is the change under review.
+   ```
+
+   - **Labels** name the results in the review, and `baseline` is one of them. A label is lowercase letters, digits, `-`, and `_`, starts with a letter or a digit, and is at most 64 characters long. It names a folder in the review, so it can't be a name Windows reserves, such as `con` or `nul`.
+   - **A `run` path is read from the configuration's folder,** wherever you run the command from, unless it's absolute. Keep it relative, as above. The review keeps a byte-for-byte copy of its configuration, so an absolute path, such as `/Users/you/research/runs/hold25`, would show anyone you share the review with where you keep your runs.
+   - **Declare each change you meant to make,** under the result that makes it, with a reason. A declared change is shown as intended. A difference you didn't declare is an unexplained mismatch, and it's flagged in a critical category: the dates, the benchmark, the currency, the costs, the execution, the universe, the data source, and the strategy. You can declare 12 settings: `universe`, `rules`, `ranking`, `max_holdings`, `benchmark`, `start_date`, `end_date`, `rebalance_weeks`, `transaction_price`, `slippage_percent`, `pit_method`, and `precision`. The baseline declares nothing.
+
+   [The review configuration](contracts.md#review-configuration) gives every key's rules.
+
+2. Review the runs, into a new or empty directory:
+
+   ```sh
+   trialfolio review review.yaml --out reviews/holdings/
+   ```
+
+To try it without credentials, write two demo runs, `trialfolio demo --out runs/demo-a/` and `trialfolio demo --out runs/demo-b/`, and review them with a configuration that names them.
+
+A review's directory holds:
+
+| Path | What it is |
+|---|---|
+| `report.html` | The review's report: one self-contained file, with no scripts, that opens offline |
+| `normalized/differences.csv` | For each result but the baseline, its 23 settings and then its 20 metrics, each compared with the baseline's |
+| `manifest.json` | Which run each label names, the comparison's method, its counts, and every file's hash. It's written last, so a review without one is incomplete. |
+| `configuration.yaml` | Your review configuration, byte for byte |
+| `inputs/<label>/` | Byte-for-byte copies of each run's `manifest.json`, `plan.json`, and normalized tables, so the review stands on its own |
+| `logs/trialfolio.log` | The review's log |
+
+It doesn't copy a run's request, its response, or its report.
+
+**Keep reviews out of Git.** A review of real runs holds Portfolio123 data, in its copies of their tables, as a run does. The workspace's `.gitignore` keeps `runs/` and `reports/` out of Git, but not `reviews/`. If you keep the workspace in Git, add `/reviews/` to it.
+
+**In the report:**
+
+- The research notice, the Portfolio123 data statement, and "Not assessed", as in a run's report.
+- Each result's benchmark beside the baseline's.
+- The intended changes, apart from the unexplained mismatches, and any other setting that's flagged, such as a date whose coverage differs.
+- Each result's metrics beside the baseline's, with the difference only where the two are comparable. It's in percentage points (`pp`) for percent metrics, and never has more decimal places than the two values. A metric that depends on the benchmark isn't differenced when the benchmarks differ, and no metric but the coverage is when the periods differ. The report gives the reason.
+- A missing value shows as unavailable, with the reason its run's `metrics.csv` gives, never as zero.
+- A result whose run has no tables, because its request failed or its response was invalid, is still compared: its settings from its plan, and every metric as unavailable. The report says why it has no tables.
+- A synthetic result, from `trialfolio demo`, is named before any result, and labeled synthetic wherever its values appear.
+- It links only to the review's own files, never to the runs, and never shows a `run` path.
+
+**Check:**
+
+- It exits 0. stdout says "Review completed", where the report is, how many setting rows are flagged and how many metric rows are unavailable, the review ID, and that statistical validation and trading readiness are not assessed.
+- In `differences.csv`, the `intended_change` rows are the changes you declared. A declared change whose values are the same is `same`, flagged `intended_change_not_observed`.
+- When two results' runs saved byte-identical responses, as two demo runs do, it warns that they share one response, and the metric rows of each but the baseline are flagged `identical_source`.
+- The runs' directories aren't changed.
+- A `run` directory that doesn't exist fails with `input.not_found`, and one that isn't a complete run with `input.not_a_run`, both with exit code 3. The message names the result's label and its `run` path, and nothing is written.
+- Reviewing into a directory that isn't empty fails with `output.not_empty`, exit code 4, and changes nothing in it.
+
+## 11. Use it from a script
+
+Add `--json` to any command. stdout then holds exactly one JSON object, on success and on failure, and everything else goes to stderr. The object gives the outcome, the exit code, the IDs, such as the plan hash, the output files, the counts, such as `provider_requests` and the credit `cost`, and the error, if any. For a review, `ids` holds the review ID, and `counts` the results, the flagged setting rows, the unavailable metric rows, and the warnings. Its schema is `schemas/json-summary-1.1.0.schema.json`. Trial Folio 0.1.0 writes version 1.0.0, whose schema, `schemas/json-summary-1.0.0.schema.json`, is kept beside it: 1.1.0 only adds to it.
 
 Approve only a plan you've reviewed. A script can read the hash from a run that wasn't approved, in `ids.plan_hash`, and approve it, but that skips the review the plan exists for.
 
@@ -325,7 +397,7 @@ Exit codes:
 - `trialfolio demo --out demo2/ --json` prints one object with `"outcome": "completed"`.
 - A plan run without approval, with `--json`, prints one object with `"exit_code": 2`, the plan hash in `ids`, and the error.
 
-## 11. When something goes wrong
+## 12. When something goes wrong
 
 Every error message says what failed, why, and what to do next. These are the ones you're most likely to see:
 
@@ -334,6 +406,7 @@ Every error message says what failed, why, and what to do next. These are the on
 | `config.invalid` | The configuration has a problem; the message lists each one | Fix them. Nothing was sent. |
 | `output.not_empty` | `--out`, or the folder given to `trialfolio init`, names a directory that isn't empty | Choose a new or empty directory |
 | `plan.approval_required` | The plan wasn't approved, or the hash didn't match | Approve it in a terminal, or give its full hash. Nothing was sent. |
+| `input.not_found`, `input.not_a_run` | `trialfolio report`'s run directory, or a review's `run` path, doesn't exist, or isn't a complete run. A review's message names the result. | Give the output directory of a run that finished. Nothing was written. |
 | `environment.unsupported` | The installed `p123api`, `requests`, or `urllib3` isn't the verified version | Run `uv sync` in the repository to restore the locked versions |
 | `provider.auth_failed` | The credentials are missing, or Portfolio123 refused them | Check the API ID and key |
 | `provider.unavailable` | Portfolio123 couldn't be reached; the request wasn't sent | Try again later |
@@ -345,7 +418,7 @@ Every error message says what failed, why, and what to do next. These are the on
 | `command.interrupted` | You pressed Ctrl-C | The message says whether a request may have been sent |
 | `internal.unexpected` | A defect in Trial Folio | Report it, with the log the message names |
 
-After a Portfolio123 error, the run's directory still has its report and manifest, which record the failure. After an interrupt, a storage failure, or an internal error, there's no manifest, so the run reads as incomplete. [Errors](contracts.md#errors) lists every code.
+After a Portfolio123 error, the run's directory still has its report and manifest, which record the failure. After an interrupt, a storage failure, or an internal error, there's no manifest, so the run, or the review, reads as incomplete. [Errors](contracts.md#errors) lists every code.
 
 **Logs.** Each command with an output directory logs to `logs/trialfolio.log` there. `trialfolio init`, `trialfolio license`, and an internal error before the output directory is claimed log to a per-user directory, which the README's [Your data stays on your machine](../README.md#your-data-stays-on-your-machine) lists, with how to delete it. To see more detail, set `TRIALFOLIO_LOG_LEVEL=DEBUG`. At every level, logs hold no credentials, configuration values, formulas, or results.
 
