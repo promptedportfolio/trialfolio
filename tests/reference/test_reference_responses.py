@@ -23,9 +23,8 @@ a temporary directory that's removed afterwards, never under the reference direc
 """
 
 import json
-import os
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -40,8 +39,6 @@ from trialfolio.planning import build_plan, installed_versions
 from trialfolio.tables import read_metrics_csv, read_settings_csv
 
 pytestmark = pytest.mark.reference
-
-REFERENCE_DIR_VARIABLE = "TRIALFOLIO_REFERENCE_DIR"
 
 
 @dataclass(frozen=True)
@@ -113,27 +110,6 @@ DOCUMENTED_METRICS = (
 )
 PRECISION = 4
 """The decimal places every reference request asked for, and the most any value may have."""
-
-
-@pytest.fixture
-def reference_dir() -> Path:
-    given = os.environ.get(REFERENCE_DIR_VARIABLE, "")
-    if not given:
-        pytest.skip(
-            f"{REFERENCE_DIR_VARIABLE} isn't set: these tests read the owner's local reference "
-            f"responses, as `{REFERENCE_DIR_VARIABLE}=reference uv run pytest -m reference`"
-        )
-    directory = Path(given).resolve()
-    if not directory.is_dir():
-        pytest.skip(f"{REFERENCE_DIR_VARIABLE} names no directory: {given}")
-    return directory
-
-
-@pytest.fixture
-def server() -> Iterator[FakePortfolio123]:
-    fake = FakePortfolio123()
-    yield fake
-    fake.close()
 
 
 def quoted(text: object) -> str:

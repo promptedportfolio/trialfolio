@@ -254,6 +254,33 @@ def snapshot(root: Path) -> dict[str, bytes | None]:
     }
 
 
+type Entry = tuple[bool, int, int, bytes | None]
+
+
+def metadata(root: Path) -> dict[str, Entry]:
+    """The root and everything under it, hidden entries included: whether each is a directory,
+    and its size, modification time, and bytes."""
+    entries: dict[str, Entry] = {}
+    for path in (root, *sorted(root.rglob("*"))):
+        status = path.stat()
+        directory = path.is_dir()
+        entries[path.relative_to(root).as_posix()] = (
+            directory,
+            status.st_size,
+            status.st_mtime_ns,
+            None if directory else path.read_bytes(),
+        )
+    return entries
+
+
+def occupied(cli: Cli, name: str) -> Path:
+    """An output directory holding one file, `name`."""
+    out = cli.tmp / "out"
+    out.mkdir()
+    (out / name).write_bytes(b"someone else's file\n")
+    return out
+
+
 def plan_hash_of(outcome: Outcome) -> str:
     """The plan hash a run without approval shows on stderr."""
     for line in outcome.stderr.splitlines():

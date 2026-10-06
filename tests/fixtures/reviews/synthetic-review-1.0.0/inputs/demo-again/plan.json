@@ -1,0 +1,370 @@
+{
+  "schema_version": "1.0.0",
+  "trialfolio_version": "0.1.0",
+  "canonicalization_version": 1,
+  "provider_wrapper": {
+    "p123api": "3.1.0"
+  },
+  "transport": {
+    "requests": "2.34.2",
+    "urllib3": "2.8.0"
+  },
+  "title": "Synthetic example: earnings yield with a liquidity floor",
+  "purpose": "Shows a run's files and report offline, from invented values.",
+  "cases": [
+    {
+      "case_id": "case-e29404ddebf86363",
+      "requests": [
+        {
+          "operation": "screen_backtest",
+          "params": {
+            "screen": {
+              "type": "stock",
+              "universe": "SP500",
+              "maxNumHoldings": 25,
+              "method": "long",
+              "currency": "USD",
+              "benchmark": "SPY",
+              "ranking": {
+                "formula": "EarnYield",
+                "lowerIsBetter": false
+              },
+              "rules": [
+                {
+                  "formula": "AvgDailyTot(30) > 1000000"
+                }
+              ]
+            },
+            "startDt": "2016-01-01",
+            "endDt": "2025-12-31",
+            "pitMethod": "Complete",
+            "precision": 4,
+            "transPrice": 1,
+            "slippage": 0.25,
+            "rebalFreq": "Every 4 Weeks"
+          }
+        }
+      ],
+      "settings": [
+        {
+          "setting": "universe",
+          "category": "universe",
+          "critical": true,
+          "value": "SP500",
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": [
+            "not_snapshotted"
+          ]
+        },
+        {
+          "setting": "screen_type",
+          "category": "universe",
+          "critical": true,
+          "value": "stock",
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "rules",
+          "category": "strategy",
+          "critical": true,
+          "value": [
+            "AvgDailyTot(30) > 1000000"
+          ],
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "ranking",
+          "category": "strategy",
+          "critical": true,
+          "value": {
+            "formula": "EarnYield",
+            "lower_is_better": false
+          },
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "max_holdings",
+          "category": "strategy",
+          "critical": true,
+          "value": 25,
+          "unit": "count",
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "position_method",
+          "category": "strategy",
+          "critical": true,
+          "value": "long",
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "benchmark",
+          "category": "benchmark",
+          "critical": true,
+          "value": "SPY",
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "currency",
+          "category": "currency",
+          "critical": true,
+          "value": "USD",
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "start_date",
+          "category": "dates",
+          "critical": true,
+          "value": "2016-01-01",
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "end_date",
+          "category": "dates",
+          "critical": true,
+          "value": "2025-12-31",
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "rebalance_weeks",
+          "category": "execution",
+          "critical": true,
+          "value": 4,
+          "unit": "weeks",
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "transaction_price",
+          "category": "execution",
+          "critical": true,
+          "value": "open",
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "slippage_percent",
+          "category": "costs",
+          "critical": true,
+          "value": "0.25",
+          "unit": "percent",
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "commission",
+          "category": "costs",
+          "critical": true,
+          "value": "not_modeled",
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "inferred",
+          "inference_rule": "Portfolio123's API: Screen page documents no commission parameter, and slippage is its only trading-cost input (checked 2026-10-01).",
+          "flags": []
+        },
+        {
+          "setting": "pit_method",
+          "category": "data_source",
+          "critical": true,
+          "value": "complete",
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "data_vendor",
+          "category": "data_source",
+          "critical": true,
+          "value": "FactSet",
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "inferred",
+          "inference_rule": "D-16: FactSet is the only supported data vendor. The endpoint documents no vendor parameter, so none is sent, and the response doesn't report the vendor.",
+          "flags": [
+            "inferred_default"
+          ]
+        },
+        {
+          "setting": "precision",
+          "category": "other",
+          "critical": false,
+          "value": 4,
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "verified",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "risk_stats_period",
+          "category": "other",
+          "critical": false,
+          "value": "monthly",
+          "unit": null,
+          "interpretation": "interpreted",
+          "expected_provenance": "inferred",
+          "inference_rule": "Portfolio123's documented default: the API: Screen page lists riskStatsPeriod's values as ['Monthly'] | 'Weekly' | 'Daily' (checked 2026-10-01), and the wrapper's documentation says an optional parameter defaults to the first value.",
+          "flags": [
+            "inferred_default"
+          ]
+        },
+        {
+          "setting": "max_pos_pct",
+          "category": "strategy",
+          "critical": true,
+          "value": "not_sent",
+          "unit": null,
+          "interpretation": "not_interpreted",
+          "expected_provenance": "unknown",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "rank_tolerance",
+          "category": "strategy",
+          "critical": true,
+          "value": "not_sent",
+          "unit": null,
+          "interpretation": "not_interpreted",
+          "expected_provenance": "unknown",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "carry_cost",
+          "category": "costs",
+          "critical": true,
+          "value": "not_sent",
+          "unit": null,
+          "interpretation": "not_interpreted",
+          "expected_provenance": "unknown",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "long_weight",
+          "category": "strategy",
+          "critical": true,
+          "value": "not_sent",
+          "unit": null,
+          "interpretation": "not_interpreted",
+          "expected_provenance": "unknown",
+          "inference_rule": null,
+          "flags": []
+        },
+        {
+          "setting": "short_weight",
+          "category": "strategy",
+          "critical": true,
+          "value": "not_sent",
+          "unit": null,
+          "interpretation": "not_interpreted",
+          "expected_provenance": "unknown",
+          "inference_rule": null,
+          "flags": []
+        }
+      ]
+    }
+  ],
+  "budget": {
+    "provider_requests": 1,
+    "credits_per_request": 5,
+    "credits_per_request_source": {
+      "title": "API: Screen",
+      "url": "https://portfolio123.customerly.help/en/articles/43324-api-screen",
+      "checked": "2026-10-01"
+    },
+    "credits": 5,
+    "authentication_calls": 1
+  },
+  "retry_policy": {
+    "automatic_retries": 0,
+    "wrapper_attempts_per_call": 1,
+    "exchanges_per_call": 1
+  },
+  "data_sent": [
+    {
+      "category": "credentials",
+      "recipient": "Portfolio123",
+      "via": "p123api",
+      "settings": []
+    },
+    {
+      "category": "strategy_definition",
+      "recipient": "Portfolio123",
+      "via": "p123api",
+      "settings": [
+        "universe",
+        "rules",
+        "ranking"
+      ]
+    },
+    {
+      "category": "backtest_settings",
+      "recipient": "Portfolio123",
+      "via": "p123api",
+      "settings": [
+        "screen_type",
+        "max_holdings",
+        "position_method",
+        "benchmark",
+        "currency",
+        "start_date",
+        "end_date",
+        "rebalance_weeks",
+        "transaction_price",
+        "slippage_percent",
+        "pit_method",
+        "precision"
+      ]
+    }
+  ],
+  "plan_hash": "sha256:26c7930bdc4cb8880a70657c69cf2c3e28afc0faea32686e88c44f71dd1f8261"
+}

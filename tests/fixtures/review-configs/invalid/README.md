@@ -5,7 +5,7 @@ Each file breaks exactly one rule of the [review configuration](../../../../docs
 - **Origin:** written for Trial Folio's tests. Synthetic: the labels, paths, and text are invented, and no value comes from Portfolio123.
 - **Schema version:** review configuration 1.0.0.
 - **Redistribution:** synthetic, so it may be committed and shared.
-- **Criteria:** R02-AC11 ([0.2.0's test pairing](../../../../docs/releases/0.2.0-review.md#test-pairing)).
+- **Criteria:** R02-AC11 ([0.2.0's test pairing](../../../../docs/releases/0.2.0-review.md#test-pairing)). `tests/interface/test_review_failures.py` also runs `misspelled-key.yaml`, `duplicate-key.yaml`, `intended-change-on-baseline.yaml`, and `unknown-setting.yaml` through the CLI, and `tests/interface/test_json_summary.py` `misspelled-key.yaml`.
 
 A new rule needs a new file, and a row here. The test checks that this table and the directory list the same files.
 

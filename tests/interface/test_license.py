@@ -4,9 +4,10 @@ don't; and `trialfolio license` prints the license, the full notice, and the ack
 status, or with `--accept` records the acknowledgment.
 
 Traces to R01-AC20 (without an acknowledgment or a terminal, `run` fails with
-`license.not_acknowledged` and exit 2, and writes nothing), R01-AC21 (`license --accept` writes
-exactly the four documented fields, later runs don't ask, and another license identifier or notice
-version asks again), and R01-AC22 (the exact `<license_id>/<notice_version>` acknowledges for the
+`license.not_acknowledged` and exit 2, and writes nothing), and so does `review`, as release
+0.2.0's failure behavior gives; R01-AC21 (`license --accept` writes exactly the four documented
+fields, later runs don't ask, and another license identifier or notice version asks again); and
+R01-AC22 (the exact `<license_id>/<notice_version>` acknowledges for the
 process without a record, and any other value is rejected); and to docs/contracts.md, license
 acknowledgment. Through the CLI's entry function in the test process, with the per-user
 directories under a temporary home; the terminal is a real pseudo-terminal.
@@ -20,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from tests.interface.conftest import Cli, config, snapshot
+from tests.support.run_builder import REVIEW_CONFIGS
 from tests.support.terminal import PseudoTerminal
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
 from trialfolio.notices import CONCISE_NOTICE, FULL_NOTICE, LICENSE_ID, NOTICE_VERSION
@@ -71,7 +73,7 @@ def error_code(stdout: str) -> object:
 # R01-AC20: without an acknowledgment
 
 
-@pytest.mark.parametrize("command", ["run", "demo", "report"])
+@pytest.mark.parametrize("command", ["run", "demo", "report", "review"])
 def test_without_an_acknowledgment_or_a_terminal_a_command_fails_and_writes_nothing(
     cli: Cli, command: str
 ) -> None:
@@ -81,6 +83,7 @@ def test_without_an_acknowledgment_or_a_terminal_a_command_fails_and_writes_noth
         "run": ("run", config("formula.yaml")),
         "demo": ("demo",),
         "report": ("report", cli.tmp),
+        "review": ("review", REVIEW_CONFIGS / "example.yaml"),
     }[command]
 
     outcome = cli(*first, "--out", out, "--json")
