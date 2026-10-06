@@ -357,6 +357,35 @@ def test_a_setting_missing_from_a_run_is_unknown(review: Review) -> None:
     assert (end_date.classification, end_date.flags) == ("unknown", ("critical_unknown",))
 
 
+def test_a_row_carries_the_baselines_flags_in_the_flag_codes_order(review: Review) -> None:
+    """A row carries the flags either run's `settings.csv` row has (the open question on flags),
+    written in the order of the flag codes table, where `coverage_mismatch` comes after
+    `critical_unexplained_mismatch`, although it sorts before it. Every review configuration's
+    baseline carries only each setting's own flags, so `coverage-mismatch` is the baseline here,
+    and the other run's start date is built to differ."""
+    runs = {run.label: run for run in review("coverage.yaml").runs}
+    other = runs["baseline"]
+    start = other.settings["start_date"]
+    changed = dataclasses.replace(
+        other,
+        settings={**other.settings, "start_date": dataclasses.replace(start, value="2016-01-05")},
+    )
+
+    differences = compare("coverage-mismatch", (runs["coverage-mismatch"], changed))
+
+    end_date = setting(differences, "baseline", "end_date")
+    assert (end_date.baseline_value, end_date.value) == ("2025-12-31", "2025-12-31")
+    assert end_date.classification == "same"
+    assert (end_date.flagged, end_date.flags) == (True, ("coverage_mismatch",))
+    start_date = setting(differences, "baseline", "start_date")
+    assert (start_date.baseline_value, start_date.value) == ("2016-01-01", "2016-01-05")
+    assert start_date.classification == "unexplained_mismatch"
+    assert (start_date.flagged, start_date.flags) == (
+        True,
+        ("critical_unexplained_mismatch", "coverage_mismatch"),
+    )
+
+
 @pytest.mark.parametrize("label", ["rejected", "invalid-structure", "not-json"])
 def test_a_run_without_tables_is_compared_from_its_plan(review: Review, label: str) -> None:
     reviewed = review("without-tables.yaml")
