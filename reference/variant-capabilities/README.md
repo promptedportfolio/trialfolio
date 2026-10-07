@@ -54,12 +54,12 @@ All 20 metrics of every result were differenced. The metrics that changed, out o
 | Result | Changed | Unchanged |
 |---|---|---|
 | `slippage-050` | 9 | The coverage (3), the risk samples, the benchmark's six, and `r_squared`. Slippage lowers each period's return without changing how the returns move with the benchmark's. |
-| `liquidity-100m` | 10 | The coverage, the risk samples, and the benchmark's six, which no change to the strategy can move |
+| `liquidity-100m` | 10 | The coverage, the risk samples, and the benchmark's six |
 | `easy-to-trade` | 10 | The same |
 | `no-microcaps` | 10 | The same |
 | `slice-0` | 10 | The same |
 
-So each result changed every strategy metric except the coverage and the risk samples, and for slippage `r_squared`, and the [0.2.0 live exercise](../review-live-exercise/README.md)'s `max_holdings: 50` changed the same 10.
+So each result changed every strategy metric except the coverage and the risk samples, and for slippage `r_squared`, and the [0.2.0 live exercise](../review-live-exercise/README.md)'s `max_holdings: 50` changed the same 10. That's what these checks showed, not what every variant leaves alone: a rebalance variant changes `coverage_periods`, as [R01-T05](../p123api-screen-backtest-values/README.md#checks-against-the-response-layout)'s 523 weekly periods against 131 every 4 weeks show.
 
 **The credentials.** A scan after the runs found the API key in no file of the runs or the reviews, and nowhere in the commands' stderr or JSON summaries. The API ID matched inside the six saved responses, Portfolio123's own data, and nowhere else: not in the logs, the reports, the normalized tables, the plans, the configurations, the attempts' other records, or the reviews.
 
