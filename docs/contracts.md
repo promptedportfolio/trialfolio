@@ -313,7 +313,7 @@ Schema version 1.0.0, introduced in 0.3.0 (task R03-T02). An experiment configur
 | `variants` | mapping | No | The [variants](#variants), by the setting each one changes. If it's absent, the only variant is the [default](#default-variants). |
 | `budget` | mapping | Yes | The [request budget](#the-experiments-budget) |
 
-**Not sent.** `experiment_id`, `title`, `purpose`, `prior_research`, and each variant's `key` and `description` describe the experiment. They're never sent, and they aren't part of any case's settings, so they don't change a `case_id`. They're recorded with `user_supplied` provenance. [R03-T03](releases/0.3.0-experiments.md#specification-tasks-before-ready) specifies how plan 1.1.0 and `experiment.json` record them.
+**Not sent.** `experiment_id`, `title`, `purpose`, `prior_research`, and each variant's `key` and `description` describe the experiment. They're never sent, and they aren't part of any case's settings, so they don't change a `case_id`. They're recorded with `user_supplied` provenance, in [plan 1.1.0](#experiment-plans-and-revisions) and [`experiment.json`](#experimentjson). A change to any of them but `experiment_id` is a plan revision, and keeps every case's `case_id`; another `experiment_id` is another experiment.
 
 #### Prior research
 
@@ -386,7 +386,7 @@ Any other key in `variants`, such as `universe`, `ranking`, `benchmark`, or a da
 - **At least one per case.** So every case can be sent once. A smaller budget fails with `config.invalid`, and the message gives the number of cases. A larger one leaves room to send a failed case again.
 - **Requests, not credits.** Trial Folio counts sends exactly, while credits depend on Portfolio123's price. The plan's budget gives the credits too, as `provider_requests` times the documented cost of a request ([budget and retries](#budget-and-retries)), and the plan display shows them.
 
-[R03-T03](releases/0.3.0-experiments.md#specification-tasks-before-ready) specifies how plan 1.1.0 records the budget, its bound on authentication calls, and how a plan revision changes it.
+Plan 1.1.0 records the budget, with a bound on authentication calls equal to `provider_requests`, and the current plan's budget bounds the experiment across every run and revision ([the budget across runs](#experiment-plans-and-revisions)).
 
 #### Experiment example
 
@@ -773,7 +773,7 @@ An attempt with a start record and no attempt record is `running` ([uncertain co
 **Field shapes.** Both records name the installed versions as the plan does, in `provider_wrapper` and `transport` ([plan contents](#plan-contents)). In the attempt record:
 
 - **`outcome`** is `succeeded`, `failed`, or `unknown`. `running` is how a start record without an attempt record reads; it's never written. The outcome follows the request's exchange, as [0.1.0's failure table](releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior) gives it: with no request exchange, `failed`, or `unknown` for a restart without a saved response; `not_connected`, `failed`; `interrupted` or a 5xx, `unknown`; a 200, `succeeded` when its response was saved and `unknown` otherwise; any other status, `failed`. The request is sent at most once, so it has at most one exchange, and a start record holds only the authentication exchange.
-- **Authentication in 0.1.0.** A start record holds exactly one successful authentication exchange (`response`, status 200). An attempt record holds at most one authentication exchange, before any request exchange. Failed authentication is valid only in a failed attempt with no request exchange. An attempt may fail before authentication starts, with no exchanges. Sending a request, or recording its uncertain completion on restart, requires successful authentication.
+- **Authentication in 0.1.0.** A start record holds exactly one successful authentication exchange (`response`, status 200). An attempt record holds at most one authentication exchange, before any request exchange. Failed authentication is valid only in a failed attempt with no request exchange. An attempt may fail before authentication starts, with no exchanges. Sending a request, or recording its uncertain completion on restart, requires successful authentication. An experiment's records are version 1.1.0, in which an attempt may send with a token an earlier attempt of the same run obtained ([experiment attempts](#experiment-attempts)).
 - **`error`** is `{"code": …, "message": …}`, and `null` exactly when the outcome is `succeeded`.
 - **`request` and `response`** reference files by `path`, relative to the output root, and `artifact_id`. A request exchange requires a reference to its saved `request.json`, including when the connection failed. `response.form` is `decoded` for `response.json`, or `undecoded` for `response.raw`. A response is referenced exactly when the attempt is `succeeded`, decoded or not: a 200 the wrapper couldn't decode is `succeeded` for capture.
 - **`provider_metadata`** holds `cost` and `quota_remaining`, Portfolio123's `quotaRemaining`. Each is `null` when the response doesn't carry it.
@@ -860,7 +860,7 @@ The core builds plans and checks approvals, and never prompts. The CLI shows the
 
 ### Plan contents
 
-Schema version 1.0.0, introduced in 0.1.0 (task R01-T04). A 1.0.0 plan has exactly one case; release 0.3.0's plan 1.1.0 adds several cases and revisions. `plan.json` holds:
+Schema version 1.0.0, introduced in 0.1.0 (task R01-T04). A 1.0.0 plan has exactly one case; release 0.3.0's plan 1.1.0 adds several cases and revisions ([experiment plans and revisions](#experiment-plans-and-revisions)). `plan.json` holds:
 
 | Field | Contents |
 |---|---|
@@ -937,7 +937,7 @@ These are categories of data, not the setting categories of `settings.csv`. Noth
 
 - **The plan hash** is `sha256:` plus the hex SHA-256 of the [canonical form](#canonical-hashing) of the plan without its `plan_hash` field.
 - **The case ID** is `case-` plus the first 16 hex digits of the SHA-256 of the canonical form of the case's `settings`, with each row reduced to `setting`, `value`, and `unit`. Changing any resolved setting changes it. The title, the purpose, and how the file is written don't.
-- **Nothing varies between invocations.** The plan holds no timestamps, output directory, file paths, attempt IDs, credentials, or account information. So the same configuration, Trial Folio version, and versions of `p123api`, `requests`, and `urllib3` give the same plan and hash on any machine, at any time, and for any output directory. That's what lets a user review a plan in one command and approve it in the next.
+- **Nothing varies between invocations.** The plan holds no timestamps, output directory, file paths, attempt IDs, credentials, or account information. So the same configuration, Trial Folio version, and versions of `p123api`, `requests`, and `urllib3` give the same plan and hash on any machine, at any time, and for any output directory. That's what lets a user review a plan in one command and approve it in the next. A 1.1.0 plan also depends on the plan it revises ([experiment plans and revisions](#experiment-plans-and-revisions)).
 - **Any change needs a new approval.** That includes a changed setting, title, purpose, budget, Trial Folio version, or version of `p123api`, `requests`, or `urllib3`. So after upgrading any of them, the same configuration needs approving again.
 - **Saved plans are checked.** A reader recomputes the hash of a saved `plan.json`. If it differs from `plan_hash`, the run is invalid (`input.not_a_run`).
 
@@ -966,7 +966,7 @@ Text from the configuration is shown with its control and formatting characters,
 
 1. Check the license acknowledgment (`license.not_acknowledged`).
 2. Validate the configuration (`config.invalid`).
-3. Check that the output directory is absent or empty (`output.not_empty`).
+3. Check that the output directory is absent or empty (`output.not_empty`). An experiment's configuration may also name a directory that holds that experiment, to resume or revise it ([running an experiment](#running-an-experiment)).
 4. Check that the installed `p123api`, `requests`, and `urllib3` are verified versions, and that `requests` would write request bodies with `json` ([plan contents](#plan-contents); `environment.unsupported`). Build the plan and show it, as [the plan display](#approval) says.
 5. Check the approval (`plan.approval_required`).
 6. Check that credentials are present (`provider.auth_failed`).
@@ -980,7 +980,64 @@ Text from the configuration is shown with its control and formatting characters,
 - **The manifest** records the `plan_hash` and how it was approved: `interactive` or `option`.
 - **Logs** record the plan hash and the case ID, never the plan's contents.
 
-In 0.1.0, a hash that doesn't match is `plan.approval_required`. `plan.changed` is for a saved plan that the configuration no longer resolves to, which arrives with resuming experiments in 0.3.0.
+In 0.1.0, a hash that doesn't match is `plan.approval_required`. `plan.changed` is for a saved plan that the configuration no longer resolves to, which arrives with resuming experiments in 0.3.0 ([experiment plans and revisions](#experiment-plans-and-revisions)).
+
+### Experiment plans and revisions
+
+Plan schema version 1.1.0, introduced in 0.3.0 (R03-T03). `trialfolio run` builds one from an [experiment configuration](#experiment-configuration). A screen configuration still gives a 1.0.0 plan, unchanged, so a screen run's artifacts, and the readers of them, stay as they are.
+
+**Contents.** A 1.1.0 plan has every field of 1.0.0, with the same meaning and rules, except as follows:
+
+| Field | Contents |
+|---|---|
+| `schema_version` | `1.1.0` |
+| `experiment_id`, `title`, `purpose`, `prior_research` | The configuration's, with `user_supplied` provenance. `purpose` is never `null`, since an experiment's is required. `prior_research` holds its `status`, and its `description` or `null`. None of them is sent. |
+| `revises` | The `plan_hash` of the plan this one revises, or `null` for the experiment's first plan (revisions, below) |
+| `cases` | Every case, in the [order of cases](#cases-and-their-order), the baseline first. Each holds a 1.0.0 case's `case_id`, `requests`, and `settings`, with the same rules, and the three fields below. |
+| `budget` | `provider_requests` is the configuration's `budget.provider_requests`, and `authentication_calls` is the same number (the budget across runs, below). `credits_per_request`, its source, and `credits` are as in 1.0.0. |
+
+Each case also holds:
+
+- **`case_key`:** `baseline`, the variant's `key`, or the [default variant](#default-variants)'s.
+- **`description`:** the variant's `description`, with `user_supplied` provenance, or `null`. The baseline has none.
+- **`variant`:** `null` for the baseline. For a variant, the `setting` it changes, and its change as the configuration gives it: a `value`, in the setting's JSON type, with a decimal as its normalized string; an `add`; or a `replace` and its `with`. Its `default` is true for P-13's default variant, and false otherwise.
+
+**Consistency.** Besides 1.0.0's rules for each case: the first case is the baseline; the case keys are unique, and so are the `case_id`s; each variant's settings are the baseline's with exactly the change its `variant` gives; and the budget's `provider_requests` is at least the number of cases. A plan that breaks any of these is invalid.
+
+**Hashing.** `plan_hash` and `case_id` are computed as for 1.0.0 ([plan hashing](#plan-hashing)). So the plan hash covers the research context, the case keys and descriptions, and `revises`, while a `case_id` covers only the case's settings: a case keeps its `case_id` whatever its key, its description, or the plan it's in. `revises` is the one field that depends on more than the configuration and the versions: it depends on the experiment's history. The same configuration, versions, and revised plan still give the same plan and hash, so a revision, too, can be reviewed in one command and approved in the next.
+
+**Revisions.** Running an experiment's configuration again into its own output directory builds its plan again, from the configuration and the installed versions ([running an experiment](#running-an-experiment)). It compares that plan with the experiment's current plan, the latest one approved:
+
+- **The same plan resumes.** If the plan equals the current one, `revises` included, the run resumes the experiment. That's so even when the file's bytes differ in a way no plan records, such as a comment, the order of keys, or `0.250` for `0.25` ([settings in the plan](#plan-contents)).
+- **Anything else is a revision.** The new plan revises the current one: its `revises` is the current plan's hash. Anything a plan holds changes it, so each of these is a revision:
+  - a changed setting of the baseline or of a variant, an added or removed variant, or a changed `rebalance_weeks` list, which changes the cases;
+  - a changed `title`, `purpose`, or `prior_research`;
+  - a changed case key or description, or a new order of one setting's variants;
+  - a changed budget;
+  - a new version of Trial Folio, `p123api`, `requests`, or `urllib3`, even with the same configuration, as an [open question](releases/0.3.0-experiments.md#open-questions) recommended. Its revision records both versions of each, and is a change of versions, not of the configuration.
+- **Another `experiment_id` isn't a revision.** It names another experiment, so its configuration can't run in this directory: `output.not_empty`. The alternative was a revision that renames the experiment, which would give one experiment's history two identities.
+
+**What a revision keeps.** A case is its `case_id`: the identity of its settings.
+
+- **A case whose settings didn't change** keeps its `case_id`, and so its attempts. A succeeded attempt still completes it, whatever plan it ran under and whatever key the case has now. That's so after a change of versions too: the case's request is what its settings send.
+- **A case whose settings changed** is a new case, with a new `case_id`, even when its key is the same. The old case is retired: no plan from then on includes it, and it and its attempts stay in the record, which counts and reports them ([experiment output](#experiment-output)).
+- **A removed variant's case** is retired the same way. A later plan that includes the same settings again, under any key, includes that same case again, with its attempts.
+
+**Approving a revision.** A revision needs a reason and the approval of its plan:
+
+- **The reason** is the user's account of why the plan changed, given with `--revision-reason <text>`: 1–2,000 characters, not all whitespace, like a purpose. The revision's `experiment.json` records it with `user_supplied` provenance. It's never sent and never logged, and the report shows it. Every revision needs one, including a change of versions, so the record says why each plan replaced the one before it ([open question](releases/0.3.0-experiments.md#open-questions)).
+- **The approval** is the revised plan's hash, by `--approve` or by interactive confirmation, as for any plan ([approval](#approval)). The full display shows the plan, what changed from the current plan, the reason, and the experiment's progress so far, and the confirmation asks to approve the revision.
+- **Without both, `plan.changed`.** The command then fails with `plan.changed`, exit 3, and sends and writes nothing. That includes an `--approve` with any other hash, the current plan's included, a refused confirmation, and a revision without a reason. The message says that the configuration or the versions changed since the current plan, gives the revision's hash, and gives the options that approve it.
+- **A reason with no revision** fails with `plan.approval_required`, exit 2, and sends nothing. That's `--revision-reason` with a new experiment, with a configuration that still gives the current plan, or with a screen. A reason for a change that isn't there suggests that the configuration given isn't the one the user changed.
+
+**Resuming needs approval too.** A run that resumes the same plan needs its approval, by the same hash, as every `run` that sends does: the core executes a plan only when it's given the plan's hash, and the CLI obtains it in each command ([approval](#approval), [REQ-04](spec.md#enduring-requirements)). So the same command resumes the experiment: the same `--approve` approves the same plan, and on a terminal the user sees the progress and confirms. One approval covers the whole plan, every case and the whole budget; it's never asked for case by case ([open question](releases/0.3.0-experiments.md#open-questions)).
+
+**The budget across runs.** The current plan's budget bounds the whole experiment ([the experiment's budget](#the-experiments-budget)). Trial Folio counts against it every attempt of the experiment: those of every case, retired cases included, under every plan, in every `run`.
+
+- **Provider requests** are counted as [budget and retries](#budget-and-retries) counts them: each send that may have reached Portfolio123, with a `running` attempt counted as one. Before each send, Trial Folio checks that one more stays within `provider_requests`.
+- **Authentication calls** are the `POST /auth` exchanges of Trial Folio's own authentication call, whatever their result, as the experiment's start and attempt records hold them. Trial Folio authenticates only to send: before a run's first request, and again only before a request that follows a 401 or 403 ([HTTP exchanges](#http-exchanges)). Before each call, it checks that one more stays within `authentication_calls`, which equals `provider_requests`. So a run that sends authenticates once, and again only after a 401 or 403. Only a call that no send follows, such as a failed authentication, or one followed by an interrupt, can bring the count above the requests sent ([open question](releases/0.3.0-experiments.md#open-questions)).
+- **When the budget is spent,** the case that would exceed it isn't started, and neither are the cases after it, as the [release's failure behavior](releases/0.3.0-experiments.md#failure-and-incomplete-data-behavior) says. Each keeps its outcome: one without an attempt stays not yet run. A revision that raises `budget.provider_requests` lets them run. A revision may set a budget below what's already counted; then nothing more is sent.
+- **The display** gives the budget, the requests and authentication calls counted so far, and what remains, and names the cases the remaining budget can't cover.
 
 ## Artifact storage
 
@@ -1026,7 +1083,7 @@ The layout of a 0.1.0 run, which [0.1.0's required outputs](releases/0.1.0-api-e
   logs/                                             diagnostics; excluded from hashes and from the manifest's evidence
 ```
 
-A review's layout is in [review output](#review-output). Release 0.3.0 adds `experiment.json` and a lock file.
+A review's layout is in [review output](#review-output), and an experiment's, with `experiment.json` and its lock file, in [experiment output](#experiment-output).
 
 A run's manifest records the following. A review's records what [review output](#review-output) lists.
 
@@ -1124,6 +1181,132 @@ A review's manifest has no `plan_hash`, `approval`, `parsers`, or `reproducibili
 **Labels in logs.** As an [open question](releases/0.2.0-review.md#open-questions) settled, a label is the user's own text, a configuration value, which [logs](#logging-and-local-diagnostics) never hold. A logged event, and so a warning on stderr, names a result by its position in `results`, such as "result 2", and the report and the manifest give its label. An error's full message names the label, and its logged message gives the position instead ([errors](#errors)).
 
 A copy's path holds its label too. The `ArtifactStore` logs each file it writes by its path, in `artifact.write.completed`, and its errors, such as `storage.write_failed`, name the path in their logged message. So the review gives the store, with each copy, a name for logs with the result's position in place of `inputs/<label>/`, such as "`manifest.json` of result 2". The store's events, and its errors' logged messages, use that name, and the errors' full messages keep the path. A run's paths hold no configuration value, so the store logs a run's files as before. R02-T08 made this change to the store: `ArtifactStore.write` takes the name for logs as `logged_as`, and logs a file by its path without one.
+
+### Experiment output
+
+Introduced in 0.3.0 (R03-T03). An experiment's output directory holds all of its plans, attempts, and records, and grows with each `run` of its configuration into it. No file in it is ever replaced ([atomic writes](#artifact-storage)), so each plan, and each run's report and manifest, is a new file:
+
+```text
+<out>/
+  experiment.lock                                   the lock; claims the directory; not evidence
+  plans/<n>/                                        one for each plan approved, numbered from 1
+    configuration.yaml                              byte-for-byte copy of the configuration the plan was built from
+    plan.json                                       plan 1.1.0
+    experiment.json                                 the experiment's record as of this plan, written last
+  cases/<case_id>/attempts/<attempt_id>/            every attempt, as for a run, with start and attempt records 1.1.0
+  sessions/<s>/                                     one for each run that ended, numbered from 1
+    report.html
+    manifest.json                                   the experiment manifest, written last
+  logs/                                             diagnostics; excluded from hashes and from the manifest's evidence
+```
+
+Where an experiment's normalized tables go isn't specified yet: R03-T05 finishes that ([what R03-T03 specified](releases/0.3.0-experiments.md#what-r03-t03-specified)).
+
+- **Numbers.** `<n>` and `<s>` are decimal, without leading zeros. Each new one is one more than the largest in the directory, so a number is never reused.
+- **No configuration values in paths.** A case's directory is named by its `case_id`, never its key, and plans and sessions by number. So, unlike a review's, an experiment's paths can be logged as they are ([labels in logs](#review-output)).
+- **The current plan** is the one in the highest-numbered `plans/<n>/` that holds `experiment.json`. A plan's directory without one is a revision whose approval was never fully recorded, because the run stopped while writing it. Nothing was sent under it, since nothing is sent before `experiment.json` is written. It's left as it is, and no record counts it as a plan.
+- **A session** is one `run` of the experiment, from its approval to its end. One that reaches its end, whatever its cases' outcomes, writes `sessions/<s>/`: its report, then its manifest. One that stops on an interrupt, a storage failure, or an unexpected exception writes no manifest, as a run doesn't ([running the commands](#cli-behavior)). The newest manifest supersedes the ones before it. If the highest-numbered session has no manifest, its run stopped before the end, and the experiment's output is visibly incomplete until a later run ends.
+
+#### Experiment attempts
+
+Each case's attempts are a run's, in `cases/<case_id>/attempts/<attempt_id>/` ([execution outcomes and attempts](#execution-outcomes-and-attempts)), with one difference. A run authenticates once, before its first request, and again only after a 401 or 403 ([release 0.3.0's required behavior](releases/0.3.0-experiments.md#required-behavior), 3). So an attempt that's sent with the token an earlier attempt of the same run obtained has no authentication exchange of its own. A 1.0.0 start record requires exactly one, so an experiment's start and attempt records are version 1.1.0:
+
+- **The start record** holds the exchanges completed before the send: Trial Folio's successful authentication call, or none when the run already held a token.
+- **The attempt record** holds every exchange of its attempt, as in 1.0.0. A request exchange, or an `unknown` outcome, requires successful authentication in the same run: the attempt's own, or an earlier attempt's, whose token no 401 or 403 has since dropped.
+- **Nothing else changes.** A screen run's records stay 1.0.0, where every attempt authenticates.
+
+Release 0.3.0 had listed the attempt record as unchanged, and this follows its settled required behavior instead ([open question](releases/0.3.0-experiments.md#open-questions)).
+
+#### `experiment.json`
+
+Schema version 1.0.0. Each `plans/<n>/` holds one, written once, after the plan's `configuration.yaml` and `plan.json` and before any request is sent under the plan. It records the experiment as that plan declares it, and the history of its plans. So the current plan's `experiment.json` is the experiment's research record: its purpose, its planned and retired cases, its declared prior research, and every revision with its reason ([METH-03](methodology.md#meth-03-research-history-and-multiple-testing); R03-AC03). It holds:
+
+- `schema_version`, `trialfolio_version`, and `created_at`, when it was written.
+- `experiment_id`.
+- **The declaration,** as the plan holds it, with `user_supplied` provenance: `title`, `purpose`, and `prior_research`, its `status` and its `description` or `null`. Trial Folio can't verify any of it, and the report says so.
+- **The planned cases,** as the plan holds them, in its order: each case's `case_key`, `case_id`, `description`, and `variant`.
+- **The retired cases:** each case an earlier plan included and this one doesn't, by its `case_id`, with the `case_key`, `description`, and `variant` it had in the last plan that included it, and that plan's number.
+- **The plans:** one entry for each plan of the experiment, oldest first, ending with this one. Each entry holds:
+  - the plan's number, its `plan_hash`, and its `revises`;
+  - the `artifact_id`s of its `plan.json` and `configuration.yaml`;
+  - how it was approved, `interactive` or `option`;
+  - its `reason`: `null` for the first plan, and the `--revision-reason` text for a revision;
+  - for a revision, what changed from the plan before it: each version that changed, with both values; the cases it added and retired, by `case_id` and key; and which other parts changed, of `title`, `purpose`, `prior_research`, `budget`, the case keys, the case descriptions, and the order of cases. A revision whose only change is of versions is recorded as such, not as a changed configuration.
+
+  The entries before the last are the earlier plan's `experiment.json`'s, unchanged, so the history can be checked one plan at a time.
+
+It records no outcome. Attempts end after it's written, and their records hold their outcomes, which each manifest counts.
+
+#### The lock
+
+Only one process runs an experiment at a time ([release 0.3.0's included scope](releases/0.3.0-experiments.md#included-scope)):
+
+- **The file** is `experiment.lock`, in the output directory. The experiment's first run [claims the directory](#cli-behavior) with it, and nothing removes or rewrites it afterwards. It holds one fixed line, which says it's Trial Folio's experiment lock, so it's never empty, as a claim requires. It isn't evidence: no manifest lists it, and, like `logs/`, it's excluded from hashes.
+- **The lock** is an exclusive advisory lock on the open file, taken without waiting: `fcntl.flock` with `LOCK_EX | LOCK_NB` on Linux and macOS, and `msvcrt.locking` with `LK_NBLCK` on the file's first byte on Windows. It's `flock`, and not `fcntl`'s record locks, because a process loses a record lock when it closes any descriptor of the file.
+- **Held by another process,** it fails the command with `experiment.locked`, exit 4. The command sends nothing, and leaves nothing written: a new experiment's claim removes what it created.
+- **When it's taken.** A new experiment takes it during the claim, on the descriptor that created the file, before writing the file's line. A resumed experiment takes it before reading any of the experiment's records. Either way, the command holds it until it ends: through the approval, every case, the report, and the manifest. So no other run can read the records while they change, or approve a plan against a history that's about to change.
+- **Releasing it.** The operating system releases the lock when the process closes the file or ends, however it ends. So a killed process leaves no stale lock, and there's nothing to clean up. On Windows, Microsoft's [`LockFileEx`](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-lockfileex) documentation says the release after a process ends may take time, depending on the system's resources (checked 2026-10-07). Until it happens, the next run fails with `experiment.locked`, and can be run again.
+- **File systems.** The lock excludes only the processes that the file system's locks reach. Two machines sharing a network volume exclude each other only when that file system enforces locks between them. A file system that refuses the lock, with any error but the one that says another process holds it, fails the command with `storage.write_failed`, exit 4, before any request, and the message says why. R03-T08 tries the lock on APFS, exFAT, and FAT32, as R01-T08 tried the store, and confirms each platform's errors. Network file systems are untested.
+- **One directory, one experiment.** The lock belongs to the output directory. An experiment's configuration run into two directories makes two experiments, each with its own records and lock, just as a screen run into two directories makes two runs.
+- **No lock per account.** [ADR 0001](adrs/0001-python-and-portfolio123-integration.md) locks per account, across processes, each operation that updates a shared account object, such as an API ranking system. 0.3.0 sends only screen backtests, which read a ranking system named by name or ID and update nothing. So it has nothing to serialize per account, and no such lock: two experiments in different directories, or an experiment and a screen run, may run at the same time with one account. The first release that updates a shared object adds that lock ([open question](releases/0.3.0-experiments.md#open-questions)).
+- **The core** takes the lock through the `ArtifactStore`, which owns the output directory, and holds it while it executes ([interface-independent core](#interface-independent-core)).
+
+#### Running an experiment
+
+**A new experiment,** into an output directory that's absent or empty, takes the steps of [`trialfolio run` for a screen](#approval), with these differences:
+
+- **Step 5** fails with `plan.approval_required` when `--revision-reason` is given too.
+- **Step 7** claims the directory with `experiment.lock`, and takes the lock. Logging to `<out>/logs/` starts then. The run writes `plans/1/configuration.yaml`, the first [atomic write](#artifact-storage), then `plans/1/plan.json`, then `plans/1/experiment.json`.
+- **Then** it runs the cases in the plan's order, and ends with `sessions/1/`.
+
+**A resumed experiment,** into a directory that holds `experiment.lock`:
+
+1. Check the license acknowledgment (`license.not_acknowledged`).
+2. Validate the configuration (`config.invalid`).
+3. Take the lock (`experiment.locked`). A directory that holds anything else, and no `experiment.lock`, is `output.not_empty`, as for a screen.
+4. Read and check the experiment's records, below (`input.not_a_run` or `artifact.unknown_schema_version`). A configuration with another `experiment_id` is `output.not_empty`. So is a directory without `plans/1/experiment.json`: its first run stopped before anything was sent, and the message says so, and to remove the directory and run again.
+5. Check the installed versions (`environment.unsupported`). Build the plan, which either is the current plan or revises it, and show it with the experiment's progress: each case's outcome so far, the retired cases, and the budget counted so far.
+6. Check the approval: for the current plan, as for a new one (`plan.approval_required`); for a revision, with its reason (`plan.changed`).
+7. Check that credentials are present when a case is due (`provider.auth_failed`).
+8. Logging to `<out>/logs/` starts. Write the attempt record of each `running` attempt, as [uncertain completion](#uncertain-completion) says. For a revision, write `plans/<n>/`, as for the first plan.
+9. Run the cases that are due, in the plan's order, and end with a new `sessions/<s>/`.
+
+**The cases that are due.** A case with a succeeded attempt is complete, and is skipped. A case with an `unknown` attempt isn't repeated automatically: R03-T04 specifies the option that repeats one. A case that has no attempt is due. So is one whose attempts all failed without being possibly charged, such as after a failed authentication. A case whose failed attempt may have been charged, such as a rejected request, waits for R03-T04's option too, since a resume never repeats a potentially charged request automatically ([open question](releases/0.3.0-experiments.md#open-questions)).
+
+**Checking the records.** A resume reads the experiment's records through the `ArtifactStore` and checks them as `trialfolio report` checks a run ([a complete run](#reports)), before it builds the plan:
+
+- **Each plan** with an `experiment.json`: that file is valid; its `plan.json` recomputes to its hash; its `plan.json` and `configuration.yaml` have the `artifact_id`s it records; its entries before the last equal the previous plan's `experiment.json`'s; and its `revises` is the previous plan's hash.
+- **Each attempt:** its records are valid, and agree with each other; they name a plan of the experiment, and a case of that plan; and each file the attempt record references has the `artifact_id` it records.
+
+An earlier session's manifest isn't read, because each manifest is written from the records.
+
+#### The experiment manifest
+
+`sessions/<s>/manifest.json`, with `artifact_type: experiment` and schema version 1.0.0. Each run that reaches its end writes one, last: one with cases that failed or are uncertain, one the budget stopped, and one that sends nothing because no case is due. It records the experiment as the run left it, and holds what a [run's manifest](#artifact-storage) holds, with these differences:
+
+- **The experiment:** its `experiment_id`, and the session's number.
+- **The plan:** the current plan's number and `plan_hash`, and how this run approved it, `interactive` or `option`.
+- **The command:** `command.options` records `approve` and `json`, as for a run, and whether `--revision-reason` was given; its text is in `experiment.json`.
+- **`artifacts`:** every file of the experiment's records: each plan's three files, each attempt's files, and this session's report. It leaves out `experiment.lock`, `logs/`, other sessions' files, and a plan's directory without `experiment.json`. Each `plans/<n>/configuration.yaml` is a source artifact, with the format `experiment-configuration` version 1.0.0, `user_supplied` provenance, no parser version, and no provider operation.
+- **Reproducibility:** over the current plan's cases.
+- **`counts`:**
+  - **Cases:** `planned`, the current plan's cases, and how many of them are `succeeded`, `failed`, `skipped`, `unknown`, and `not_yet_run`, which add up to `planned` ([R03-AC08](releases/0.3.0-experiments.md#acceptance-criteria)). 0.3.0 skips no planned case deliberately, so `skipped` is 0.
+  - **Retired cases:** how many cases revisions retired. Their attempts are counted with the others.
+  - **Attempts:** every attempt of the experiment, by outcome.
+  - **The budget:** the experiment's `provider_requests` and `authentication_calls`, counted as [the budget across runs](#experiment-plans-and-revisions) counts them, beside the current plan's budget.
+  - **Cost:** the sum of the costs Portfolio123 reported, when any did.
+- **A case's outcome** for these counts:
+  - `succeeded`, when one of its attempts succeeded and that attempt's response passed validation;
+  - `failed`, when its succeeded attempt's response failed validation, with `provider.response_invalid`, as a run with that response fails;
+  - otherwise, its latest attempt's outcome, by start time: `failed`, or `unknown`, with a `running` attempt counted as `unknown`;
+  - `not_yet_run`, when it has no attempt.
+
+  R03-T04 may refine this for a case repeated on purpose.
+- **`outcome`:** `completed` when every planned case succeeded, and `partial` otherwise, with `execution.partial`, exit 6 ([CLI behavior](#cli-behavior)).
+
+**The report,** `sessions/<s>/report.html`, comes before the manifest, and is rendered from the records and what the manifest will record, as a run's is. The release's [required behavior](releases/0.3.0-experiments.md#required-behavior), 6 and 7, and [reports](#reports) set what it holds: every case and its outcome, the retired cases, every revision and its reason, and the declared prior research, which Trial Folio can't verify. R03-T10 settles its details, as R02-T07 did a review's.
+
+**Logs** name the experiment's plans by number and hash, and its cases by `case_id`. They never hold the `experiment_id`, a case key, a description, or a revision's reason, which are the user's text ([logging](#logging-and-local-diagnostics)).
 
 ## Canonical hashing
 
@@ -1233,14 +1416,14 @@ The command is `trialfolio`. Commands are introduced by release:
 | `trialfolio report <run-dir> --out <dir>` | 0.1.0 | Re-render a saved run's report offline |
 | `trialfolio demo --out <dir>` | 0.1.0 | Write a synthetic example run, labeled synthetic, and render its report offline |
 | `trialfolio review <config> --out <dir>` | 0.2.0 | Compare saved runs offline |
-| `trialfolio run <config> --out <dir>`, for a `kind: experiment` configuration | 0.3.0 | Plan, execute, and resume a finite experiment ([D-24](spec.md#decisions)) |
+| `trialfolio run <config> --out <dir> [--approve <plan-hash>] [--revision-reason <text>]`, for a `kind: experiment` configuration | 0.3.0 | Plan, execute, resume, and revise a finite experiment ([D-24](spec.md#decisions), [running an experiment](#running-an-experiment)) |
 | `trialfolio --version` | 0.1.0 | Print the application version |
 | `trialfolio license [--accept]` | 0.1.0 | Print the license, the full notice, and the acknowledgment status; `--accept` records the acknowledgment |
 
 - **stdout** carries the command's result: a short human summary, or with `--json` the [JSON summary](#json-summary).
 - **stderr** carries progress, warnings, and errors, which come from the same events as the log file. It also carries the [plan display](#approval) and the confirmation prompts, which are written directly and never logged, because they show configuration values.
-- **Output directory.** `review` and `run` create the output directory. They refuse to write into a directory that exists and is not empty (`output.not_empty`). There is no overwrite option in 0.1.0. `init` treats its workspace the same way. `run` reuses an existing directory only to resume an experiment's same plan, as release 0.3.0 specifies; never for a screen.
-- **Claiming the directory.** A command that creates a new output checks the directory early, but another process can write to it before the command writes anything, for example while `run` waits for approval. So the command claims the directory with its first file. `run` resuming an experiment in its own existing directory doesn't claim it; it takes the experiment lock instead, as release 0.3.0 specifies. The claim:
+- **Output directory.** `review` and `run` create the output directory. They refuse to write into a directory that exists and is not empty (`output.not_empty`). There is no overwrite option in 0.1.0. `init` treats its workspace the same way. `run` reuses an existing directory only to resume or revise the experiment it holds, as [running an experiment](#running-an-experiment) says; never for a screen.
+- **Claiming the directory.** A command that creates a new output checks the directory early, but another process can write to it before the command writes anything, for example while `run` waits for approval. So the command claims the directory with its first file. A new experiment claims its directory with `experiment.lock`, and takes [the lock](#the-lock) on the file it creates, before writing it; if it can't, the claim fails, and removes what it created. `run` resuming an experiment in its own existing directory doesn't claim it; it takes the experiment lock instead. The claim:
   1. It creates the directory if it's absent, and any missing parent directories, one at a time, remembering which ones it created. A directory that another process creates first is used as it is, and not remembered. Before it creates anything, it checks the path as the early check does: a path that exists and isn't a directory, a symbolic link to nothing included, is `output.not_empty`, and a path that can't be created, because a parent isn't a directory or none exists, is `storage.write_failed`. `..` segments are resolved in the path as written, so the claim never creates a directory that's only on the way to `..`.
   2. It creates its first file directly under its final name, with an exclusive create that fails if the name exists, then writes and syncs it. No temporary file is involved, so nothing else is written into a directory that isn't claimed. The file is never empty: see the identity rule below.
   3. It lists the directory.
@@ -1362,11 +1545,11 @@ The core raises typed errors with stable dotted codes and actionable messages. O
 | `artifact.unknown_schema_version` | 3 | An artifact's schema version has no reader |
 | `environment.unsupported` | 3 | The installed `p123api`, `requests`, or `urllib3` isn't a verified version, or `requests` would write request bodies with `simplejson` ([plan contents](#plan-contents)). It's found before the plan is shown, so nothing is sent and no output is created. The message names the verified versions and how to restore them. Exit 3, like an unsupported input, because the fix is local. |
 | `license.not_acknowledged` | 2 | A data-processing command ran without an acknowledgment of the current license and notice versions |
-| `plan.approval_required` | 2 | A charged or mutating operation was requested without the matching plan hash: no `--approve`, a different hash, or a refused confirmation |
-| `plan.changed` | 3 | The configuration no longer resolves to a saved plan, for example when resuming an experiment (0.3.0). A hash given with `--approve` that doesn't match is `plan.approval_required`. |
-| `output.not_empty` | 4 | The output directory exists and is not empty |
+| `plan.approval_required` | 2 | A charged or mutating operation was requested without the matching plan hash: no `--approve`, a different hash, or a refused confirmation. Also `--revision-reason` when there's no revision to give a reason for ([experiment plans and revisions](#experiment-plans-and-revisions)). |
+| `plan.changed` | 3 | The configuration or the installed versions no longer give an experiment's current plan, and the revision wasn't approved with a reason: no `--revision-reason`, no `--approve` with the revision's hash, or a refused confirmation ([experiment plans and revisions](#experiment-plans-and-revisions)). Otherwise, a hash given with `--approve` that doesn't match is `plan.approval_required`. |
+| `output.not_empty` | 4 | The output directory exists and is not empty. For an experiment, it holds no `experiment.lock`, or it holds another experiment, or one whose first plan was never recorded ([running an experiment](#running-an-experiment)). |
 | `storage.write_failed` | 4 | An artifact could not be written durably. This is the code even when a request was already sent; the attempt record still gives the outcome ([endings that decide the error code](#endings-that-decide-the-error-code)). |
-| `experiment.locked` | 4 | Another process holds the experiment lock |
+| `experiment.locked` | 4 | Another process holds the experiment lock ([the lock](#the-lock)) |
 | `provider.auth_failed` | 5 | Credentials were missing, Trial Folio's authentication call got a 400, 401, 402, 403, or 406, or Portfolio123 refused a request's authorization with a 401 or 403 |
 | `provider.unavailable` | 5 | Portfolio123 couldn't be reached, or didn't complete Trial Folio's authentication call: that call got a 5xx or no complete response, or the request's connection was never established ([HTTP exchanges](#http-exchanges)). Either way, the request wasn't sent. |
 | `provider.quota_exceeded` | 5 | The provider refused the request because of quota or credits |
@@ -1386,7 +1569,7 @@ The core raises typed errors with stable dotted codes and actionable messages. O
 - Core functions accept validated models and return result models. They do not print, prompt, parse arguments, exit the process, read environment variables, or read secrets.
 - Readers of configurations and saved runs accept content together with a declared source name, not only a filesystem path, so an uploaded file follows the same path as a local one.
 - Planning returns a plan model, and execution requires the approved plan hash.
-- Long-running execution reports progress through callbacks or events and supports cancellation between provider requests. It holds a lock that prevents two processes from executing the same experiment, and it serializes Portfolio123 shared-state operations per account across processes.
+- Long-running execution reports progress through callbacks or events and supports cancellation between provider requests. It holds a lock that prevents two processes from executing the same experiment ([the lock](#the-lock)), and it serializes Portfolio123 shared-state operations per account across processes, of which 0.3.0 has none.
 
 ## Protocols
 
