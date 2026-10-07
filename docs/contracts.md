@@ -1225,14 +1225,17 @@ Each case's attempts are a run's, in `cases/<case_id>/attempts/<attempt_id>/` ([
 
 - **The start record** holds the exchanges completed before the send: Trial Folio's successful authentication call, or none when the run already held a token.
 - **The attempt record** holds every exchange of its attempt, as in 1.0.0. A request exchange, or an `unknown` outcome, requires successful authentication in the same run, which is its session: the attempt's own, or an earlier attempt's, whose token no 401 or 403 has since dropped.
-- **Two fields say which authentication.** Both records hold them:
-  - **`session`:** the number of the [session](#experiment-output) that started the attempt. An attempt record that a later run writes for a `running` attempt keeps its start record's.
+- **Three fields place the attempt in its run, and name the authentication it used.** Both records hold them:
+  - **`session`:** the number of the [session](#experiment-output) that started the attempt.
+  - **`sequence`:** the attempt's place in its session: 1 for the first attempt the session starts, and one more for each attempt it starts after that. A session starts its attempts one at a time, so `sequence` orders them, and an earlier attempt of a session is one with a lower `sequence`. Their start times don't order them, because the clock can move backward between two attempts.
   - **`authenticated_by`:** the `attempt_id` of the attempt whose successful authentication gave the token its request was sent with: its own, or an earlier attempt's of the same session. A start record always has one, and an attempt record has one exactly when it has a start record, and the same one.
+
+  An attempt record that a later run writes, for a `running` attempt or for one whose only record is its authentication record, keeps that record's `session` and `sequence`.
 - **Nothing else changes.** A screen run's records stay 1.0.0, where every attempt authenticates.
 
 Release 0.3.0 had listed the attempt record as unchanged, and this follows its settled required behavior instead ([open question](releases/0.3.0-experiments.md#open-questions)).
 
-**The authentication record.** An attempt that makes Trial Folio's own authentication call first writes `authenticating.json` durably, in its directory, which it creates: schema version 1.0.0, with the `attempt_id`, `case_id`, `plan_hash`, `session`, and `started_at` that its start record will hold. An attempt that sends with a token the run already holds has none. Then it authenticates, and writes its files in a run's order ([writing the files](#execution-outcomes-and-attempts)). So each authentication call is recorded before it's made, and the budget counts it even when the process is killed before its exchange is recorded ([the budget across runs](#experiment-plans-and-revisions)).
+**The authentication record.** An attempt that makes Trial Folio's own authentication call first writes `authenticating.json` durably, in its directory, which it creates: schema version 1.0.0, with the `attempt_id`, `case_id`, `plan_hash`, `session`, `sequence`, and `started_at` that its start record will hold. An attempt that sends with a token the run already holds has none. Then it authenticates, and writes its files in a run's order ([writing the files](#execution-outcomes-and-attempts)). So each authentication call is recorded before it's made, and the budget counts it even when the process is killed before its exchange is recorded ([the budget across runs](#experiment-plans-and-revisions)).
 
 An attempt that has its authentication record, and neither a start record nor an attempt record, stopped after writing it and before its send, perhaps during its authentication call. A resume writes its attempt record, as it does a `running` attempt's: `failed`, not possibly charged, because nothing was sent, with the error code `command.interrupted`, as an interrupt during authentication gives ([interrupts](#interrupts)). Its one exchange is the authentication call's, recorded as `interrupted`, because nothing shows whether the call was made, or how it ended. A `request.json` it wrote is left as it is, and the attempt record references none.
 
@@ -1299,8 +1302,8 @@ Only one process runs an experiment at a time ([release 0.3.0's included scope](
 **Checking the records.** A resume reads the experiment's records through the `ArtifactStore` and checks them as `trialfolio report` checks a run ([a complete run](#reports)), before it builds the plan:
 
 - **Each plan** with an `experiment.json`: that file is valid; its `plan.json` recomputes to its hash; its `plan.json` and `configuration.yaml` have the `artifact_id`s it records; its entries before the last equal the previous plan's `experiment.json`'s; and its `revises` is the previous plan's hash.
-- **Each attempt:** its records are valid, and agree with each other; they name a plan of the experiment, a case of that plan, and a session of the experiment; and each file the attempt record references has the `artifact_id` it records.
-- **Each attempt's authentication,** when it has a start record: its `authenticated_by` names an attempt of its session whose records hold a successful authentication: itself, or one that started before it. No attempt that names the same one, and started before it, got a 401 or 403 to its request, which would have dropped that token. Start times order a session's attempts, which run one at a time.
+- **Each attempt:** its records are valid, and agree with each other; they name a plan of the experiment, a case of that plan, and a session of the experiment; no other attempt of its session has its `sequence`; and each file the attempt record references has the `artifact_id` it records.
+- **Each attempt's authentication,** when it has a start record: its `authenticated_by` names an attempt of its session whose records hold a successful authentication: itself, or one with a lower `sequence`. No attempt that names the same one, with a lower `sequence` than this one, got a 401 or 403 to its request, which would have dropped that token. `sequence` orders a session's attempts, not their start times ([experiment attempts](#experiment-attempts)).
 - **The latest manifest,** the highest-numbered session's that has one: it's valid, and each file it lists has the size and `artifact_id` it records, as `trialfolio report` checks a run's files. No record is ever removed or replaced, so it lists every plan's and attempt's file written before it. A file missing or changed since, as after an incomplete copy, fails the check, instead of leaving a case that had an attempt looking due, to be sent again and left out of the budget. The plan and attempt files it doesn't list were written after it, and are checked as above. Earlier manifests aren't read, because the latest lists every plan's and attempt's file they list. Records written after it, by a run that stopped before its end, have no manifest to be checked against.
 
 #### The experiment manifest
@@ -1321,7 +1324,7 @@ Only one process runs an experiment at a time ([release 0.3.0's included scope](
 - **A case's outcome** for these counts:
   - `succeeded`, when one of its attempts succeeded and that attempt's response passed validation;
   - `failed`, when its succeeded attempt's response failed validation, with `provider.response_invalid`, as a run with that response fails;
-  - otherwise, its latest attempt's outcome, by start time: `failed`, or `unknown`, with a `running` attempt counted as `unknown`;
+  - otherwise, its latest attempt's outcome, by `session`, then by `sequence`, not by start time: `failed`, or `unknown`, with a `running` attempt counted as `unknown`;
   - `not_yet_run`, when it has no attempt.
 
   R03-T04 may refine this for a case repeated on purpose.
