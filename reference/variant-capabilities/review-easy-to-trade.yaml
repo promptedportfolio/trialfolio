@@ -1,0 +1,21 @@
+kind: review
+schema_version: 1.0.0
+title: R03-T01's rule variants on the broad universe
+purpose: Check that an added microcap rule and an added slice rule were each accepted and took effect.
+baseline: easy-to-trade
+results:
+  - label: easy-to-trade
+    run: payloads/runs/easy-to-trade
+    description: The live check's settings on the Easy to Trade US universe.
+  - label: no-microcaps
+    run: payloads/runs/no-microcaps
+    description: The same screen, excluding stocks with a market cap of 300 million dollars or less.
+    intended_changes:
+      - setting: rules
+        reason: An added microcap rule is the variant being verified.
+  - label: slice-0
+    run: payloads/runs/slice-0
+    description: The same screen, limited to the stocks whose StockID is 0 modulo 4.
+    intended_changes:
+      - setting: rules
+        reason: An added slice rule is the variant being verified.
