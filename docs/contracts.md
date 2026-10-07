@@ -55,9 +55,9 @@ Identifiers are introduced with the release that can define their semantics.
 | `label` | 0.2.0 | User-declared name of one compared result, unique within a review | `[a-z0-9][a-z0-9_-]{0,63}`, other than a device name Windows reserves ([review configuration](#review-configuration)) |
 | `plan_hash` | 0.1.0 | Identity of a plan, which execution requires as approval | `sha256:` of the plan's canonical form ([plan hashing](#plan-hashing)) |
 | `case_id` | 0.1.0 | Stable identity of one fully resolved configuration | `case-` plus the first 16 hex digits of the SHA-256 of the canonical resolved settings ([plan hashing](#plan-hashing)) |
-| `case_key` | 0.3.0 | User-declared readable name for a planned case | Same pattern as `label` |
+| `case_key` | 0.3.0 | Readable name for a planned case, unique within an experiment: `baseline` for the baseline, user-declared for a variant, and given by Trial Folio for a default variant ([experiment configuration](#experiment-configuration)) | Same pattern as `label`, with the same reserved names |
 | `attempt_id` | 0.1.0 | One execution attempt of a case | Random UUID, version 4, written in canonical form: lowercase, with hyphens |
-| `experiment_id` | 0.3.0 | One declared experiment | User-declared slug, same pattern as `label` |
+| `experiment_id` | 0.3.0 | One declared experiment | User-declared slug, same pattern as `label`, with the same reserved names ([experiment configuration](#experiment-configuration)) |
 | `study_id`, `candidate_id`, `assessment_id` | Later | Defined when their increment is specified | — |
 
 The forms of the identifiers 0.1.0 introduces are requirements since 0.1.0's sign-off (2026-10-01), and those 0.2.0 introduces since 0.2.0's (2026-10-05). The others are proposed until their release is Ready.
@@ -294,6 +294,165 @@ results:
       - setting: max_holdings
         reason: Doubling holdings is the change under review.
 ```
+
+### Experiment configuration
+
+Schema version 1.0.0, introduced in 0.3.0 (task R03-T02). An experiment configuration describes a finite experiment: one baseline screen, and a small set of variants, each changing one setting of the baseline. `trialfolio run` compiles it into cases before any request ([D-24](spec.md#decisions)): the baseline's case, then one case for each variant. Each case is a fully resolved screen, sent just as a screen configuration with its settings would be.
+
+**Top-level keys:**
+
+| Key | Type | Required | Rules |
+|---|---|---|---|
+| `kind` | string | Yes | `experiment` |
+| `schema_version` | string | Yes | A supported version (`1.0.0`). Any other value fails with `config.invalid`, and the message names the supported versions. |
+| `experiment_id` | string | Yes | The experiment's [identity](#identity): the same pattern as a review's `label`, with the same reserved names |
+| `title` | string | Yes | 1–200 characters. Used as the report heading. |
+| `purpose` | string | Yes | 1–2,000 characters, not all whitespace: the question the experiment addresses. Unlike a screen's, it's required, because it's part of the research history ([METH-03](methodology.md#meth-03-research-history-and-multiple-testing)). |
+| `prior_research` | mapping | Yes | The [prior-research declaration](#prior-research) |
+| `baseline` | mapping | Yes | The [baseline](#the-baseline) screen's settings |
+| `variants` | mapping | No | The [variants](#variants), by the setting each one changes. If it's absent, the only variant is the [default](#default-variants). |
+| `budget` | mapping | Yes | The [request budget](#the-experiments-budget) |
+
+**Not sent.** `experiment_id`, `title`, `purpose`, `prior_research`, and each variant's `key` and `description` describe the experiment. They're never sent, and they aren't part of any case's settings, so they don't change a `case_id`. They're recorded with `user_supplied` provenance. [R03-T03](releases/0.3.0-experiments.md#specification-tasks-before-ready) specifies how plan 1.1.0 and `experiment.json` record them.
+
+#### Prior research
+
+Prior research is earlier work on the same idea whose outcomes the user saw, such as backtests of the same screen or of close variations of it, in Trial Folio or anywhere else ([METH-03.1 and METH-03.4](methodology.md#meth-03-research-history-and-multiple-testing)). Trial Folio can't verify it. It records the declaration as the user wrote it, and its report says the declaration is unverified.
+
+| Key | Type | Required | Rules |
+|---|---|---|---|
+| `status` | string | Yes | `complete`, `partial`, or `unknown`, below |
+| `description` | string | With `complete` or `partial` | 1–5,000 characters, not all whitespace. It may also be given with `unknown`. |
+
+- **`complete`:** the description accounts for all the earlier outcome-informed work on this idea, or says there was none.
+- **`partial`:** it accounts for some of it, and there was more that it doesn't describe.
+- **`unknown`:** the user can't say what earlier work there was.
+
+#### The baseline
+
+`baseline` holds a screen's settings: the keys of a [screen configuration](#screen-configuration) from `universe` to `data_vendor`, with the same types, rules, and [verified values](#screen-configuration). The text Portfolio123 receives is written in quotes or as a block scalar, as in a screen configuration (R01-T18). It has no `kind`, `schema_version`, `title`, or `purpose`, which are the experiment's. Its case's key is `baseline`. The universe is the baseline's, and every case uses it ([D-19](spec.md#decisions)).
+
+#### Variants
+
+`variants` maps a setting to a list of variants of it. Each variant changes that one setting of the baseline, and nothing else. A variant may change only these settings, the types [R03-T01 verified](releases/0.3.0-experiments.md#what-r03-t01-verified):
+
+| Key in `variants` | Variant type | Each entry's change |
+|---|---|---|
+| `rules` | A changed rule, such as a liquidity rule's threshold; or an added rule, such as a microcap cutoff | `replace` and `with`, or `add` |
+| `max_holdings` | Maximum holdings | `value`: an integer, 1 or more |
+| `rebalance_weeks` | Rebalance frequency | `value`: 1 or 4 |
+| `slippage_percent` | Slippage | `value`: a decimal, 0 or more, in percent |
+
+Any other key in `variants`, such as `universe`, `ranking`, `benchmark`, or a date, fails with `config.invalid`, and the message names the settings a variant may change.
+
+**Each entry:**
+
+| Key | Type | Required | Rules |
+|---|---|---|---|
+| `key` | string | Yes | The case's `case_key`. The same pattern as a review's `label`, with the same reserved names; unique among the experiment's cases, including a default variant's; and not `baseline`. |
+| `description` | string | No | 1–500 characters, shown in the report |
+| `value` | integer or decimal | In `max_holdings`, `rebalance_weeks`, and `slippage_percent`, and only there | The setting's value in this case. It follows the rules of the screen configuration's key of the same name: a decimal is read and normalized by the [decimals rules](#screen-configuration). |
+| `add` | string | In `rules`, unless `replace` is given | A screening formula, added after the baseline's rules |
+| `replace` | string | In `rules`, unless `add` is given | One of the baseline's rules. The case puts `with` in its place, so the rules keep their order. |
+| `with` | string | With `replace`, and only with it | The formula that replaces it |
+
+**Rules that span keys:**
+
+- **One change per variant.** An entry in `rules` holds `add`, or `replace` and `with`, never both. A variant that changes two settings isn't offered: each case differs from the baseline in one setting, as each of [R03-T01's checks](releases/0.3.0-experiments.md#what-r03-t01-verified) did.
+- **Rule text.** `add`, `replace`, and `with` are written in quotes or as block scalars, as rules are. `replace` must be the same text as exactly one of the baseline's rules, character for character, once YAML has read both. Trial Folio doesn't read formulas, so it can't check that a replacement changes only a threshold: any replacement is a changed rule, and a formula is verified by its form, as every formula is.
+- **A variant changes something.** A `value` must differ from the baseline's, after normalization: `0.250` is the baseline's `0.25`. `add` and `with` must not be the same text as any of the baseline's rules. More generally, every case resolves to settings of its own, so no two cases share a `case_id`. A variant that breaks this fails with `config.invalid`, and the message names it by its place in the file, such as `variants.max_holdings[0]`, never by its key, which is the user's text.
+- **Lists.** Each list holds at least one entry, except `rebalance_weeks`'s, where an empty list turns the [default](#default-variants) off. `variants`, when it's given, holds at least one key.
+- **At least one variant.** An experiment has at least two cases: the baseline, and at least one variant, its own or the default. An experiment whose only case is its baseline fails with `config.invalid`; a screen configuration runs one screen.
+- **Not offered:** a variant that removes one of the baseline's rules. R03-T01 verified changed and added rules only. A baseline without the rule, and a variant that adds it, make the same comparison.
+
+#### Default variants
+
+[P-13](spec.md#proposed-defaults) sets one default for screens: rebalancing every 1 week and every 4 weeks. Where `variants` has no `rebalance_weeks` key, Trial Folio adds a rebalance variant for each of those two values that isn't the baseline's. 1 and 4 are the only values [verified](#screen-configuration), so it always adds exactly one, keyed `rebalance-weeks-1` or `rebalance-weeks-4`, with no description.
+
+- **A list replaces it.** A `rebalance_weeks` list replaces the default, and an empty list turns it off. A paper reproduction follows [METH-09.4](methodology.md#meth-09-reproducing-published-research)'s variant set instead of P-13's, so its configuration turns the default off.
+- **It's a case like any other.** The plan shows it, the budget must cover it, and the research history records it. It adds one request, and so 5 credits at the documented cost.
+
+#### Cases and their order
+
+- **How a case resolves.** A case's settings are the baseline's with its one change. Its request follows the screen configuration's "Sent as" mapping, and its `case_id` is computed as a screen run's is ([plan hashing](#plan-hashing)). So a case has the same `case_id` as a screen run with the same settings, whatever its key.
+- **Order.** The baseline comes first. Then come the variants of `rules`, `max_holdings`, `rebalance_weeks`, and `slippage_percent`, in that order, the [screen settings](#screen-settings)' order, and within each setting in its list's order. The default comes in `rebalance_weeks`'s place. The order of the keys in `variants` doesn't matter, so it leaves no trace in the plan.
+
+#### The experiment's budget
+
+| Key | Type | Required | Rules |
+|---|---|---|---|
+| `provider_requests` | integer | Yes | At least the number of cases. The most provider requests the experiment may send, counted as [budget and retries](#budget-and-retries) counts them, across every attempt of every case, including the attempts of each later `run` that resumes it. |
+
+- **At least one per case.** So every case can be sent once. A smaller budget fails with `config.invalid`, and the message gives the number of cases. A larger one leaves room to send a failed case again.
+- **Requests, not credits.** Trial Folio counts sends exactly, while credits depend on Portfolio123's price. The plan's budget gives the credits too, as `provider_requests` times the documented cost of a request ([budget and retries](#budget-and-retries)), and the plan display shows them.
+
+[R03-T03](releases/0.3.0-experiments.md#specification-tasks-before-ready) specifies how plan 1.1.0 records the budget, its bound on authentication calls, and how a plan revision changes it.
+
+#### Experiment example
+
+```yaml
+kind: experiment
+schema_version: 1.0.0
+experiment_id: earnyield-sensitivity
+title: Earnings yield sensitivity
+purpose: How do holdings, slippage, and a stricter liquidity rule change the earnings-yield screen's results?
+prior_research:
+  status: partial
+  description: Earlier backtests of this screen in the Portfolio123 website compared 25 and 50 holdings. Other variations tried there weren't recorded.
+baseline:
+  universe: 'SP500'
+  rules:
+    - 'AvgDailyTot(30) > 1000000'
+  ranking:
+    formula: 'EarnYield'
+    lower_is_better: false
+  max_holdings: 25
+  benchmark: 'SPY'
+  start_date: 2016-01-01
+  end_date: 2025-12-31
+  rebalance_weeks: 4
+  transaction_price: open
+  slippage_percent: 0.25
+  pit_method: complete
+  precision: 4
+variants:
+  rules:
+    - key: liquidity-100m
+      description: A stricter liquidity floor, 100 million dollars a day.
+      replace: 'AvgDailyTot(30) > 1000000'
+      with: 'AvgDailyTot(30) > 100000000'
+  max_holdings:
+    - key: holdings-50
+      value: 50
+  slippage_percent:
+    - key: slippage-050
+      value: 0.5
+budget:
+  provider_requests: 6
+```
+
+It compiles to five cases, in this order: `baseline`, `liquidity-100m`, `holdings-50`, the default `rebalance-weeks-1`, and `slippage-050`. Its budget allows one request more than the cases need.
+
+An added rule is written like this. On a baseline whose universe is `'Easy to Trade US'`, with the settings above, this variant excludes microcaps, and the empty `rebalance_weeks` list turns the default off, so the experiment has two cases:
+
+```yaml
+variants:
+  rules:
+    - key: no-microcaps
+      description: Excludes stocks with a market cap of 300 million dollars or less.
+      add: 'MktCap > 300'
+  rebalance_weeks: []
+```
+
+These examples are validated in two ways:
+
+- **Against Portfolio123.** Each case resolves to a request Portfolio123 accepted:
+  - `baseline` to R01-T01's [`request.json`](../reference/p123api-screen-backtest/request.json), as the [screen example](#example) does
+  - `liquidity-100m` and `slippage-050` to those of R03-T01's [`liquidity-100m.yaml`](../reference/variant-capabilities/liquidity-100m.yaml) and [`slippage-050.yaml`](../reference/variant-capabilities/slippage-050.yaml)
+  - `holdings-50` to that of the 0.2.0 live exercise's [`holdings-50.yaml`](../reference/review-live-exercise/holdings-50.yaml)
+  - `rebalance-weeks-1` to R01-T05's [`request-weekly.json`](../reference/p123api-screen-backtest-values/request-weekly.json)
+  - the second example's two cases to those of R03-T01's [`easy-to-trade.yaml`](../reference/variant-capabilities/easy-to-trade.yaml) and [`no-microcaps.yaml`](../reference/variant-capabilities/no-microcaps.yaml)
+- **Against this format.** On 2026-10-07, R03-T02 read each example, the second as a whole file with those settings, with Trial Folio 0.2.1's YAML reader, which found every text Portfolio123 receives quoted. It then checked each rule above, compiled the cases, and validated each case as a screen configuration with 0.2.1's model. Each case's `case_id` and request equal those of its screen configuration, read by 0.2.1, or its committed request. The same check, run on altered copies, failed on each of these: a wrong reference, an unquoted rule, a `value` equal to the baseline's, a budget smaller than the number of cases, a key that's the default's, a `replace` that isn't one of the baseline's rules, and an empty `max_holdings` list.
 
 ## Source artifacts
 
