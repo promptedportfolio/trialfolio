@@ -1,0 +1,12 @@
+kind: review
+schema_version: 1.0.0
+title: The live check's run against the user guide walk-through's
+purpose: Compare two real runs of the same settings, made hours apart, with nothing declared.
+baseline: live-check
+results:
+  - label: live-check
+    run: payloads/runs/live-check
+    description: The live check's run of formula.yaml, R01-AC24.
+  - label: walkthrough
+    run: payloads/runs/walkthrough
+    description: The user guide walk-through's run of the starter screen.yaml.

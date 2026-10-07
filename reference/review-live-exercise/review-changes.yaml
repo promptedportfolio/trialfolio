@@ -1,0 +1,18 @@
+kind: review
+schema_version: 1.0.0
+title: Live runs with one setting changed each
+purpose: Exercise a declared change and an undeclared benchmark change on real runs.
+baseline: live-check
+results:
+  - label: live-check
+    run: payloads/runs/live-check
+    description: The live check's run of formula.yaml, R01-AC24.
+  - label: holdings-50
+    run: payloads/runs/holdings-50
+    description: The same screen, with 50 holdings.
+    intended_changes:
+      - setting: max_holdings
+        reason: Doubling holdings is the declared change.
+  - label: benchmark-iwm
+    run: payloads/runs/benchmark-iwm
+    description: The same screen against IWM, with the change left undeclared.
