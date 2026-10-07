@@ -18,7 +18,7 @@ Every check keeps the [live check](../p123api-live-check/README.md)'s settings, 
 |---|---|---|
 | [`slippage-050.yaml`](slippage-050.yaml) | `slippage_percent: 0.5` | The live check's run, on SP500 |
 | [`liquidity-100m.yaml`](liquidity-100m.yaml) | The liquidity rule's threshold, from 1 million to 100 million dollars a day: `AvgDailyTot(30) > 100000000` | The live check's run |
-| [`easy-to-trade.yaml`](easy-to-trade.yaml) | `universe: 'Easy to Trade US'` | The live check's run. The universe isn't a variant ([D-19](../../docs/spec.md#decisions)): this run is the baseline of the next two, and its review shows that Portfolio123 used the universe it names. |
+| [`easy-to-trade.yaml`](easy-to-trade.yaml) | `universe: 'Easy to Trade US'` | The live check's run. The universe isn't a variant ([D-19](../../docs/spec.md#decisions)): this run is the baseline of the next two. Its review shows that Portfolio123 accepted the name and used a universe other than SP500: the strategy's metrics differ from SP500's. |
 | [`no-microcaps.yaml`](no-microcaps.yaml) | An added rule, `MktCap > 300`, which excludes stocks with a market cap of 300 million dollars or less | `easy-to-trade` |
 | [`slice-0.yaml`](slice-0.yaml) | An added rule, `Mod(StockID,4) = 0`, the first of four universe slices ([METH-09.5](../../docs/methodology.md#meth-09-reproducing-published-research)) | `easy-to-trade` |
 
@@ -59,7 +59,7 @@ All 20 metrics of every result were differenced. The metrics that changed, out o
 | `no-microcaps` | 10 | The same |
 | `slice-0` | 10 | The same |
 
-So every strategy metric changed, and the [0.2.0 live exercise](../review-live-exercise/README.md)'s `max_holdings: 50` changed the same 10.
+So each result changed every strategy metric except the coverage and the risk samples, and for slippage `r_squared`, and the [0.2.0 live exercise](../review-live-exercise/README.md)'s `max_holdings: 50` changed the same 10.
 
 **The credentials.** A scan after the runs found the API key in no file of the runs or the reviews, and nowhere in the commands' stderr or JSON summaries. The API ID matched inside the six saved responses, Portfolio123's own data, and nowhere else: not in the logs, the reports, the normalized tables, the plans, the configurations, the attempts' other records, or the reviews.
 
@@ -69,5 +69,5 @@ So every strategy metric changed, and the [0.2.0 live exercise](../review-live-e
 - **A liquidity rule is verified as a variant.** A changed threshold in a rule was accepted and took effect.
 - **Added rules are verified.** Portfolio123 accepted a screen of two rules, and each added rule, the microcap cutoff and the slice, took effect. So microcap exclusion and universe slices can be written as screen rules.
 - **`StockID`'s stability isn't verified.** One backtest of one slice can't show that `StockID` stays the same for a stock across the test period, which [METH-09.5](../../docs/methodology.md#meth-09-reproducing-published-research) requires before a study relies on the slices.
-- **A universe other than SP500 works,** and Portfolio123 used the one it names: the strategy's metrics differ from SP500's.
+- **A universe other than SP500 works.** Portfolio123 accepted `Easy to Trade US`, and the strategy's metrics differ from SP500's, so it used a different universe.
 - **Holdings and rebalancing were already verified:** `max_holdings` by the 0.2.0 live exercise, and `rebalance_weeks` 1 and 4 by R01-T05 and R01-T01.
