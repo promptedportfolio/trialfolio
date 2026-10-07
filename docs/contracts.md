@@ -330,7 +330,7 @@ Prior research is earlier work on the same idea whose outcomes the user saw, suc
 
 #### The baseline
 
-`baseline` holds a screen's settings: the keys of a [screen configuration](#screen-configuration) from `universe` to `data_vendor`, with the same types, rules, and [verified values](#screen-configuration). The text Portfolio123 receives is written in quotes or as a block scalar, as in a screen configuration (R01-T18). It has no `kind`, `schema_version`, `title`, or `purpose`, which are the experiment's. Its case's key is `baseline`. The universe is the baseline's, and every case uses it ([D-19](spec.md#decisions)).
+`baseline` holds a screen's settings: the keys of a [screen configuration](#screen-configuration) from `universe` to `data_vendor`, with the same types, rules, and [verified values](#screen-configuration). The text Portfolio123 receives is written in quotes or as a block scalar, as in a screen configuration (R01-T18). It has no `kind`, `schema_version`, `title`, or `purpose`, which are the experiment's. Its case's key is `baseline`. The universe is the baseline's, and every case uses it ([D-19](spec.md#decisions)). Another universe is another experiment, not a plan revision ([experiment plans and revisions](#experiment-plans-and-revisions)).
 
 #### Variants
 
@@ -1010,12 +1010,14 @@ Each case also holds:
 
 - **The same plan resumes.** If the plan equals the current one, `revises` included, the run resumes the experiment. That's so even when the file's bytes differ in a way no plan records, such as a comment, the order of keys, or `0.250` for `0.25` ([settings in the plan](#plan-contents)).
 - **Anything else is a revision.** The new plan revises the current one: its `revises` is the current plan's hash. Anything a plan holds changes it, so each of these is a revision:
-  - a changed setting of the baseline or of a variant, an added or removed variant, or a changed `rebalance_weeks` list, which changes the cases;
+  - a changed setting of the baseline other than its universe, a changed setting of a variant, an added or removed variant, or a changed `rebalance_weeks` list, which changes the cases;
   - a changed `title`, `purpose`, or `prior_research`;
   - a changed case key or description, or a new order of one setting's variants;
   - a changed budget;
   - a new version of Trial Folio, `p123api`, `requests`, or `urllib3`, even with the same configuration, as an [open question](releases/0.3.0-experiments.md#open-questions) recommended. Its revision records both versions of each, and is a change of versions, not of the configuration.
-- **Another `experiment_id` isn't a revision.** It names another experiment, so its configuration can't run in this directory: `output.not_empty`. The alternative was a revision that renames the experiment, which would give one experiment's history two identities.
+- **Another `experiment_id` or universe isn't a revision.** Either makes another experiment, so its configuration can't run in this directory: `output.not_empty`, and the message says that it's another experiment, to run into a new output directory.
+  - **Another `experiment_id`** names another experiment. The alternative was a revision that renames the experiment, which would give one experiment's history two identities.
+  - **Another universe** is a separate experiment ([D-19](spec.md#decisions)), which no release through 0.3.0 varies within an experiment. As a revision, it would retire every case and keep it in the record, so one experiment would hold cases on two universes.
 
 **What a revision keeps.** A case is its `case_id`: the identity of its settings.
 
@@ -1264,7 +1266,7 @@ Only one process runs an experiment at a time ([release 0.3.0's included scope](
 1. Check the license acknowledgment (`license.not_acknowledged`).
 2. Validate the configuration (`config.invalid`).
 3. Take the lock (`experiment.locked`). A directory that holds anything else, and no `experiment.lock`, is `output.not_empty`, as for a screen.
-4. Read and check the experiment's records, below (`input.not_a_run` or `artifact.unknown_schema_version`). A configuration with another `experiment_id` is `output.not_empty`. So is a directory without `plans/1/experiment.json`: its first run stopped before anything was sent, and the message says so, and to remove the directory and run again.
+4. Read and check the experiment's records, below (`input.not_a_run` or `artifact.unknown_schema_version`). A configuration with another `experiment_id`, or whose baseline has another universe than the current plan's, is `output.not_empty`. So is a directory without `plans/1/experiment.json`: its first run stopped before anything was sent, and the message says so, and to remove the directory and run again.
 5. Check the installed versions (`environment.unsupported`). Build the plan, which either is the current plan or revises it, and show it with the experiment's progress: each case's outcome so far, the retired cases, and the budget counted so far.
 6. Check the approval: for the current plan, as for a new one (`plan.approval_required`); for a revision, with its reason (`plan.changed`).
 7. Check that credentials are present when a case is due (`provider.auth_failed`).
@@ -1547,7 +1549,7 @@ The core raises typed errors with stable dotted codes and actionable messages. O
 | `license.not_acknowledged` | 2 | A data-processing command ran without an acknowledgment of the current license and notice versions |
 | `plan.approval_required` | 2 | A charged or mutating operation was requested without the matching plan hash: no `--approve`, a different hash, or a refused confirmation. Also `--revision-reason` when there's no revision to give a reason for ([experiment plans and revisions](#experiment-plans-and-revisions)). |
 | `plan.changed` | 3 | The configuration or the installed versions no longer give an experiment's current plan, and the revision wasn't approved with a reason: no `--revision-reason`, no `--approve` with the revision's hash, or a refused confirmation ([experiment plans and revisions](#experiment-plans-and-revisions)). Otherwise, a hash given with `--approve` that doesn't match is `plan.approval_required`. |
-| `output.not_empty` | 4 | The output directory exists and is not empty. For an experiment, it holds no `experiment.lock`, or it holds another experiment, or one whose first plan was never recorded ([running an experiment](#running-an-experiment)). |
+| `output.not_empty` | 4 | The output directory exists and is not empty. For an experiment, it holds no `experiment.lock`, or it holds another experiment, by its `experiment_id` or its universe, or one whose first plan was never recorded ([running an experiment](#running-an-experiment)). |
 | `storage.write_failed` | 4 | An artifact could not be written durably. This is the code even when a request was already sent; the attempt record still gives the outcome ([endings that decide the error code](#endings-that-decide-the-error-code)). |
 | `experiment.locked` | 4 | Another process holds the experiment lock ([the lock](#the-lock)) |
 | `provider.auth_failed` | 5 | Credentials were missing, Trial Folio's authentication call got a 400, 401, 402, 403, or 406, or Portfolio123 refused a request's authorization with a 401 or 403 |
