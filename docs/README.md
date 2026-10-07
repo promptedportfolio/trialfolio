@@ -34,6 +34,7 @@ These are the specifications for Trial Folio. The implementation tasks of releas
 | [adrs/0006-observe-the-wrappers-http-exchanges.md](adrs/0006-observe-the-wrappers-http-exchanges.md) | Recording each HTTP exchange the `p123api` wrapper makes, so failures are classified by what was sent |
 | [adrs/0007-host-the-source-publicly-on-github.md](adrs/0007-host-the-source-publicly-on-github.md) | The public GitHub repository, its hosting exception, and where packages come from |
 | [adrs/0008-license-version-1-1.md](adrs/0008-license-version-1-1.md) | Version 1.1 of the license: Personal Vehicles, and the removed adoption sentence |
+| [graphical-prototype.md](graphical-prototype.md) | The read-only graphical prototype, outside any release ([D-29](spec.md#decisions)): its scope, criteria, and tasks (GP), and what each build found |
 | [written-permission-template.md](written-permission-template.md) | The form a written permission grant takes |
 | [user-guide.md](user-guide.md) | How to set up and use Trial Folio, workflow by workflow, with what to check at each step. It owns no requirement: where it disagrees with an owning document, the guide is fixed. |
 | [ai-development.md](ai-development.md) | How AI is used to build Trial Folio, in plain language |
