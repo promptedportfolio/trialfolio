@@ -3,7 +3,8 @@ the starter screen configuration, a README, and a `.gitignore`, and nothing else
 license acknowledgment, sends nothing, and logs to the per-user log directory.
 
 Traces to R01-AC33 (release 0.1.0) and to docs/contracts.md, CLI behavior, and to R01-AC20's
-commands that work without an acknowledgment. Through the CLI's entry function in the test
+commands that work without an acknowledgment. Since 2026-10-07, by the owner's decision recorded
+in release 0.2.0's changes after sign-off, the `.gitignore` keeps reviews out of Git too. Through the CLI's entry function in the test
 process, with the per-user directories under a temporary home.
 """
 
@@ -247,7 +248,9 @@ def test_from_the_workspace_run_shows_the_starter_plan_and_sends_nothing(
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs Git")
-def test_the_gitignore_keeps_credential_files_runs_and_reports_out_of_git(cli: Cli) -> None:
+def test_the_gitignore_keeps_credential_files_runs_reports_and_reviews_out_of_git(
+    cli: Cli,
+) -> None:
     workspace = cli.tmp / "workspace"
     assert cli("init", workspace).exit_code == 0
     git = ["git", "-C", str(workspace)]
@@ -260,7 +263,15 @@ def test_the_gitignore_keeps_credential_files_runs_and_reports_out_of_git(cli: C
         )
         return set(result.stdout.splitlines())
 
-    kept_out = {".env", ".env.local", "p123.env", "runs/first/report.html", "reports/first/x"}
+    # reviews/ since 2026-10-07, the owner's decision: a review holds Portfolio123 data too.
+    kept_out = {
+        ".env",
+        ".env.local",
+        "p123.env",
+        "runs/first/report.html",
+        "reports/first/x",
+        "reviews/first/inputs/hold25/normalized/metrics.csv",
+    }
     kept = {"screen.yaml", "README.md", ".gitignore", "notes/runs.md", "demo/report.html"}
     assert ignored(*kept_out, *kept) == kept_out
 

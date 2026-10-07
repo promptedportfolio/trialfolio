@@ -1,15 +1,15 @@
 """`trialfolio init`'s starter files: what a new workspace holds (docs/contracts.md, CLI behavior;
 release 0.1.0, included scope).
 
-A workspace is a folder for one user's configurations, runs, and reports. No command depends on
+A workspace is a folder for one user's configurations, runs, reports, and reviews. No command depends on
 it: it's where the user starts, and Trial Folio never looks for it.
 
 - `screen.yaml` is the documented example without its purpose, with comments on each key. Its
   settings resolve to the request Portfolio123 accepted in R01-T01.
 - `README.md` says what the folder holds, and the next commands, with a link to the user guide
   at the version's release tag, which works once the version is tagged.
-- `.gitignore` keeps credential files, and the runs and reports, which hold Portfolio123 data,
-  out of Git, for a user who keeps the folder in a repository.
+- `.gitignore` keeps credential files, and the runs, reports, and reviews, which hold Portfolio123
+  data, out of Git, for a user who keeps the folder in a repository.
 
 They're packaged in `init_data/`, with `.gitignore` as `gitignore`, so that no tool takes it for
 the package's own.

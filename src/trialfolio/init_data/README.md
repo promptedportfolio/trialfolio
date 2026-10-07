@@ -3,7 +3,7 @@
 `trialfolio init` set up this folder for your screen configurations and the runs Trial Folio writes from them. Run Trial Folio's commands from here.
 
 - `screen.yaml` is a screen configuration to change for your own backtest. It starts with the settings of the example Portfolio123 accepted in a live call.
-- `.gitignore` matters if you keep this folder in Git. It keeps credential files out, and runs and reports too, because they hold Portfolio123 data.
+- `.gitignore` matters if you keep this folder in Git. It keeps credential files out, and runs, reports, and reviews too, because they hold Portfolio123 data.
 
 ## Next steps
 

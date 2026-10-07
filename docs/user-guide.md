@@ -48,7 +48,7 @@ Steps:
 
    - `screen.yaml`, a starter configuration
    - `README.md`, the next steps
-   - `.gitignore`, which keeps credential files, runs, and reports out of Git, if you keep the folder in a repository
+   - `.gitignore`, which keeps credential files, runs, reports, and reviews out of Git, if you keep the folder in a repository
 
    The folder must be new or empty. Given no folder, `trialfolio init` sets up the current one. It needs no license acknowledgment, and sends nothing.
 
@@ -352,7 +352,7 @@ A review's directory holds:
 
 It doesn't copy a run's request, its response, or its report.
 
-**Keep reviews out of Git.** A review of real runs holds Portfolio123 data, in its copies of their tables, as a run does. The workspace's `.gitignore` keeps `runs/` and `reports/` out of Git, but not `reviews/`. If you keep the workspace in Git, add `/reviews/` to it.
+**Keep reviews out of Git.** A review of real runs holds Portfolio123 data, in its copies of their tables, as a run does. The `.gitignore` that `trialfolio init` writes keeps `reviews/` out of Git, as it does `runs/` and `reports/`, so write reviews there. A workspace that Trial Folio 0.1.0 set up lacks that line: if you keep it in Git, add `/reviews/` to its `.gitignore`.
 
 **In the report:**
 

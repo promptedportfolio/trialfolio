@@ -68,7 +68,7 @@ trialfolio demo --out demo/
 trialfolio license
 ```
 
-- `init` sets up a workspace: a new or empty folder with a starter screen configuration, a README of next steps, and a `.gitignore` that keeps credential files, runs, and reports out of Git. It sends nothing, and needs no license acknowledgment.
+- `init` sets up a workspace: a new or empty folder with a starter screen configuration, a README of next steps, and a `.gitignore` that keeps credential files, runs, reports, and reviews out of Git. It sends nothing, and needs no license acknowledgment.
 - `review` compares saved runs with a baseline, offline, as a review configuration names them. It shows which settings differ, as changes you declared or as unexplained mismatches, and the difference between each pair of comparable metrics, in `differences.csv` and a report. It ranks no run. It copies each run's manifest, plan, and tables, so a review of real runs holds Portfolio123 data, as a run does.
 - `report` re-renders a saved run's report, offline.
 - `demo` writes a synthetic example run, labeled synthetic, with its report. It needs no Portfolio123 subscription or credentials: it sends nothing, and every value in it is invented.
