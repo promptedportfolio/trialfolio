@@ -9,7 +9,7 @@ isn't part of either notice, so changing it doesn't (DSC-06).
 from typing import Final
 
 LICENSE_NAME: Final = "Nathan Slaughter Personal Research License"
-LICENSE_ID: Final = "LicenseRef-NSPRL-1.0"
+LICENSE_ID: Final = "LicenseRef-NSPRL-1.1"
 NOTICE_VERSION: Final = "1.0"
 
 FULL_NOTICE: Final = (

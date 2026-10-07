@@ -40,6 +40,8 @@ Release specifications continue to own their scope and status. This planning dir
 | [0.2.0 Review](releases/0.2.0-review.md) | Compare saved runs against a baseline and see exactly what differs | Offline comparison of saved runs, intended changes separated from unexplained mismatches, `differences.csv`, and a review report | 0.1.0 | None beyond 0.1.0 |
 | [0.3.0 Experiments](releases/0.3.0-experiments.md) | Run and review a controlled, finite experiment | A baseline plus predefined variants, stable case and attempt identities, sequential execution, resume, and uncertain-completion handling | 0.2.0 | Verified backend support for each variant type offered |
 
+Release [0.2.1](releases/0.2.1-license.md) changes only the license, to version 1.1 ([D-27](spec.md#decisions)). It adds no workflow.
+
 Later releases keep the 0.1.0 run and report path, and 0.2.0 compares the runs it produces. Trial Folio doesn't import results produced elsewhere ([ADR 0005](adrs/0005-build-on-the-portfolio123-api-only.md)). Automatic search, sophisticated scheduling, and statistical acceptance decisions are outside all three.
 
 ## After 0.3.0

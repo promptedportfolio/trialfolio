@@ -40,7 +40,7 @@ Every artifact records these versions separately:
 | `canonicalization_version` | Version of the canonical-hashing rules used for identities |
 | Provider library versions | The versions of `p123api`, `requests`, and `urllib3` used for provider requests ([plan contents](#plan-contents)) |
 | Method versions | Version of each analytical method applied (when methods are introduced) |
-| `license_id`, `notice_version` | The applicable license identifier (`LicenseRef-NSPRL-1.0`) and financial-notice version (`1.0`), defined in [../LICENSE](../LICENSE) and [disclaimers.md](disclaimers.md) |
+| `license_id`, `notice_version` | The applicable license identifier (`LicenseRef-NSPRL-1.1` from 0.2.1; artifacts that 0.1.0 and 0.2.0 wrote record `LicenseRef-NSPRL-1.0`) and financial-notice version (`1.0`), defined in [../LICENSE](../LICENSE) and [disclaimers.md](disclaimers.md) |
 
 A schema's version does not need to match the release that introduces it. Compatibility is defined against documented readers and semantics, not merely against added fields.
 
@@ -1171,7 +1171,7 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
   It then asks the user to type `accept`. Any other answer exits with `license.not_acknowledged` and writes nothing.
 - **Non-interactive.** There are two ways to acknowledge:
   - `trialfolio license --accept` records the acknowledgment.
-  - Setting `TRIALFOLIO_ACCEPT_LICENSE` to `<license_id>/<notice_version>`, for example `LicenseRef-NSPRL-1.0/1.0`, acknowledges for that process only and records nothing, which suits CI.
+  - Setting `TRIALFOLIO_ACCEPT_LICENSE` to `<license_id>/<notice_version>`, for example `LicenseRef-NSPRL-1.1/1.0`, acknowledges for that process only and records nothing, which suits CI.
 
   Without either, the command exits with `license.not_acknowledged`. The message gives both options and the exact value to use.
 - **Exempt commands.** `trialfolio --version`, `--help`, `trialfolio init`, which processes no data, and `trialfolio license` work without an acknowledgment. `trialfolio license` prints the license, the full notice, and the acknowledgment status.

@@ -1,14 +1,9 @@
 Nathan Slaughter Personal Research License
-Version 1.0
-License identifier: LicenseRef-NSPRL-1.0
-Status: Adopted 2026-10-02
+Version 1.1
+License identifier: LicenseRef-NSPRL-1.1
+Status: Adopted 2026-10-07
 
 Copyright (c) 2026 Nathan Slaughter
-
-This text has no effect until Nathan Slaughter adopts it. Adoption is
-recorded by changing the status line above to "Adopted" with the adoption
-date (for example, "Status: Adopted 2026-10-15") and making the same change
-in docs/adrs/0004-custom-personal-research-license.md.
 
 
 0. About this license
@@ -43,7 +38,8 @@ Covered Software and reserves publication and distribution to the Licensor.
 
 1.6  "Eligible Individual" means a natural person who is not a
      Professional User and who uses the Covered Software only on their own
-     behalf, not on behalf of an Organization.
+     behalf, not on behalf of an Organization. Use for the individual's
+     Personal Vehicle is use on their own behalf.
 
 1.7  "Professional User" means an individual to whom any one or more of
      the following applies:
@@ -56,13 +52,17 @@ Covered Software and reserves publication and distribution to the Licensor.
 
      These conditions are alternatives; any one of them is enough. Liquid
      Assets of exactly US $5,000,000 do not meet condition (a). Condition
-     (b) applies whether or not the individual is paid. Conditions (a) and
-     (c) apply even when the individual intends to use the Covered Software
-     only for their own research.
+     (b) applies whether or not the individual is paid. Investment
+     decisions for the individual's Personal Vehicle are decisions for
+     themselves under condition (b). Conditions (a) and (c) apply even when
+     the individual intends to use the Covered Software only for their own
+     research.
 
 1.8  "Liquid Assets" means cash, cash equivalents, and readily marketable
      financial assets that the individual beneficially owns, valued in U.S.
-     dollars, excluding retirement accounts.
+     dollars, excluding retirement accounts. Assets the individual holds
+     through their Personal Vehicle, other than a retirement account, count
+     as assets the individual beneficially owns.
 
 1.9  "Family Members" means the members of an individual's family. This
      license does not further define the term.
@@ -70,8 +70,9 @@ Covered Software and reserves publication and distribution to the Licensor.
 1.10 "Personal Research" means private analysis by an Eligible Individual
      for their own purposes, including research for investment decisions
      concerning themselves and their Family Members. It does not include
-     work for an employer or other Organization, services to clients or
-     other persons, or redistribution.
+     work for an employer; work for any Organization other than the
+     individual's Personal Vehicle; services to clients or other persons;
+     or redistribution.
 
 1.11 "Primary Source of Income" means a source that provides more than
      half of the individual's total income.
@@ -109,6 +110,21 @@ Covered Software and reserves publication and distribution to the Licensor.
 
 1.20 "Contributor" means any person other than the Licensor whose
      contribution the Licensor has accepted into the Covered Software.
+
+1.21 "Personal Vehicle" means, for an individual, any of the following:
+
+     (a) a revocable trust of which the individual is a grantor and a
+         trustee;
+     (b) an individual retirement account (IRA), or any other retirement
+         account, held for the individual's benefit; or
+     (c) a limited liability company of which the individual is the only
+         member.
+
+     A Personal Vehicle is an Organization. Sections 1.6, 1.7, 1.10, and 4
+     nevertheless treat use for an individual's Personal Vehicle as use on
+     their own behalf, and section 1.8 says how its assets count. Services
+     to clients or other persons are never Personal Research, including
+     when they are provided through a Personal Vehicle.
 
 
 2. Personal research grant
@@ -153,7 +169,9 @@ Covered Software and reserves publication and distribution to the Licensor.
 
 Organizations, and individuals using the Covered Software on an
 Organization's behalf, including for an employer, are outside the grant in
-section 2. They must obtain Written Permission before any use.
+section 2. They must obtain Written Permission before any use. An
+individual's use for their own Personal Vehicle (section 1.21) is not use
+on an Organization's behalf.
 
 
 5. Public projects, published code, and reserved uses

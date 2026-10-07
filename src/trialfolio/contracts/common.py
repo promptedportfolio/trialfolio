@@ -120,7 +120,7 @@ PackageVersion = Annotated[str, StringConstraints(pattern=r"^[0-9][0-9A-Za-z.+!_
 """An installed package's version, as `importlib.metadata.version` reports it."""
 
 LicenseId = Annotated[str, StringConstraints(pattern=r"^LicenseRef-[A-Za-z0-9.-]+$")]
-"""An SPDX license reference, such as `LicenseRef-NSPRL-1.0`."""
+"""An SPDX license reference, such as `LicenseRef-NSPRL-1.1`."""
 
 NOT_BLANK: Final = r"[^\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]"
 """The pattern of text that isn't blank: a character that isn't whitespace, meaning Unicode's

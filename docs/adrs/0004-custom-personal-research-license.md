@@ -1,12 +1,12 @@
 # ADR 0004: Custom personal research license
 
-**Status:** Accepted: licensing approach (owner requirement). Decision 8 is superseded by [ADR 0007](0007-host-the-source-publicly-on-github.md): the source is public on GitHub, under a narrow hosting exception in LICENSE section 5.4.
-**License text status:** Adopted 2026-10-02
+**Status:** Accepted: licensing approach (owner requirement). Decision 8 is superseded by [ADR 0007](0007-host-the-source-publicly-on-github.md): the source is public on GitHub, under a narrow hosting exception in LICENSE section 5.4. Decisions 1 and 4 are amended by [ADR 0008](0008-license-version-1-1.md): version 1.1 of the license adds Personal Vehicles and removes a sentence left from the draft.
+**License text status:** Version 1.0 adopted 2026-10-02. Version 1.1 adopted 2026-10-07 ([ADR 0008](0008-license-version-1-1.md)).
 **Date:** 2026-10-01
 **Decision owner:** Nathan Slaughter
 **Owner decisions:** D-03 to D-08 in the [product specification](../spec.md)
 
-Nathan Slaughter adopted the license on 2026-10-02. The license text status above and the status line of [LICENSE](../../LICENSE) record it.
+Nathan Slaughter adopted the license on 2026-10-02. The license text status above and the status line of [LICENSE](../../LICENSE) record it. He adopted version 1.1 on 2026-10-07, as [ADR 0008](0008-license-version-1-1.md) records.
 
 ## Context
 
