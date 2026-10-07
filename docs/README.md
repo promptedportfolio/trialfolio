@@ -4,7 +4,7 @@ These are the specifications for Trial Folio. The implementation tasks of releas
 
 ## Where to start
 
-- **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. [0.1.0 API execution](releases/0.1.0-api-execution.md) is Implemented: built, verified, and used privately, but not yet released. [0.2.0 Review](releases/0.2.0-review.md) is Implemented: built and verified, and the owner set that status on 2026-10-07, but not yet released.
+- **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. [0.1.0 API execution](releases/0.1.0-api-execution.md) is Implemented: built, verified, and used privately, but not yet released. [0.2.0 Review](releases/0.2.0-review.md) is Implemented too: built, verified, and used privately, but not yet released.
 - **Using Trial Folio:** read the [user guide](user-guide.md).
 - **Understanding the product:** read [spec.md](spec.md), then [roadmap.md](roadmap.md).
 - **Planning a release:** follow [Product direction (D-23)](spec.md#product-direction) and the [release planning requirements](roadmap.md#release-planning-requirements), then write or complete its release specification. Roadmap targets are not implementation assignments.
