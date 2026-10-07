@@ -20,7 +20,7 @@ Section 19 of the license makes any change a new version, with a new identifier,
 ## Decision
 
 1. **Version 1.1,** identifier `LicenseRef-NSPRL-1.1`, adopted by Nathan Slaughter on 2026-10-07. Version 1.0 remains the license of releases 0.1.0 and 0.2.0, and of every copy received under it.
-2. **Personal Vehicles (section 1.21).** An individual's Personal Vehicle is a revocable trust of which they are a grantor and a trustee; an IRA, or any other retirement account, held for their benefit; or a limited liability company of which they are the only member. Use for one's own Personal Vehicle is use on one's own behalf (sections 1.6 and 4), investment decisions for it are decisions for oneself (section 1.7, condition (b)), and research for it can be personal research (section 1.10). The owner chose any retirement account, not only IRAs, to match the way the Liquid Assets definition already treats retirement accounts as a group.
+2. **Personal Vehicles (section 1.21).** An individual's Personal Vehicle is a revocable trust of which they are a grantor and a trustee; an IRA, or any other retirement account, held for their benefit; or a limited liability company of which they are the only member. Use for one's own Personal Vehicle is use on one's own behalf (sections 1.6 and 4), investment decisions for it are decisions for oneself (section 1.7, condition (b)), and research for it can be personal research (section 1.10). The owner chose any retirement account, not only IRAs, to match the way the Liquid Assets definition already treats retirement accounts as a group. A Personal Vehicle is only the individual's own: a Family Member's trust, retirement account, or LLC isn't one, even when the individual manages it (the owner's decision, 2026-10-07).
 3. **Their assets count (section 1.8).** Assets held through a Personal Vehicle, other than a retirement account, count toward the US $5,000,000 Liquid Assets threshold. This makes explicit what "beneficially owns" already most naturally covered, so moving investments into an LLC or a trust doesn't move anyone under the threshold.
 4. **Services stay outside.** Services to clients or other persons are never personal research, including when they're provided through a Personal Vehicle (sections 1.10 and 1.21). A single-member LLC that provides research or advice to others needs written permission, as any organization does.
 5. **The leftover sentence is removed.** Adoption is recorded by LICENSE's status line, in this ADR, and in the licensing policy ([LIC-03](../licensing-policy.md#lic-03-adoption)).
@@ -35,6 +35,7 @@ Section 19 of the license makes any change a new version, with a new identifier,
 | Edit 1.0 in place | People who received 1.0 keep its terms (section 19, [LIC-20](../licensing-policy.md#lic-20-license-changes-and-earlier-grants)), and one identifier can't name two texts |
 | IRAs only | The owner chose any retirement account (decision 2) |
 | Leave assets held through an LLC or a trust out of Liquid Assets | Anyone could move under the Professional User threshold by moving investments into an entity |
+| Include a Family Member's own trust, retirement account, or LLC, such as a spouse's IRA the individual manages | The owner decided against it on 2026-10-07 (decision 2) |
 | Ship version 1.1 with 0.3.0 | The owner chose a patch release, so the new text doesn't wait for 0.3.0's specification |
 
 ## Consequences
@@ -42,7 +43,7 @@ Section 19 of the license makes any change a new version, with a new identifier,
 - Every artifact and report from 0.2.1 records `LicenseRef-NSPRL-1.1`. Runs and reviews written under 1.0 keep their identifier, and still read.
 - Users who acknowledged version 1.0 are asked again, once, because an acknowledgment covers one license identifier and one notice version ([D-17](../spec.md#decisions)). The research notice is unchanged, so its version stays 1.0.
 - Version 1.1 grants more than 1.0. Its one tightening is decision 3, which states what 1.0's "beneficially owns" already covered. Copies received under 1.0 keep its terms (section 19).
-- A Family Member's own trust, retirement account, or LLC isn't a Personal Vehicle of the individual who manages it. [Release 0.2.1's open question](../releases/0.2.1-license.md#open-questions) asks whether it should be.
+- A Family Member's own trust, retirement account, or LLC isn't a Personal Vehicle of the individual who manages it (decision 2). Anyone unsure whether managing one is covered can ask for written permission.
 
 ## Follow-up conditions
 
