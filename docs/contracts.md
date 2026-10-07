@@ -1012,7 +1012,7 @@ Each case also holds:
 - **Anything else is a revision.** The revision is that plan with its `revises` set to the current plan's hash, and that's the plan shown, hashed, and approved. Anything a plan holds changes it, so each of these is a revision:
   - a changed setting of the baseline other than its universe, a changed setting of a variant, an added or removed variant, or a changed `rebalance_weeks` list, which changes the cases;
   - a changed `title`, `purpose`, or `prior_research`;
-  - a changed case key or description, or a new order of one setting's variants;
+  - a changed case key, description, or `variant`, or a new order of one setting's variants. A `variant` can change while the case's settings don't, as when a `rebalance_weeks` list gives the [default variant](#default-variants)'s value, which makes its `default` false;
   - a changed budget;
   - a new version of Trial Folio, `p123api`, `requests`, or `urllib3`, even with the same configuration, as an [open question](releases/0.3.0-experiments.md#open-questions) recommended. Its revision records both versions of each, and is a change of versions, not of the configuration.
 - **Another `experiment_id` or universe isn't a revision.** Either makes another experiment, so its configuration can't run in this directory: `output.not_empty`, and the message says that it's another experiment, to run into a new output directory.
@@ -1253,7 +1253,7 @@ Schema version 1.0.0. Each `plans/<n>/` holds one, written once, after the plan'
   - the `artifact_id`s of its `plan.json` and `configuration.yaml`;
   - how it was approved, `interactive` or `option`;
   - its `reason`: `null` for the first plan, and the `--revision-reason` text for a revision;
-  - for a revision, what changed from the plan before it: each version that changed, with both values; the cases it added and retired, by `case_id` and key; and which other parts changed, of `title`, `purpose`, `prior_research`, `budget`, the case keys, the case descriptions, and the order of cases. A revision whose only change is of versions is recorded as such, not as a changed configuration.
+  - for a revision, what changed from the plan before it: each version that changed, with both values; the cases it added and retired, by `case_id` and key; and which other parts changed, of `title`, `purpose`, `prior_research`, `budget`, the case keys, the case descriptions, the case variants, and the order of cases. A case's `variant` can change while its settings don't, so the case is kept: a `rebalance_weeks` list that gives the default variant's value, for one, makes that case's `default` false, and nothing else changes. A revision whose only change is of versions is recorded as such, not as a changed configuration.
 
   The entries before the last are the earlier plan's `experiment.json`'s, unchanged, so the history can be checked one plan at a time.
 
