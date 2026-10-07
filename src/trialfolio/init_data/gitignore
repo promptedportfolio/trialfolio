@@ -4,7 +4,8 @@
 .env*
 *.env
 
-# Runs and reports hold Portfolio123 data, which Portfolio123's terms govern. Sharing it publicly
-# may need Portfolio123's consent.
+# Runs, reports, and reviews hold Portfolio123 data, which Portfolio123's terms govern. Sharing it
+# publicly may need Portfolio123's consent.
 /runs/
 /reports/
+/reviews/

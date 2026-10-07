@@ -401,6 +401,18 @@ def test_the_log_names_each_result_by_its_position_never_its_label(
         assert linked[name] == review_id
 
 
+# The command's help (the owner's decision, 2026-10-07)
+
+
+def test_the_help_says_trialfolio_compares_saved_runs(cli: Cli) -> None:
+    outcome = cli("--help")
+
+    assert outcome.exit_code == 0
+    text = " ".join(outcome.stdout.split())
+    assert "compare saved runs with a baseline" in text
+    assert "review Compare saved runs with a baseline offline." in text
+
+
 # The environment
 
 

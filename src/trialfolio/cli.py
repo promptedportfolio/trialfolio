@@ -150,8 +150,8 @@ def _parser(version: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="trialfolio",
         description=(
-            "Plan, run, and record one Portfolio123 screen backtest, and keep the relationship"
-            " between its settings and its results."
+            "Plan, run, and record Portfolio123 screen backtests, keeping each run's settings with"
+            " its results, and compare saved runs with a baseline."
         ),
         allow_abbrev=False,
     )
