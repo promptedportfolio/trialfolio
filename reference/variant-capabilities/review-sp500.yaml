@@ -1,0 +1,27 @@
+kind: review
+schema_version: 1.0.0
+title: R03-T01's SP500 variants against the live check
+purpose: Check that each changed setting was accepted and took effect, and that the broad universe was used.
+baseline: live-check
+results:
+  - label: live-check
+    run: payloads/runs/live-check
+    description: The live check's run of formula.yaml, R01-AC24.
+  - label: slippage-050
+    run: payloads/runs/slippage-050
+    description: The same screen, with slippage of 0.5%.
+    intended_changes:
+      - setting: slippage_percent
+        reason: Doubling slippage is the variant being verified.
+  - label: liquidity-100m
+    run: payloads/runs/liquidity-100m
+    description: The same screen, with the liquidity rule at 100 million dollars a day.
+    intended_changes:
+      - setting: rules
+        reason: A stricter liquidity threshold is the variant being verified.
+  - label: easy-to-trade
+    run: payloads/runs/easy-to-trade
+    description: The same screen on the Easy to Trade US universe.
+    intended_changes:
+      - setting: universe
+        reason: The broad universe is the baseline of the microcap and slice variants.

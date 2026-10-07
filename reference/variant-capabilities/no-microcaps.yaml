@@ -1,0 +1,20 @@
+kind: screen
+schema_version: 1.0.0
+title: R03-T01, excluding microcaps
+purpose: R03-T01 verifies one variant type with a real run that changes one setting from its baseline, for a review to compare.
+universe: 'Easy to Trade US'
+rules:
+  - 'AvgDailyTot(30) > 1000000'
+  - 'MktCap > 300'
+ranking:
+  formula: 'EarnYield'
+  lower_is_better: false
+max_holdings: 25
+benchmark: 'SPY'
+start_date: 2016-01-01
+end_date: 2025-12-31
+rebalance_weeks: 4
+transaction_price: open
+slippage_percent: 0.25
+pit_method: complete
+precision: 4
