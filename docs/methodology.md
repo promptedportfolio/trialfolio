@@ -136,7 +136,7 @@ A provider request count is not a multiple-testing family size (INV-09).
 
 **METH-03.3 Selection is history.** A predefined diagnostic does not mechanically add one independent hypothesis per request. If its outcome influences which system is selected, that selection MUST be represented in the history. Keeping only finalists, or dropping correlated factors, does not erase the search.
 
-**METH-03.4 Unknown earlier search.** Searches made before Trial Folio recorded them cannot be repaired by starting the count at installation. The study MUST record a search-history status (complete, incomplete, or unknown). Where defensible, it SHOULD report sensitivity to plausible prior-search assumptions, and it MUST limit its claim accordingly.
+**METH-03.4 Unknown earlier search.** Searches made before Trial Folio recorded them cannot be repaired by starting the count at installation. The study MUST record a search-history status (complete, partial, or unknown), the statuses an experiment's prior-research declaration uses from 0.3.0 ([experiment configuration](contracts.md#prior-research)). The owner chose `partial` on 2026-10-07. Where defensible, it SHOULD report sensitivity to plausible prior-search assumptions, and it MUST limit its claim accordingly.
 
 **METH-03.5 History before correction.** Research history is recorded from 0.3.0. No multiple-testing correction is implemented until that history exists and its completeness is visible (INV-09).
 
