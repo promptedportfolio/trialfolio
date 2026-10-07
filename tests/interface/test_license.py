@@ -6,8 +6,8 @@ status, or with `--accept` records the acknowledgment.
 Traces to R01-AC20 (without an acknowledgment or a terminal, `run` fails with
 `license.not_acknowledged` and exit 2, and writes nothing), and so does `review`, as release
 0.2.0's failure behavior gives; R01-AC21 (`license --accept` writes exactly the four documented
-fields, later runs don't ask, and another license identifier or notice version asks again); and
-R01-AC22 (the exact `<license_id>/<notice_version>` acknowledges for the
+fields, later runs don't ask, and another license identifier or notice version asks again,
+including license 1.0's, which 0.1.0 and 0.2.0 recorded, as release 0.2.1 gives); and R01-AC22 (the exact `<license_id>/<notice_version>` acknowledges for the
 process without a record, and any other value is rejected); and to docs/contracts.md, license
 acknowledgment. Through the CLI's entry function in the test process, with the per-user
 directories under a temporary home; the terminal is a real pseudo-terminal.
@@ -103,8 +103,8 @@ def test_version_and_help_work_without_an_acknowledgment(cli: Cli) -> None:
     helped = cli("--help")
     run_help = cli("run", "--help")
 
-    # 0.2.0 since its specification was completed (D-26).
-    assert (version.exit_code, version.stdout) == (0, "trialfolio 0.2.0\n")
+    # 0.2.1, the release of license version 1.1 (D-27).
+    assert (version.exit_code, version.stdout) == (0, "trialfolio 0.2.1\n")
     assert helped.exit_code == 0
     assert "run" in helped.stdout
     assert "license" in helped.stdout
@@ -166,8 +166,12 @@ def test_after_license_accept_a_run_on_a_terminal_shows_no_prompt(cli: Cli) -> N
 
 @pytest.mark.parametrize(
     "changes",
-    [{"license_id": "LicenseRef-NSPRL-0.9"}, {"notice_version": "0.9"}],
-    ids=["another-license-id", "another-notice-version"],
+    [
+        {"license_id": "LicenseRef-NSPRL-0.9"},
+        {"license_id": "LicenseRef-NSPRL-1.0"},
+        {"notice_version": "0.9"},
+    ],
+    ids=["another-license-id", "license-1.0", "another-notice-version"],
 )
 def test_a_record_of_another_license_or_notice_version_doesnt_acknowledge(
     cli: Cli, changes: dict[str, str]
@@ -185,8 +189,12 @@ def test_a_record_of_another_license_or_notice_version_doesnt_acknowledge(
 @posix_only
 @pytest.mark.parametrize(
     "changes",
-    [{"license_id": "LicenseRef-NSPRL-0.9"}, {"notice_version": "0.9"}],
-    ids=["another-license-id", "another-notice-version"],
+    [
+        {"license_id": "LicenseRef-NSPRL-0.9"},
+        {"license_id": "LicenseRef-NSPRL-1.0"},
+        {"notice_version": "0.9"},
+    ],
+    ids=["another-license-id", "license-1.0", "another-notice-version"],
 )
 def test_a_record_of_another_license_or_notice_version_brings_the_prompt_back(
     cli: Cli, changes: dict[str, str]

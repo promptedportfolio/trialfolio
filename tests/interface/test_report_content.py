@@ -110,7 +110,7 @@ def test_the_concise_notice_comes_first_and_links_to_the_full_notice_in_a_detail
         assert document.before(notice, later)
     assert [p.text for p in full.find_all("p")][: len(FULL_NOTICE)] == list(FULL_NOTICE)
     assert LICENSE_NAME in full.text
-    assert "LicenseRef-NSPRL-1.0" in full.text
+    assert "LicenseRef-NSPRL-1.1" in full.text
     assert "Notice version 1.0." in full.text
     assert [a.attrs["href"] for a in full.find_all("a")] == [LICENSE_URL]
 

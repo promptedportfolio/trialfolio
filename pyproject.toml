@@ -1,11 +1,11 @@
 [project]
 name = "trialfolio"
-version = "0.2.0"
+version = "0.2.1"
 description = "Plan, record, and compare Portfolio123 strategy evidence. Source available under a custom license."
 readme = "README.md"
 # LIC-01 and LIC-11 (docs/licensing-policy.md): the custom license's identifier, never MIT or
 # an OSI classifier, and the license and notices in every copy.
-license = "LicenseRef-NSPRL-1.0"
+license = "LicenseRef-NSPRL-1.1"
 license-files = ["LICENSE", "CONTACT.md", "THIRD_PARTY_NOTICES.md", "docs/disclaimers.md"]
 authors = [{ name = "Nathan Slaughter", email = "git@nathanslaughter.com" }]
 requires-python = ">=3.12"

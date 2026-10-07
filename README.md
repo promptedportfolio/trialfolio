@@ -14,12 +14,13 @@ Portfolio123 does the backtesting. Trial Folio plans each request, records exact
 
 ## Status
 
-**Pre-release. Nothing is installable yet.** Release 0.1.0 is built, has passed its tests, including a live run through the Portfolio123 API, and is in private use. Release 0.2.0, which compares saved runs, is built, has passed its tests, including reviews of real runs, and is in private use too. Neither has been released.
+**Pre-release. Nothing is installable yet.** Release 0.1.0 is built, has passed its tests, including a live run through the Portfolio123 API, and is in private use. Release 0.2.0, which compares saved runs, is built, has passed its tests, including reviews of real runs, and is in private use too. Release 0.2.1 changes only the license, to version 1.1. None has been released.
 
 | Capability | Planned release | Status |
 |---|---|---|
 | Run one screen backtest through the Portfolio123 API and keep the settings with the results | [0.1.0](docs/releases/0.1.0-api-execution.md) | Implemented: built, tested, and used privately; not yet released |
 | Compare saved runs, offline, against a baseline | [0.2.0](docs/releases/0.2.0-review.md) | Implemented: built, tested, and used privately; not yet released |
+| Version 1.1 of the license: your own trust, retirement accounts, and single-member LLC count as you | [0.2.1](docs/releases/0.2.1-license.md) | Ready: signed off; not yet released |
 | Run a small, planned experiment of screen variants, with safe resume | [0.3.0](docs/releases/0.3.0-experiments.md) | Outlined (Draft) |
 | Descriptive return analytics, robustness diagnostics, statistical evaluation, forward tracking | [Roadmap](docs/roadmap.md) | Not specified |
 
@@ -72,7 +73,7 @@ trialfolio license
 - `review` compares saved runs with a baseline, offline, as a review configuration names them. It shows which settings differ, as changes you declared or as unexplained mismatches, and the difference between each pair of comparable metrics, in `differences.csv` and a report. It ranks no run. It copies each run's manifest, plan, and tables, so a review of real runs holds Portfolio123 data, as a run does.
 - `report` re-renders a saved run's report, offline.
 - `demo` writes a synthetic example run, labeled synthetic, with its report. It needs no Portfolio123 subscription or credentials: it sends nothing, and every value in it is invented.
-- `license` prints the license and the full research notice. The first time, `run`, `report`, `demo`, and `review` ask you at the terminal to acknowledge them, by typing `accept`. `trialfolio license --accept` acknowledges them ahead of time, and setting `TRIALFOLIO_ACCEPT_LICENSE` to `LicenseRef-NSPRL-1.0/1.0` acknowledges them for one command without recording anything, which suits scripts.
+- `license` prints the license and the full research notice. The first time, `run`, `report`, `demo`, and `review` ask you at the terminal to acknowledge them, by typing `accept`. `trialfolio license --accept` acknowledges them ahead of time, and setting `TRIALFOLIO_ACCEPT_LICENSE` to `LicenseRef-NSPRL-1.1/1.0` acknowledges them for one command without recording anything, which suits scripts.
 
 Add `--json` to any command for one JSON summary on stdout.
 
@@ -99,9 +100,9 @@ Trial Folio is written with the help of AI coding tools, working from the specif
 
 ## License
 
-Trial Folio is source available under a custom license, the Nathan Slaughter Personal Research License (`LicenseRef-NSPRL-1.0`). It is not open source.
+Trial Folio is source available under a custom license, the Nathan Slaughter Personal Research License (`LicenseRef-NSPRL-1.1`). It is not open source.
 
-- Individuals may use it for private research on investment decisions for themselves and their family members.
+- Individuals may use it for private research on investment decisions for themselves and their family members, including for their own revocable trust, retirement accounts, or single-member LLC.
 - Professional Users and organizations need Nathan Slaughter's prior written permission.
 - No one may publish, redistribute, or put its code into a public project without that permission.
 - You may view and fork this repository on GitHub, as GitHub's terms allow. LICENSE section 5.4 sets the limits: a fork carries no right to publish changes.

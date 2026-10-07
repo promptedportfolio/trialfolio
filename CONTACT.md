@@ -26,7 +26,7 @@ Send licensing questions and requests for written permission to **[git@nathansla
 
 **Sending a request does not grant permission.** You have permission only after you receive an express written grant from Nathan Slaughter. An inquiry, silence, an automatic reply, attribution, a donation, or the purchase of an unrelated product is not permission.
 
-The [LICENSE](LICENSE) (`LicenseRef-NSPRL-1.0`) controls. The [licensing policy](docs/licensing-policy.md) explains it in plain terms.
+The [LICENSE](LICENSE) (`LicenseRef-NSPRL-1.1`) controls. The [licensing policy](docs/licensing-policy.md) explains it in plain terms.
 
 ### When you need written permission
 
@@ -36,7 +36,9 @@ Ask before you act if any of these apply:
   - you have more than US $5,000,000 in liquid assets, not counting retirement accounts
   - you make investment decisions for anyone other than yourself and your family members
   - reselling research about stocks provides more than half of your total income
-- **You would use Trial Folio for an organization**, including for your employer.
+
+  Your own revocable trust, retirement accounts, and single-member LLC count as you (LICENSE section 1.21). Their assets, other than retirement accounts, count toward the US $5,000,000.
+- **You would use Trial Folio for an organization**, including for your employer. Your own revocable trust, retirement accounts, and single-member LLC don't count here, unless you'd use Trial Folio through them to serve clients or other people.
 - **You would put Trial Folio's code, or code based on it, into any public project or published code.** This applies whether the project is free, paid, commercial, nonprofit, source available, or open source.
 - **You would publish, redistribute, or sublicense Trial Folio**, or supply it to anyone else. This includes public forks outside what LICENSE section 5.4 allows on GitHub, vendored source, packages, binaries, container images, notebooks containing copied code, and hosted services.
 - **You would let someone other than your family members use Trial Folio through an interface you run.**
@@ -56,7 +58,7 @@ Don't send account balances, statements, tax records, or the names of family mem
 
 ### What a grant identifies
 
-A written grant comes from Nathan Slaughter, sent from or signed as above. It identifies:
+A written grant comes from Nathan Slaughter, sent from or signed as above. The [written permission template](docs/written-permission-template.md) shows its form. It identifies:
 
 - the recipient
 - the permitted scope

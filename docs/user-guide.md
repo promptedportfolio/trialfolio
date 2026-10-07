@@ -67,13 +67,14 @@ Steps:
 2. Acknowledge them, in one of three ways:
    - **At the terminal.** The first time you run `run`, `report`, `demo`, or `review`, it shows the concise notice and asks you to type `accept`.
    - **Ahead of time.** `trialfolio license --accept`.
-   - **For one command, recording nothing.** Set `TRIALFOLIO_ACCEPT_LICENSE=LicenseRef-NSPRL-1.0/1.0`, which suits scripts.
+   - **For one command, recording nothing.** Set `TRIALFOLIO_ACCEPT_LICENSE=LicenseRef-NSPRL-1.1/1.0`, which suits scripts.
 
 **Check:**
 
 - Before you acknowledge, `trialfolio demo --out demo/` from a script, or with its input redirected, fails with `license.not_acknowledged`, exit code 2, and writes nothing.
 - After `trialfolio license --accept`, the last line of `trialfolio license` says "Acknowledged", with the time and the file it's recorded in. The record holds only the license identifier, the notice version, the time, and how you acknowledged.
 - Any value of `TRIALFOLIO_ACCEPT_LICENSE` but the exact one is rejected, even after you've acknowledged. An empty one counts as unset.
+- A new version of the license asks again. Release 0.2.1 brings version 1.1, so an acknowledgment of version 1.0, from 0.1.0 or 0.2.0, doesn't cover it.
 
 ## 3. Try the demo
 

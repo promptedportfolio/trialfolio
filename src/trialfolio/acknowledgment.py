@@ -2,7 +2,7 @@
 LIC-12).
 
 The core never checks it (REQ-03): each interface presents it, as the CLI does. An acknowledgment
-covers one license identifier and one notice version, `LicenseRef-NSPRL-1.0` and `1.0`, and only a
+covers one license identifier and one notice version, `LicenseRef-NSPRL-1.1` and `1.0`, and only a
 change to either asks again. There are three ways to give one:
 
 - **Interactively,** by typing `accept` when stdin and stderr are both terminals. The CLI records

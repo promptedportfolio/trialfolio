@@ -1,7 +1,7 @@
 # Disclaimers and notices
 
 **Status:** Draft. **Notice version:** 1.0.
-**License:** [LICENSE](../LICENSE), `LicenseRef-NSPRL-1.0`, adopted 2026-10-02.
+**License:** [LICENSE](../LICENSE), version 1.1, `LicenseRef-NSPRL-1.1`, adopted 2026-10-07 ([ADR 0008](adrs/0008-license-version-1-1.md)). Version 1.0 was adopted on 2026-10-02.
 **Related invariant:** INV-13. **Owner decisions:** D-03 to D-08 in the [product specification](spec.md).
 
 This document owns the text of Trial Folio's research, financial-result, warranty, and Portfolio123 notices, and says where each must appear. It also records the operating safeguards Trial Folio's behavior must follow.

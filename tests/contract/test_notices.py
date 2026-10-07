@@ -1,7 +1,7 @@
 """The notices a report carries match the documents that own them, word for word: the full notice
 and the concise notice in docs/disclaimers.md (DSC-01, DSC-02) and LICENSE's Appendix A, the
-Portfolio123 data statement (DSC-06), the license's name and identifier in LICENSE, the notice
-version, and the two outside links docs/contracts.md gives a report.
+Portfolio123 data statement (DSC-06), the license's name, version, and identifier in LICENSE,
+which agree (D-27), the notice version, and the two outside links docs/contracts.md gives a report.
 
 Traces to R01-AC13 (the report's notices, license name, identifier, and notice version) and to
 DSC-09 (a notice's text changes only with its version) and LIC-11.
@@ -84,6 +84,7 @@ def test_the_license_name_identifier_and_notice_version_are_licenses_and_the_dis
     lines = LICENSE.splitlines()
 
     assert lines[0] == LICENSE_NAME
+    assert lines[1] == f"Version {LICENSE_ID.removeprefix('LicenseRef-NSPRL-')}"
     assert f"License identifier: {LICENSE_ID}" in lines[:5]
     assert f"**Notice version:** {NOTICE_VERSION}." in DISCLAIMERS
     assert f"`{LICENSE_ID}`" in DISCLAIMERS

@@ -1,8 +1,8 @@
 # Licensing policy
 
-**Status:** Draft. The license text was **adopted on 2026-10-02**.
-**Controlling document:** [LICENSE](../LICENSE), the Nathan Slaughter Personal Research License, version 1.0, identifier `LicenseRef-NSPRL-1.0`.
-**Owner decisions:** D-03 to D-08 in the [product specification](spec.md). **Related invariant:** INV-13.
+**Status:** Draft. Version 1.1 of the license text was **adopted on 2026-10-07**, and version 1.0 on 2026-10-02.
+**Controlling document:** [LICENSE](../LICENSE), the Nathan Slaughter Personal Research License, version 1.1, identifier `LicenseRef-NSPRL-1.1`.
+**Owner decisions:** D-03 to D-08, D-27, and D-28 in the [product specification](spec.md). **Related invariant:** INV-13.
 
 This policy explains Trial Folio's license: who may use it, what is reserved, how to get permission, how results may be shared, and what must happen before public distribution. LICENSE controls. If this policy and LICENSE disagree, LICENSE controls and the disagreement is a defect to fix. This policy must not describe any permission that LICENSE doesn't grant.
 
@@ -16,7 +16,7 @@ This policy is not legal advice or a legal determination. Nathan Slaughter may s
 |---|---|---|
 | [LIC-01](#lic-01-license-identity) | Trial Folio is source available under a custom license, never described as open source | Requirement |
 | [LIC-02](#lic-02-licensor-and-contact) | Nathan Slaughter is author, licensor, and licensing contact | Requirement |
-| [LIC-03](#lic-03-adoption) | Nathan Slaughter adopts the license; adoption is recorded in LICENSE and ADR 0004 | Requirement |
+| [LIC-03](#lic-03-adoption) | Nathan Slaughter adopts each license version; adoption is recorded in LICENSE and the version's ADR | Requirement |
 | [LIC-04](#lic-04-personal-research-grant) | The general grant covers eligible individuals' private personal research only | Requirement |
 | [LIC-05](#lic-05-professional-users) | Professional Users need prior express written permission | Requirement |
 | [LIC-06](#lic-06-written-permission) | Permission is express, written, and specific | Requirement |
@@ -39,10 +39,10 @@ This policy is not legal advice or a legal determination. Nathan Slaughter may s
 
 ### LIC-01 License identity
 
-Trial Folio's own material is licensed under the Nathan Slaughter Personal Research License, identifier `LicenseRef-NSPRL-1.0`. The license is not MIT and not an OSI-approved open-source license. Its restrictions on professional use and publication are incompatible with the freedoms the [Open Source Definition](https://opensource.org/osd) requires.
+Trial Folio's own material is licensed under the Nathan Slaughter Personal Research License, version 1.1, identifier `LicenseRef-NSPRL-1.1`, from release 0.2.1. Releases 0.1.0 and 0.2.0 carry version 1.0, `LicenseRef-NSPRL-1.0` ([LIC-20](#lic-20-license-changes-and-earlier-grants)). The license is not MIT and not an OSI-approved open-source license. Its restrictions on professional use and publication are incompatible with the freedoms the [Open Source Definition](https://opensource.org/osd) requires.
 
 - The README, package metadata, documentation, and release announcements MUST describe Trial Folio as "source available under a custom license".
-- Package metadata MUST identify the license as `LicenseRef-NSPRL-1.0` and include the LICENSE file.
+- Package metadata MUST identify the license by the identifier of the version it carries, currently `LicenseRef-NSPRL-1.1`, and include the LICENSE file.
 - No document, badge, or package classifier may describe Trial Folio as MIT-licensed, open source, or OSI-approved.
 
 ### LIC-02 Licensor and contact
@@ -53,12 +53,13 @@ The license covers only material Nathan Slaughter can license. It claims no excl
 
 ### LIC-03 Adoption
 
-Nathan Slaughter adopted LICENSE on 2026-10-02. He adopts it himself (D-03). Adoption took these steps, and a future license version repeats them:
+Nathan Slaughter adopted version 1.0 of LICENSE on 2026-10-02, and version 1.1 on 2026-10-07 ([ADR 0008](adrs/0008-license-version-1-1.md)). He adopts each version himself (D-03). Adopting a version takes these steps:
 
 1. Resolve the decisions marked "before adoption" under [Outstanding decisions](#outstanding-decisions).
-2. Delete the drafting-notes block at the top of LICENSE.
+2. Remove any drafting notes from LICENSE. Version 1.1 removed a sentence about adoption that version 1.0 had kept from its draft.
 3. Change the LICENSE status line to `Status: Adopted YYYY-MM-DD`.
-4. Record the same status and date in [ADR 0004](adrs/0004-custom-personal-research-license.md).
+4. Record the same status and date in the version's ADR: [ADR 0004](adrs/0004-custom-personal-research-license.md) for version 1.0, and [ADR 0008](adrs/0008-license-version-1-1.md) for version 1.1.
+5. Give the new version a new identifier (LICENSE section 19), and ship it with a new Trial Folio version, tagged on the commit that adopts it. Reports link to the LICENSE at their version's tag ([D-21](spec.md#decisions), [D-27](spec.md#decisions)).
 
 
 ## Who may use Trial Folio
@@ -66,6 +67,8 @@ Nathan Slaughter adopted LICENSE on 2026-10-02. He adopts it himself (D-03). Ado
 ### LIC-04 Personal research grant
 
 The general grant is limited to **eligible individuals**: natural persons who are not Professional Users and who use Trial Folio only on their own behalf. They may use it for their own private research, including research for investment decisions concerning themselves and their family members.
+
+Using Trial Folio for one's own **Personal Vehicle** is acting on one's own behalf (LICENSE section 1.21, D-27). A Personal Vehicle is a revocable trust of which the individual is a grantor and a trustee; an IRA, or any other retirement account, held for their benefit; or a limited liability company of which they are the only member. Services to clients or other persons are never personal research, even through a Personal Vehicle.
 
 The grant permits the copies needed for that use and private modifications, kept on devices, accounts, and storage that only the individual can access. It grants no right to publish, distribute, or sublicense.
 
@@ -85,11 +88,12 @@ Portfolio123's High-Net-Worth Investor account type uses a similar threshold: "m
 
 | Term | Meaning in LICENSE | Status |
 |---|---|---|
-| Liquid assets | Cash, cash equivalents, and readily marketable financial assets the individual beneficially owns, valued in U.S. dollars, excluding retirement accounts | Requirement (D-06), resolved |
+| Liquid assets | Cash, cash equivalents, and readily marketable financial assets the individual beneficially owns, valued in U.S. dollars, excluding retirement accounts. Assets held through a Personal Vehicle, other than a retirement account, count | Requirement (D-06, D-27), resolved |
 | Primary source of income | A source that provides more than half of the individual's total income | Requirement (D-06), resolved |
 | Family members | The members of an individual's family; the license adds no list | Requirement (D-06), resolved |
 | Resell research | To provide research about stocks to other persons for compensation, whether the individual produced it or obtained it from others | Requirement (D-13) |
-| Personal research | Private analysis for the individual's own purposes, including investment decisions concerning themselves and their family members; excludes work for an employer or other organization, client services, and redistribution | Requirement, confirmed as drafted 2026-10-02 |
+| Personal research | Private analysis for the individual's own purposes, including investment decisions concerning themselves and their family members; excludes work for an employer, work for any organization but the individual's Personal Vehicle, client services, and redistribution | Requirement, confirmed as drafted 2026-10-02; the Personal Vehicle exception is D-27 |
+| Personal Vehicle | The individual's revocable trust, of which they are a grantor and a trustee; an IRA or any other retirement account held for their benefit; or a limited liability company of which they are the only member. Use for it is use on their own behalf, and investment decisions for it are decisions for themselves | Requirement (D-27) |
 
 Trial Folio MUST NOT ask users to provide account balances, statements, income records, or family identities in order to run. Eligibility is the user's responsibility under the license (see [LIC-12](#lic-12-acceptance-and-acknowledgment)).
 
@@ -105,6 +109,9 @@ These examples illustrate LICENSE. They are not a finding that the terms or any 
 | Individual with more than US $5 million in liquid assets, using Trial Folio only personally | Prior express written permission required |
 | Individual making investment decisions for an unrelated friend without charging | Prior express written permission required |
 | Individual making investment decisions only for themselves and family members | Eligible, if no other criterion applies |
+| Individual researching for their own IRA, their 401(k), their revocable living trust, of which they are a grantor and a trustee, or an LLC of which they are the only member, with no other criterion | Eligible: each is a Personal Vehicle, so the use is on their own behalf |
+| Individual with US $3 million in a brokerage account and US $3 million more in their single-member LLC's brokerage account | Prior express written permission required: the LLC's assets count, for more than US $5 million in liquid assets |
+| Individual providing research or advice to clients through their single-member LLC | Written permission required: services to clients aren't personal research, even through a Personal Vehicle |
 | Individual for whom reselling stock research is 60% of total income | Prior express written permission required |
 | Individual for whom reselling stock research is exactly 50% of total income | Resale criterion not met; eligible if no other criterion applies |
 | Individual using Trial Folio for their employer's research | Written permission required (organizational use) |
@@ -118,11 +125,11 @@ Permission MUST be express and in writing, sent or signed by Nathan Slaughter. I
 
 None of these is permission: an inquiry, silence, a lack of objection, an automatic reply, attribution, a donation, or the purchase of an unrelated product. Permission to use Trial Folio as a Professional User or for an organization doesn't include permission to publish or distribute code unless the grant says so expressly.
 
-[CONTACT.md](../CONTACT.md) describes what to send.
+[CONTACT.md](../CONTACT.md) describes what to send. The [written permission template](written-permission-template.md) shows the form a grant takes (D-28).
 
 ### LIC-07 Organizations
 
-Organizations, and individuals using Trial Folio on an organization's behalf (including for an employer), are outside the personal research grant. They need written permission before any use.
+Organizations, and individuals using Trial Folio on an organization's behalf (including for an employer), are outside the personal research grant. They need written permission before any use. An individual's use for their own Personal Vehicle isn't use on an organization's behalf ([LIC-04](#lic-04-personal-research-grant)).
 
 ## Publication and distribution
 
@@ -166,7 +173,7 @@ Supports INV-13.
 
 - Every copy of Trial Folio carries LICENSE, CONTACT.md, THIRD_PARTY_NOTICES.md, and docs/disclaimers.md.
 - Every human-facing report carries the concise notice and the full notice, as [disclaimers.md](disclaimers.md#dsc-03-where-notices-appear) specifies.
-- Machine-readable artifacts that carry assessments or reports record `license_id` (currently `LicenseRef-NSPRL-1.0`) and `notice_version` (currently `1.0`) as fields. They don't insert notice prose into numeric fields. The field definitions belong to [contracts.md](contracts.md).
+- Machine-readable artifacts that carry assessments or reports record `license_id` (currently `LicenseRef-NSPRL-1.1`) and `notice_version` (currently `1.0`) as fields. They don't insert notice prose into numeric fields. The field definitions belong to [contracts.md](contracts.md).
 - The CLI makes the license identifier and the notices available to the user. The release specification defines how.
 - The README states the license identity (LIC-01) and the two Portfolio123 notices ([disclaimers.md](disclaimers.md#dsc-06-portfolio123-notices)).
 
@@ -273,6 +280,8 @@ Before any public distribution:
 ### LIC-20 License changes and earlier grants
 
 A new license version applies to the Trial Folio versions distributed with it. It doesn't remove rights a recipient already has under terms granted earlier. Before changing an existing release's license, check what earlier grants exist. No MIT-licensed or otherwise permissively licensed release of Trial Folio has been made.
+
+Version 1.1 applies from release 0.2.1. Releases 0.1.0 and 0.2.0, whose tags hold version 1.0, keep it, and so does every copy received under it. Version 1.1 grants more than 1.0. Its one tightening states what 1.0's "beneficially owns" already covered: assets held through a Personal Vehicle count toward liquid assets ([ADR 0008](adrs/0008-license-version-1-1.md)).
 
 ## Outstanding decisions
 

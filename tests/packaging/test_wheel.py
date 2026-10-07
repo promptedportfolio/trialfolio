@@ -2,7 +2,7 @@
 or an OSI license.
 
 Traces to R01-AC19 (the wheel contains LICENSE, CONTACT.md, THIRD_PARTY_NOTICES.md, and the
-disclaimers, and its metadata declares `LicenseRef-NSPRL-1.0`, with no MIT or OSI classifier),
+disclaimers, and its metadata declares `LicenseRef-NSPRL-1.1`, with no MIT or OSI classifier),
 and to LIC-01 and LIC-11 (docs/licensing-policy.md): the license identity, and the license and
 notices in every copy. It also carries `trialfolio init`'s starter files (R01-AC33), `.gitignore`
 included, under its packaged name, `gitignore`.
@@ -47,7 +47,7 @@ def test_the_wheel_carries_the_license_and_the_notices_unchanged(wheel: Path) ->
 def test_the_metadata_declares_the_custom_license_and_no_open_source_one(wheel: Path) -> None:
     core = metadata(wheel)
 
-    assert core["License-Expression"] == "LicenseRef-NSPRL-1.0"
+    assert core["License-Expression"] == "LicenseRef-NSPRL-1.1"
     assert core["License"] is None
     classifiers: list[str] = core.get_all("Classifier", [])
     assert not [c for c in classifiers if c.startswith("License ::")]
