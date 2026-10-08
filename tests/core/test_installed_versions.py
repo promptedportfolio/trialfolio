@@ -40,8 +40,8 @@ def unsupported() -> str:
 def test_the_installed_versions_are_the_verified_ones() -> None:
     versions = installed_versions()
 
-    # 0.2.1, the release of license version 1.1 (D-27).
-    assert versions.trialfolio == "0.2.1"
+    # 0.3.0, whose specification R03-T05 completed (D-26).
+    assert versions.trialfolio == "0.3.0"
     for name, verified in VERIFIED_VERSIONS.items():
         assert getattr(versions, name) in verified
 

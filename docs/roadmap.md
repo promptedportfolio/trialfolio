@@ -30,7 +30,7 @@ For example, the proposed 0.4.0 scenario is: open a saved experiment, identify t
 
 Use actual research to refine subsequent priorities. A proposed product checkpoint is completing three substantially different reproduction studies with their evidence and reports assembled in Trial Folio, then recording the remaining manual steps. This is a planning exercise, not a requirement that their findings be positive, a statistical validation, or an additional 1.0.0 gate. Reference payloads stay local; committed examples and fixtures are synthetic under [REQ-11](spec.md#enduring-requirements).
 
-Release specifications continue to own their scope and status. This planning direction leaves 0.1.0's criteria and the settled scope of 0.2.0 and the 0.3.0 outline intact. Future specifications remain Draft until their dependencies, contracts, acceptance evidence, and owner decisions are resolved.
+Release specifications continue to own their scope and status. This planning direction leaves 0.1.0's criteria and the settled scope of 0.2.0 and 0.3.0 intact. Future specifications remain Draft until their dependencies, contracts, acceptance evidence, and owner decisions are resolved.
 
 ## Releases 0.1.0 to 0.3.0
 
@@ -106,8 +106,8 @@ This table maps what reproducing published factor research needs ([spec.md, Prim
 | Settings compared, with intended changes separated from unexplained mismatches | 0.2.0 | The first step toward a deviation record against the paper |
 | Deviation record against the paper's method | Reproduction and sensitivity workflow | Bring study records forward without claiming statistical evaluation; their scientific meaning remains in [METH-09](methodology.md#meth-09-reproducing-published-research) |
 | Preregistered plan: purpose, planned cases, declared prior research | 0.3.0 (plan and purpose); Reproduction and sensitivity workflow (study record); Statistical evaluation (full confirmatory use) | The approved plan hash records cases declared before execution. Every confirmatory protocol must be frozen before protected outcomes are exposed. |
-| Full universe versus excluding microcaps | 0.3.0, if universe variants are verified backend capabilities | Otherwise, the next increment that verifies them |
-| Stable-identifier universe slices | 0.3.0, if universe rules can express them | Slices share dates and are not independent confirmations (METH-09) |
+| Full universe versus excluding microcaps | 0.3.0, as a variant that adds a rule with its cutoff stated, such as `MktCap > 300` | [R03-T01 verified](releases/0.3.0-experiments.md#what-r03-t01-verified) that Portfolio123 accepts such a rule, and that it changes the results |
+| Stable-identifier universe slices | Reproduction and sensitivity workflow, once a study verifies `StockID`'s stability | 0.3.0 accepts a `Mod(StockID,4)` rule as any added rule, but doesn't offer or label it as a slice ([what R03-T01 verified](releases/0.3.0-experiments.md#what-r03-t01-verified)). Slices share dates and are not independent confirmations (METH-09) |
 | Paper's rebalance versus practitioner screen with a rank-drop sell rule | 0.3.0 for rebalance variants; Simulation review for sell rules | Sell-rule support in screen backtests is unverified |
 | Gross and net of declared costs | 0.1.0 (recorded settings); Reproduction and sensitivity workflow (paired analyses) | Requires verified cost semantics and adequate data or reruns; repricing a trade list is not a rerun (METH-06) |
 | Rolling returns over several holding periods | 0.4.0 Descriptive return analytics (proposed) | Needs dated return series in the saved responses; distinct from repeated entry-date backtests |
@@ -138,7 +138,7 @@ The graphical workflow, descriptive analysis, rank diagnostics, and reproduction
 
 | Question | Impact | Recommended default | Resolve by |
 |---|---|---|---|
-| Which variant types can 0.3.0 offer? | 0.3.0 scope | Only the types whose backend support is recorded with integration evidence in 0.2.0 or 0.3.0 | 0.3.0 specification Ready |
+| Which variant types can 0.3.0 offer? | 0.3.0 scope | Only the types whose backend support is recorded with integration evidence in 0.2.0 or 0.3.0 | Resolved at 0.3.0's sign-off (2026-10-08): the types [R03-T01 verified](releases/0.3.0-experiments.md#what-r03-t01-verified) |
 | Which platforms and application toolkit will the first graphical release support? | Installation, packaging, distribution, and maintenance | Prove a small packaged workflow on the initial supported platform set, starting with the prototype of [D-29](spec.md#decisions); record the toolkit and license review in the LIC-17 ADR | 0.4.0 specification Ready |
 | How do interactive results screens differ from exported reports under REQ-08, D-07, and LIC-17? | The proposed UI conflicts with the current script-free rule if every screen is a report | Amend the owning documents to distinguish application code from exports, retaining on-screen notices and script-free exports | 0.4.0 specification Ready |
 | Which analyses can 0.4.0 compute from archived responses, and what extra study inputs do they need? | Honest coverage and a consistent analysis set | Define and version the supported calculations; label missing inputs and defer analyses that require new acquisition | 0.4.0 specification Ready |

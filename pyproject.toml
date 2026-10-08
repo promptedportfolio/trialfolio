@@ -1,6 +1,6 @@
 [project]
 name = "trialfolio"
-version = "0.2.1"
+version = "0.3.0"
 description = "Plan, record, and compare Portfolio123 strategy evidence. Source available under a custom license."
 readme = "README.md"
 # LIC-01 and LIC-11 (docs/licensing-policy.md): the custom license's identifier, never MIT or
