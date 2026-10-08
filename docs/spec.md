@@ -56,7 +56,7 @@ Trial Folio eventually supports two kinds of research objective. The first is pe
 |---|---|
 | Study | A research question, objective, data boundaries, search history, and evaluation protocol |
 | Experiment | A declared collection of cases addressing one question |
-| Case | One resolved configuration or candidate strategy within an experiment |
+| Case | One fully resolved configuration, identified by its settings alone (`case_id`): a screen run has one, and an experiment several |
 | Candidate | A strategy specification considered during research; it can appear in several cases |
 | Attempt | One execution or acquisition attempt for a case |
 | Artifact | Saved input, output, metadata, or derived evidence |
