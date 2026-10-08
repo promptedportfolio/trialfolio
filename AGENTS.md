@@ -118,5 +118,5 @@ When the owner asks for the next item, do the next task from the task tables of 
     - any tests written ahead of a later task;
     - the limitations and the remaining work.
 
-    Don't merge it ([git workflow](#git-workflow)).
-11. **Report.** Finish with the handoff the [rules](#rules) ask for, with the pull request's link and the next task. Name what awaits the owner: this task's details to confirm, any earlier entry in the release's changes after sign-off that still awaits confirmation, and any approval or account-side step.
+    Don't merge it: it waits for the owner's iterative review, and then the owner's approval ([git workflow](#git-workflow)).
+11. **Report.** Finish with the handoff the [rules](#rules) ask for, with the pull request's link and the next task. Name what awaits the owner: the iterative review of the pull request, this task's details to confirm, any earlier entry in the release's changes after sign-off that still awaits confirmation, and any approval or account-side step.
