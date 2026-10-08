@@ -83,6 +83,7 @@ The workflow:
 
 - Start each change on a feature branch named `<type>/<short-description>`. Push it and open a pull request with `gh pr create`.
 - Nathan merges pull requests. Merge one only when Nathan explicitly approves merging that specific pull request in the current conversation. Pull requests are squash-merged, with a conventional-commit title.
+- No pull request is merged until the owner's iterative review has run on it, documentation-only ones included: two independent reviews at the same time, then fixes for their findings, and a third review of those fixes when the first two found anything of medium or high severity. Every finding is posted on the pull request and answered there. The owner's approval to merge comes after that review, never in place of it. If the review hasn't run, say so before merging, even when the owner asks for the merge.
 - Don't bypass the hooks, and don't edit `.githooks/` or `.claude/` unless Nathan asks.
 - The repository is public ([ADR 0007](docs/adrs/0007-host-the-source-publicly-on-github.md)). Outside contributions aren't accepted ([LIC-14](docs/licensing-policy.md#lic-14-contributions)): don't merge, copy, or adapt changes from a pull request that Nathan didn't author.
 
