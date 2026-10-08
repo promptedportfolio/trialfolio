@@ -83,7 +83,7 @@ The workflow:
 
 - Start each change on a feature branch named `<type>/<short-description>`. Push it and open a pull request with `gh pr create`.
 - Nathan merges pull requests. Merge one only when Nathan explicitly approves merging that specific pull request in the current conversation. Pull requests are squash-merged, with a conventional-commit title.
-- No pull request is merged until the owner's iterative review has run on it, documentation-only ones included. The owner starts the review. It runs in this order:
+- No pull request is merged until the owner's iterative review has run on it, documentation-only ones included ([D-11](docs/spec.md#decisions)). The owner starts the review. It runs in this order:
   1. Two reviews at the same time, by reviewers who didn't write or fix the change and don't share its writer's context.
   2. Fixes: each finding is fixed, or declined with a reason, and answered under it on the pull request.
   3. A third review of the fixes, when the first two reviews found anything of medium or high severity or the fixes changed behavior or tests, and only if the fixes pushed a change. Its findings are fixed or declined the same way, which ends the review. Without a third review, the fixes end it.
