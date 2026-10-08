@@ -54,7 +54,7 @@ Steps:
 
 **Check:**
 
-- `trialfolio --version` prints `trialfolio 0.1.0` from the tag `v0.1.0`. A copy of `main` prints the next release's version, `0.2.0`, which the package takes once that release's specification is complete ([D-26](spec.md#decisions)).
+- `trialfolio --version` prints the version of the tag your copy came from, such as `trialfolio 0.2.1` from `v0.2.1`. A copy of `main` prints the next release's version, `0.3.0`, which the package takes once that release's specification is complete ([D-26](spec.md#decisions)).
 - `trialfolio --help` lists `init`, `run`, `report`, `demo`, `review`, and `license`.
 - `trialfolio init ~/research` exits 0 without asking you to acknowledge the license. The folder holds exactly `screen.yaml`, `README.md`, and `.gitignore`, with no `logs/` folder.
 - Running it again on the same folder fails with `output.not_empty`, exit code 4, and changes nothing.
