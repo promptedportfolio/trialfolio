@@ -21,7 +21,7 @@ Portfolio123 does the backtesting. Trial Folio plans each request, records exact
 | Run one screen backtest through the Portfolio123 API and keep the settings with the results | [0.1.0](docs/releases/0.1.0-api-execution.md) | Implemented: built, tested, and used privately; not yet released |
 | Compare saved runs, offline, against a baseline | [0.2.0](docs/releases/0.2.0-review.md) | Implemented: built, tested, and used privately; not yet released |
 | Version 1.1 of the license: your own trust, retirement accounts, and single-member LLC count as you | [0.2.1](docs/releases/0.2.1-license.md) | Ready: signed off, tagged, and every release requirement met; not yet released |
-| Run a small, planned experiment of screen variants, with safe resume | [0.3.0](docs/releases/0.3.0-experiments.md) | Outlined (Draft) |
+| Run a small, planned experiment of screen variants, with safe resume | [0.3.0](docs/releases/0.3.0-experiments.md) | Specified (Ready) |
 | Descriptive return analytics, robustness diagnostics, statistical evaluation, forward tracking | [Roadmap](docs/roadmap.md) | Not specified |
 
 **Supported inputs:** release 0.1.0 runs one long-only stock screen backtest through the Portfolio123 API, described in a YAML file. It accepts only the settings and values that live calls have verified:

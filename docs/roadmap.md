@@ -30,7 +30,7 @@ For example, the proposed 0.4.0 scenario is: open a saved experiment, identify t
 
 Use actual research to refine subsequent priorities. A proposed product checkpoint is completing three substantially different reproduction studies with their evidence and reports assembled in Trial Folio, then recording the remaining manual steps. This is a planning exercise, not a requirement that their findings be positive, a statistical validation, or an additional 1.0.0 gate. Reference payloads stay local; committed examples and fixtures are synthetic under [REQ-11](spec.md#enduring-requirements).
 
-Release specifications continue to own their scope and status. This planning direction leaves 0.1.0's criteria and the settled scope of 0.2.0 and the 0.3.0 outline intact. Future specifications remain Draft until their dependencies, contracts, acceptance evidence, and owner decisions are resolved.
+Release specifications continue to own their scope and status. This planning direction leaves 0.1.0's criteria and the settled scope of 0.2.0 and 0.3.0 intact. Future specifications remain Draft until their dependencies, contracts, acceptance evidence, and owner decisions are resolved.
 
 ## Releases 0.1.0 to 0.3.0
 
@@ -138,7 +138,7 @@ The graphical workflow, descriptive analysis, rank diagnostics, and reproduction
 
 | Question | Impact | Recommended default | Resolve by |
 |---|---|---|---|
-| Which variant types can 0.3.0 offer? | 0.3.0 scope | Only the types whose backend support is recorded with integration evidence in 0.2.0 or 0.3.0 | 0.3.0 specification Ready |
+| Which variant types can 0.3.0 offer? | 0.3.0 scope | Only the types whose backend support is recorded with integration evidence in 0.2.0 or 0.3.0 | Resolved at 0.3.0's sign-off (2026-10-08): the types [R03-T01 verified](releases/0.3.0-experiments.md#what-r03-t01-verified) |
 | Which platforms and application toolkit will the first graphical release support? | Installation, packaging, distribution, and maintenance | Prove a small packaged workflow on the initial supported platform set, starting with the prototype of [D-29](spec.md#decisions); record the toolkit and license review in the LIC-17 ADR | 0.4.0 specification Ready |
 | How do interactive results screens differ from exported reports under REQ-08, D-07, and LIC-17? | The proposed UI conflicts with the current script-free rule if every screen is a report | Amend the owning documents to distinguish application code from exports, retaining on-screen notices and script-free exports | 0.4.0 specification Ready |
 | Which analyses can 0.4.0 compute from archived responses, and what extra study inputs do they need? | Honest coverage and a consistent analysis set | Define and version the supported calculations; label missing inputs and defer analyses that require new acquisition | 0.4.0 specification Ready |

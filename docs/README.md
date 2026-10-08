@@ -4,7 +4,7 @@ These are the specifications for Trial Folio. The implementation tasks of releas
 
 ## Where to start
 
-- **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. [0.1.0 API execution](releases/0.1.0-api-execution.md) is Implemented: built, verified, and used privately, but not yet released. [0.2.0 Review](releases/0.2.0-review.md) is Implemented too: built, verified, and used privately, but not yet released. [0.2.1 License version 1.1](releases/0.2.1-license.md) changes only the license. The owner signed it off on 2026-10-07, and it's tagged, with every release requirement met.
+- **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. [0.1.0 API execution](releases/0.1.0-api-execution.md) is Implemented: built, verified, and used privately, but not yet released. [0.2.0 Review](releases/0.2.0-review.md) is Implemented too: built, verified, and used privately, but not yet released. [0.2.1 License version 1.1](releases/0.2.1-license.md) changes only the license. The owner signed it off on 2026-10-07, and it's tagged, with every release requirement met. [0.3.0 Experiments](releases/0.3.0-experiments.md) is Ready: the owner signed off on 2026-10-08.
 - **Using Trial Folio:** read the [user guide](user-guide.md).
 - **Understanding the product:** read [spec.md](spec.md), then [roadmap.md](roadmap.md).
 - **Planning a release:** follow [Product direction (D-23)](spec.md#product-direction) and the [release planning requirements](roadmap.md#release-planning-requirements), then write or complete its release specification. Roadmap targets are not implementation assignments.
@@ -25,7 +25,7 @@ These are the specifications for Trial Folio. The implementation tasks of releas
 | [releases/0.2.0-review.md](releases/0.2.0-review.md) | Offline comparison of saved runs against a baseline (R02) |
 | [releases/0.2.0-verification.md](releases/0.2.0-verification.md) | Release 0.2.0's verification record: each command's date, versions, and outcome, and the evidence for each acceptance criterion |
 | [releases/0.2.1-license.md](releases/0.2.1-license.md) | Version 1.1 of the license, its identifier, and the package's version |
-| [releases/0.3.0-experiments.md](releases/0.3.0-experiments.md) | Finite experiments with resume (R03). An outline, to be completed before implementation |
+| [releases/0.3.0-experiments.md](releases/0.3.0-experiments.md) | Finite experiments with resume (R03) |
 | [adrs/0001-python-and-portfolio123-integration.md](adrs/0001-python-and-portfolio123-integration.md) | Python, `p123api`, and the third-party code boundary, with verification notes |
 | [adrs/0002-pydantic-contracts-and-protocols.md](adrs/0002-pydantic-contracts-and-protocols.md) | Pydantic models, generated schemas, and narrow protocols |
 | [adrs/0003-versioned-research-artifacts.md](adrs/0003-versioned-research-artifacts.md) | File-based, immutable, versioned artifacts |
