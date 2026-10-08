@@ -383,7 +383,7 @@ Any other key in `variants`, such as `universe`, `ranking`, `benchmark`, or a da
 |---|---|---|---|
 | `provider_requests` | integer | Yes | At least the number of cases. The most provider requests the experiment may send, counted as [budget and retries](#budget-and-retries) counts them, across every attempt of every case, including the attempts of each later `run` that resumes it. |
 
-- **At least one per case.** So every case can be sent once. A smaller budget fails with `config.invalid`, and the message gives the number of cases. A larger one leaves room to send a failed case again.
+- **At least one per case.** So every case can be sent once. A smaller budget fails with `config.invalid`, and the message gives the number of cases. A larger one leaves room to [repeat a case](#repeating-a-case) whose request may have been charged.
 - **Requests, not credits.** Trial Folio counts sends exactly, while credits depend on Portfolio123's price. The plan's budget gives the credits too, as `provider_requests` times the documented cost of a request ([budget and retries](#budget-and-retries)), and the plan display shows them.
 
 Plan 1.1.0 records the budget, with a bound on authentication calls equal to `provider_requests`, and the current plan's budget bounds the experiment across every run and revision ([the budget across runs](#experiment-plans-and-revisions)).
@@ -829,7 +829,7 @@ Trial Folio authenticates first, when it [needs to](#http-exchanges), then write
 - **A start record without an attempt record** is `running`. Its request is sent at most once, so a reader counts it as one possible send: `possibly_charged`, and one provider request. On restart, as in 0.3.0's resume, Trial Folio writes its attempt record, and rewrites nothing:
   - **With a saved response.** A `response.json` or `response.raw` in the attempt's directory is complete, because it's published atomically ([atomic writes](#artifact-storage)), and either is saved only after a 200. So the attempt record is written as `succeeded`, with the request's exchange recorded as a `response` with status 200 and the note `completed_from_saved_response`. A `response.raw` is flagged `provider.response_invalid`, as it would have been.
   - **Without one.** The attempt record is written as `unknown`, possibly charged, with one provider request. Its exchanges are the start record's: the request's exchange was never recorded.
-- **An `unknown` attempt** is never retried automatically, because the original request may have been charged or may have changed provider state. `unknown` always means that no response was durably recorded.
+- **An `unknown` attempt** is never retried automatically, because the original request may have been charged or may have changed provider state. `unknown` always means that no response was durably recorded. From 0.3.0, the user can repeat an experiment's case on purpose, confirming the possible repeat charge ([repeating a case](#repeating-a-case)).
 
 ### Endings that decide the error code
 
@@ -1231,11 +1231,12 @@ Each case's attempts are a run's, in `cases/<case_id>/attempts/<attempt_id>/` ([
   - **`authenticated_by`:** the `attempt_id` of the attempt whose successful authentication gave the token its request was sent with: its own, or an earlier attempt's of the same session. A start record always has one, and an attempt record has one exactly when it has a start record, and the same one.
 
   An attempt record that a later run writes, for a `running` attempt or for one whose only record is its authentication record, keeps that record's `session` and `sequence`.
+- **`repeat_of` records a repeat.** It's the `attempt_id` that the confirmation of a [repeat](#repeating-a-case) named, for an attempt that `--repeat` started, and `null` for any other. The start record, the attempt record, and the [authentication record](#experiment-attempts) all hold it, so an attempt record that a later run writes keeps it too.
 - **Nothing else changes.** A screen run's records stay 1.0.0, where every attempt authenticates.
 
 Release 0.3.0 had listed the attempt record as unchanged, and this follows its settled required behavior instead ([open question](releases/0.3.0-experiments.md#open-questions)).
 
-**The authentication record.** An attempt that makes Trial Folio's own authentication call first writes `authenticating.json` durably, in its directory, which it creates: schema version 1.0.0, with the `attempt_id`, `case_id`, `plan_hash`, `session`, `sequence`, and `started_at` that its start record will hold. An attempt that sends with a token the run already holds has none. Then it authenticates, and writes its files in a run's order ([writing the files](#execution-outcomes-and-attempts)). So each authentication call is recorded before it's made, and the budget counts it even when the process is killed before its exchange is recorded ([the budget across runs](#experiment-plans-and-revisions)).
+**The authentication record.** An attempt that makes Trial Folio's own authentication call first writes `authenticating.json` durably, in its directory, which it creates: schema version 1.0.0, with the `attempt_id`, `case_id`, `plan_hash`, `session`, `sequence`, `repeat_of`, and `started_at` that its start record will hold. An attempt that sends with a token the run already holds has none. Then it authenticates, and writes its files in a run's order ([writing the files](#execution-outcomes-and-attempts)). So each authentication call is recorded before it's made, and the budget counts it even when the process is killed before its exchange is recorded ([the budget across runs](#experiment-plans-and-revisions)).
 
 An attempt that has its authentication record, and neither a start record nor an attempt record, stopped after writing it and before its send, perhaps during its authentication call. A resume writes its attempt record, as it does a `running` attempt's: `failed`, not possibly charged, because nothing was sent, with the error code `command.interrupted`, as an interrupt during authentication gives ([interrupts](#interrupts)). Its one exchange is the authentication call's, recorded as `interrupted`, because nothing shows whether the call was made, or how it ended. A `request.json` it wrote is left as it is, and the attempt record references none.
 
@@ -1281,7 +1282,7 @@ Only one process runs an experiment at a time ([release 0.3.0's included scope](
 
 **A new experiment,** into an output directory that's absent or empty, takes the steps of [`trialfolio run` for a screen](#approval), with these differences:
 
-- **Step 5** fails with `plan.approval_required` when `--revision-reason` is given too.
+- **Step 5** fails with `plan.approval_required` when `--revision-reason` or `--repeat` is given too: a new experiment has no revision, and no attempt to repeat.
 - **Step 7** claims the directory with `experiment.lock`, and takes the lock. Logging to `<out>/logs/` starts then. The run writes `sessions/1/session.json`, the first [atomic write](#artifact-storage), then `plans/1/configuration.yaml`, `plans/1/plan.json`, and `plans/1/experiment.json`.
 - **Then** it runs the cases in the plan's order, and ends with `sessions/1/`'s report and manifest.
 
@@ -1291,46 +1292,95 @@ Only one process runs an experiment at a time ([release 0.3.0's included scope](
 2. Validate the configuration (`config.invalid`).
 3. Take the lock (`experiment.locked`). A directory that holds anything else, and no `experiment.lock`, is `output.not_empty`, as for a screen.
 4. Read and check the experiment's records, below (`input.not_a_run` or `artifact.unknown_schema_version`). A configuration with another `experiment_id`, or whose baseline has another universe than the current plan's, is `output.not_empty`. So is a directory without `plans/1/experiment.json`: its first run stopped before anything was sent, and the message says so, and to remove the directory and run again.
-5. Check the installed versions (`environment.unsupported`). Build the plan, which either is the current plan or revises it, and show it with the experiment's progress: each case's outcome so far, the retired cases, and the budget counted so far.
-6. Check the approval: for the current plan, as for a new one (`plan.approval_required`); for a revision, with its reason (`plan.changed`).
-7. Check that credentials are present when a case is due (`provider.auth_failed`).
+5. Check the installed versions (`environment.unsupported`). Build the plan, which either is the current plan or revises it, and show it with the experiment's progress: each case's outcome so far, the cases that can be [repeated](#repeating-a-case), each with the option that repeats it, the retired cases, and the budget counted so far. Check each `--repeat` against the plan and the records (`plan.approval_required`).
+6. Check the approval: for the current plan, as for a new one (`plan.approval_required`); for a revision, with its reason (`plan.changed`). Then confirm the repeats that `--repeat` names without an attempt ID (`plan.approval_required`).
+7. Check that credentials are present when a case is due or to be repeated (`provider.auth_failed`).
 8. Logging to `<out>/logs/` starts. Write the new session's `sessions/<s>/session.json`. Then write the attempt record of each `running` attempt, as [uncertain completion](#uncertain-completion) says, and of each attempt whose only record is its authentication record, as [experiment attempts](#experiment-attempts) says. For a revision, write `plans/<n>/`, as for the first plan.
-9. Run the cases that are due, in the plan's order, and end with the session's report and manifest.
+9. Run the cases that are due, and the cases to repeat, in the plan's order, and end with the session's report and manifest.
 
-**The cases that are due.** A case with a succeeded attempt is complete, and is skipped. A case with an `unknown` attempt isn't repeated automatically: R03-T04 specifies the option that repeats one. A case that has no attempt is due. So is one whose attempts all failed without being possibly charged, such as after a failed authentication. A case whose failed attempt may have been charged, such as a rejected request, waits for R03-T04's option too, since a resume never repeats a potentially charged request automatically ([open question](releases/0.3.0-experiments.md#open-questions)).
+**The cases that are due.** Each case of the plan is in one of three states, by whether its attempts succeeded or are [possibly charged](#http-exchanges). A `running` attempt, and one whose only record is its authentication record, count as step 8 will record them: the first `succeeded` with a saved response, and `unknown` without one, possibly charged either way; the second `failed`, not possibly charged.
+
+- **Complete:** one of its attempts succeeded. It's skipped.
+- **Due:** none of its attempts is possibly charged. It has no attempt, or each failed before its request could reach Portfolio123, such as after a failed authentication or a connection that never opened. A resume sends it.
+- **Awaiting a repeat:** one of its attempts is possibly charged, and none succeeded, so it's `unknown`, or `failed` after a request that may have reached Portfolio123, such as one Portfolio123 rejected. A resume never sends its request again automatically, since it may already have been charged. Only a confirmed [repeat](#repeating-a-case) sends it ([open question](releases/0.3.0-experiments.md#open-questions)).
 
 **Checking the records.** A resume reads the experiment's records through the `ArtifactStore` and checks them as `trialfolio report` checks a run ([a complete run](#reports)), before it builds the plan:
 
 - **Each plan** with an `experiment.json`: that file is valid; its `plan.json` recomputes to its hash; its `plan.json` and `configuration.yaml` have the `artifact_id`s it records; its entries before the last equal the previous plan's `experiment.json`'s; and its `revises` is the previous plan's hash.
 - **Each attempt:** its records are valid, and agree with each other; they name a plan of the experiment, a case of that plan, and a session of the experiment; no other attempt of its session has its `sequence`; and each file the attempt record references has the `artifact_id` it records.
 - **Each attempt's authentication,** when it has a start record: its `authenticated_by` names an attempt of its session whose records hold a successful authentication: itself, or one with a lower `sequence`. No attempt that names the same one, with a lower `sequence` than this one, got a 401 or 403 to its request, which would have dropped that token. `sequence` orders a session's attempts, not their start times ([experiment attempts](#experiment-attempts)).
+- **Each attempt's repeat:** an attempt that follows a possibly charged attempt of its case, by `session`, then by `sequence`, has a `repeat_of` that names the latest such attempt before it. Every other attempt's `repeat_of` is `null`. So the records show that no request that may have been charged was sent again without a confirmation ([repeating a case](#repeating-a-case)).
 - **The latest manifest,** the highest-numbered session's that has one: it's valid, and each file it lists has the size and `artifact_id` it records, as `trialfolio report` checks a run's files. No record is ever removed or replaced, so it lists every plan's and attempt's file written before it. A file missing or changed since, as after an incomplete copy, fails the check, instead of leaving a case that had an attempt looking due, to be sent again and left out of the budget. The plan and attempt files it doesn't list were written after it, and are checked as above. Earlier manifests aren't read, because the latest lists every plan's and attempt's file they list. Records written after it, by a run that stopped before its end, have no manifest to be checked against.
+
+#### Repeating a case
+
+Introduced in 0.3.0 (R03-T04). A resume never sends a case's request again once it may have reached Portfolio123 ([the cases that are due](#running-an-experiment)). `--repeat` sends it again, as a new attempt of the same case, when the user names the case and confirms the possible repeat charge ([release 0.3.0's required behavior](releases/0.3.0-experiments.md#required-behavior), 4).
+
+**Which cases can be repeated.** A case of the plan the run approves that's awaiting a repeat: one of its attempts is possibly charged, and none succeeded. So it's `unknown`, or `failed` after a request that may have reached Portfolio123, such as one that got a 400, 402, or 429. A failed case needs the same confirmation as an `unknown` one, because whether Portfolio123 charges a failed request is unverified ([budget and retries](#budget-and-retries)). Without `--repeat`, it could never be sent again: a revision keeps a case whose settings didn't change, with its attempts ([what a revision keeps](#experiment-plans-and-revisions)). These can't be repeated:
+
+- **A complete case,** one with a succeeded attempt. Its response is saved, and sending its request again would be a reproduction, which 0.3.0 doesn't offer.
+- **A due case,** none of whose attempts is possibly charged. A resume sends it anyway.
+- **A retired case.** No plan from then on includes it, unless a later plan includes its settings again.
+
+**The option.** `--repeat <case-key>`, or `--repeat <case-key>:<attempt-id>`, once for each case to repeat. The key names the case in the plan this run approves: the current plan, or the revision when the run revises it. A case that a revision kept keeps its attempts, so it's repeated under its key in the revision.
+
+- **With the attempt ID,** the option is the confirmation, and the CLI doesn't ask. The ID is the `attempt_id` of the case's latest possibly charged attempt, whose possible charge the user acknowledges, as `--approve` approves a plan by its hash. The full plan display gives this option, exactly, for each case awaiting a repeat, and so do the messages of a run that ends with one, and of a repeat that fails, below.
+- **Without it,** the CLI asks, when stdin and stderr are both terminals and there's no `--approve`, once the plan is approved. It lists each case to repeat with its latest possibly charged attempt: the `attempt_id`, the outcome and error code, and that its request may already have been charged. It says that a repeat sends the request again, may be charged again, and counts against the budget, and gives the budget that would remain. Then it asks the user to type `repeat`, one answer for all the cases it lists, under the rules for typing `approve` ([approval](#approval)): exactly `repeat`, and any other answer is a refusal. It passes on the attempt IDs it showed, as interactive approval passes on the hash it showed. With `--approve`, or without a terminal, the CLI never asks, as for approval, so a repeat needs its attempt ID.
+- **Usage errors.** A value that doesn't match a case key's pattern, `[a-z0-9][a-z0-9_-]{0,63}`, alone or followed by a colon and an `attempt_id`'s form, is a usage error that the parser reports before any other check, and so is a case key given twice: exit 2, without a JSON summary, as for an invalid `--revision-reason` ([CLI behavior](#cli-behavior)).
+
+**One confirmation, one repeat.** A confirmation names an attempt, and allows one send of its case's request after that attempt. It's used once a later attempt of the case is possibly charged. So running the same command again, as after an interruption, never repeats the case a second time on the same confirmation:
+
+- **Until the repeat may have reached Portfolio123,** the confirmation is unused, and the command repeats the case, as it would have the first time. That includes a repeat that sent nothing, such as one whose authentication failed: the same command tries it again.
+- **After that,** the confirmation is used. The command doesn't repeat the case, says that it was repeated already, and resumes the rest of the experiment. A repeat that ended `unknown`, or `failed` and possibly charged, needs a new confirmation, which names the repeat's own attempt.
+
+Each attempt that `--repeat` starts records the confirmation's attempt in `repeat_of` ([experiment attempts](#experiment-attempts)). A resume checks that each attempt sent after a possibly charged attempt of its case names the latest one ([checking the records](#running-an-experiment)).
+
+**What fails.** Each of these fails with `plan.approval_required`, exit 2, once the plan is shown, and sends and writes nothing. The message says why, and gives the exact option for each case awaiting a repeat:
+
+- `--repeat` with a screen, or with a new experiment, which has no attempts;
+- a key that names no case of the plan this run approves;
+- a key alone, for a due case;
+- an attempt ID that names no attempt of the case, or an attempt that isn't possibly charged, or one that succeeded;
+- a key alone, for a case awaiting a repeat, with `--approve` or without a terminal;
+- a refused confirmation.
+
+Two don't fail. The case isn't repeated, the command says so, and it resumes the rest of the experiment:
+
+- an attempt ID whose confirmation is used;
+- a key alone, for a complete case, so that a command that confirmed a repeat on a terminal resumes when it's run again after the repeat succeeded.
+
+**The budget.** A repeat is a send like any other. It counts against the experiment's budget ([the budget across runs](#experiment-plans-and-revisions)), and runs in the plan's order, among the cases that are due. When the remaining budget can't cover it, it isn't started, and neither are the cases after it, and its confirmation stays unused. A revision that raises `budget.provider_requests` then lets the same confirmation repeat it.
+
+**Counting.** A repeat is a provider operation, not a new case: it's an attempt of the same case, with the same `case_id`, and [METH-03.2](methodology.md#meth-03-research-history-and-multiple-testing) keeps provider operations apart from candidates and hypotheses. The [experiment manifest](#the-experiment-manifest) counts the repeats apart from the other attempts, and counts a case by the latest of its attempts that may have reached Portfolio123, so a repeat that sent nothing can't hide an `unknown` request. The report shows each repeat, and the attempt it repeated, and marks each case awaiting one; R03-T10 settles how.
+
+**In the core.** Execution takes the confirmed repeats with the plan's hash: each case to repeat, by its `case_id`, and the attempt whose possible charge the user acknowledged. It checks them as above, and never asks ([interface-independent core](#interface-independent-core)). The CLI obtains them from `--repeat`, or from the confirmation it asks for.
+
+**Logs** name a repeat's case by its `case_id`, and the attempt it repeats by its `attempt_id`, never by the case key.
 
 #### The experiment manifest
 
-`sessions/<s>/manifest.json`, with `artifact_type: experiment` and schema version 1.0.0. Each run that reaches its end writes one, last: one with cases that failed or are uncertain, one the budget stopped, and one that sends nothing because no case is due. It records the experiment as the run left it, and holds what a [run's manifest](#artifact-storage) holds, with these differences:
+`sessions/<s>/manifest.json`, with `artifact_type: experiment` and schema version 1.0.0. Each run that reaches its end writes one, last: one with cases that failed or are uncertain, one the budget stopped, and one that sends nothing because no case is due or to be repeated. It records the experiment as the run left it, and holds what a [run's manifest](#artifact-storage) holds, with these differences:
 
 - **The experiment:** its `experiment_id`, and the session's number.
 - **The plan:** the current plan's number and `plan_hash`, and how this run approved it, `interactive` or `option`.
-- **The command:** `command.options` records `approve` and `json`, as for a run, and whether `--revision-reason` was given; its text is in `experiment.json`.
+- **The command:** `command.options` records `approve` and `json`, as for a run, and whether `--revision-reason` and `--repeat` were given. The reason's text is in `experiment.json`, and the repeats are in the attempts' `repeat_of`.
 - **`artifacts`:** every file of the experiment's records: each plan's three files, each attempt's files, and this session's `session.json` and report. It leaves out `experiment.lock`, `logs/`, other sessions' files, and a plan's directory without `experiment.json`. Each `plans/<n>/configuration.yaml` is a source artifact, with the format `experiment-configuration` version 1.0.0, `user_supplied` provenance, no parser version, and no provider operation.
 - **Reproducibility:** over the current plan's cases.
 - **`counts`:**
   - **Cases:** `planned`, the current plan's cases, and how many of them are `succeeded`, `failed`, `skipped`, `unknown`, and `not_yet_run`, which add up to `planned` ([R03-AC08](releases/0.3.0-experiments.md#acceptance-criteria)). 0.3.0 skips no planned case deliberately, so `skipped` is 0.
   - **Retired cases:** how many cases revisions retired. Their attempts are counted with the others.
-  - **Attempts:** every attempt of the experiment, by outcome.
+  - **Attempts:** every attempt of the experiment, by outcome, and `repeats`, how many of them [repeat a case](#repeating-a-case), those with a `repeat_of`. `retries` is 0, as in a run, because Trial Folio never resends a request on its own ([budget and retries](#budget-and-retries)).
   - **The budget:** the experiment's `provider_requests` and `authentication_calls`, counted as [the budget across runs](#experiment-plans-and-revisions) counts them, beside the current plan's budget.
   - **Cost:** the sum of the costs Portfolio123 reported, when any did.
 - **A case's outcome** for these counts:
   - `succeeded`, when one of its attempts succeeded and that attempt's response passed validation;
   - `failed`, when its succeeded attempt's response failed validation, with `provider.response_invalid`, as a run with that response fails;
-  - otherwise, its latest attempt's outcome, by `session`, then by `sequence`, not by start time: `failed`, or `unknown`, with a `running` attempt counted as `unknown`;
+  - otherwise, when one of its attempts is possibly charged, the outcome of the latest such attempt, by `session`, then by `sequence`, not by start time: `failed`, or `unknown`, with a `running` attempt counted as `unknown`. A later attempt that wasn't possibly charged, such as a [repeat](#repeating-a-case) whose authentication failed, sent nothing, so it changes nothing known about the case's request. Counting by the latest attempt, possibly charged or not, would count such a case as `failed`, although its request's outcome is still unknown;
+  - `failed`, when it has attempts and none is possibly charged: it's due, and a resume sends it;
   - `not_yet_run`, when it has no attempt.
-
-  R03-T04 may refine this for a case repeated on purpose.
 - **`outcome`:** `completed` when every planned case succeeded, and `partial` otherwise, with `execution.partial`, exit 6 ([CLI behavior](#cli-behavior)).
 
-**The report,** `sessions/<s>/report.html`, comes before the manifest, and is rendered from the records and what the manifest will record, as a run's is. The release's [required behavior](releases/0.3.0-experiments.md#required-behavior), 6 and 7, and [reports](#reports) set what it holds: every case and its outcome, the retired cases, every revision and its reason, and the declared prior research, which Trial Folio can't verify. R03-T10 settles its details, as R02-T07 did a review's.
+**The report,** `sessions/<s>/report.html`, comes before the manifest, and is rendered from the records and what the manifest will record, as a run's is. The release's [required behavior](releases/0.3.0-experiments.md#required-behavior), 6 and 7, and [reports](#reports) set what it holds: every case and its outcome, the retired cases, every revision and its reason, every repeat, and the declared prior research, which Trial Folio can't verify. R03-T10 settles its details, as R02-T07 did a review's.
 
 **Logs** name the experiment's plans by number and hash, and its cases by `case_id`. They never hold the `experiment_id`, a case key, a description, or a revision's reason, which are the user's text ([logging](#logging-and-local-diagnostics)).
 
@@ -1442,7 +1492,7 @@ The command is `trialfolio`. Commands are introduced by release:
 | `trialfolio report <run-dir> --out <dir>` | 0.1.0 | Re-render a saved run's report offline |
 | `trialfolio demo --out <dir>` | 0.1.0 | Write a synthetic example run, labeled synthetic, and render its report offline |
 | `trialfolio review <config> --out <dir>` | 0.2.0 | Compare saved runs offline |
-| `trialfolio run <config> --out <dir> [--approve <plan-hash>] [--revision-reason <text>]`, for a `kind: experiment` configuration | 0.3.0 | Plan, execute, resume, and revise a finite experiment ([D-24](spec.md#decisions), [running an experiment](#running-an-experiment)) |
+| `trialfolio run <config> --out <dir> [--approve <plan-hash>] [--revision-reason <text>] [--repeat <case-key>[:<attempt-id>]]...`, for a `kind: experiment` configuration | 0.3.0 | Plan, execute, resume, and revise a finite experiment, and repeat a case on purpose ([D-24](spec.md#decisions), [running an experiment](#running-an-experiment), [repeating a case](#repeating-a-case)) |
 | `trialfolio --version` | 0.1.0 | Print the application version |
 | `trialfolio license [--accept]` | 0.1.0 | Print the license, the full notice, and the acknowledgment status; `--accept` records the acknowledgment |
 
@@ -1488,7 +1538,7 @@ The command is `trialfolio`. Commands are introduced by release:
   - **Its log** goes to the per-user log directory, as `trialfolio license`'s does, so the workspace holds only the starter files. When that directory is the workspace or in it, because `TRIALFOLIO_LOG_DIR` names one there or the workspace holds the home directory's default, `init` writes no log file, with a warning on stderr. So it never changes a directory it refuses. It compares the two paths as the file system would: their parts that exist by the file system's own identity, so a symbolic link, or another case or Unicode normalization that the file system ignores, can't hide the workspace, and their names that don't exist yet ignoring case and normalization. So a log directory that differs from a new workspace only that way gets no log file on any file system.
   - **A failure after the claim.** A write that fails, or an interrupt, after `screen.yaml` claimed the workspace leaves the files written so far. It removes nothing. The message gives the usual code, `storage.write_failed` or `command.interrupted`, says nothing was sent, and says the workspace holds some of the starter files, to remove before running `trialfolio init` there again.
   - **Nothing depends on a workspace.** No other command looks for one, and the starter files hold nothing Trial Folio reads back.
-- **stdout and stderr.** Without `--json`, stdout holds a short summary on success, and nothing on failure. stderr shows the error with its full message, progress at INFO, and warnings. An argument the parser rejects is a usage error, exit 2, reported by the parser on stderr, without a JSON summary: no error code covers it. That includes a blank `--out`, empty or only whitespace, which names no directory of its own, and an `--out` that isn't valid UTF-8 text, such as a name in another encoding, which Python reads with lone surrogates: the summary's `output_dir` couldn't hold either. So is an invalid `--revision-reason` ([approving a revision](#experiment-plans-and-revisions)). An error message that names a path from the command line or the environment, such as the configuration's, the run directory's, or the log's, writes its lone surrogates and its control and formatting characters as escapes, as the [plan display](#approval) does, so the summary can hold the message, and the path can't act on a terminal.
+- **stdout and stderr.** Without `--json`, stdout holds a short summary on success, and nothing on failure. stderr shows the error with its full message, progress at INFO, and warnings. An argument the parser rejects is a usage error, exit 2, reported by the parser on stderr, without a JSON summary: no error code covers it. That includes a blank `--out`, empty or only whitespace, which names no directory of its own, and an `--out` that isn't valid UTF-8 text, such as a name in another encoding, which Python reads with lone surrogates: the summary's `output_dir` couldn't hold either. So is an invalid `--revision-reason` ([approving a revision](#experiment-plans-and-revisions)), or `--repeat` ([repeating a case](#repeating-a-case)). An error message that names a path from the command line or the environment, such as the configuration's, the run directory's, or the log's, writes its lone surrogates and its control and formatting characters as escapes, as the [plan display](#approval) does, so the summary can hold the message, and the path can't act on a terminal.
 - **The JSON summary.** `counts.attempts` is 1 once an attempt record or a start record exists. `metrics_unavailable` is 0 when there's no `metrics.csv`. `warnings` counts the warnings logged during the command.
 - **The entry function** is `trialfolio.cli.main(argv, *, endpoint, timeout, clock, store_factory)`. It returns the exit code, and reads `sys.stdin`, `sys.stdout`, and `sys.stderr` as they are when it's called. The installed command, and `python -m trialfolio`, call it with none of the keyword parameters.
 - **Imports.** `run` and `demo` load the modules that import `p123api`, `requests`, or `urllib3` only after `installed_versions` has checked them, and it imports all three, `p123api` last, so a missing or broken one is `environment.unsupported` before the plan is shown, never an `ImportError`. `trialfolio report` and `trialfolio review` send nothing, so they check no versions, but they read runs with modules that import them: an `ImportError` loading those is `environment.unsupported` too. `review` loads them once its configuration is valid.
@@ -1571,7 +1621,7 @@ The core raises typed errors with stable dotted codes and actionable messages. O
 | `artifact.unknown_schema_version` | 3 | An artifact's schema version has no reader |
 | `environment.unsupported` | 3 | The installed `p123api`, `requests`, or `urllib3` isn't a verified version, or `requests` would write request bodies with `simplejson` ([plan contents](#plan-contents)). It's found before the plan is shown, so nothing is sent and no output is created. The message names the verified versions and how to restore them. Exit 3, like an unsupported input, because the fix is local. |
 | `license.not_acknowledged` | 2 | A data-processing command ran without an acknowledgment of the current license and notice versions |
-| `plan.approval_required` | 2 | A charged or mutating operation was requested without the matching plan hash: no `--approve`, a different hash, or a refused confirmation. Also `--revision-reason` when there's no revision to give a reason for, unless it's the reason the current plan recorded, which resumes it ([experiment plans and revisions](#experiment-plans-and-revisions)). |
+| `plan.approval_required` | 2 | A charged or mutating operation was requested without the matching plan hash: no `--approve`, a different hash, or a refused confirmation. Also `--revision-reason` when there's no revision to give a reason for, unless it's the reason the current plan recorded, which resumes it ([experiment plans and revisions](#experiment-plans-and-revisions)). Also a `--repeat` that names no case awaiting a repeat, or a repeat that isn't confirmed ([repeating a case](#repeating-a-case)). |
 | `plan.changed` | 3 | The configuration or the installed versions no longer give an experiment's current plan, and the revision wasn't approved with a reason: no `--revision-reason`, no `--approve` with the revision's hash, or a refused confirmation ([experiment plans and revisions](#experiment-plans-and-revisions)). Otherwise, a hash given with `--approve` that doesn't match is `plan.approval_required`. |
 | `output.not_empty` | 4 | The output directory exists and is not empty. For an experiment, it holds no `experiment.lock`, or it holds another experiment, by its `experiment_id` or its universe, or one whose first plan was never recorded ([running an experiment](#running-an-experiment)). |
 | `storage.write_failed` | 4 | An artifact could not be written durably. This is the code even when a request was already sent; the attempt record still gives the outcome ([endings that decide the error code](#endings-that-decide-the-error-code)). |
@@ -1594,7 +1644,7 @@ The core raises typed errors with stable dotted codes and actionable messages. O
 - The CLI parses arguments, reads configuration files, injects credentials, calls core functions, formats output, and maps errors to exit codes.
 - Core functions accept validated models and return result models. They do not print, prompt, parse arguments, exit the process, read environment variables, or read secrets.
 - Readers of configurations and saved runs accept content together with a declared source name, not only a filesystem path, so an uploaded file follows the same path as a local one.
-- Planning returns a plan model, and execution requires the approved plan hash.
+- Planning returns a plan model, and execution requires the approved plan hash. An experiment's execution also takes the confirmed repeats, each naming the attempt whose possible charge the user acknowledged ([repeating a case](#repeating-a-case)).
 - Long-running execution reports progress through callbacks or events and supports cancellation between provider requests. It holds a lock that prevents two processes from executing the same experiment ([the lock](#the-lock)), and it serializes Portfolio123 shared-state operations per account across processes, of which 0.3.0 has none, on the basis [the lock](#the-lock) gives.
 
 ## Protocols
