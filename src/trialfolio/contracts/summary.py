@@ -312,12 +312,23 @@ class JsonSummaryV1_2(ContractModel):
             raise ValueError("a session writes into the output directory")
         if set(self.outputs) - {"manifest", "report"}:
             raise ValueError("an experiment's outputs are its session's manifest and report")
+        # A run ends completed or partial only once it has run its plan, as its session's
+        # manifest's outcome does.
+        ended = self.outcome != "failed"
         if self.cases is None:
+            if ended:
+                raise ValueError("an experiment's run that ends completed or partial gives cases")
             return
         if self.cases[0].case_key != BASELINE_CASE_KEY:
             raise ValueError("an experiment's cases are the baseline first, and its variants")
         require_unique(tuple(case.case_key for case in self.cases), "case keys")
         require_unique(tuple(case.case_id for case in self.cases), "case IDs")
+        every_case_succeeded = all(case.outcome == "succeeded" for case in self.cases)
+        if ended and (self.outcome == "completed") != every_case_succeeded:
+            raise ValueError(
+                "an experiment's run is completed exactly when every case succeeded, and "
+                "partial otherwise"
+            )
         counts = self.counts
         if isinstance(counts, ExperimentCounts):
             outcomes = [case.outcome for case in self.cases]

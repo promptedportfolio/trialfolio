@@ -1333,15 +1333,22 @@ RUN_COUNTS: Document = {
 }
 
 
+def every_case_succeeded(document: Document) -> None:
+    """Each of the three cases succeeded, and the counts say so. The outcome is left as it is."""
+    document["counts"].update(cases_succeeded=3, cases_failed=0, cases_unknown=0)
+    for case in document["cases"]:
+        case.update(outcome="succeeded", repeat_attempt_id=None)
+
+
+def completed_run(document: Document) -> None:
+    document.update(outcome="completed", exit_code=0, error=None)
+
+
 SUMMARY_ACCEPTS: dict[str, Change] = {
     "without approval": without_approval,
     "locked": locked,
     "a resume before its plan is built": before_the_plan,
-    "completed": lambda d: (
-        d.update(outcome="completed", exit_code=0, error=None),
-        d["counts"].update(cases_succeeded=3, cases_failed=0, cases_unknown=0),
-        [case.update(outcome="succeeded", repeat_attempt_id=None) for case in d["cases"]],
-    ),
+    "completed": lambda d: (completed_run(d), every_case_succeeded(d)),
     "a new experiment before its session": lambda d: (
         d["ids"].pop("session"),
         d.update(
@@ -1399,7 +1406,7 @@ SUMMARY_REJECTS: dict[str, Change] = {
         d.update(counts=RUN_COUNTS),
     ),
     "cases without the plan hash": lambda d: d["ids"].pop("plan_hash"),
-    "the plan hash without cases": lambda d: d.pop("cases"),
+    "the plan hash without cases": lambda d: (without_approval(d), d.pop("cases")),
     "an experiment's counts without an experiment": lambda d: (
         d.update(ids={"plan_hash": PLAN_HASH}),
         d.pop("cases"),
@@ -1430,6 +1437,23 @@ SUMMARY_REJECTS: dict[str, Change] = {
     "a repeat attempt for a succeeded case": lambda d: summary_cases(d)[1].update(
         repeat_attempt_id=ATTEMPT_ID
     ),
+    # A run ends completed or partial only once it has run its plan, and it's completed exactly
+    # when every case succeeded, as its session's manifest's outcome is.
+    "completed with cases that didn't succeed": completed_run,
+    "completed with a case not yet run": lambda d: (
+        completed_run(d),
+        every_case_succeeded(d),
+        summary_cases(d)[2].update(outcome="not_yet_run"),
+        d["counts"].update(cases_succeeded=2, cases_not_yet_run=1),
+    ),
+    "partial with every case succeeded": every_case_succeeded,
+    "completed without cases": lambda d: (
+        completed_run(d),
+        every_case_succeeded(d),
+        d["ids"].pop("plan_hash"),
+        d.pop("cases"),
+    ),
+    "partial without cases": lambda d: (d["ids"].pop("plan_hash"), d.pop("cases")),
     "a skipped case outcome": lambda d: summary_cases(d)[2].update(outcome="skipped"),
     "more repeats than attempts": lambda d: d["counts"].update(repeats=4),
     "a session 0": lambda d: d["ids"].update(session=0),
