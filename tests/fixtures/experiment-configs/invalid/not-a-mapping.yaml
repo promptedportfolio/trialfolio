@@ -1,0 +1,5 @@
+# Invalid: A file is a mapping of keys to values.
+# Key: -
+# Value: -
+- kind: experiment
+- schema_version: 1.0.0

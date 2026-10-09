@@ -114,6 +114,12 @@ ConfigDecimal = Annotated[
 ConfigDate = Annotated[date, BeforeValidator(_date_from_yaml)]
 """A YAML date, or text in exactly `YYYY-MM-DD` form, with no time part."""
 
+MaxHoldings = Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)]
+"""`max_holdings`: 1 or more."""
+
+RebalanceWeeks = Annotated[Literal[1, 4], IntegerOnly]
+"""`rebalance_weeks`: 1 or 4, the values a release has verified."""
+
 
 class FormulaRanking(ContractModel):
     """A ranking by a single formula, the recommended form."""
@@ -167,27 +173,19 @@ def read_ranking(value: object) -> Ranking:
     return _RANKING_MODELS[forms[0]].model_validate(mapping)
 
 
-class ScreenConfiguration(ContractModel):
-    """A screen configuration, `kind: screen`: one long-only stock screen backtest, run through
-    p123api's screen_backtest (docs/contracts.md, screen configuration).
-    """
+class ScreenFields(ContractModel):
+    """A screen's settings: a screen configuration's keys from `universe` to `data_vendor`, with
+    their types, rules, and verified values. An experiment's baseline is one (docs/contracts.md,
+    the baseline)."""
 
-    kind: Literal["screen"]
-    schema_version: ScreenSchemaVersion
-    title: Title
-    purpose: Annotated[
-        Purpose | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
     universe: NonEmptyText
     rules: Annotated[tuple[NonEmptyText, ...], Field(min_length=1, strict=False)]
     ranking: Ranking
-    max_holdings: Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)]
+    max_holdings: MaxHoldings
     benchmark: NonEmptyText
     start_date: ConfigDate
     end_date: ConfigDate
-    rebalance_weeks: Annotated[Literal[1, 4], IntegerOnly]
+    rebalance_weeks: RebalanceWeeks
     transaction_price: Literal["open"]
     slippage_percent: ConfigDecimal
     pit_method: Literal["complete"]
@@ -215,3 +213,24 @@ class ScreenConfiguration(ContractModel):
         if self.end_date <= self.start_date:
             raise ValueError("`end_date` must be later than `start_date`")
         return self
+
+
+class _ScreenHeader(ContractModel):
+    """The keys a screen configuration has before its settings."""
+
+    kind: Literal["screen"]
+    schema_version: ScreenSchemaVersion
+    title: Title
+    purpose: Annotated[
+        Purpose | None,
+        BeforeValidator(present),
+        Field(json_schema_extra=optional_key),
+    ] = None
+
+
+# Pydantic orders the fields of the bases last to first, so the header's come first, as in the
+# file and the committed schema.
+class ScreenConfiguration(ScreenFields, _ScreenHeader):
+    """A screen configuration, `kind: screen`: one long-only stock screen backtest, run through
+    p123api's screen_backtest (docs/contracts.md, screen configuration).
+    """

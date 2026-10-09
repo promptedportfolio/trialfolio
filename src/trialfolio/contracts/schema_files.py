@@ -23,13 +23,23 @@ from pydantic import BaseModel
 from pydantic.json_schema import JsonSchemaMode
 
 from trialfolio.contracts.acknowledgment import AcknowledgmentRecord
-from trialfolio.contracts.attempt import AttemptRecord, StartRecord
+from trialfolio.contracts.attempt import (
+    AttemptRecord,
+    AttemptRecordV1_1,
+    AuthenticationRecord,
+    StartRecord,
+    StartRecordV1_1,
+)
+from trialfolio.contracts.experiment_configuration import ExperimentConfiguration
+from trialfolio.contracts.experiment_manifest import ExperimentManifest
+from trialfolio.contracts.experiment_plan import PlanV1_1
+from trialfolio.contracts.experiment_record import ExperimentRecord, SessionRecord
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.review_configuration import ReviewConfiguration
 from trialfolio.contracts.review_manifest import ReviewManifest
 from trialfolio.contracts.screen_configuration import ScreenConfiguration
-from trialfolio.contracts.summary import JsonSummary, JsonSummaryV1_1
+from trialfolio.contracts.summary import JsonSummary, JsonSummaryV1_1, JsonSummaryV1_2
 from trialfolio.contracts.tables import DifferencesRow, MetricsRow, SettingsRow
 
 JSON_SCHEMA_DIALECT: Final = "https://json-schema.org/draft/2020-12/schema"
@@ -49,17 +59,28 @@ SCHEMA_FILES: Final = (
     # is written by Trial Folio, so its schema is what serialization writes.
     SchemaFile("screen-configuration-1.0.0.schema.json", ScreenConfiguration, "validation"),
     SchemaFile("review-configuration-1.0.0.schema.json", ReviewConfiguration, "validation"),
+    SchemaFile("experiment-configuration-1.0.0.schema.json", ExperimentConfiguration, "validation"),
+    # A screen run's plan and records stay 1.0.0; an experiment's are 1.1.0 (release 0.3.0).
     SchemaFile("plan-1.0.0.schema.json", Plan, "serialization"),
+    SchemaFile("plan-1.1.0.schema.json", PlanV1_1, "serialization"),
+    SchemaFile("experiment-record-1.0.0.schema.json", ExperimentRecord, "serialization"),
+    SchemaFile("session-record-1.0.0.schema.json", SessionRecord, "serialization"),
+    SchemaFile("authentication-record-1.0.0.schema.json", AuthenticationRecord, "serialization"),
     SchemaFile("start-record-1.0.0.schema.json", StartRecord, "serialization"),
+    SchemaFile("start-record-1.1.0.schema.json", StartRecordV1_1, "serialization"),
     SchemaFile("attempt-record-1.0.0.schema.json", AttemptRecord, "serialization"),
+    SchemaFile("attempt-record-1.1.0.schema.json", AttemptRecordV1_1, "serialization"),
     SchemaFile("run-manifest-1.0.0.schema.json", RunManifest, "serialization"),
     SchemaFile("review-manifest-1.0.0.schema.json", ReviewManifest, "serialization"),
+    SchemaFile("experiment-manifest-1.0.0.schema.json", ExperimentManifest, "serialization"),
     SchemaFile("metrics-row-1.0.0.schema.json", MetricsRow, "serialization"),
     SchemaFile("settings-row-1.0.0.schema.json", SettingsRow, "serialization"),
     SchemaFile("differences-row-1.0.0.schema.json", DifferencesRow, "serialization"),
-    # 1.0.0 is what Trial Folio 0.1.0 writes, kept with its bytes unchanged; 0.2.0 writes 1.1.0.
+    # 1.0.0 is what Trial Folio 0.1.0 writes, and 1.1.0 what 0.2.0 writes, each kept with its
+    # bytes unchanged; 0.3.0 writes 1.2.0.
     SchemaFile("json-summary-1.0.0.schema.json", JsonSummary, "serialization"),
     SchemaFile("json-summary-1.1.0.schema.json", JsonSummaryV1_1, "serialization"),
+    SchemaFile("json-summary-1.2.0.schema.json", JsonSummaryV1_2, "serialization"),
     SchemaFile("license-acknowledgment.schema.json", AcknowledgmentRecord, "serialization"),
 )
 """Every published schema: one for each contract and each schema version that has a reader."""

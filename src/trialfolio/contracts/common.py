@@ -113,6 +113,32 @@ ReviewLabel = Annotated[
 """The label of one result of a review: a result label that isn't a Windows device name,
 because it names the result's directory under `inputs/` (identity, review configuration)."""
 
+
+def _not_a_device_key(value: str) -> str:
+    if value in WINDOWS_DEVICE_NAMES:
+        raise ValueError(
+            "is a name Windows reserves for a device. An experiment's ID and its case keys take "
+            "a review label's form, which can't be one. Choose another"
+        )
+    return value
+
+
+ExperimentKey = Annotated[
+    str,
+    StringConstraints(pattern=LABEL_PATTERN),
+    AfterValidator(_not_a_device_key),
+    Field(json_schema_extra={"not": {"enum": list(WINDOWS_DEVICE_NAMES)}}),
+]
+"""An `experiment_id` or a `case_key`: a review label's pattern, and none of its reserved names
+(identity)."""
+
+BASELINE_CASE_KEY: Final = "baseline"
+"""The baseline's `case_key` (experiment configuration)."""
+
+Ordinal = Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)]
+"""A number counted from 1: a plan's or a session's number, or an attempt's `sequence`
+(experiment output)."""
+
 SettingName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]*$")]
 """A normalized setting name, in snake_case (settings.csv)."""
 
@@ -145,8 +171,26 @@ Purpose = Annotated[str, StringConstraints(min_length=1, max_length=2000, patter
 """A configuration's declared purpose: 1 to 2,000 characters, not all whitespace."""
 
 ShortText = Annotated[str, StringConstraints(min_length=1, max_length=500, pattern=NOT_BLANK)]
-"""Text of 1 to 500 characters, not all whitespace: a review result's description, or a declared
-change's reason."""
+"""Text of 1 to 500 characters, not all whitespace: a review result's description, a declared
+change's reason, or a variant's description."""
+
+PriorResearchText = Annotated[
+    str, StringConstraints(min_length=1, max_length=5000, pattern=NOT_BLANK)
+]
+"""A prior-research declaration's description: 1 to 5,000 characters, not all whitespace."""
+
+PriorResearchStatus = Literal["complete", "partial", "unknown"]
+"""How much of the earlier outcome-informed work the declaration accounts for (prior research)."""
+
+
+RevisionReason = Purpose
+"""A revision's reason, `--revision-reason`: 1 to 2,000 characters, not all whitespace, like a
+purpose (approving a revision). It's valid UTF-8 text too: Pydantic refuses a constrained
+string that holds a lone surrogate."""
+
+Approval = Literal["interactive", "option", "not_required"]
+"""How a plan was approved: by typing `approve`, with `--approve`, or not at all, for a synthetic
+run or experiment, which sends nothing (approval)."""
 
 
 def optional_key(schema: JsonDict) -> None:

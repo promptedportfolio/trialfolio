@@ -1,6 +1,6 @@
 # Trial Folio contracts
 
-**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures, R01-T08 the `ArtifactStore` and the output directory claim, R01-T09 the `ScreenBacktestClient` and its transport adapter, R01-T10 plans, canonical hashing, and approval, R01-T11 attempt recording, R01-T12 normalization and the normalized tables, and R01-T13 the report, its notices, and reading a saved run back for `trialfolio report`. For 0.2.0, R02-T04 implemented the review configuration and its reader, the review manifest, the rows of `differences.csv`, and the JSON summary's version 1.1.0, as models and generated schemas. Nothing else here is implemented yet.
+**Status:** Draft. R01-T07 implemented 0.1.0's contracts as Pydantic models, generated schemas, and the screen configuration fixtures, R01-T08 the `ArtifactStore` and the output directory claim, R01-T09 the `ScreenBacktestClient` and its transport adapter, R01-T10 plans, canonical hashing, and approval, R01-T11 attempt recording, R01-T12 normalization and the normalized tables, and R01-T13 the report, its notices, and reading a saved run back for `trialfolio report`. For 0.2.0, R02-T04 implemented the review configuration and its reader, the review manifest, the rows of `differences.csv`, and the JSON summary's version 1.1.0, as models and generated schemas. For 0.3.0, R03-T06 implemented the experiment configuration and its reader, plan 1.1.0, `experiment.json`, the session and authentication records, start and attempt records 1.1.0, the experiment manifest, and the JSON summary's version 1.2.0, as models and generated schemas. Nothing else here is implemented yet.
 **Date:** 2026-10-01
 
 This document owns the meaning of Trial Folio's interfaces and artifacts: configuration files, saved artifacts, identifiers, metric values, errors, CLI behavior, reports, and logs. Pydantic models under `src/trialfolio/contracts/` define the executable structures, JSON Schemas generated from them under `schemas/` publish those structures, and tests with fixtures under `tests/fixtures/` provide conformance evidence. This prose stays authoritative for meaning. If a model accepts something this document says is invalid, the model has a defect.
@@ -1006,6 +1006,8 @@ Each case also holds:
 
 **Consistency.** Besides 1.0.0's rules for each case: the first case is the baseline; the case keys are unique, and so are the `case_id`s; each variant's settings are the baseline's with exactly the change its `variant` gives; and the budget's `provider_requests` is at least the number of cases. A plan that breaks any of these is invalid.
 
+**Field shapes (R03-T06).** A case holds `case_key`, `case_id`, `description`, and `variant`, then a 1.0.0 case's `requests` and `settings`. `variant` always holds `setting`, `value`, `add`, `replace`, `with`, and `default`, with `null` for each that doesn't apply: a variant of `max_holdings`, `rebalance_weeks`, or `slippage_percent` gives a `value`, and a variant of `rules` an `add`, or a `replace` and its `with`. The default variant is the plan's only variant of `rebalance_weeks`, keyed as [default variants](#default-variants) says, with no description. `schemas/plan-1.1.0.schema.json` gives every field.
+
 **Hashing.** `plan_hash` and `case_id` are computed as for 1.0.0 ([plan hashing](#plan-hashing)). So the plan hash covers the research context, the case keys and descriptions, and `revises`, while a `case_id` covers only the case's settings: a case keeps its `case_id` whatever its key, its description, or the plan it's in. `revises` is the one field that depends on more than the configuration and the versions: it depends on the experiment's history. The same configuration, versions, and revised plan still give the same plan and hash, so a revision, too, can be reviewed in one command and approved in the next.
 
 **Revisions.** Running an experiment's configuration again into its own output directory builds its plan again, from the configuration and the installed versions, with the `revises` of the experiment's current plan, the latest one approved ([running an experiment](#running-an-experiment)). It compares that plan with the current plan:
@@ -1218,7 +1220,7 @@ Each case's normalized tables are in its own directory, as [an experiment's norm
 - **No configuration values in paths.** A case's directory is named by its `case_id`, never its key, and plans and sessions by number. So, unlike a review's, an experiment's paths can be logged as they are ([labels in logs](#review-output)).
 - **The current plan** is the one in the highest-numbered `plans/<n>/` that holds `experiment.json`. A plan's directory without one is a revision whose approval was never fully recorded, because the run stopped while writing it. Nothing was sent under it, since nothing is sent before `experiment.json` is written. It's left as it is, and no record counts it as a plan.
 - **A session** is one `run` of the experiment that passes its checks and its approval, from then to its end.
-  - **It starts with its session record.** Before it writes any other record of the experiment, or sends anything, it writes `sessions/<s>/session.json` durably, schema version 1.0.0: `schema_version`, `trialfolio_version`, `session`, its number, and `started_at`, when it was written. That reserves the number, which each attempt the session starts records ([experiment attempts](#experiment-attempts)).
+  - **It starts with its session record.** Before it writes any other record of the experiment, or sends anything, it writes `sessions/<s>/session.json` durably, schema version 1.0.0: `schema_version`, `trialfolio_version`, `session`, its number, and `started_at`, when it was written. That reserves the number, which each attempt the session starts records ([experiment attempts](#experiment-attempts)). `schemas/session-record-1.0.0.schema.json` gives every field.
   - **It ends with its manifest.** One that reaches its end, whatever its cases' outcomes, writes its report, then its manifest, in its directory. One that stops on an interrupt, a storage failure, or an unexpected exception, or whose process is killed, writes no manifest, as a run doesn't ([running the commands](#cli-behavior)).
   - **The newest manifest supersedes the ones before it.** Since each run that changes the records reserves a session first, a run that stopped before its end always leaves a session numbered higher than any manifest written before it. So when the highest-numbered session has no manifest, the experiment's output is visibly incomplete, until a later run ends.
 
@@ -1241,7 +1243,9 @@ Each case's attempts are a run's, in `cases/<case_id>/attempts/<attempt_id>/` ([
 
 Release 0.3.0 had listed the attempt record as unchanged, and this follows its settled required behavior instead ([open question](releases/0.3.0-experiments.md#open-questions)). The owner confirmed it on 2026-10-08.
 
-**The authentication record.** An attempt that makes Trial Folio's own authentication call first writes `authenticating.json` durably, in its directory, which it creates: schema version 1.0.0, with the `attempt_id`, `case_id`, `plan_hash`, `session`, `sequence`, `repeat_of`, and `started_at` that its start record will hold. An attempt that sends with a token the run already holds has none. Then it authenticates, and writes its files in a run's order ([writing the files](#execution-outcomes-and-attempts)). So each authentication call is recorded before it's made, and the budget counts it even when the process is killed before its exchange is recorded ([the budget across runs](#experiment-plans-and-revisions)).
+**The authentication record.** An attempt that makes Trial Folio's own authentication call first writes `authenticating.json` durably, in its directory, which it creates: schema version 1.0.0, with the `attempt_id`, `case_id`, `plan_hash`, `session`, `sequence`, `repeat_of`, and `started_at` that its start record will hold. An attempt that sends with a token the run already holds has none. Then it authenticates, and writes its files in a run's order ([writing the files](#execution-outcomes-and-attempts)). So each authentication call is recorded before it's made, and the budget counts it even when the process is killed before its exchange is recorded ([the budget across runs](#experiment-plans-and-revisions)). The record also holds `trialfolio_version`, as every artifact does ([versioning](#versioning)) (R03-T06).
+
+`schemas/authentication-record-1.0.0.schema.json`, `schemas/start-record-1.1.0.schema.json`, and `schemas/attempt-record-1.1.0.schema.json` give every field.
 
 An attempt that has its authentication record, and neither a start record nor an attempt record, stopped after writing it and before its send, perhaps during its authentication call. A resume writes its attempt record, as it does a `running` attempt's: `failed`, not possibly charged, because nothing was sent, with the error code `command.interrupted`, as an interrupt during authentication gives ([interrupts](#interrupts)). Its one exchange is the authentication call's, recorded as `interrupted`, because nothing shows whether the call was made, or how it ended. A `request.json` it wrote is left as it is, and the attempt record references none.
 
@@ -1280,6 +1284,14 @@ Schema version 1.0.0. Each `plans/<n>/` holds one, written once, after the plan'
   The entries before the last are the earlier plan's `experiment.json`'s, unchanged, so the history can be checked one plan at a time.
 
 It records no outcome. Attempts end after it's written, and their records hold their outcomes, which each manifest counts.
+
+**Field shapes (R03-T06).** The planned cases are `planned_cases`, and the retired ones `retired_cases`, each with `plan`, the number of the last plan that included it. Each entry of `plans` holds `plan`, the plan's number; `plan_hash`; `revises`; `plan_artifact_id` and `configuration_artifact_id`; `approval`; `reason`; and `changes`, `null` for the first plan. A revision's `changes` holds:
+
+- `versions`: each version that changed, with its `package`, `trialfolio`, `p123api`, `requests`, or `urllib3`, in that order, and its `previous` and `current` version;
+- `cases_added` and `cases_retired`: each case by its `case_id` and `case_key`;
+- `parts`: the names of the other parts that changed, of `title`, `purpose`, `prior_research`, `budget`, `case_keys`, `case_descriptions`, `case_variants`, and `case_order`, in that order.
+
+A revision changes something a plan holds, so its `changes` record at least one change. The plans' numbers start at 1 and increase, but may skip a number: a plan's directory without `experiment.json` isn't part of the history ([experiment output](#experiment-output)). `schemas/experiment-record-1.0.0.schema.json` gives every field.
 
 #### The lock
 
@@ -1409,6 +1421,15 @@ Two don't fail. The case isn't repeated, the command says so, and it resumes the
   - `failed`, when it has attempts and none is possibly charged: it's due, and a resume sends it;
   - `not_yet_run`, when it has no attempt.
 - **`outcome`:** `completed` when every planned case succeeded, and `partial` otherwise, with `execution.partial`, exit 6 ([CLI behavior](#cli-behavior)).
+
+**Field shapes (R03-T06).**
+
+- **`command`** is `null` when no `trialfolio` command ran the session: when the core runs it for another interface, and for a synthetic experiment, which only the core writes. Otherwise its `name` is `run`, and its `options` are `approve`, the hash as given or `null`; `json`; and `revision_reason` and `repeat`, each true when the option was given.
+- **`plan`** is the current plan's number, beside its `plan_hash` and the `approval`.
+- **`artifacts`.** Each file's role names it, and it's at its role's place in the layout: `configuration`, `plan`, and `experiment_record` in `plans/<n>/`; `authentication_record`, `start_record`, `attempt_record`, `provider_request`, `provider_response`, and `provider_response_undecoded` in an attempt's directory; `metrics` and `settings` in a case's `normalized/`; and `session_record` and `report` in the manifest's own session. Each plan it lists has its three files, and so do the first plan and the current one, which it always lists. A case whose tables it lists has both.
+- **`counts`** holds `cases`, with `planned` and each outcome; `retired_cases`; `attempts`, by outcome as in a run, and `repeats`; `retries`, 0; `provider_requests` and `authentication_calls`, as counted; `budget`, the current plan's `provider_requests` and `authentication_calls`; and `cost`.
+
+`schemas/experiment-manifest-1.0.0.schema.json` gives every field.
 
 **The report,** `sessions/<s>/report.html`, comes before the manifest, and is rendered from the records and what the manifest will record, as a run's is. The release's [required behavior](releases/0.3.0-experiments.md#required-behavior), 6 and 7, and [reports](#reports) set what it holds: every case and its outcome, the retired cases, every revision and its reason, every repeat, and the declared prior research, which Trial Folio can't verify. R03-T10 settles its details, as R02-T07 did a review's.
 
@@ -1600,6 +1621,7 @@ With `--json`, every command writes exactly one JSON object to stdout, followed 
 - **Which plan.** `cases` and the case counts are over the plan this run builds, once it's built, and the current plan before then. Once approved, the plan this run builds is the current plan. Until a revision is approved, its `cases` and case counts give what the experiment would hold under it: its kept cases with their outcomes, its new cases `not_yet_run`, and the cases it would retire counted as retired. The outcomes are as the command leaves the records: as the session's manifest gives them, once it's written.
 - **`output_dir`:** the directory as given on the command line, once this command writes into it: for a new experiment, from the claim, as for a screen; for a resume, from its session record, when its logging starts there. Before then it's `null`, with no `outputs`, as when a command creates no directory, so a resume that fails before its session, such as with `experiment.locked`, `input.not_a_run`, `plan.approval_required`, or `plan.changed`, gives `null`: it wrote nothing.
 - **`outputs`:** `manifest` and `report`, the session's, once written. A case's tables have no key, since an experiment has a pair for each case: the manifest lists them.
+- **The models (R03-T06).** The 1.2.0 model is `JsonSummaryV1_2`, and its `ids` `SummaryIdsV1_2`, so the 1.0.0 and 1.1.0 models keep their names. `cases` is left out when it isn't given, never `null`, so an experiment's summary gives `ids.plan_hash` exactly when it gives `cases`.
 
 | Key | Meaning |
 |---|---|
@@ -1792,7 +1814,12 @@ JSON Schemas are generated from the models, never maintained by hand, and commit
 | `run-manifest-1.0.0.schema.json` | [Run manifest](#artifact-storage) |
 | `review-manifest-1.0.0.schema.json` | [Review manifest](#review-output) |
 | `metrics-row-1.0.0.schema.json`, `settings-row-1.0.0.schema.json`, `differences-row-1.0.0.schema.json` | One row of each [normalized table](#normalized-tables) |
-| `json-summary-1.0.0.schema.json`, `json-summary-1.1.0.schema.json` | [JSON summary](#json-summary): 1.0.0, which 0.1.0 writes, with its bytes unchanged, and 1.1.0, which 0.2.0 writes |
+| `experiment-configuration-1.0.0.schema.json` | [Experiment configuration](#experiment-configuration) |
+| `plan-1.1.0.schema.json` | [Experiment plan](#experiment-plans-and-revisions) |
+| `experiment-record-1.0.0.schema.json`, `session-record-1.0.0.schema.json` | [`experiment.json`](#experimentjson), and the [session record](#experiment-output) |
+| `authentication-record-1.0.0.schema.json`, `start-record-1.1.0.schema.json`, `attempt-record-1.1.0.schema.json` | [Experiment attempts](#experiment-attempts) |
+| `experiment-manifest-1.0.0.schema.json` | [Experiment manifest](#the-experiment-manifest) |
+| `json-summary-1.0.0.schema.json`, `json-summary-1.1.0.schema.json`, `json-summary-1.2.0.schema.json` | [JSON summary](#json-summary): 1.0.0, which 0.1.0 writes, and 1.1.0, which 0.2.0 writes, each with its bytes unchanged, and 1.2.0, which 0.3.0 writes |
 | `license-acknowledgment.schema.json` | [License acknowledgment record](#license-acknowledgment), which has no schema version |
 
 ## Open questions

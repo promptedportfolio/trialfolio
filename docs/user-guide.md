@@ -377,7 +377,7 @@ It doesn't copy a run's request, its response, or its report.
 
 ## 11. Use it from a script
 
-Add `--json` to any command. stdout then holds exactly one JSON object, on success and on failure, and everything else goes to stderr. The object gives the outcome, the exit code, the IDs, such as the plan hash, the output files, the counts, such as `provider_requests` and the credit `cost`, and the error, if any. For a review, `ids` holds the review ID, and `counts` the results, the flagged setting rows, the unavailable metric rows, and the warnings. Its schema is `schemas/json-summary-1.1.0.schema.json`. Trial Folio 0.1.0 writes version 1.0.0, whose schema, `schemas/json-summary-1.0.0.schema.json`, is kept beside it: 1.1.0 only adds to it.
+Add `--json` to any command. stdout then holds exactly one JSON object, on success and on failure, and everything else goes to stderr. The object gives the outcome, the exit code, the IDs, such as the plan hash, the output files, the counts, such as `provider_requests` and the credit `cost`, and the error, if any. For a review, `ids` holds the review ID, and `counts` the results, the flagged setting rows, the unavailable metric rows, and the warnings. Its schema is `schemas/json-summary-1.2.0.schema.json`. Trial Folio 0.1.0 writes version 1.0.0, and 0.2.0 version 1.1.0, whose schemas, `schemas/json-summary-1.0.0.schema.json` and `schemas/json-summary-1.1.0.schema.json`, are kept beside it: each version only adds to the one before.
 
 Approve only a plan you've reviewed. A script can read the hash from a run that wasn't approved, in `ids.plan_hash`, and approve it, but that skips the review the plan exists for.
 
