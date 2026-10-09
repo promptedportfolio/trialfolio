@@ -1191,6 +1191,22 @@ def test_manifest_rejects(change: Change) -> None:
     rejects(ExperimentManifest, changed(manifest, change))
 
 
+LISTED_FILES = [artifact["path"].rpartition("/")[2] for artifact in manifest()["artifacts"]]
+
+
+@pytest.mark.parametrize("index", range(len(LISTED_FILES)), ids=LISTED_FILES)
+def test_a_files_name_is_its_roles_exactly(index: int) -> None:
+    """The dot in a role's file name is a dot: `plans/1/planXjson` isn't the plan's `plan.json`,
+    and `sessions/1/reportXhtml` isn't the session's report."""
+
+    def substitute(document: Document) -> None:
+        artifact = artifacts(document)[index]
+        stem, _, extension = artifact["path"].rpartition(".")
+        artifact["path"] = f"{stem}X{extension}"
+
+    rejects(ExperimentManifest, changed(manifest, substitute))
+
+
 # The JSON summary, version 1.2.0
 
 

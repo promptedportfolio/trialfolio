@@ -66,19 +66,19 @@ _TABLES = r"cases/(?P<case>case-[0-9a-f]{16})/normalized/"
 _SESSION = r"sessions/(?P<session>[1-9][0-9]*)/"
 
 _ROLE_PATTERNS: Final[dict[ExperimentArtifactRole, str]] = {
-    "configuration": f"{_PLAN}configuration.yaml",
-    "plan": f"{_PLAN}plan.json",
-    "experiment_record": f"{_PLAN}experiment.json",
-    "authentication_record": f"{_ATTEMPT}authenticating.json",
-    "start_record": f"{_ATTEMPT}started.json",
-    "attempt_record": f"{_ATTEMPT}attempt.json",
-    "provider_request": f"{_ATTEMPT}request.json",
-    "provider_response": f"{_ATTEMPT}response.json",
-    "provider_response_undecoded": f"{_ATTEMPT}response.raw",
-    "metrics": f"{_TABLES}metrics.csv",
-    "settings": f"{_TABLES}settings.csv",
-    "session_record": f"{_SESSION}session.json",
-    "report": f"{_SESSION}report.html",
+    "configuration": rf"{_PLAN}configuration\.yaml",
+    "plan": rf"{_PLAN}plan\.json",
+    "experiment_record": rf"{_PLAN}experiment\.json",
+    "authentication_record": rf"{_ATTEMPT}authenticating\.json",
+    "start_record": rf"{_ATTEMPT}started\.json",
+    "attempt_record": rf"{_ATTEMPT}attempt\.json",
+    "provider_request": rf"{_ATTEMPT}request\.json",
+    "provider_response": rf"{_ATTEMPT}response\.json",
+    "provider_response_undecoded": rf"{_ATTEMPT}response\.raw",
+    "metrics": rf"{_TABLES}metrics\.csv",
+    "settings": rf"{_TABLES}settings\.csv",
+    "session_record": rf"{_SESSION}session\.json",
+    "report": rf"{_SESSION}report\.html",
 }
 
 ROLE_PATHS: Final = {role: re.compile(pattern) for role, pattern in _ROLE_PATTERNS.items()}
