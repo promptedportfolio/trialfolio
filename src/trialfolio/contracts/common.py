@@ -60,7 +60,11 @@ Sha256Digest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$"
 CaseId = Annotated[str, StringConstraints(pattern=r"^case-[0-9a-f]{16}$")]
 """`case-` and the first 16 hex digits of a SHA-256 (plan hashing)."""
 
-_UUID_TEXT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
+UUID4_PATTERN: Final = r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+"""A version 4 UUID in canonical form, lowercase, with hyphens: an `attempt_id`'s or a
+`review_id`'s text, as a path names it too (identity)."""
+
+_UUID_TEXT = re.compile(UUID4_PATTERN)
 
 
 def _canonical_uuid(value: object) -> object:

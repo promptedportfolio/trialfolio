@@ -1174,6 +1174,15 @@ def only_plan_3(document: Document) -> None:
         artifact["path"] = artifact["path"].replace("plans/1/", "plans/3/")
 
 
+def attempt_directory(name: str) -> Change:
+    """Names the attempt's directory `name`, 36 characters that aren't a version 4 UUID in
+    canonical form."""
+    return lambda d: [
+        artifact.update(path=artifact["path"].replace(ATTEMPT_ID, name))
+        for artifact in artifacts(d)
+    ]
+
+
 MANIFEST_REJECTS: dict[str, Change] = {
     # R03-AC08: the case counts add up.
     "case counts that add up to less": lambda d: case_counts(d).update(planned=4),
@@ -1232,6 +1241,17 @@ MANIFEST_REJECTS: dict[str, Change] = {
     "a path listed twice": lambda d: artifacts(d).append(artifacts(d)[4]),
     "a case ID's directory named by its key": lambda d: artifacts(d)[8].update(
         path="cases/holdings-50/normalized/metrics.csv"
+    ),
+    # An attempt's directory is named by its attempt_id, a version 4 UUID in canonical form.
+    "an attempt's directory of hyphens": attempt_directory("-" * 36),
+    "an attempt's directory with misplaced hyphens": attempt_directory(
+        "1b4e28ba2-fa1-4d2b-883f-0016d3cca427"
+    ),
+    "an attempt's directory named by a version 1 UUID": attempt_directory(
+        "1b4e28ba-2fa1-1d2b-883f-0016d3cca427"
+    ),
+    "an attempt's directory named by a UUID of another variant": attempt_directory(
+        "1b4e28ba-2fa1-4d2b-c83f-0016d3cca427"
     ),
     "no parser": lambda d: d.update(parsers=[]),
     "a parser listed twice": lambda d: d["parsers"].append(d["parsers"][0]),

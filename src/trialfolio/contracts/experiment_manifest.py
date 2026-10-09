@@ -11,6 +11,7 @@ from typing import Annotated, Final, Literal, Self, TypedDict
 from pydantic import ConfigDict, Field, model_validator, with_config
 
 from trialfolio.contracts.common import (
+    UUID4_PATTERN,
     Approval,
     CommandOutcome,
     ContractModel,
@@ -61,7 +62,7 @@ EXPERIMENT_CONFIGURATION_FORMAT: Final = "experiment-configuration"
 """The format the source record of a plan's `configuration.yaml` gives."""
 
 _PLAN = r"plans/(?P<plan>[1-9][0-9]*)/"
-_ATTEMPT = r"cases/case-[0-9a-f]{16}/attempts/[0-9a-f-]{36}/"
+_ATTEMPT = rf"cases/case-[0-9a-f]{{16}}/attempts/{UUID4_PATTERN}/"
 _TABLES = r"cases/(?P<case>case-[0-9a-f]{16})/normalized/"
 _SESSION = r"sessions/(?P<session>[1-9][0-9]*)/"
 
