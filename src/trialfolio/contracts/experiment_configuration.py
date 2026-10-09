@@ -37,6 +37,7 @@ from trialfolio.contracts.common import (
     ordered,
     present,
 )
+from trialfolio.contracts.plan import CREDITS_PER_REQUEST
 from trialfolio.contracts.screen_configuration import (
     ConfigDecimal,
     MaxHoldings,
@@ -207,11 +208,18 @@ class Variants(ContractModel):
     ] = None
 
 
+MAX_PROVIDER_REQUESTS: Final = MAX_SAFE_INTEGER // CREDITS_PER_REQUEST
+"""The largest budget, 1801439850948198 requests: the plan's credits, `provider_requests` times
+the documented cost of a request, are then at most 2^53 - 1, the largest integer canonical
+hashing keeps exactly (docs/contracts.md, the experiment's budget)."""
+
+
 class ExperimentBudget(ContractModel):
     """The experiment's request budget, across every `run` that resumes it."""
 
-    provider_requests: Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)]
-    """The most provider requests the experiment may send: at least the number of cases."""
+    provider_requests: Annotated[int, Field(ge=1, le=MAX_PROVIDER_REQUESTS)]
+    """The most provider requests the experiment may send: at least the number of cases, and few
+    enough that the plan's credits can be hashed."""
 
 
 class ExperimentConfiguration(ContractModel):

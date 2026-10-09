@@ -381,10 +381,11 @@ Any other key in `variants`, such as `universe`, `ranking`, `benchmark`, or a da
 
 | Key | Type | Required | Rules |
 |---|---|---|---|
-| `provider_requests` | integer | Yes | At least the number of cases. The most provider requests the experiment may send, counted as [budget and retries](#budget-and-retries) counts them, across every attempt of every case, including the attempts of each later `run` that resumes it. |
+| `provider_requests` | integer | Yes | At least the number of cases, and at most 1801439850948198. The most provider requests the experiment may send, counted as [budget and retries](#budget-and-retries) counts them, across every attempt of every case, including the attempts of each later `run` that resumes it. |
 
 - **At least one per case.** So every case can be sent once. A smaller budget fails with `config.invalid`, and the message gives the number of cases. A larger one leaves room to [repeat a case](#repeating-a-case) whose request may have been charged.
 - **Requests, not credits.** Trial Folio counts sends exactly, while credits depend on Portfolio123's price. The plan's budget gives the credits too, as `provider_requests` times the documented cost of a request ([budget and retries](#budget-and-retries)), and the plan display shows them.
+- **Few enough that the plan's credits can be hashed.** The plan records its credits, `provider_requests` times the documented cost of a request, and [canonical hashing](#canonical-hashing) refuses an integer above 9007199254740991 (2^53 − 1), the limit on every integer a configuration gives ([screen configuration](#screen-configuration)). At 5 credits a request, the largest budget is 1801439850948198 requests, whose credits are 9007199254740990. A larger one fails with `config.invalid` as the file is read, and the schema gives the bound as the key's `maximum`. The bound follows the documented cost, so a version with another cost has another bound. The review of R03-T07's pull request added it ([changes after sign-off](releases/0.3.0-experiments.md#changes-after-sign-off)).
 
 Plan 1.1.0 records the budget, with a bound on authentication calls equal to `provider_requests`, and the current plan's budget bounds the experiment across every run and revision ([the budget across runs](#experiment-plans-and-revisions)).
 

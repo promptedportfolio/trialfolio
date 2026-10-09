@@ -10,8 +10,9 @@ description, or its place), and R03-AC07's core check (each change docs/contract
 plans and revisions lists is a revision, with the cases kept, added, and retired, and the parts
 changed, that `experiment.json` records; another `experiment_id` or universe isn't a revision;
 and a plan built with other versions is a change of versions alone). Also to docs/contracts.md:
-the default variant, the order of cases, plan hashing, and `experiment.json`; and fixtures, whose
-README lists each revision. R03-T07 wrote them.
+the experiment's budget, the default variant, the order of cases, plan hashing, and
+`experiment.json`; and fixtures, whose README lists each revision. R03-T07 wrote them, and the
+review of its pull request added the budget's bound.
 """
 
 import os
@@ -209,6 +210,18 @@ def test_the_plan_records_the_research_context_and_the_budget_across_runs() -> N
         "data_sent",
     ):
         assert plan[field] == screen[field], field
+
+
+def test_the_largest_budget_gives_credits_the_plan_can_hash() -> None:
+    """The budget's bound is the multiplication's: the largest budget the configuration accepts,
+    1801439850948198 requests, costs 9007199254740990 credits at 5 a request, within 2^53 - 1.
+    The contract tests check that one more is refused."""
+    text = edited("  provider_requests: 6\n", "  provider_requests: 1801439850948198\n")
+
+    plan = build_experiment_plan(from_text(text), VERSIONS)
+
+    assert plan.budget.credits == 9007199254740990
+    assert plan.plan_hash == plan_hash(plan)
 
 
 def test_a_prior_research_declaration_without_a_description_is_planned_as_null() -> None:

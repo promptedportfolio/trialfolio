@@ -242,6 +242,18 @@ def test_a_budget_of_exactly_the_cases_is_accepted() -> None:
     assert read(content).budget.provider_requests == 5
 
 
+def test_a_budget_whose_credits_a_plan_cant_hash_is_rejected() -> None:
+    """At 5 credits a request, 1801439850948199 requests cost more than 2^53 - 1 credits, which
+    canonical hashing can't keep exactly. tests/core/test_experiment_plan.py plans the largest
+    budget accepted."""
+    content = with_line("  provider_requests: 6\n", "  provider_requests: 1801439850948199\n")
+
+    assert (
+        "`budget.provider_requests` input should be less than or equal to 1801439850948198."
+        in rejection(content)
+    )
+
+
 # The default variant, and the order of cases
 
 NO_VARIANTS = example()[: example().index("variants:\n")] + "budget:\n  provider_requests: 2\n"

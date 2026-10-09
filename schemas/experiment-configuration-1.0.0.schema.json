@@ -7,8 +7,8 @@
       "description": "The experiment's request budget, across every `run` that resumes it.",
       "properties": {
         "provider_requests": {
-          "description": "The most provider requests the experiment may send: at least the number of cases.",
-          "maximum": 9007199254740991,
+          "description": "The most provider requests the experiment may send: at least the number of cases, and few\nenough that the plan's credits can be hashed.",
+          "maximum": 1801439850948198,
           "minimum": 1,
           "title": "Provider Requests",
           "type": "integer"

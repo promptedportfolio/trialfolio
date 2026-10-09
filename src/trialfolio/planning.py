@@ -29,7 +29,7 @@ import importlib.util
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from types import MappingProxyType, ModuleType
 from typing import Final, Literal, cast
 
@@ -71,10 +71,11 @@ from trialfolio.contracts.experiment_record import (
     VersionedPackage,
 )
 from trialfolio.contracts.plan import (
+    CREDITS_PER_REQUEST,
+    CREDITS_PER_REQUEST_SOURCE,
     DATA_SENT_SETTINGS,
     Budget,
     DataSent,
-    DocumentedSource,
     Plan,
     PlanCase,
     PlanFlag,
@@ -205,15 +206,6 @@ def installed_versions() -> Versions:
     _imported("p123api")
     return versions
 
-
-CREDITS_PER_REQUEST: Final = 5
-"""Portfolio123's documented cost of one screen backtest, in credits (budget and retries)."""
-
-CREDITS_PER_REQUEST_SOURCE: Final = DocumentedSource(
-    title="API: Screen",
-    url="https://portfolio123.customerly.help/en/articles/43324-api-screen",
-    checked=date(2026, 10, 1),
-)
 
 BUDGET: Final = Budget(
     provider_requests=1,
