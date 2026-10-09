@@ -12,14 +12,14 @@ changed, that `experiment.json` records; another `experiment_id` or universe isn
 and a plan built with other versions is a change of versions alone). Also to docs/contracts.md:
 the experiment's budget, the default variant, the order of cases, plan hashing, and
 `experiment.json`; and fixtures, whose README lists each revision. R03-T07 wrote them, and the
-review of its pull request added the budget's bound.
+review of its pull request added the budget's bound and a budget whose documented cost changed.
 """
 
 import os
 import re
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -29,7 +29,7 @@ from trialfolio.contracts.common import TransportVersions, WrapperVersions
 from trialfolio.contracts.experiment_configuration import ExperimentConfiguration
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
 from trialfolio.contracts.experiment_record import CaseChange, ExperimentRecord
-from trialfolio.contracts.plan import PlanSetting
+from trialfolio.contracts.plan import CREDITS_PER_REQUEST_SOURCE, PlanSetting
 from trialfolio.errors import TrialFolioError
 from trialfolio.planning import (
     VERIFIED_VERSIONS,
@@ -594,6 +594,38 @@ def test_a_plan_built_with_another_version_is_a_change_of_versions_alone(
     assert [case.case_id for case in revision.plan.cases] == [
         case.case_id for case in current.cases
     ]
+
+
+@pytest.mark.parametrize(
+    "budget",
+    [
+        {"credits_per_request": 4, "credits": 24},
+        {
+            "credits_per_request_source": CREDITS_PER_REQUEST_SOURCE.model_copy(
+                update={"checked": date(2026, 9, 1)}
+            )
+        },
+    ],
+    ids=["credits_per_request", "credits_per_request_source"],
+)
+def test_a_plan_built_with_another_documented_cost_is_a_change_of_versions_and_of_the_budget(
+    budget: dict[str, object],
+) -> None:
+    """`budget` is any change to the plan's budget, not only to `provider_requests`: an earlier
+    Trial Folio may have recorded another documented cost, or another source for it, for the same
+    configuration."""
+    planned = plan_of(EXPERIMENTS / "example.yaml")
+    current = recorded_with(
+        planned, trialfolio_version="0.2.1", budget=planned.budget.model_copy(update=budget)
+    )
+
+    revision = revision_of(EXPERIMENTS / "example.yaml", current)
+
+    assert current.budget.provider_requests == revision.plan.budget.provider_requests
+    assert [change.package for change in revision.changes.versions] == ["trialfolio"]
+    assert (revision.changes.cases_added, revision.changes.cases_retired) == ((), ())
+    assert revision.changes.parts == ("budget",)
+    assert revision.plan.budget == planned.budget
 
 
 def test_another_trialfolio_version_given_as_installed_is_a_change_of_versions() -> None:
