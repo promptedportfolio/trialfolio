@@ -1,0 +1,41 @@
+# Invalid: Unknown keys in baseline are rejected.
+# Key: baseline.max_holding
+# Value: 25
+kind: experiment
+schema_version: 1.0.0
+experiment_id: earnyield-sensitivity
+title: Earnings yield sensitivity
+purpose: How do holdings, slippage, and a stricter liquidity rule change the earnings-yield screen's results?
+prior_research:
+  status: partial
+  description: Earlier backtests of this screen in the Portfolio123 website compared 25 and 50 holdings. Other variations tried there weren't recorded.
+baseline:
+  universe: 'SP500'
+  rules:
+    - 'AvgDailyTot(30) > 1000000'
+  ranking:
+    formula: 'EarnYield'
+    lower_is_better: false
+  max_holding: 25
+  benchmark: 'SPY'
+  start_date: 2016-01-01
+  end_date: 2025-12-31
+  rebalance_weeks: 4
+  transaction_price: open
+  slippage_percent: 0.25
+  pit_method: complete
+  precision: 4
+variants:
+  rules:
+    - key: liquidity-100m
+      description: A stricter liquidity floor, 100 million dollars a day.
+      replace: 'AvgDailyTot(30) > 1000000'
+      with: 'AvgDailyTot(30) > 100000000'
+  max_holdings:
+    - key: holdings-50
+      value: 50
+  slippage_percent:
+    - key: slippage-050
+      value: 0.5
+budget:
+  provider_requests: 6

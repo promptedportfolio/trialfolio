@@ -38,7 +38,12 @@ from trialfolio.contracts.plan import (
     SettingValue,
     screen_backtest_params,
 )
-from trialfolio.contracts.screen_configuration import IdRanking, NameRanking, ScreenConfiguration
+from trialfolio.contracts.screen_configuration import (
+    IdRanking,
+    NameRanking,
+    ScreenConfiguration,
+    ScreenFields,
+)
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS, ScreenSetting
 from trialfolio.errors import TrialFolioError
 
@@ -190,7 +195,7 @@ DATA_SENT: Final = tuple(
 """The three categories of data that leave the machine, in the order data sent lists them."""
 
 
-def _configured_values(configuration: ScreenConfiguration) -> dict[str, SettingValue]:
+def _configured_values(configuration: ScreenFields) -> dict[str, SettingValue]:
     """The settings the configuration gives, in their JSON types as a plan holds them: dates as
     `YYYY-MM-DD`, and decimals as normalized text."""
     return {
@@ -228,8 +233,9 @@ def _plan_setting(setting: ScreenSetting, value: SettingValue) -> PlanSetting:
     )
 
 
-def resolve_settings(configuration: ScreenConfiguration) -> tuple[PlanSetting, ...]:
-    """Every screen setting, in order, resolved from the configuration (settings in the plan).
+def resolve_settings(configuration: ScreenFields) -> tuple[PlanSetting, ...]:
+    """Every screen setting, in order, resolved from the configuration, or from an experiment's
+    case (settings in the plan).
 
     A setting the configuration doesn't give takes the one value its row allows: a fixed value,
     an inferred default, `not_modeled`, or `not_sent`. So `data_vendor` is FactSet, inferred,

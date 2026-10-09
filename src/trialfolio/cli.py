@@ -55,11 +55,11 @@ from trialfolio.contracts.manifest import CommandRecord
 from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.review_manifest import ReviewCommandRecord
 from trialfolio.contracts.summary import (
-    JsonSummaryV1_1,
+    JsonSummaryV1_2,
     NoCounts,
     ReviewCounts,
     RunCounts,
-    SummaryIdsV1_1,
+    SummaryIdsV1_2,
 )
 from trialfolio.display import visible
 from trialfolio.errors import EXIT_CODES, TrialFolioError
@@ -89,7 +89,7 @@ API_KEY_VARIABLE: Final = "TRIALFOLIO_P123_API_KEY"
 KEY_LOG_VARIABLE: Final = "SSLKEYLOGFILE"
 """`urllib3` writes TLS session keys to the file it names, so the CLI removes it (credentials)."""
 
-SUMMARY_SCHEMA_VERSION: Final = "1.1.0"
+SUMMARY_SCHEMA_VERSION: Final = "1.2.0"
 
 
 def utc_now() -> datetime:
@@ -271,7 +271,7 @@ class _Invocation:
     clock: Clock
     store_factory: StoreFactory
     logs: CommandLogs | None = None
-    ids: SummaryIdsV1_1 = field(default_factory=lambda: SummaryIdsV1_1())
+    ids: SummaryIdsV1_2 = field(default_factory=lambda: SummaryIdsV1_2())
     output_dir: str | None = None
     """The output directory as given, once the command has claimed it."""
     execution: "Execution | None" = None
@@ -346,7 +346,7 @@ class _Invocation:
         except (OSError, ValueError):  # A closed stream: nothing more can be shown.
             pass
 
-    def _summary(self, error: TrialFolioError | None, exit_code: int) -> JsonSummaryV1_1:
+    def _summary(self, error: TrialFolioError | None, exit_code: int) -> JsonSummaryV1_2:
         outcome = (
             "completed"
             if error is None
@@ -354,7 +354,7 @@ class _Invocation:
             if error.code == "execution.partial"
             else "failed"
         )
-        return JsonSummaryV1_1.model_validate(
+        return JsonSummaryV1_2.model_validate(
             {
                 "schema_version": SUMMARY_SCHEMA_VERSION,
                 "command": self.name,
@@ -381,8 +381,8 @@ class _Invocation:
             return self.args.out
         return self.output_dir
 
-    def _ids(self) -> SummaryIdsV1_1:
-        ids = SummaryIdsV1_1(**self.ids)
+    def _ids(self) -> SummaryIdsV1_2:
+        ids = SummaryIdsV1_2(**self.ids)
         if self.review is not None and self.review.claimed:
             ids["review_id"] = self.review.review_id
         attempt = self.execution.attempt if self.execution is not None else None

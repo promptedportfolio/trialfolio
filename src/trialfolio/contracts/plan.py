@@ -219,6 +219,17 @@ def screen_backtest_params(values: Mapping[str, object]) -> ScreenBacktestParams
     )
 
 
+def check_case(requests: tuple[PlanRequest], settings: tuple[PlanSetting, ...]) -> None:
+    """Raises `ValueError` unless `settings` are the screen settings, in their documented order,
+    and the request is what they send (plan contents, consistency)."""
+    names = tuple(row.setting for row in settings)
+    if names != tuple(setting.name for setting in SCREEN_SETTINGS):
+        raise ValueError("settings must be the screen settings, in their documented order")
+    values = {row.setting: row.value for row in settings}
+    if requests[0].params != screen_backtest_params(values):
+        raise ValueError("the request's params must be what the settings send")
+
+
 class PlanCase(ContractModel):
     """One fully resolved case. A 1.0.0 plan has exactly one."""
 
@@ -228,12 +239,7 @@ class PlanCase(ContractModel):
 
     @model_validator(mode="after")
     def _screen_settings(self) -> Self:
-        names = tuple(row.setting for row in self.settings)
-        if names != tuple(setting.name for setting in SCREEN_SETTINGS):
-            raise ValueError("settings must be the screen settings, in their documented order")
-        values = {row.setting: row.value for row in self.settings}
-        if self.requests[0].params != screen_backtest_params(values):
-            raise ValueError("the request's params must be what the settings send")
+        check_case(self.requests, self.settings)
         return self
 
 

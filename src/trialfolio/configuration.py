@@ -1,6 +1,7 @@
 """Reads configuration files: YAML text in, validated models out (docs/contracts.md,
-configuration files). `read_screen_configuration` reads a `kind: screen` file, and
-`read_review_configuration` a `kind: review` one.
+configuration files). `read_screen_configuration` reads a `kind: screen` file,
+`read_review_configuration` a `kind: review` one, and `read_experiment_configuration` a
+`kind: experiment` one.
 
 Reading is a named adapter step before model validation (ADR 0002). It builds plain values from
 PyYAML's parse events, never through PyYAML's constructors, so it decides what each scalar means:
@@ -17,7 +18,8 @@ PyYAML's parse events, never through PyYAML's constructors, so it decides what e
   rejected, because outside quotes YAML reads a space and `#` as the start of a comment, so
   `name: Core Combo #2` would send `Core Combo`, and Portfolio123 formulas can hold `#`, as in
   `#Industry`. Fixed words, such as `open`, and the title and purpose, which are never sent, may
-  be plain.
+  be plain. In an experiment configuration, the same holds for the baseline's text, and for each
+  rule variant's `add`, `replace`, and `with`, which are written as rules are.
 
 `original_values` gives each top-level value's text exactly as the file writes it, for
 `settings.csv`'s `original_value` (docs/contracts.md, settings.csv).
@@ -51,6 +53,11 @@ from yaml.events import (
 from yaml.nodes import Node, ScalarNode
 
 from trialfolio.contracts.common import DATE_PATTERN, INTEGER_PATTERN, LABEL_PATTERN, NOT_BLANK
+from trialfolio.contracts.experiment_configuration import (
+    EXPERIMENT_SCHEMA_VERSIONS,
+    VARIANT_SETTINGS,
+    ExperimentConfiguration,
+)
 from trialfolio.contracts.review_configuration import REVIEW_SCHEMA_VERSIONS, ReviewConfiguration
 from trialfolio.contracts.screen_configuration import SCREEN_SCHEMA_VERSIONS, ScreenConfiguration
 from trialfolio.errors import TrialFolioError
@@ -135,6 +142,30 @@ def read_review_configuration(content: bytes, source_name: str) -> ReviewConfigu
         )
 
 
+def read_experiment_configuration(content: bytes, source_name: str) -> ExperimentConfiguration:
+    """Reads an experiment configuration from the bytes of a file, named `source_name` in
+    messages.
+
+    Raises `TrialFolioError` with `config.invalid` when the file breaks any rule of the experiment
+    configuration. The message lists each problem, names its key, or a variant by its place, such
+    as `variants.max_holdings[0]`, and includes no value: never a variant's key either, which is
+    the user's text.
+    """
+    document, plain = _read_document(content, source_name, "experiment", EXPERIMENT_SCHEMA_VERSIONS)
+    unquoted = [_unquoted_text(path) for path in plain if _is_sent_experiment_text(path)]
+    try:
+        configuration = ExperimentConfiguration.model_validate(document)
+    except ValidationError as error:
+        details = error.errors(include_input=False)
+        _fail(
+            source_name,
+            [_describe(detail) for detail in details if not _follows(detail, details)] + unquoted,
+        )
+    if unquoted:
+        _fail(source_name, unquoted)
+    return configuration
+
+
 def _read_document(
     content: bytes, source_name: str, kind: str, versions: tuple[str, ...]
 ) -> tuple[dict[str, object], list[KeyPath]]:
@@ -145,7 +176,11 @@ def _read_document(
         _fail(source_name, ["The file must be a mapping of keys to values."])
     document = cast("dict[str, object]", loaded)
     if "kind" not in document:
-        _fail(source_name, [f"`kind` is required. A {kind} configuration has `kind: {kind}`."])
+        article = "An" if kind[0] in "aeiou" else "A"
+        _fail(
+            source_name,
+            [f"`kind` is required. {article} {kind} configuration has `kind: {kind}`."],
+        )
     if document["kind"] != kind:
         _fail(source_name, [f"`kind` must be {kind}."])
     supported = ", ".join(versions)
@@ -183,6 +218,24 @@ def _is_sent_text(path: KeyPath) -> bool:
     name, the universe, and the benchmark."""
     return path in _SENT_TEXT or (
         len(path) == 2 and path[0] == "rules" and isinstance(path[1], int)
+    )
+
+
+_RULE_CHANGES: Final = frozenset({"add", "replace", "with"})
+"""A rule variant's keys, whose text is written as rules are."""
+
+
+def _is_sent_experiment_text(path: KeyPath) -> bool:
+    """An experiment configuration's text that's written as the text Portfolio123 receives: the
+    baseline's, as a screen configuration's, and each rule variant's `add`, `replace`, and
+    `with`."""
+    if path[:1] == ("baseline",):
+        return _is_sent_text(path[1:])
+    return (
+        len(path) == 4
+        and path[:2] == ("variants", "rules")
+        and isinstance(path[2], int)
+        and path[3] in _RULE_CHANGES
     )
 
 
@@ -228,24 +281,45 @@ def _format_path(path: KeyPath) -> str:
     return text
 
 
+_HEADER_KEYS: Final = frozenset({("kind",), ("schema_version",), ("title",), ("purpose",)})
+"""The keys a screen configuration has before its settings, which an experiment's baseline
+doesn't: the experiment's own are at the top level."""
+
+
 def _describe(detail: ErrorDetails) -> str:
-    key = _format_path(detail["loc"])
+    location = detail["loc"]
+    key = _format_path(location)
     kind = detail["type"]
     message = detail["msg"].removeprefix("Value error, ").rstrip(".")
-    if not detail["loc"]:
+    if not location:
         return f"{message}."
     if kind == "missing":
         return f"`{key}` is required."
+    if kind == "extra_forbidden" and location[:1] == ("variants",) and len(location) == 2:
+        return (
+            f"`{key}` isn't a setting a variant may change. A variant may change "
+            f"{', '.join(VARIANT_SETTINGS[:-1])}, or {VARIANT_SETTINGS[-1]}."
+        )
+    if kind == "extra_forbidden" and location[0] == "baseline" and location[1:] in _HEADER_KEYS:
+        return (
+            f"`{key}` isn't a key of the baseline: an experiment's kind, schema_version, "
+            "title, and purpose are written at the top level."
+        )
     if kind == "extra_forbidden":
         return f"`{key}` isn't a key this configuration accepts. Check its spelling."
     context = detail.get("ctx", {})
     if kind == "string_pattern_mismatch" and context.get("pattern") == NOT_BLANK:
         return f"`{key}` is blank. Give it text that isn't only whitespace."
     if kind == "string_pattern_mismatch" and context.get("pattern") == LABEL_PATTERN:
+        what = "a label of " if location[-1] == "label" else ""
         return (
-            f"`{key}` must be a label of 1 to 64 characters: lowercase letters, digits, _, and -,"
+            f"`{key}` must be {what}1 to 64 characters: lowercase letters, digits, _, and -,"
             " starting with a letter or a digit."
         )
+    if kind == "value_error" and message.startswith("`"):
+        # A rule that spans the keys of a mapping inside the file names them within it, as
+        # `end_date` in the baseline: each becomes its path, such as `baseline.end_date`.
+        return re.sub(r"`([^`]+)`", lambda name: f"`{key}.{name.group(1)}`", message) + "."
     if kind == "too_short" and detail["loc"][-1] == "intended_changes":
         return f"`{key}` is empty. A result that declares no change leaves the key out."
     if kind == "too_short":
