@@ -186,6 +186,21 @@ def rules_case(change: Document, rules: list[str]) -> Document:
     )
 
 
+def default_on_holdings() -> Document:
+    """The default rebalance variant, built on the holdings variant's settings instead of the
+    baseline's."""
+    return plan_case(
+        "rebalance-weeks-1",
+        DEFAULT_ID,
+        variant("rebalance_weeks", 1, default=True),
+        {"max_holdings": 50, "rebalance_weeks": 1},
+        lambda params: (
+            params["screen"].update(maxNumHoldings=50),
+            params.update(rebalFreq="Every Week"),
+        ),
+    )
+
+
 def slippage_case() -> Document:
     return plan_case(
         "slippage-050",
@@ -667,13 +682,15 @@ PLAN_REJECTS: dict[str, Change] = {
         prior_research={"status": "partial", "description": None}
     ),
     "one case": lambda d: d.update(cases=cases_of(d)[:1]),
-    "a variant first": lambda d: cases_of(d).reverse(),
+    "a variant first, the others built on it": lambda d: d.update(
+        cases=[holdings_case(), default_on_holdings()]
+    ),
     "a baseline with a variant": lambda d: cases_of(d)[0].update(
         variant=variant("max_holdings", 50)
     ),
     "a baseline with a description": lambda d: cases_of(d)[0].update(description="The baseline."),
     "a variant keyed baseline": lambda d: cases_of(d)[1].update(case_key="baseline"),
-    "a repeated case key": lambda d: cases_of(d)[2].update(case_key="holdings-50"),
+    "a repeated case key": with_case(slippage_case() | {"case_key": "holdings-50"}),
     "a repeated case ID": lambda d: cases_of(d)[2].update(case_id=HOLDINGS_ID),
     "a variant that changes another setting too": lambda d: (
         setting_of(d, 1, "benchmark").update(value="IWM"),
@@ -691,8 +708,8 @@ PLAN_REJECTS: dict[str, Change] = {
     "a request that isn't what the settings send": lambda d: cases_of(d)[1]["requests"][0][
         "params"
     ]["screen"].update(maxNumHoldings=25),
-    "two cases with one change": with_case(
-        holdings_case() | {"case_key": "holdings-again", "case_id": "case-0000000000000009"}
+    "two cases with one change": lambda d: cases_of(d).insert(
+        2, holdings_case() | {"case_key": "holdings-again", "case_id": "case-0000000000000009"}
     ),
     "the variants out of order": lambda d: cases_of(d).insert(1, cases_of(d).pop()),
     "a rule variant that adds a baseline rule": with_case(
@@ -704,6 +721,16 @@ PLAN_REJECTS: dict[str, Change] = {
     "a rule variant that replaces no baseline rule": with_case(
         rules_case(
             variant("rules", replace="Price > 1", **{"with": "Price > 5"}),
+            ["AvgDailyTot(30) > 1000000"],
+        )
+    ),
+    "a rule variant that replaces a rule with itself": with_case(
+        rules_case(
+            variant(
+                "rules",
+                replace="AvgDailyTot(30) > 1000000",
+                **{"with": "AvgDailyTot(30) > 1000000"},
+            ),
             ["AvgDailyTot(30) > 1000000"],
         )
     ),
@@ -854,7 +881,9 @@ EXPERIMENT_RECORD_REJECTS: dict[str, Change] = {
     "not_required for some plans and not others": lambda d: entries(d)[0].update(
         approval="not_required"
     ),
-    "a first plan that revises one": lambda d: entries(d)[0].update(revises=EARLIER_PLAN),
+    "a first plan that revises one": lambda d: entries(d)[0].update(
+        revises=EARLIER_PLAN, reason="A reason.", changes=deepcopy(VERSIONS_ONLY)
+    ),
     "a first plan with a reason": lambda d: entries(d)[0].update(reason="A reason."),
     "a revision without a reason": lambda d: entries(d)[1].update(reason=None),
     "a revision without its changes": lambda d: entries(d)[1].update(changes=None),
@@ -866,6 +895,12 @@ EXPERIMENT_RECORD_REJECTS: dict[str, Change] = {
     "a version change that changes nothing": lambda d: entries(d)[1]["changes"]["versions"][
         0
     ].update(current="0.3.0"),
+    "versions out of order": lambda d: entries(d)[1]["changes"]["versions"].insert(
+        0, {"package": "p123api", "previous": "3.1.0", "current": "3.2.0"}
+    ),
+    "a version changed twice": lambda d: entries(d)[1]["changes"]["versions"].append(
+        entries(d)[1]["changes"]["versions"][0]
+    ),
     "parts out of order": lambda d: entries(d)[1]["changes"].update(parts=["purpose", "title"]),
     "a part twice": lambda d: entries(d)[1]["changes"].update(parts=["purpose", "purpose"]),
     "an unknown part": lambda d: entries(d)[1]["changes"].update(parts=["settings"]),
@@ -883,9 +918,19 @@ EXPERIMENT_RECORD_REJECTS: dict[str, Change] = {
     "a retired case from a plan the history skips": lambda d: d["retired_cases"].append(
         d["retired_cases"][0] | {"case_id": "case-00000000000000ee", "plan": 2}
     ),
-    "a case both planned and retired": lambda d: d["retired_cases"][0].update(case_id=BASELINE_ID),
+    "a case both planned and retired": lambda d: (
+        d["retired_cases"][0].update(case_id=BASELINE_ID),
+        entries(d)[1]["changes"]["cases_retired"][0].update(case_id=BASELINE_ID),
+    ),
     "a variant first": lambda d: d["planned_cases"].reverse(),
     "one planned case": lambda d: d.update(planned_cases=d["planned_cases"][:1]),
+    "a planned variant without a variant": lambda d: d["planned_cases"][2].update(variant=None),
+    "a planned baseline with a variant": lambda d: d["planned_cases"][0].update(
+        variant=variant("max_holdings", 50)
+    ),
+    "a planned baseline with a description": lambda d: d["planned_cases"][0].update(
+        description="The baseline."
+    ),
     "repeated planned keys": lambda d: d["planned_cases"][2].update(case_key="holdings-50"),
     "repeated plan hashes": lambda d: entries(d).append(
         entries(d)[1]
@@ -1122,6 +1167,13 @@ def case_counts(document: Document) -> Document:
     return counts
 
 
+def only_plan_3(document: Document) -> None:
+    """The current plan is 3, and the first plan isn't listed."""
+    document.update(plan=3)
+    for artifact in artifacts(document):
+        artifact["path"] = artifact["path"].replace("plans/1/", "plans/3/")
+
+
 MANIFEST_REJECTS: dict[str, Change] = {
     # R03-AC08: the case counts add up.
     "case counts that add up to less": lambda d: case_counts(d).update(planned=4),
@@ -1175,12 +1227,14 @@ MANIFEST_REJECTS: dict[str, Change] = {
         )
     ),
     "a current plan that isn't listed": lambda d: d.update(plan=2),
+    "no first plan": only_plan_3,
     "a case with metrics.csv alone": without(f"cases/{HOLDINGS_ID}/normalized/settings.csv"),
-    "a path listed twice": lambda d: artifacts(d).append(artifacts(d)[0]),
+    "a path listed twice": lambda d: artifacts(d).append(artifacts(d)[4]),
     "a case ID's directory named by its key": lambda d: artifacts(d)[8].update(
         path="cases/holdings-50/normalized/metrics.csv"
     ),
     "no parser": lambda d: d.update(parsers=[]),
+    "a parser listed twice": lambda d: d["parsers"].append(d["parsers"][0]),
     "an experiment ID that's a device name": lambda d: d.update(experiment_id="com1"),
     "a run's artifact type": lambda d: d.update(artifact_type="run"),
 }
@@ -1235,9 +1289,34 @@ def locked(document: Document) -> None:
     document.pop("cases")
 
 
+def before_the_plan(document: Document) -> None:
+    """A resume that fails with `environment.unsupported`: it has read and checked the records,
+    so its counts are known, and it hasn't built the plan, or reserved a session."""
+    without_approval(document)
+    document.update(
+        exit_code=3,
+        ids={"experiment_id": "earnyield-sensitivity"},
+        error={
+            "code": "environment.unsupported",
+            "message": "The installed requests isn't a verified version.",
+        },
+    )
+    document.pop("cases")
+
+
+RUN_COUNTS: Document = {
+    "attempts": 3,
+    "provider_requests": 3,
+    "metrics_unavailable": 0,
+    "warnings": 0,
+    "cost": 5,
+}
+
+
 SUMMARY_ACCEPTS: dict[str, Change] = {
     "without approval": without_approval,
     "locked": locked,
+    "a resume before its plan is built": before_the_plan,
     "completed": lambda d: (
         d.update(outcome="completed", exit_code=0, error=None),
         d["counts"].update(cases_succeeded=3, cases_failed=0, cases_unknown=0),
@@ -1289,25 +1368,26 @@ def summary_cases(document: Document) -> list[Document]:
 SUMMARY_REJECTS: dict[str, Change] = {
     "version 1.1.0": lambda d: d.update(schema_version="1.1.0"),
     "null cases": lambda d: (locked(d), d.update(cases=None)),
-    "cases without an experiment": lambda d: d["ids"].pop("experiment_id"),
+    "cases without an experiment": lambda d: (
+        d["ids"].pop("experiment_id"),
+        d["ids"].pop("session"),
+        d.update(counts=RUN_COUNTS),
+    ),
+    "a session without an experiment": lambda d: (
+        d["ids"].pop("experiment_id"),
+        d.pop("cases"),
+        d.update(counts=RUN_COUNTS),
+    ),
     "cases without the plan hash": lambda d: d["ids"].pop("plan_hash"),
     "the plan hash without cases": lambda d: d.pop("cases"),
     "an experiment's counts without an experiment": lambda d: (
         d.update(ids={"plan_hash": PLAN_HASH}),
         d.pop("cases"),
     ),
-    "a run's counts for an experiment": lambda d: d.update(
-        counts={
-            "attempts": 3,
-            "provider_requests": 3,
-            "metrics_unavailable": 0,
-            "warnings": 0,
-            "cost": 5,
-        }
-    ),
+    "a run's counts for an experiment": lambda d: d.update(counts=RUN_COUNTS),
     "an experiment's case ID in ids": lambda d: d["ids"].update(case_id=BASELINE_ID),
     "an experiment's attempt ID in ids": lambda d: d["ids"].update(attempt_id=ATTEMPT_ID),
-    "an experiment reviewed": lambda d: d.update(command="review"),
+    "an experiment run with demo": lambda d: d.update(command="demo"),
     "a session without an output directory": lambda d: d.update(output_dir=None, outputs={}),
     "a case's tables in outputs": lambda d: d["outputs"].update(
         metrics=f"cases/{HOLDINGS_ID}/normalized/metrics.csv"
@@ -1320,7 +1400,10 @@ SUMMARY_REJECTS: dict[str, Change] = {
     "case counts that aren't the cases'": lambda d: d["counts"].update(
         cases_failed=2, cases_unknown=0
     ),
-    "case counts that don't add up": lambda d: d["counts"].update(cases_planned=4),
+    "case counts that don't add up": lambda d: (
+        before_the_plan(d),
+        d["counts"].update(cases_planned=4),
+    ),
     "a skipped case with every case listed": lambda d: d["counts"].update(
         cases_skipped=1, cases_planned=4
     ),
