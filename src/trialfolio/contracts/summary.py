@@ -330,6 +330,13 @@ class JsonSummaryV1_2(ContractModel):
                 "partial otherwise"
             )
         counts = self.counts
+        # The counts are known before the plan is built, but a new experiment's claim can find the
+        # lock held after it's built (the owner's decision of 2026-10-09).
+        locked = self.error is not None and self.error.code == "experiment.locked"
+        if isinstance(counts, NoCounts) and not locked:
+            raise ValueError(
+                "an experiment's cases come with its counts, except after experiment.locked"
+            )
         if isinstance(counts, ExperimentCounts):
             outcomes = [case.outcome for case in self.cases]
             if (

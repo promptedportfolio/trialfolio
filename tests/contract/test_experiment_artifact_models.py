@@ -1309,6 +1309,18 @@ def locked(document: Document) -> None:
     document.pop("cases")
 
 
+def locked_at_the_claim(document: Document) -> None:
+    """A new experiment whose claim finds the lock held, after its plan is built: it gives its
+    cases, none of them run, and `{}` counts, as after any `experiment.locked`."""
+    locked(document)
+    document["ids"]["plan_hash"] = PLAN_HASH
+    document["cases"] = [
+        summary_case("baseline", BASELINE_ID, "not_yet_run"),
+        summary_case("holdings-50", HOLDINGS_ID, "not_yet_run"),
+        summary_case("rebalance-weeks-1", DEFAULT_ID, "not_yet_run"),
+    ]
+
+
 def before_the_plan(document: Document) -> None:
     """A resume that fails with `environment.unsupported`: it has read and checked the records,
     so its counts are known, and it hasn't built the plan, or reserved a session."""
@@ -1347,6 +1359,7 @@ def completed_run(document: Document) -> None:
 SUMMARY_ACCEPTS: dict[str, Change] = {
     "without approval": without_approval,
     "locked": locked,
+    "locked at a new experiment's claim, after its plan is built": locked_at_the_claim,
     "a resume before its plan is built": before_the_plan,
     "completed": lambda d: (completed_run(d), every_case_succeeded(d)),
     "a new experiment before its session": lambda d: (
@@ -1420,8 +1433,8 @@ SUMMARY_REJECTS: dict[str, Change] = {
         metrics=f"cases/{HOLDINGS_ID}/normalized/metrics.csv"
     ),
     "cases that don't start with the baseline": lambda d: summary_cases(d).reverse(),
-    "no cases": lambda d: d.update(cases=[], counts={}),
-    "one case": lambda d: d.update(cases=summary_cases(d)[:1], counts={}),
+    "no cases": lambda d: (locked_at_the_claim(d), d.update(cases=[])),
+    "one case": lambda d: (locked_at_the_claim(d), d.update(cases=summary_cases(d)[:1])),
     "a repeated case key": lambda d: summary_cases(d)[2].update(case_key="holdings-50"),
     "a repeated case ID": lambda d: summary_cases(d)[2].update(case_id=HOLDINGS_ID),
     "case counts that aren't the cases'": lambda d: d["counts"].update(
@@ -1454,6 +1467,13 @@ SUMMARY_REJECTS: dict[str, Change] = {
         d.pop("cases"),
     ),
     "partial without cases": lambda d: (d["ids"].pop("plan_hash"), d.pop("cases")),
+    # The owner's decision of 2026-10-09: cases come with the experiment's counts, except after
+    # experiment.locked.
+    "cases with {} counts": lambda d: d.update(counts={}),
+    "cases with {} counts, without approval": lambda d: (
+        without_approval(d),
+        d.update(counts={}),
+    ),
     "a skipped case outcome": lambda d: summary_cases(d)[2].update(outcome="skipped"),
     "more repeats than attempts": lambda d: d["counts"].update(repeats=4),
     "a session 0": lambda d: d["ids"].update(session=0),
