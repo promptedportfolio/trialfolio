@@ -83,6 +83,12 @@ The workflow:
 
 - Start each change on a feature branch named `<type>/<short-description>`. Push it and open a pull request with `gh pr create`.
 - Nathan merges pull requests. Merge one only when Nathan explicitly approves merging that specific pull request in the current conversation. Pull requests are squash-merged, with a conventional-commit title.
+- No pull request is merged until the owner's iterative review has run on it, documentation-only ones included ([D-11](docs/spec.md#decisions)). The owner starts the review. Each of its reviews, the third included, is by a reviewer who didn't write or fix the change and doesn't share the context of whoever did. It runs in this order:
+  1. Two reviews at the same time.
+  2. Fixes: each finding is fixed, or declined with a reason, and answered under it on the pull request.
+  3. A third review of the fixes, when the first two reviews found anything of medium or high severity or the fixes changed behavior or tests, and only if the fixes pushed a change. Its findings are fixed or declined the same way, which ends the review. Without a third review, the fixes end it.
+
+  Each review is posted on the pull request as a review of its own, numbered, even when it finds nothing, so the pull request shows which reviews ran. The owner's approval to merge comes after the review, never in place of it. If the review hasn't run, or hasn't ended, don't merge, even when the owner asks: say so, and stop.
 - Don't bypass the hooks, and don't edit `.githooks/` or `.claude/` unless Nathan asks.
 - The repository is public ([ADR 0007](docs/adrs/0007-host-the-source-publicly-on-github.md)). Outside contributions aren't accepted ([LIC-14](docs/licensing-policy.md#lic-14-contributions)): don't merge, copy, or adapt changes from a pull request that Nathan didn't author.
 
@@ -112,5 +118,5 @@ When the owner asks for the next item, do the next task from the task tables of 
     - any tests written ahead of a later task;
     - the limitations and the remaining work.
 
-    Don't merge it ([git workflow](#git-workflow)).
-11. **Report.** Finish with the handoff the [rules](#rules) ask for, with the pull request's link and the next task. Name what awaits the owner: this task's details to confirm, any earlier entry in the release's changes after sign-off that still awaits confirmation, and any approval or account-side step.
+    Don't merge it: it waits for the owner's iterative review, and then the owner's approval ([git workflow](#git-workflow)).
+11. **Report.** Finish with the handoff the [rules](#rules) ask for, with the pull request's link and the next task. Name what awaits the owner: the iterative review of the pull request, this task's details to confirm, any earlier entry in the release's changes after sign-off that still awaits confirmation, and any approval or account-side step.
