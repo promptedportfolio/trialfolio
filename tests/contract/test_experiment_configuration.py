@@ -200,6 +200,36 @@ def test_a_setting_a_variant_cant_change_lists_those_it_can() -> None:
     )
 
 
+@pytest.mark.parametrize("name", ["kind", "title"])
+def test_a_screens_header_key_in_the_baseline_says_where_it_belongs(name: str) -> None:
+    """Not that its spelling is wrong: it's a key of the experiment, at the top level."""
+    path = INVALID / f"baseline-with-{name}.yaml"
+
+    assert (
+        f"`baseline.{name}` isn't a key of the baseline: an experiment's kind, schema_version, "
+        "title, and purpose are written at the top level." in rejection(path.read_bytes())
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "key"),
+    [
+        ("experiment-id-uppercase", "experiment_id"),
+        ("key-uppercase", "variants.max_holdings[0].key"),
+    ],
+)
+def test_an_experiment_key_isnt_called_a_label(name: str, key: str) -> None:
+    """A review's results have labels; an experiment's ID and its variants' keys share their
+    pattern, and aren't labels."""
+    message = rejection((INVALID / f"{name}.yaml").read_bytes())
+
+    assert (
+        f"`{key}` must be 1 to 64 characters: lowercase letters, digits, _, and -, starting with a "
+        "letter or a digit." in message
+    )
+    assert "label" not in message
+
+
 def test_a_budget_below_the_cases_gives_their_number() -> None:
     path = INVALID / "budget-below-cases.yaml"
 
