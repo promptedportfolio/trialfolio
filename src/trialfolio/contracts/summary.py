@@ -265,11 +265,12 @@ class JsonSummaryV1_2(ContractModel):
     from a new experiment's claim, or from a resume's session record."""
     outputs: SummaryOutputs
     cases: Annotated[
-        tuple[SummaryCase, ...] | None,
+        Annotated[tuple[SummaryCase, ...], Field(min_length=2)] | None,
         Field(exclude_if=lambda cases: cases is None, json_schema_extra=optional_key),
     ] = None
     """For an experiment only, once its plan is built: each case of the plan this run builds, in
-    its order. Left out for every other command and configuration."""
+    its order, the baseline and at least one variant. Left out for every other command and
+    configuration."""
     counts: RunCounts | ReviewCounts | ExperimentCounts | NoCounts
     """`{}` for `init`, `report`, and `license`, and for an experiment until its counts are
     known."""
@@ -313,7 +314,7 @@ class JsonSummaryV1_2(ContractModel):
             raise ValueError("an experiment's outputs are its session's manifest and report")
         if self.cases is None:
             return
-        if self.cases[0].case_key != BASELINE_CASE_KEY or len(self.cases) < 2:
+        if self.cases[0].case_key != BASELINE_CASE_KEY:
             raise ValueError("an experiment's cases are the baseline first, and its variants")
         require_unique(tuple(case.case_key for case in self.cases), "case keys")
         require_unique(tuple(case.case_id for case in self.cases), "case IDs")

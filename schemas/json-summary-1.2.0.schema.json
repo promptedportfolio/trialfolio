@@ -490,10 +490,11 @@
       "$ref": "#/$defs/SummaryOutputs"
     },
     "cases": {
-      "description": "For an experiment only, once its plan is built: each case of the plan this run builds, in\nits order. Left out for every other command and configuration.",
+      "description": "For an experiment only, once its plan is built: each case of the plan this run builds, in\nits order, the baseline and at least one variant. Left out for every other command and\nconfiguration.",
       "items": {
         "$ref": "#/$defs/SummaryCase"
       },
+      "minItems": 2,
       "title": "Cases",
       "type": "array"
     },

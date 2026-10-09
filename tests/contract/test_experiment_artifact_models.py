@@ -1313,6 +1313,7 @@ SUMMARY_REJECTS: dict[str, Change] = {
         metrics=f"cases/{HOLDINGS_ID}/normalized/metrics.csv"
     ),
     "cases that don't start with the baseline": lambda d: summary_cases(d).reverse(),
+    "no cases": lambda d: d.update(cases=[], counts={}),
     "one case": lambda d: d.update(cases=summary_cases(d)[:1], counts={}),
     "a repeated case key": lambda d: summary_cases(d)[2].update(case_key="holdings-50"),
     "a repeated case ID": lambda d: summary_cases(d)[2].update(case_id=HOLDINGS_ID),
