@@ -251,6 +251,18 @@ class DocumentedSource(ContractModel):
     checked: date
 
 
+CREDITS_PER_REQUEST: Final = 5
+"""Portfolio123's documented cost of one screen backtest, in credits (budget and retries). The
+planner records it in each plan's budget, and an experiment configuration's budget is bounded by
+it, so that the plan's credits can be hashed."""
+
+CREDITS_PER_REQUEST_SOURCE: Final = DocumentedSource(
+    title="API: Screen",
+    url="https://portfolio123.customerly.help/en/articles/43324-api-screen",
+    checked=date(2026, 10, 1),
+)
+
+
 class Budget(ContractModel):
     """The request budget (budget and retries)."""
 

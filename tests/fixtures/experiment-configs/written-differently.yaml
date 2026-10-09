@@ -1,0 +1,40 @@
+# example.yaml's experiment, written differently. It gives example.yaml's plan.
+budget:
+  provider_requests: 6
+variants:
+  slippage_percent:
+    - value: 0.50
+      key: slippage-050
+  # The order of the settings here leaves no trace in the plan.
+  max_holdings:
+    - value: 50
+      key: holdings-50
+  rules:
+    - with: 'AvgDailyTot(30) > 100000000'
+      replace: 'AvgDailyTot(30) > 1000000'
+      description: A stricter liquidity floor, 100 million dollars a day.
+      key: liquidity-100m
+baseline:
+  precision: 4
+  pit_method: complete
+  slippage_percent: 0.250
+  transaction_price: open
+  rebalance_weeks: 4
+  end_date: '2025-12-31'
+  start_date: '2016-01-01'
+  benchmark: "SPY"
+  max_holdings: 25
+  ranking:
+    lower_is_better: false
+    formula: 'EarnYield'
+  rules:
+    - 'AvgDailyTot(30) > 1000000'
+  universe: "SP500"
+prior_research:
+  description: Earlier backtests of this screen in the Portfolio123 website compared 25 and 50 holdings. Other variations tried there weren't recorded.
+  status: partial
+purpose: How do holdings, slippage, and a stricter liquidity rule change the earnings-yield screen's results?
+title: Earnings yield sensitivity
+experiment_id: earnyield-sensitivity
+schema_version: 1.0.0
+kind: experiment

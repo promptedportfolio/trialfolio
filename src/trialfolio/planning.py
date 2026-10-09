@@ -10,6 +10,17 @@ CLI's side: it shows the plan and obtains the approved hash.
   directory, file paths, attempt IDs, credentials, or account information.
 - `plan_hash` recomputes a plan's hash from its contents, never from its stored `plan_hash`, and
   `check_approval` passes only exactly that hash.
+
+An experiment's plan compiler and revision rules (docs/contracts.md, experiment plans and
+revisions):
+
+- `build_experiment_plan` compiles an experiment configuration into a plan 1.1.0: the baseline's
+  case, then a case for each variant, the default included, in the order of cases.
+- `plan_revision` builds an experiment's plan again for a run into its own output directory, and
+  gives the revision of its current plan, with what changed, or None when the configuration and
+  the versions give the current plan, which the run resumes.
+- `first_experiment_record` and `revised_experiment_record` give the `experiment.json` of a
+  plan: the experiment as the plan declares it, its retired cases, and the history of its plans.
 """
 
 import importlib
@@ -18,17 +29,53 @@ import importlib.util
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime
 from types import MappingProxyType, ModuleType
 from typing import Final, Literal, cast
 
 from trialfolio.canonical import CANONICALIZATION_VERSION, canonical_json, sha256_hex
-from trialfolio.contracts.common import CRITICAL_CATEGORIES, TransportVersions, WrapperVersions
+from trialfolio.contracts.common import (
+    BASELINE_CASE_KEY,
+    CRITICAL_CATEGORIES,
+    Approval,
+    TransportVersions,
+    WrapperVersions,
+)
+from trialfolio.contracts.experiment_configuration import (
+    ConfiguredVariant,
+    ExperimentConfiguration,
+    HoldingsVariant,
+    RebalanceVariant,
+    RuleVariant,
+    SlippageVariant,
+    configured_variants,
+)
+from trialfolio.contracts.experiment_plan import (
+    DeclaredPriorResearch,
+    ExperimentPlanCase,
+    PlanBudgetV1_1,
+    PlanV1_1,
+    PlanVariant,
+)
+from trialfolio.contracts.experiment_record import (
+    REVISED_PARTS,
+    VERSIONED_PACKAGES,
+    CaseChange,
+    ExperimentRecord,
+    PlanChanges,
+    PlanEntry,
+    RecordedCase,
+    RetiredCase,
+    RevisedPart,
+    VersionChange,
+    VersionedPackage,
+)
 from trialfolio.contracts.plan import (
+    CREDITS_PER_REQUEST,
+    CREDITS_PER_REQUEST_SOURCE,
     DATA_SENT_SETTINGS,
     Budget,
     DataSent,
-    DocumentedSource,
     Plan,
     PlanCase,
     PlanFlag,
@@ -160,15 +207,6 @@ def installed_versions() -> Versions:
     return versions
 
 
-CREDITS_PER_REQUEST: Final = 5
-"""Portfolio123's documented cost of one screen backtest, in credits (budget and retries)."""
-
-CREDITS_PER_REQUEST_SOURCE: Final = DocumentedSource(
-    title="API: Screen",
-    url="https://portfolio123.customerly.help/en/articles/43324-api-screen",
-    checked=date(2026, 10, 1),
-)
-
 BUDGET: Final = Budget(
     provider_requests=1,
     credits_per_request=CREDITS_PER_REQUEST,
@@ -258,7 +296,7 @@ def case_id(settings: Sequence[PlanSetting]) -> str:
     return "case-" + sha256_hex(canonical_json(rows))[:16]
 
 
-def plan_hash(plan: Plan) -> str:
+def plan_hash(plan: Plan | PlanV1_1) -> str:
     """`sha256:` and the SHA-256 of the canonical form of `plan` without its `plan_hash` field
     (plan hashing). It's computed from the contents, so a stored `plan_hash` is never trusted."""
     content = plan.model_dump(mode="json", exclude={"plan_hash"})
@@ -266,7 +304,14 @@ def plan_hash(plan: Plan) -> str:
 
 
 _UNHASHED: Final = "sha256:" + "0" * 64
-"""A placeholder, replaced by the plan's hash before the plan leaves `build_plan`."""
+"""A placeholder, replaced by the plan's hash before the plan leaves `build_plan` or
+`build_experiment_plan`."""
+
+
+def _screen_requests(settings: Sequence[PlanSetting]) -> tuple[PlanRequest]:
+    """A case's one request: the screen backtest its settings send, by the "Sent as" mapping."""
+    params = screen_backtest_params({row.setting: row.value for row in settings})
+    return (PlanRequest(operation="screen_backtest", params=params),)
 
 
 def build_plan(configuration: ScreenConfiguration, versions: Versions) -> Plan:
@@ -278,7 +323,6 @@ def build_plan(configuration: ScreenConfiguration, versions: Versions) -> Plan:
     """
     _require_verified(versions)
     settings = resolve_settings(configuration)
-    params = screen_backtest_params({row.setting: row.value for row in settings})
     draft = Plan(
         schema_version="1.0.0",
         trialfolio_version=versions.trialfolio,
@@ -290,7 +334,7 @@ def build_plan(configuration: ScreenConfiguration, versions: Versions) -> Plan:
         cases=(
             PlanCase(
                 case_id=case_id(settings),
-                requests=(PlanRequest(operation="screen_backtest", params=params),),
+                requests=_screen_requests(settings),
                 settings=settings,
             ),
         ),
@@ -323,3 +367,316 @@ def check_approval(plan: Plan, approved_hash: str | None) -> str:
             f"shown. {given} Nothing was sent.",
         )
     return expected
+
+
+def _experiment_budget(provider_requests: int) -> PlanBudgetV1_1:
+    """The budget across runs: the configuration's provider requests, as many authentication
+    calls, and the credits the requests cost at the documented cost."""
+    return PlanBudgetV1_1(
+        provider_requests=provider_requests,
+        credits_per_request=CREDITS_PER_REQUEST,
+        credits_per_request_source=CREDITS_PER_REQUEST_SOURCE,
+        credits=provider_requests * CREDITS_PER_REQUEST,
+        authentication_calls=provider_requests,
+    )
+
+
+def _plan_variant(variant: ConfiguredVariant) -> PlanVariant:
+    """A case's `variant`: the setting it changes, and its change as the configuration gives it,
+    with a decimal as its normalized text. Every key is written, null where it doesn't apply."""
+    given = variant.variant
+    change: dict[str, object] = {"value": None, "add": None, "replace": None, "with": None}
+    if isinstance(given, RuleVariant):
+        change |= {"add": given.add, "replace": given.replace, "with": given.with_}
+    elif isinstance(given, SlippageVariant):
+        # The model normalized it, so its text is the normalized form, in plain notation.
+        change["value"] = str(given.value)
+    elif isinstance(given, HoldingsVariant | RebalanceVariant):
+        change["value"] = given.value
+    else:  # The default, which the file doesn't write: the frequency the baseline doesn't use.
+        change["value"] = variant.screen.rebalance_weeks
+    # `with` is a Python keyword, so the model takes it by its alias.
+    return PlanVariant.model_validate(
+        {"setting": variant.setting, **change, "default": variant.default}
+    )
+
+
+def _experiment_case(
+    key: str, description: str | None, variant: PlanVariant | None, screen: ScreenFields
+) -> ExperimentPlanCase:
+    """A case of the experiment, resolved as a screen with its settings is: so its `case_id` and
+    request are that screen's, whatever its key."""
+    settings = resolve_settings(screen)
+    return ExperimentPlanCase(
+        case_key=key,
+        case_id=case_id(settings),
+        description=description,
+        variant=variant,
+        requests=_screen_requests(settings),
+        settings=settings,
+    )
+
+
+def build_experiment_plan(
+    configuration: ExperimentConfiguration, versions: Versions, revises: str | None = None
+) -> PlanV1_1:
+    """Compiles an experiment configuration into its plan 1.1.0 (docs/contracts.md, experiment
+    plans and revisions): the baseline's case, then a case for each variant, P-13's default
+    included, in the order of cases, each with its request and every resolved setting; the
+    research context; the budget across runs; and `revises`, the hash of the plan this one
+    revises, or None for the experiment's first plan.
+
+    Nothing in the plan varies between invocations, so the same configuration, versions, and
+    `revises` give the same plan and hash, however the file is written.
+
+    Raises `TrialFolioError` with `environment.unsupported` when `versions` names a version of
+    `p123api`, `requests`, or `urllib3` that no release has verified.
+    """
+    _require_verified(versions)
+    cases = [_experiment_case(BASELINE_CASE_KEY, None, None, configuration.baseline)]
+    cases.extend(
+        _experiment_case(variant.key, variant.description, _plan_variant(variant), variant.screen)
+        for variant in configured_variants(configuration)
+    )
+    declared = configuration.prior_research
+    draft = PlanV1_1(
+        schema_version="1.1.0",
+        trialfolio_version=versions.trialfolio,
+        canonicalization_version=CANONICALIZATION_VERSION,
+        provider_wrapper=WrapperVersions(p123api=versions.p123api),
+        transport=TransportVersions(requests=versions.requests, urllib3=versions.urllib3),
+        experiment_id=configuration.experiment_id,
+        title=configuration.title,
+        purpose=configuration.purpose,
+        prior_research=DeclaredPriorResearch(
+            status=declared.status, description=declared.description
+        ),
+        revises=revises,
+        cases=tuple(cases),
+        budget=_experiment_budget(configuration.budget.provider_requests),
+        retry_policy=RETRY_POLICY,
+        data_sent=DATA_SENT,
+        plan_hash=_UNHASHED,
+    )
+    # The draft was validated whole. Its hash is well formed, so the copy needs no validation.
+    return draft.model_copy(update={"plan_hash": plan_hash(draft)})
+
+
+@dataclass(frozen=True)
+class PlanRevision:
+    """A revision of an experiment's current plan: the plan a run approves in its place, and what
+    changed from the current plan, which the revision's `experiment.json` records."""
+
+    plan: PlanV1_1
+    """Its `revises` is the current plan's hash."""
+    changes: PlanChanges
+
+
+def _another_experiment(problem: str) -> TrialFolioError:
+    return TrialFolioError(
+        "output.not_empty",
+        f"{problem} The directory's records stay as they are, and nothing was sent. Run the "
+        "configuration into a new output directory.",
+    )
+
+
+def _universe(plan: PlanV1_1) -> SettingValue:
+    """The baseline's universe, which every case of the plan uses."""
+    (universe,) = (row.value for row in plan.cases[0].settings if row.setting == "universe")
+    return universe
+
+
+def plan_revision(
+    configuration: ExperimentConfiguration, versions: Versions, current: PlanV1_1
+) -> PlanRevision | None:
+    """Builds the experiment's plan again, for a run of its configuration into its own output
+    directory, and compares it with `current`, the experiment's current plan (docs/contracts.md,
+    experiment plans and revisions).
+
+    Returns None when the configuration and the versions give the current plan, which the run
+    then resumes. That's so even when the file is written differently, in a way no plan records.
+    Anything else is a revision: that plan, with its `revises` set to the current plan's hash,
+    recomputed from its contents, and what changed.
+
+    Raises `TrialFolioError` with `output.not_empty` when the configuration's `experiment_id`, or
+    its baseline's universe, isn't the current plan's: either makes another experiment, not a
+    revision. Raises it with `environment.unsupported` as `build_experiment_plan` does.
+    """
+    if configuration.experiment_id != current.experiment_id:
+        raise _another_experiment(
+            "The configuration's `experiment_id` isn't that of the experiment in the output "
+            "directory, so it's another experiment, which can't run there."
+        )
+    if configuration.baseline.universe != _universe(current):
+        raise _another_experiment(
+            "The configuration's baseline has another universe than the experiment in the output "
+            "directory. Another universe is another experiment, not a revision of this one, so "
+            "it can't run there."
+        )
+    current_hash = plan_hash(current)
+    if build_experiment_plan(configuration, versions, current.revises).plan_hash == current_hash:
+        return None
+    revision = build_experiment_plan(configuration, versions, current_hash)
+    return PlanRevision(revision, _changes(current, revision))
+
+
+def _versions_of(plan: PlanV1_1) -> dict[VersionedPackage, str]:
+    return {
+        "trialfolio": plan.trialfolio_version,
+        "p123api": plan.provider_wrapper.p123api,
+        "requests": plan.transport.requests,
+        "urllib3": plan.transport.urllib3,
+    }
+
+
+def _changes(previous: PlanV1_1, revision: PlanV1_1) -> PlanChanges:
+    """What the revision changed from the plan before it: each version that changed, with both
+    values; the cases it added, in its order, and those it retired, in the previous plan's; and
+    which other parts changed.
+
+    A case is its `case_id`, so a case whose settings didn't change is kept. `case_keys`,
+    `case_descriptions`, and `case_variants` are changes to a kept case, and `case_order` a new
+    order of the kept cases. An added or retired case is recorded as that alone, even when it has
+    a retired case's key.
+    """
+    before, after = _versions_of(previous), _versions_of(revision)
+    earlier = {case.case_id: case for case in previous.cases}
+    later = {case.case_id: case for case in revision.cases}
+    kept = [(earlier[case.case_id], case) for case in revision.cases if case.case_id in earlier]
+    changed: dict[RevisedPart, bool] = {
+        "title": previous.title != revision.title,
+        "purpose": previous.purpose != revision.purpose,
+        "prior_research": previous.prior_research != revision.prior_research,
+        "budget": previous.budget != revision.budget,
+        "case_keys": any(old.case_key != new.case_key for old, new in kept),
+        "case_descriptions": any(old.description != new.description for old, new in kept),
+        "case_variants": any(old.variant != new.variant for old, new in kept),
+        "case_order": [case.case_id for case in previous.cases if case.case_id in later]
+        != [new.case_id for _, new in kept],
+    }
+    # Everything else a plan holds follows from these and Trial Folio's own code, so a plan that
+    # differs in none of them was built by other code under the same version: the model refuses
+    # a revision that records no change.
+    return PlanChanges(
+        versions=tuple(
+            VersionChange(package=package, previous=before[package], current=after[package])
+            for package in VERSIONED_PACKAGES
+            if before[package] != after[package]
+        ),
+        cases_added=tuple(
+            CaseChange(case_id=case.case_id, case_key=case.case_key)
+            for case in revision.cases
+            if case.case_id not in earlier
+        ),
+        cases_retired=tuple(
+            CaseChange(case_id=case.case_id, case_key=case.case_key)
+            for case in previous.cases
+            if case.case_id not in later
+        ),
+        parts=tuple(part for part in REVISED_PARTS if changed[part]),
+    )
+
+
+def _recorded(case: ExperimentPlanCase | RecordedCase) -> dict[str, object]:
+    return {
+        "case_key": case.case_key,
+        "case_id": case.case_id,
+        "description": case.description,
+        "variant": case.variant,
+    }
+
+
+def _record(
+    plan: PlanV1_1, retired: tuple[RetiredCase, ...], plans: tuple[PlanEntry, ...], at: datetime
+) -> ExperimentRecord:
+    return ExperimentRecord(
+        schema_version="1.0.0",
+        # Written in the run that built the plan, so by the Trial Folio the plan records.
+        trialfolio_version=plan.trialfolio_version,
+        created_at=at,
+        experiment_id=plan.experiment_id,
+        title=plan.title,
+        purpose=plan.purpose,
+        prior_research=plan.prior_research,
+        planned_cases=tuple(RecordedCase.model_validate(_recorded(case)) for case in plan.cases),
+        retired_cases=retired,
+        plans=plans,
+    )
+
+
+def first_experiment_record(
+    plan: PlanV1_1,
+    *,
+    plan_artifact_id: str,
+    configuration_artifact_id: str,
+    approval: Approval,
+    created_at: datetime,
+) -> ExperimentRecord:
+    """The `experiment.json` of an experiment's first plan, in `plans/1/` (docs/contracts.md,
+    `experiment.json`): the experiment as the plan declares it, its planned cases, no retired
+    case, and the plan's entry, with no reason or changes.
+
+    `plan_artifact_id` and `configuration_artifact_id` are those of the plan's `plan.json` and
+    `configuration.yaml`, and `approval` is how the plan was approved, `not_required` only for a
+    synthetic experiment.
+
+    Raises `ValueError` when `plan` revises another plan.
+    """
+    entry = PlanEntry(
+        plan=1,
+        plan_hash=plan_hash(plan),
+        revises=plan.revises,
+        plan_artifact_id=plan_artifact_id,
+        configuration_artifact_id=configuration_artifact_id,
+        approval=approval,
+        reason=None,
+        changes=None,
+    )
+    return _record(plan, (), (entry,), created_at)
+
+
+def revised_experiment_record(
+    previous: ExperimentRecord,
+    revision: PlanRevision,
+    *,
+    number: int,
+    reason: str,
+    plan_artifact_id: str,
+    configuration_artifact_id: str,
+    approval: Approval,
+    created_at: datetime,
+) -> ExperimentRecord:
+    """The `experiment.json` of a revision, in `plans/<number>/`, from the current plan's,
+    `previous` (docs/contracts.md, `experiment.json`).
+
+    It holds the experiment as the revision declares it, and its planned cases. Its retired cases
+    are `previous`'s, without each case the revision includes again, followed by each case the
+    current plan included and the revision doesn't, as the current plan held it, with its number.
+    Its plans are `previous`'s, unchanged, followed by the revision's entry, with `reason`, the
+    revision's `--revision-reason`, and what changed.
+
+    Raises `ValueError` when the records don't fit together: when `number` isn't above the
+    current plan's, the revision doesn't revise it, or `previous` isn't its record, as the
+    revision's changes show; or when `reason` isn't a valid reason.
+    """
+    planned = {case.case_id for case in revision.plan.cases}
+    current = previous.plans[-1].plan
+    retired = (
+        *(case for case in previous.retired_cases if case.case_id not in planned),
+        *(
+            RetiredCase.model_validate({**_recorded(case), "plan": current})
+            for case in previous.planned_cases
+            if case.case_id not in planned
+        ),
+    )
+    entry = PlanEntry(
+        plan=number,
+        plan_hash=plan_hash(revision.plan),
+        revises=revision.plan.revises,
+        plan_artifact_id=plan_artifact_id,
+        configuration_artifact_id=configuration_artifact_id,
+        approval=approval,
+        reason=reason,
+        changes=revision.changes,
+    )
+    return _record(revision.plan, retired, (*previous.plans, entry), created_at)
