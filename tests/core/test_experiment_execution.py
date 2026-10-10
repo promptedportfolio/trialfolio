@@ -17,7 +17,9 @@ wrap the real store; the clock is fixed.
 
 R03-AC10's core check needs attempts an earlier session made: in a new experiment, whose budget
 is at least the number of cases, each case's one attempt makes at most one request and one
-authentication call, so the budget always covers it. R03-T09, which writes resume, writes it.
+authentication call, so the budget always covers it. So it resumes the experiment, which R03-T09
+built, and checks that before each send, and each authentication call, the budget counts every
+earlier session's attempts.
 """
 
 import hashlib
@@ -45,7 +47,9 @@ from trialfolio.experiment_execution import (
     AttemptStarted,
     ExperimentExecution,
     ProgressEvent,
+    Repeat,
 )
+from trialfolio.experiment_records import open_experiment
 from trialfolio.planning import build_experiment_plan, installed_versions
 from trialfolio.provider import Credentials, P123ScreenBacktestClient
 from trialfolio.storage import ArtifactStore, LocalArtifactStore
@@ -87,8 +91,11 @@ class Executed:
 
     @property
     def manifest(self) -> ExperimentManifest:
+        return self.manifest_of(1)
+
+    def manifest_of(self, session: int) -> ExperimentManifest:
         return ExperimentManifest.model_validate_json(
-            (self.out / "sessions/1/manifest.json").read_bytes()
+            (self.out / f"sessions/{session}/manifest.json").read_bytes()
         )
 
     def attempts(self, case_id: str) -> list[Path]:
@@ -150,6 +157,42 @@ class Experiments:
             received=tuple(f"{r.method} {r.path}" for r in received),
             bodies=tuple(json.loads(r.body) for r in received if r.path == "/screen/backtest"),
             events=tuple(events),
+        )
+
+    def resume(
+        self, executed: Executed, name: str = "example.yaml", *, repeats: Sequence[Repeat] = ()
+    ) -> Executed:
+        """Resumes the experiment `executed` wrote, approved by its plan's hash, through the
+        core: its records are read under the lock, and the session runs what's due."""
+        content = (CONFIGS / name).read_bytes()
+        before = len(self.server.received)
+        credentials = Credentials(canaries.API_ID, canaries.API_KEY)
+        with (
+            P123ScreenBacktestClient(credentials, endpoint=self.server.endpoint) as client,
+            LocalArtifactStore(executed.out) as store,
+        ):
+            saved = open_experiment(store)
+            execution = ExperimentExecution(
+                saved.plan,
+                saved.plan.plan_hash,
+                "option",
+                store,
+                client,
+                command=None,
+                clock=FixedClock(),
+                experiment=saved,
+                repeats=repeats,
+            )
+            error = execution.run(content)
+        received = self.server.received[before:]
+        return Executed(
+            out=executed.out,
+            plan=saved.plan,
+            error=error,
+            execution=execution,
+            received=tuple(f"{r.method} {r.path}" for r in received),
+            bodies=tuple(json.loads(r.body) for r in received if r.path == "/screen/backtest"),
+            events=(),
         )
 
 
@@ -918,3 +961,52 @@ def test_a_quota_refusal_of_the_last_case_stops_nothing_else(experiments: Experi
     assert error is not None and error.code == "execution.partial"
     assert "provider.quota_exceeded" in error.message
     assert "no later case started" not in error.message
+
+
+# The budget across sessions (R03-AC10)
+
+
+def test_before_each_send_the_budget_counts_every_earlier_sessions_requests(
+    experiments: Experiments,
+) -> None:
+    # default-only.yaml's budget is its 2 requests. A 503 leaves the baseline unknown, and the
+    # other case's request spends the rest, so a confirmed repeat of the baseline isn't started.
+    experiments.server.reply("/auth", AUTHENTICATED)
+    experiments.server.reply("/screen/backtest", Reply(503), complete())
+    first = experiments.run("default-only.yaml")
+    baseline = first.plan.cases[0].case_id
+    unknown = first.record(baseline)
+
+    resumed = experiments.resume(
+        first, "default-only.yaml", repeats=[Repeat(baseline, unknown.attempt_id)]
+    )
+
+    error = resumed.error
+    assert error is not None and error.code == "execution.partial"
+    assert "budget couldn't cover the next case" in error.message
+    assert resumed.received == ()
+    counts = resumed.manifest_of(2).counts
+    assert (counts.provider_requests, counts.authentication_calls) == (2, 1)
+    assert counts.budget.provider_requests == 2
+
+
+def test_before_each_authentication_call_the_budget_counts_every_earlier_sessions_calls(
+    experiments: Experiments,
+) -> None:
+    # With each run's authentication refused, two runs count two authentication calls and no
+    # request, which spends default-only.yaml's budget of 2, so a third makes no call.
+    experiments.server.reply("/auth", Reply(401), Reply(401), AUTHENTICATED)
+    experiments.server.reply("/screen/backtest", complete(), complete())
+    first = experiments.run("default-only.yaml")
+    second = experiments.resume(first, "default-only.yaml")
+    assert first.received == second.received == (AUTH,)
+
+    third = experiments.resume(first, "default-only.yaml")
+
+    error = third.error
+    assert error is not None and error.code == "execution.partial"
+    assert "budget couldn't cover the next case" in error.message
+    assert third.received == ()
+    counts = third.manifest_of(3).counts
+    assert (counts.provider_requests, counts.authentication_calls) == (0, 2)
+    assert (counts.cases.failed, counts.cases.not_yet_run) == (1, 1)

@@ -1,6 +1,6 @@
 """The executor: executing an approved experiment plan, in the core (docs/contracts.md, running
-an experiment, experiment output, the lock, the budget across runs, and progress and
-cancellation).
+an experiment, experiment output, the lock, the budget across runs, repeating a case, and
+progress and cancellation).
 
 `ExperimentExecution.run` executes a new experiment into an output directory that's absent or
 empty:
@@ -26,22 +26,40 @@ empty:
 6. It writes the session's report, `sessions/1/report.html`, and then its manifest,
    `sessions/1/manifest.json`, last.
 
+Given the experiment's records, which `open_experiment` read and checked while taking the lock,
+it resumes the experiment in the same directory instead (R03-T09):
+
+1. It writes the new session's `sessions/<s>/session.json`, numbered after every session in the
+   directory.
+2. It writes the attempt record of each attempt a stopped run left without one: `succeeded` for
+   a start record with a saved response, `unknown` for one without, and `failed` for an attempt
+   with only its authentication record. Then it writes each complete case's tables that a stopped
+   run didn't, from the response's bytes the check read. For a revision, it writes
+   `plans/<n>/`, as for the first plan, with the reason in its `experiment.json`.
+3. It runs the cases that are due, and each case a confirmed repeat names, in the plan's order,
+   as a new experiment runs its cases, with the budget counting every attempt of the experiment.
+   A complete case, and one awaiting a repeat that no repeat names, are skipped.
+4. It writes the session's report and manifest, which list every file of the experiment's
+   records and count every attempt.
+
 A case that fails is recorded, and the session goes on to the next one. An interrupt or a storage
 failure ends the session at once, without its manifest, so the experiment's output reads as
-incomplete until a later run resumes it; resuming is R03-T09's. So does an attempt whose attempt
-record wasn't written, such as after an unexpected exception while writing it, as for a run: a
-manifest couldn't account for it. Every attempt written so far stays, and is never replaced.
+incomplete until a later run resumes it. So does an attempt whose attempt record wasn't written,
+such as after an unexpected exception while writing it, as for a run: a manifest couldn't account
+for it. Every attempt written so far stays, and is never replaced.
 
 Execution with the demo's client, which sends nothing, writes a synthetic experiment: its plan
 and manifest record the approval `not_required`, and its report says its values are invented.
+It resumes and revises only a synthetic experiment, and nothing else does.
 
 Nothing here prompts, prints, reads the environment, or reads secrets: the caller passes the
-approved hash, and the client, which holds any credentials. Progress goes to the caller's
-callback, as events that name each case by its `case_id` and hold no text from the
-configuration, and the caller may cancel from any thread. Logs name the plan by its hash and
+approved hash, the confirmed repeats, and the client, which holds any credentials. Progress goes
+to the caller's callback, as events that name each case by its `case_id` and hold no text from
+the configuration, and the caller may cancel from any thread. Logs name the plan by its hash and
 each case by its `case_id`, never by its key.
 """
 
+import json
 import logging
 import threading
 import uuid
@@ -50,9 +68,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Final, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from trialfolio.attempts import (
+    ATTEMPT_RECORD,
     AttemptFile,
     Clock,
     ExperimentAttempt,
@@ -63,7 +82,12 @@ from trialfolio.attempts import (
 )
 from trialfolio.configuration import experiment_original_values, read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1
-from trialfolio.contracts.common import AUTHENTICATION_REQUEST, Approval, ErrorDetail
+from trialfolio.contracts.common import (
+    AUTHENTICATION_REQUEST,
+    Approval,
+    ErrorDetail,
+    RevisionReason,
+)
 from trialfolio.contracts.experiment_manifest import (
     EXPERIMENT_CONFIGURATION_FORMAT,
     BudgetLimits,
@@ -87,20 +111,36 @@ from trialfolio.contracts.manifest import (
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION
 from trialfolio.demo import SyntheticScreenBacktestClient
 from trialfolio.errors import TrialFolioError
+from trialfolio.experiment_records import (
+    LOCK_LINE,
+    LOCK_PATH,
+    CaseAttempt,
+    CaseOutcome,
+    MissingTables,
+    SavedExperiment,
+    SavedExperimentAttempt,
+    case_outcome,
+    plan_path,
+    session_path,
+)
 from trialfolio.normalization import (
     LAYOUT,
     LAYOUT_VERSION,
     PARSER_VERSION,
-    NormalizedTables,
     holds_series,
+    write_case_settings,
     write_case_tables,
 )
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
 from trialfolio.planning import (
+    PlanRevision,
     Versions,
     build_experiment_plan,
     check_approval,
     first_experiment_record,
+    plan_changes,
+    plan_hash,
+    revised_experiment_record,
 )
 from trialfolio.provider import DecodedResponse, ScreenBacktestClient
 from trialfolio.report import (
@@ -112,12 +152,6 @@ from trialfolio.report import (
 from trialfolio.storage import ArtifactStore, StoredFile
 
 _logger = logging.getLogger(__name__)
-
-LOCK_PATH: Final = "experiment.lock"
-"""The file that claims an experiment's output directory, and on which the lock is taken."""
-
-LOCK_LINE: Final = b"Trial Folio experiment lock: it claims this directory for one experiment.\n"
-"""The lock file's one fixed line, so the file is never empty (docs/contracts.md, the lock)."""
 
 SCHEMA_VERSION: Final = "1.0.0"
 """The schema version of the experiment manifests, `experiment.json` files, and session records
@@ -136,18 +170,9 @@ _SCHEMA_VERSIONS: Final[dict[ExperimentArtifactRole, str]] = {
 """The schema version the manifest records for each role whose files have one, apart from the
 configuration, which gives its own."""
 
-type CaseOutcome = Literal["succeeded", "failed", "unknown", "not_yet_run"]
+_REASON: Final = TypeAdapter[str](RevisionReason)
+
 type StopReason = Literal["budget", "authentication", "quota", "cancelled"]
-
-
-def plan_path(plan: int, name: str) -> str:
-    """`plans/<plan>/<name>`, relative to the output root."""
-    return f"plans/{plan}/{name}"
-
-
-def session_path(session: int, name: str) -> str:
-    """`sessions/<session>/<name>`, relative to the output root."""
-    return f"sessions/{session}/{name}"
 
 
 # Progress events (docs/contracts.md, progress and cancellation)
@@ -213,82 +238,134 @@ class Cancellation:
         return self._requested.is_set()
 
 
-# Case outcomes (docs/contracts.md, the experiment manifest)
+@dataclass(frozen=True)
+class Repeat:
+    """A confirmed repeat (docs/contracts.md, repeating a case): the case to repeat, by its
+    `case_id`, and the attempt whose possible charge the user acknowledged, the case's latest
+    possibly charged attempt, by its `attempt_id`."""
+
+    case_id: str
+    attempt_id: uuid.UUID
+
+
+# The attempts of the experiment
 
 
 @dataclass(frozen=True)
-class CaseAttempt:
-    """What a case's outcome reads of one of its attempts."""
+class _Attempt:
+    """An attempt of the experiment, an earlier session's or this one's, as the session's counts,
+    budget, and manifest read it."""
 
+    case_id: str
     session: int
     sequence: int
-    outcome: Literal["running", "succeeded", "failed", "unknown"]
-    """`running` for a start record without an attempt record."""
+    outcome: Literal["running", "succeeded", "failed", "unknown"] | None
+    """As its records read: `running` for a start record without an attempt record, and None for
+    an attempt of this session that left no record. An earlier session's attempt without its
+    attempt record reads as step 8 records it."""
     possibly_charged: bool
-    valid: bool
-    """For a succeeded attempt, whether its response passed validation."""
+    error_code: str | None
+    repeat_of: uuid.UUID | None
+    requests: int
+    """The sends the budget counts."""
+    authentications: int
+    """Trial Folio's own authentication calls the budget counts."""
+    record: AttemptRecordV1_1 | None
+    """Its attempt record, once it's written."""
+    files: tuple[AttemptFile, ...]
+
+    def read(self, *, valid: bool) -> CaseAttempt | None:
+        if self.outcome is None:
+            return None
+        return CaseAttempt(self.session, self.sequence, self.outcome, self.possibly_charged, valid)
 
 
-def case_outcome(attempts: Sequence[CaseAttempt]) -> CaseOutcome:
-    """A case's outcome, as the manifest counts it: `succeeded` when one of its attempts
-    succeeded with a valid response, and `failed` when that response failed validation;
-    otherwise the outcome of its latest possibly charged attempt, by session and then sequence,
-    with a `running` one counted as `unknown`; `failed` when it has attempts and none is
-    possibly charged; and `not_yet_run` when it has none."""
-    succeeded = [attempt for attempt in attempts if attempt.outcome == "succeeded"]
-    if succeeded:
-        return "succeeded" if any(attempt.valid for attempt in succeeded) else "failed"
-    charged = [attempt for attempt in attempts if attempt.possibly_charged]
-    if charged:
-        latest = max(charged, key=lambda attempt: (attempt.session, attempt.sequence))
-        return "failed" if latest.outcome == "failed" else "unknown"
-    return "failed" if attempts else "not_yet_run"
+def _saved(attempt: SavedExperimentAttempt) -> _Attempt:
+    return _Attempt(
+        case_id=attempt.case_id,
+        session=attempt.session,
+        sequence=attempt.sequence,
+        outcome=attempt.outcome,
+        possibly_charged=attempt.possibly_charged,
+        error_code=attempt.error_code,
+        repeat_of=attempt.repeat_of,
+        requests=attempt.provider_requests,
+        authentications=attempt.authentication_calls,
+        record=attempt.record,
+        files=attempt.files,
+    )
 
 
-@dataclass
-class _Case:
-    """A planned case, and what this session did with it."""
-
-    case: ExperimentPlanCase
-    result: ExperimentAttemptResult | None = None
-    tables: NormalizedTables | None = None
-    invalid: TrialFolioError | None = None
-    """The `provider.response_invalid` its saved response got."""
-
-    @property
-    def outcome(self) -> CaseOutcome:
-        """The case's outcome, as the records written so far give it."""
-        result = self.result
-        read = None if result is None else _as_written(result, valid=self.invalid is None)
-        return case_outcome(() if read is None else (read,))
+def _recorded(record: AttemptRecordV1_1, files: tuple[AttemptFile, ...]) -> _Attempt:
+    return _Attempt(
+        case_id=record.case_id,
+        session=record.session,
+        sequence=record.sequence,
+        outcome=record.outcome,
+        possibly_charged=record.possibly_charged,
+        error_code=None if record.error is None else record.error.code,
+        repeat_of=record.repeat_of,
+        requests=provider_requests(record),
+        authentications=sum(e.request == AUTHENTICATION_REQUEST for e in record.exchanges),
+        record=record,
+        files=files,
+    )
 
 
-def _as_written(result: ExperimentAttemptResult, *, valid: bool) -> CaseAttempt | None:
-    """How an attempt's records read. Without its attempt record, which a resume writes, it reads
-    as the resume will count it (the cases that are due): `running` with its start record, and
-    `failed`, not possibly charged, with only its authentication record. With neither, there's no
-    record of the attempt, so None."""
+def _ended(result: ExperimentAttemptResult) -> _Attempt:
+    """An attempt of this session, as its records read. Without its attempt record, which a
+    resume writes, it reads as the resume will count it: `running` with its start record, and
+    `failed`, not possibly charged, with only its authentication record."""
     record = result.record
-    outcome: Literal["running", "succeeded", "failed", "unknown"]
     if result.recorded:
-        outcome, charged = record.outcome, record.possibly_charged
-    elif result.start is not None:
-        outcome, charged = "running", True
+        return _recorded(record, result.files)
+    outcome: Literal["running", "failed"] | None
+    if result.start is not None:
+        outcome, charged, requests = "running", True, 1
     elif any(file.role == "authentication_record" for file in result.files):
-        outcome, charged = "failed", False
+        outcome, charged, requests = "failed", False, 0
     else:
-        return None
-    return CaseAttempt(
+        outcome, charged, requests = None, False, 0
+    return _Attempt(
+        case_id=record.case_id,
         session=record.session,
         sequence=record.sequence,
         outcome=outcome,
         possibly_charged=charged,
-        valid=valid,
+        error_code=None if record.error is None else record.error.code,
+        repeat_of=record.repeat_of,
+        requests=requests,
+        authentications=int(result.authenticated),
+        record=None,
+        files=result.files,
     )
 
 
+@dataclass(frozen=True)
+class _Tables:
+    """A case's normalized tables, and the parser that wrote its `metrics.csv`."""
+
+    metrics: StoredFile
+    settings: StoredFile
+    parser_version: int
+
+
+@dataclass(frozen=True)
+class _RecordedPlan:
+    """A plan of the experiment, with its files, as the manifest lists them."""
+
+    number: int
+    record: ExperimentRecord
+    files: tuple[tuple[ExperimentArtifactRole, StoredFile], ...]
+    configuration: bytes
+    """Its `configuration.yaml`'s bytes, from which its cases' tables take their original
+    values."""
+    configuration_version: str
+
+
 class ExperimentExecution:
-    """One execution of an approved experiment plan into the output directory of `store`.
+    """One execution of an approved experiment plan into the output directory of `store`: a new
+    experiment, or, given its records, a resumed one.
 
     Its properties stay readable whatever happens, so a caller whose execution was interrupted
     still knows what was written: whether the directory was claimed, the session, each attempt,
@@ -307,6 +384,9 @@ class ExperimentExecution:
         clock: Clock = utc_now,
         progress: Progress | None = None,
         cancellation: Cancellation | None = None,
+        experiment: SavedExperiment | None = None,
+        reason: str | None = None,
+        repeats: Sequence[Repeat] = (),
     ) -> None:
         """Writes nothing.
 
@@ -316,19 +396,55 @@ class ExperimentExecution:
         is the `trialfolio` command that runs the session, or None when the core runs it for
         another interface, and always for a synthetic experiment.
 
-        Raises `TrialFolioError` with `plan.approval_required` unless `approved_hash` is the
-        plan's hash, recomputed from its contents (approval); and `ValueError` when the plan
-        revises another, which only a resume can approve, or `approval` or `command` doesn't fit
-        whether the experiment is synthetic.
+        `experiment` is the experiment's records, which `open_experiment` read from `store`
+        while taking its lock, to resume or revise it; None for a new experiment. `plan` is then
+        its current plan, which the session resumes, or a revision of it, which `plan_revision`
+        built, with its `reason`. `repeats` are the confirmed repeats, each checked as repeating
+        a case says.
+
+        Raises `TrialFolioError`:
+
+        - with `output.not_empty` when the demo's client is given for an experiment that isn't
+          synthetic, or another client for one that is;
+        - with `plan.approval_required` when a repeat names no case of the plan, a case that
+          isn't awaiting a repeat, or an attempt of it that isn't possibly charged, or that
+          succeeded; when a new experiment is given a reason or a repeat; when a resume of the
+          current plan is given a reason, unless it's the one the current plan recorded, which
+          resumes it; and unless `approved_hash` is the plan's hash, recomputed from its
+          contents (approval);
+        - with `plan.changed` when a revision isn't approved by its hash, with a reason.
+
+        Raises `ValueError` when `plan` revises another without the experiment's records, or
+        isn't the current plan or a revision of it; when a repeat names a case twice; when the
+        reason isn't a valid reason; and when `approval` or `command` doesn't fit whether the
+        experiment is synthetic.
         """
-        check_approval(plan, approved_hash)
-        if plan.revises is not None:
-            raise ValueError("a new experiment's first plan revises none")
         synthetic = isinstance(client, SyntheticScreenBacktestClient)
         if (approval == "not_required") != synthetic:
             raise ValueError("only an experiment executed with the demo's client needs no approval")
         if synthetic and command is not None:
             raise ValueError("no trialfolio command writes a synthetic experiment")
+        self._revision: PlanRevision | None = None
+        self._reason: str | None = None
+        self._repeats: dict[str, Repeat] = {}
+        self._used: tuple[Repeat, ...] = ()
+        if experiment is None:
+            if reason is not None:
+                raise _no_revision("A new experiment has no plan to revise.")
+            if repeats:
+                raise TrialFolioError(
+                    "plan.approval_required",
+                    "A new experiment has no attempt to repeat, so no repeat applies. Nothing was"
+                    " sent.",
+                )
+            check_approval(plan, approved_hash)
+            if plan.revises is not None:
+                raise ValueError("a new experiment's first plan revises none")
+        else:
+            if synthetic != experiment.synthetic:
+                raise _another_kind(synthetic=experiment.synthetic)
+            self._repeats, self._used = _confirmed(plan, experiment, repeats)
+            self._approve(plan, approved_hash, experiment, reason)
         self._plan = plan
         self._approval: Approval = approval
         self._store = store
@@ -338,14 +454,40 @@ class ExperimentExecution:
         self._progress = progress
         self._cancellation = cancellation
         self._synthetic = synthetic
-        self._session = 1
-        self._plan_number = 1
+        self._experiment = experiment
+        self._started = False
         self._claimed = False
+        self._session = 1 if experiment is None else experiment.next_session
+        self._plan_number = 1 if experiment is None else experiment.current.number
         self._session_record: StoredFile | None = None
-        self._record: ExperimentRecord | None = None
-        self._plan_files: list[tuple[ExperimentArtifactRole, StoredFile]] = []
-        self._cases = [_Case(case) for case in plan.cases]
-        self._attempts: list[ExperimentAttemptResult] = []
+        self._record: ExperimentRecord | None = None if experiment is None else experiment.record
+        self._plans: list[_RecordedPlan] = (
+            []
+            if experiment is None
+            else [
+                _RecordedPlan(
+                    saved.number,
+                    saved.record,
+                    saved.files,
+                    saved.configuration_content,
+                    saved.configuration_version,
+                )
+                for saved in experiment.plans
+            ]
+        )
+        self._attempts: list[_Attempt] = (
+            [] if experiment is None else [_saved(attempt) for attempt in experiment.attempts]
+        )
+        self._tables: dict[str, _Tables] = {}
+        if experiment is not None:
+            for case_id, tables in experiment.tables.items():
+                if tables.settings is not None:
+                    self._tables[case_id] = _Tables(
+                        tables.metrics, tables.settings, tables.parser_version
+                    )
+        self._invalid: dict[str, TrialFolioError] = {}
+        """The `provider.response_invalid` each case's saved response got, by `case_id`."""
+        self._results: list[ExperimentAttemptResult] = []
         self._current: ExperimentAttempt | None = None
         self._stopped: tuple[StopReason, TrialFolioError | None] | None = None
         self._report: StoredFile | None = None
@@ -357,9 +499,46 @@ class ExperimentExecution:
         self._record_data = b""
         """The first plan's `experiment.json`, once it's built."""
 
+    def _approve(
+        self,
+        plan: PlanV1_1,
+        approved_hash: str,
+        experiment: SavedExperiment,
+        reason: str | None,
+    ) -> None:
+        """Checks the approval of a resumed experiment's plan: the current plan's, as a new
+        plan's is, or a revision's, with its reason (approving a revision)."""
+        current = experiment.plan
+        if plan == current:
+            if reason is not None and reason != experiment.record.plans[-1].reason:
+                raise _no_revision(
+                    "The configuration gives the experiment's current plan, so there's no"
+                    " revision to give a reason for: run it without a reason to resume it."
+                )
+            check_approval(plan, approved_hash)
+            return
+        if plan.revises != current.plan_hash:
+            raise ValueError("the plan is neither the experiment's current plan nor a revision")
+        expected = plan_hash(plan)
+        if reason is None or approved_hash != expected:
+            missing = "a reason" if reason is None else "the approval of its hash"
+            raise TrialFolioError(
+                "plan.changed",
+                "The configuration, or the installed versions, changed since the experiment's"
+                f" current plan, and the revision wasn't approved: it needs {missing}. Approving"
+                f" it takes its full hash, {expected}, and a reason for the revision. Nothing was"
+                " sent.",
+            )
+        try:
+            self._reason = _REASON.validate_python(reason)
+        except ValidationError:
+            raise ValueError("the reason isn't a valid revision reason") from None
+        self._revision = PlanRevision(plan, plan_changes(current, plan))
+
     @property
     def claimed(self) -> bool:
-        """Whether the output directory was claimed. Before then, nothing was written."""
+        """Whether the output directory was claimed, or, for a resume, whether the run began
+        writing into it. Before then, nothing was written."""
         return self._claimed
 
     @property
@@ -374,12 +553,18 @@ class ExperimentExecution:
     @property
     def attempts(self) -> tuple[ExperimentAttemptResult, ...]:
         """Each attempt that ended in this session, in order."""
-        return tuple(self._attempts)
+        return tuple(self._results)
 
     @property
     def outcomes(self) -> tuple[tuple[ExperimentPlanCase, CaseOutcome], ...]:
         """Each planned case, in the plan's order, with its outcome as the records now give it."""
-        return tuple((case.case, case.outcome) for case in self._cases)
+        return tuple((case, self._outcome(case.case_id)) for case in self._plan.cases)
+
+    @property
+    def repeats_used(self) -> tuple[Repeat, ...]:
+        """The confirmed repeats this session doesn't make, because an earlier repeat used their
+        confirmation: a later attempt of the case may have reached Portfolio123."""
+        return self._used
 
     @property
     def manifest(self) -> ExperimentManifest | None:
@@ -395,7 +580,8 @@ class ExperimentExecution:
     ) -> TrialFolioError | None:
         """Takes the steps the module lists. `configuration` is the bytes of the experiment
         configuration the plan was built from. `on_claimed` is called once the directory is
-        claimed, before anything else is written into it, such as to start writing logs there.
+        claimed, or, for a resume, whose store already holds the lock, before the first write,
+        before anything else is written into it, such as to start writing logs there.
 
         Returns the error the caller reports, or None when every planned case succeeded:
         `execution.partial` when the session reached its end with a case that didn't succeed;
@@ -403,21 +589,29 @@ class ExperimentExecution:
         ended the session without its manifest; and the attempt's error, such as
         `internal.unexpected`, when an attempt's record wasn't written, which ends the session
         the same way. Raises `ValueError` before writing
-        anything when `configuration` doesn't give the plan; the claim's `TrialFolioError`,
-        `output.not_empty`, `experiment.locked`, or `storage.write_failed`, and a
-        `KeyboardInterrupt` during the claim, which removes what the claim created, so nothing
-        is left; and any unexpected exception, which leaves the session without its manifest.
+        anything when `configuration` doesn't give the plan; for a new experiment, the claim's
+        `TrialFolioError`, `output.not_empty`, `experiment.locked`, or `storage.write_failed`,
+        and a `KeyboardInterrupt` during the claim, which removes what the claim created, so
+        nothing is left; and any unexpected exception, which leaves the session without its
+        manifest.
         """
-        if self._claimed:
+        if self._started:
             raise RuntimeError("an execution runs once")
+        self._started = True
         self._check_configuration(configuration)
-        self._store.claim(LOCK_PATH, LOCK_LINE, lock=True)
+        if self._experiment is None:
+            self._store.claim(LOCK_PATH, LOCK_LINE, lock=True)
         self._claimed = True
         try:
             if on_claimed is not None:
                 on_claimed()
             self._write_session()
-            self._write_plan(configuration)
+            if self._experiment is None:
+                self._write_plan(configuration)
+            else:
+                self._complete_records(self._experiment)
+                if self._revision is not None:
+                    self._write_revision(self._revision, configuration)
         except KeyboardInterrupt:
             return self._before_cases(
                 TrialFolioError("command.interrupted", "Trial Folio was interrupted.")
@@ -433,8 +627,9 @@ class ExperimentExecution:
             extra=self._log_fields("experiment.session.started"),
         )
         try:
-            self._emit(SessionStarted(self._session, tuple(c.case.case_id for c in self._cases)))
-            ending = self._run_cases(configuration)
+            sends = self._sends()
+            self._emit(SessionStarted(self._session, tuple(case.case_id for case, _ in sends)))
+            ending = self._run_cases(sends)
             if ending is not None:
                 return self._incomplete(ending)
             error = self._partial()
@@ -468,10 +663,14 @@ class ExperimentExecution:
             requests=plan.transport.requests,
             urllib3=plan.transport.urllib3,
         )
-        read = read_experiment_configuration(configuration, plan_path(1, "configuration.yaml"))
-        if build_experiment_plan(read, versions) != plan:
+        number = self._plan_number if self._revision is None else self._next_plan()
+        read = read_experiment_configuration(configuration, plan_path(number, "configuration.yaml"))
+        if build_experiment_plan(read, versions, plan.revises) != plan:
             raise ValueError("the configuration doesn't give the plan")
         self._configuration_version = read.schema_version
+
+    def _next_plan(self) -> int:
+        return 1 if self._experiment is None else self._experiment.next_plan
 
     def _write_session(self) -> None:
         record = SessionRecord(
@@ -486,10 +685,11 @@ class ExperimentExecution:
 
     def _write_plan(self, configuration: bytes) -> None:
         number = self._plan_number
+        files: list[tuple[ExperimentArtifactRole, StoredFile]] = []
         saved = self._store.write(plan_path(number, "configuration.yaml"), configuration)
-        self._plan_files.append(("configuration", saved))
+        files.append(("configuration", saved))
         plan = self._store.write(plan_path(number, "plan.json"), _model_json(self._plan))
-        self._plan_files.append(("plan", plan))
+        files.append(("plan", plan))
         record = first_experiment_record(
             self._plan,
             plan_artifact_id=plan.artifact_id,
@@ -499,41 +699,167 @@ class ExperimentExecution:
         )
         self._record_data = _model_json(record)
         written = self._store.write(plan_path(number, "experiment.json"), self._record_data)
-        self._plan_files.append(("experiment_record", written))
+        files.append(("experiment_record", written))
         self._record = record
+        self._plans.append(
+            _RecordedPlan(number, record, tuple(files), configuration, self._configuration_version)
+        )
         _logger.info(
             "Recorded plan %d.", number, extra=self._log_fields("experiment.plan.recorded")
         )
 
+    def _write_revision(self, revision: PlanRevision, configuration: bytes) -> None:
+        """Writes the revision's `plans/<n>/`, as for the first plan, with the reason in its
+        `experiment.json`, written last: nothing is sent under it before."""
+        number = self._next_plan()
+        previous = self._experiment_record()
+        files: list[tuple[ExperimentArtifactRole, StoredFile]] = []
+        saved = self._store.write(plan_path(number, "configuration.yaml"), configuration)
+        files.append(("configuration", saved))
+        plan = self._store.write(plan_path(number, "plan.json"), _model_json(revision.plan))
+        files.append(("plan", plan))
+        record = revised_experiment_record(
+            previous,
+            revision,
+            number=number,
+            reason=str(self._reason),
+            plan_artifact_id=plan.artifact_id,
+            configuration_artifact_id=saved.artifact_id,
+            approval=self._approval,
+            created_at=_utc(self._clock()),
+        )
+        written = self._store.write(plan_path(number, "experiment.json"), _model_json(record))
+        files.append(("experiment_record", written))
+        self._record = record
+        self._plan_number = number
+        self._plans.append(
+            _RecordedPlan(number, record, tuple(files), configuration, self._configuration_version)
+        )
+        _logger.info(
+            "Recorded plan %d, which revises plan %d.",
+            number,
+            previous.plans[-1].plan,
+            extra=self._log_fields("experiment.plan.recorded"),
+        )
+
+    def _complete_records(self, experiment: SavedExperiment) -> None:
+        """Step 8 of a resume: writes the attempt record of each attempt a stopped run left
+        without one, then the tables of each complete case that a stopped run didn't write."""
+        _logger.info(
+            "Session %d resumes the experiment under plan %d.",
+            self._session,
+            experiment.current.number,
+            extra=self._log_fields("experiment.resumed"),
+        )
+        for place, saved in enumerate(experiment.attempts):
+            if saved.record is not None:
+                continue
+            plan = experiment.saved_plan(saved.plan).plan
+            record = saved.completed_record(plan, _utc(self._clock()))
+            stored = self._store.write(f"{saved.directory}/{ATTEMPT_RECORD}", _model_json(record))
+            files = (*saved.files, AttemptFile("attempt_record", stored))
+            self._attempts[place] = _recorded(record, files)
+            _logger.warning(
+                "Recorded the attempt a stopped run left without its attempt record: %s; possibly"
+                " charged: %s.",
+                record.outcome,
+                "yes" if record.possibly_charged else "no",
+                extra={
+                    **self._log_fields("experiment.attempt.recorded", saved.case_id),
+                    "attempt_id": str(saved.attempt_id),
+                },
+            )
+        for case_id, missing in experiment.missing.items():
+            self._write_missing(case_id, missing, experiment)
+
+    def _write_missing(
+        self, case_id: str, missing: MissingTables, experiment: SavedExperiment
+    ) -> None:
+        if missing.invalid is not None:
+            self._case_invalid(case_id, missing.invalid)
+            return
+        if missing.metrics_rows is not None:
+            tables = write_case_tables(
+                self._store,
+                missing.case,
+                missing.originals,
+                configuration=missing.configuration,
+                response=missing.response,
+                content=missing.content,
+            )
+            self._tables[case_id] = _Tables(tables.metrics, tables.settings, PARSER_VERSION)
+            return
+        saved = experiment.tables[case_id]
+        settings, _ = write_case_settings(
+            self._store,
+            missing.case,
+            missing.originals,
+            configuration=missing.configuration,
+            metrics=saved.metrics_rows,
+        )
+        self._tables[case_id] = _Tables(saved.metrics, settings, saved.parser_version)
+
     # The cases
 
-    def _run_cases(self, configuration: bytes) -> TrialFolioError | None:
-        """Runs each case in the plan's order, until one can't start. Returns the error of an
-        attempt that an interrupt or a storage failure ended, or whose attempt record wasn't
-        written, which ends the session."""
+    def _sends(self) -> list[tuple[ExperimentPlanCase, uuid.UUID | None]]:
+        """The cases this session sends, in the plan's order, each with the attempt a repeat of
+        it repeats: every case of a new experiment; and in a resume, each case that's due, and
+        each awaiting a repeat that a confirmed repeat names."""
+        experiment = self._experiment
+        if experiment is None:
+            return [(case, None) for case in self._plan.cases]
+        for repeat in self._used:
+            _logger.info(
+                "The case isn't repeated: the repeat confirmed for its attempt %s was made"
+                " already.",
+                repeat.attempt_id,
+                extra=self._log_fields("experiment.repeat.used", repeat.case_id),
+            )
+        sends: list[tuple[ExperimentPlanCase, uuid.UUID | None]] = []
+        for saved in experiment.cases(self._plan):
+            repeat = self._repeats.get(saved.case.case_id)
+            if saved.state == "due":
+                sends.append((saved.case, None))
+            elif saved.state == "awaiting_repeat" and repeat is not None:
+                sends.append((saved.case, repeat.attempt_id))
+        return sends
+
+    def _run_cases(
+        self, sends: Sequence[tuple[ExperimentPlanCase, uuid.UUID | None]]
+    ) -> TrialFolioError | None:
+        """Runs each case to send in the plan's order, until one can't start. Returns the error
+        of an attempt that an interrupt or a storage failure ended, or whose attempt record
+        wasn't written, which ends the session."""
         token_from: uuid.UUID | None = None
-        for place, case in enumerate(self._cases, 1):
-            later = place < len(self._cases)
+        for place, (case, repeat_of) in enumerate(sends, 1):
+            later = place < len(sends)
             stop = self._stop_before(token_from is None)
             if stop is not None:
                 self._stop(stop, None)
                 break
+            if repeat_of is not None:
+                _logger.info(
+                    "Repeating the case's request, as confirmed for its attempt %s.",
+                    repeat_of,
+                    extra=self._log_fields("experiment.repeat.started", case.case_id),
+                )
             attempt = ExperimentAttempt(
                 self._plan,
-                case.case,
+                case,
                 self._store,
                 session=self._session,
                 # The session starts its attempts one at a time, so this is its next one.
-                sequence=len(self._attempts) + 1,
+                sequence=len(self._results) + 1,
+                repeat_of=repeat_of,
                 clock=self._clock,
                 synthetic=self._synthetic,
             )
             self._current = attempt
-            self._emit(AttemptStarted(case.case.case_id, attempt.attempt_id))
+            self._emit(AttemptStarted(case.case_id, attempt.attempt_id))
             result = attempt.run(self._client, token_from)
             self._current = None
-            self._attempts.append(result)
-            case.result = result
+            self._results.append(result)
+            self._attempts.append(_ended(result))
             error = result.error
             # A manifest can't account for an attempt without its attempt record, whose start
             # record reads as running, so that ends the session too, whatever stopped the write.
@@ -541,11 +867,11 @@ class ExperimentExecution:
                 error is not None and error.code in ("command.interrupted", "storage.write_failed")
             ):
                 return error
-            self._write_tables(case, result, configuration)
+            self._write_tables(case, result)
             record = result.record
             self._emit(
                 AttemptEnded(
-                    case.case.case_id,
+                    case.case_id,
                     attempt.attempt_id,
                     record.outcome,
                     record.possibly_charged,
@@ -567,7 +893,8 @@ class ExperimentExecution:
 
     def _stop_before(self, authenticates: bool) -> StopReason | None:
         """Why the next attempt can't start, if it can't: a cancellation, or a budget that
-        doesn't cover one more request, or one more authentication call when it authenticates."""
+        doesn't cover one more request, or one more authentication call when it authenticates.
+        The budget counts every attempt of the experiment, earlier sessions' included."""
         if self._cancellation is not None and self._cancellation.requested:
             return "cancelled"
         budget = self._plan.budget
@@ -585,22 +912,23 @@ class ExperimentExecution:
             extra=self._log_fields("experiment.stopped"),
         )
 
-    def _write_tables(
-        self, case: _Case, result: ExperimentAttemptResult, configuration: bytes
-    ) -> None:
+    def _write_tables(self, case: ExperimentPlanCase, result: ExperimentAttemptResult) -> None:
         """Writes the case's tables from its saved response, right after its attempt record. A
         response that fails validation leaves the case `failed`."""
         response = result.record.response
         if not result.recorded or response is None:
             return
-        configuration_file = dict(self._plan_files)["configuration"]
+        # The session's attempts run under the current plan, and its saved configuration gives
+        # the original values, however the configuration given to this run is written.
+        plan = self._plans[-1]
+        configuration_file = dict(plan.files)["configuration"]
         originals = experiment_original_values(
-            configuration, configuration_file.path, case.case.case_key
+            plan.configuration, configuration_file.path, case.case_key
         )
         try:
-            case.tables = write_case_tables(
+            tables = write_case_tables(
                 self._store,
-                case.case,
+                case,
                 originals,
                 configuration=configuration_file,
                 response=response,
@@ -608,12 +936,49 @@ class ExperimentExecution:
         except TrialFolioError as failure:
             if failure.code != "provider.response_invalid":
                 raise
-            case.invalid = failure
-            _logger.error(
-                "The case's response failed validation: %s.",
-                failure.code,
-                extra=self._log_fields("experiment.case.invalid", case.case.case_id),
-            )
+            self._case_invalid(case.case_id, failure)
+            return
+        self._tables[case.case_id] = _Tables(tables.metrics, tables.settings, PARSER_VERSION)
+
+    def _case_invalid(self, case_id: str, failure: TrialFolioError) -> None:
+        self._invalid[case_id] = failure
+        _logger.error(
+            "The case's response failed validation: %s.",
+            failure.code,
+            extra=self._log_fields("experiment.case.invalid", case_id),
+        )
+
+    # The cases' outcomes
+
+    def _of(self, case_id: str) -> list[_Attempt]:
+        """The case's attempts, by session and then sequence."""
+        return [attempt for attempt in self._attempts if attempt.case_id == case_id]
+
+    def _outcome(self, case_id: str) -> CaseOutcome:
+        valid = case_id not in self._invalid
+        reads = (attempt.read(valid=valid) for attempt in self._of(case_id))
+        return case_outcome(tuple(read for read in reads if read is not None))
+
+    def _described(self, case_id: str) -> str:
+        """The case's outcome, with the error code of the attempt that gives it."""
+        outcome = self._outcome(case_id)
+        if outcome == "not_yet_run":
+            return "not yet run"
+        invalid = self._invalid.get(case_id)
+        if invalid is not None:
+            return f"failed ({invalid.code})"
+        attempts = [attempt for attempt in self._of(case_id) if attempt.outcome is not None]
+        charged = [attempt for attempt in attempts if attempt.possibly_charged]
+        code = (charged or attempts)[-1].error_code
+        return outcome if code is None else f"{outcome} ({code})"
+
+    def _awaiting_repeat(self, case_id: str) -> bool:
+        """Whether the case awaits a repeat: one of its attempts may have reached Portfolio123,
+        and none succeeded. One whose response failed validation succeeded, so it's complete."""
+        attempts = self._of(case_id)
+        return not any(a.outcome == "succeeded" for a in attempts) and any(
+            a.possibly_charged for a in attempts
+        )
 
     # The end of the session
 
@@ -631,12 +996,12 @@ class ExperimentExecution:
             error=None if error is None else ErrorDetail(code=error.code, message=error.message),
             cases=tuple(
                 CaseView(
-                    case=case.case,
-                    outcome=case.outcome,
-                    attempts=0 if case.result is None else 1,
-                    tables=case.tables is not None,
+                    case=case,
+                    outcome=self._outcome(case.case_id),
+                    attempts=sum(a.outcome is not None for a in self._of(case.case_id)),
+                    tables=case.case_id in self._tables,
                 )
-                for case in self._cases
+                for case in self._plan.cases
             ),
             counts=self._counts(),
             artifacts=self._artifacts(),
@@ -668,13 +1033,13 @@ class ExperimentExecution:
     def _partial(self) -> TrialFolioError | None:
         """`execution.partial` when a planned case didn't succeed, with what happened to each,
         and why the session stopped, if it did."""
-        missed = [case for case in self._cases if case.outcome != "succeeded"]
+        missed = [case for case in self._plan.cases if self._outcome(case.case_id) != "succeeded"]
         if not missed:
             return None
-        planned = len(self._cases)
+        planned = len(self._plan.cases)
 
-        def listing(named: Callable[[_Case], str]) -> str:
-            return "; ".join(f"{named(case)}, {_described(case)}" for case in missed)
+        def listing(named: Callable[[ExperimentPlanCase], str]) -> str:
+            return "; ".join(f"{named(case)}, {self._described(case.case_id)}" for case in missed)
 
         lead = f"{len(missed)} of the {planned} planned cases didn't succeed:"
         why = ""
@@ -686,14 +1051,14 @@ class ExperimentExecution:
         charged = (
             " A case whose request may have reached Portfolio123 is never sent again"
             " automatically: a confirmed repeat sends it."
-            if any(_awaiting_repeat(case) for case in missed)
+            if any(self._awaiting_repeat(case.case_id) for case in missed)
             else ""
         )
         tail = f"{why}{charged} Every planned case is accounted for in the session's manifest."
         return TrialFolioError(
             "execution.partial",
-            f"{lead} {listing(lambda c: f'`{c.case.case_key}`')}.{tail}",
-            f"{lead} {listing(lambda c: c.case.case_id)}.{tail}",
+            f"{lead} {listing(lambda c: f'`{c.case_key}`')}.{tail}",
+            f"{lead} {listing(lambda c: c.case_id)}.{tail}",
         )
 
     def _build_manifest(
@@ -709,10 +1074,9 @@ class ExperimentExecution:
                     references.setdefault(
                         row.setting, ExternalReference(setting=row.setting, snapshotted=False)
                     )
-        series = any(
-            isinstance(result.response, DecodedResponse) and holds_series(result.response.payload)
-            for result in self._attempts
-        )
+        parsers = sorted({tables.parser_version for tables in self._tables.values()}) or [
+            PARSER_VERSION
+        ]
         return ExperimentManifest(
             schema_version=SCHEMA_VERSION,
             artifact_type="experiment",
@@ -728,15 +1092,14 @@ class ExperimentExecution:
             outcome="completed" if error is None else "partial",
             error=None if error is None else ErrorDetail(code=error.code, message=error.message),
             artifacts=artifacts,
-            parsers=(
-                ParserVersion(
-                    layout=LAYOUT, layout_version=LAYOUT_VERSION, parser_version=PARSER_VERSION
-                ),
+            parsers=tuple(
+                ParserVersion(layout=LAYOUT, layout_version=LAYOUT_VERSION, parser_version=version)
+                for version in parsers
             ),
             license_id=LICENSE_ID,
             notice_version=NOTICE_VERSION,
             capabilities=Capabilities(
-                return_series="source_only" if series else "absent",
+                return_series="source_only" if self._holds_series() else "absent",
                 statistical_validation="not_assessed",
                 trading_readiness="not_assessed",
             ),
@@ -747,9 +1110,31 @@ class ExperimentExecution:
             counts=self._counts(),
         )
 
+    def _holds_series(self) -> bool:
+        """Whether a saved response of the experiment holds per-period series."""
+        if any(
+            isinstance(result.response, DecodedResponse) and holds_series(result.response.payload)
+            for result in self._results
+        ):
+            return True
+        experiment = self._experiment
+        if experiment is None:
+            return False
+        for attempt in experiment.attempts:
+            if attempt.response is None or attempt.response[0].form != "decoded":
+                continue
+            try:
+                payload: object = json.loads(attempt.response[1])
+            except (UnicodeDecodeError, ValueError, RecursionError):
+                continue
+            if holds_series(payload):
+                return True
+        return False
+
     def _counts(self) -> ExperimentManifestCounts:
-        outcomes = [case.outcome for case in self._cases]
-        records = [result.record for result in self._attempts]
+        outcomes = [self._outcome(case.case_id) for case in self._plan.cases]
+        attempts = [attempt for attempt in self._attempts if attempt.outcome is not None]
+        records = [attempt.record for attempt in attempts if attempt.record is not None]
         costs = [r.provider_metadata.cost for r in records if r.provider_metadata.cost is not None]
         budget = self._plan.budget
         return ExperimentManifestCounts(
@@ -761,13 +1146,13 @@ class ExperimentExecution:
                 unknown=outcomes.count("unknown"),
                 not_yet_run=outcomes.count("not_yet_run"),
             ),
-            retired_cases=0,
+            retired_cases=len(self._experiment_record().retired_cases),
             attempts=ExperimentAttemptCounts(
-                succeeded=sum(r.outcome == "succeeded" for r in records),
-                failed=sum(r.outcome == "failed" for r in records),
-                unknown=sum(r.outcome == "unknown" for r in records),
-                running=0,
-                repeats=sum(r.repeat_of is not None for r in records),
+                succeeded=sum(a.outcome == "succeeded" for a in attempts),
+                failed=sum(a.outcome == "failed" for a in attempts),
+                unknown=sum(a.outcome == "unknown" for a in attempts),
+                running=sum(a.outcome == "running" for a in attempts),
+                repeats=sum(a.repeat_of is not None for a in attempts),
             ),
             retries=0,
             provider_requests=self._provider_requests(),
@@ -780,13 +1165,14 @@ class ExperimentExecution:
         )
 
     def _provider_requests(self) -> int:
-        """The sends counted against the budget: each that may have reached Portfolio123."""
-        return sum(provider_requests(result.record) for result in self._attempts)
+        """The sends counted against the budget: each that may have reached Portfolio123, of
+        every attempt of the experiment."""
+        return sum(attempt.requests for attempt in self._attempts)
 
     def _authentication_calls(self) -> int:
         """Trial Folio's own authentication calls counted against the budget, whatever their
         result: an attempt's `POST /auth` exchange, or its authentication record alone."""
-        return sum(_authentication_calls(result) for result in self._attempts)
+        return sum(attempt.authentications for attempt in self._attempts)
 
     def _experiment_record(self) -> ExperimentRecord:
         if self._record is None:  # written before any case runs
@@ -795,29 +1181,48 @@ class ExperimentExecution:
 
     def _artifacts(self) -> tuple[ExperimentArtifact, ...]:
         """Each file of the experiment's records so far, as the manifest lists it, apart from
-        the report: the plan's files, each attempt's, each case's tables, and the session's
-        record."""
-        listed = [self._listed(role, stored) for role, stored in self._plan_files]
-        tables = {case.case.case_id: case.tables for case in self._cases}
-        for result in self._attempts:
-            listed.extend(self._attempt_file(file, result.record) for file in result.files)
-            case_tables = tables.get(result.record.case_id)
-            if case_tables is not None and result.record.outcome == "succeeded":
-                listed.append(self._listed("metrics", case_tables.metrics))
-                listed.append(self._listed("settings", case_tables.settings))
+        the report: each plan's files, each attempt's, followed by its case's tables once it
+        succeeded, and the session's record. A file the latest manifest lists is listed as it
+        lists it, its source record included."""
+        listed = [
+            self._earlier(stored.path) or self._listed(role, stored, plan=recorded)
+            for recorded in self._plans
+            for role, stored in recorded.files
+        ]
+        for attempt in self._attempts:
+            listed.extend(self._attempt_file(file, attempt) for file in attempt.files)
+            tables = self._tables.get(attempt.case_id)
+            if tables is not None and attempt.outcome == "succeeded":
+                metrics, settings = tables.metrics, tables.settings
+                listed.append(self._earlier(metrics.path) or self._listed("metrics", metrics))
+                listed.append(self._earlier(settings.path) or self._listed("settings", settings))
         if self._session_record is not None:
             listed.append(self._listed("session_record", self._session_record))
         return tuple(listed)
 
-    def _attempt_file(self, file: AttemptFile, record: AttemptRecordV1_1) -> ExperimentArtifact:
+    def _attempt_file(self, file: AttemptFile, attempt: _Attempt) -> ExperimentArtifact:
+        """The file as the manifest lists it: as the latest manifest does, unless it's a
+        response whose case's `metrics.csv` that manifest doesn't list, which the installed
+        parser wrote since, and which its source record then names (which parser wrote them)."""
         role: ExperimentArtifactRole = file.role
+        earlier = self._earlier(file.file.path)
+        tables = self._tables.get(attempt.case_id)
+        if earlier is not None and not (
+            role == "provider_response"
+            and tables is not None
+            and self._earlier(tables.metrics.path) is None
+        ):
+            return earlier
         source = None
         if role in ("provider_request", "provider_response", "provider_response_undecoded"):
             decoded = role == "provider_response"
+            record = attempt.record
+            # The request was written just before the attempt's start record, and the response
+            # was saved just before its attempt record.
+            started = record.started_at if record is not None else _utc(self._clock())
+            ended = record.ended_at if record is not None else started
             source = SourceRecord(
-                # The request was written just before the attempt's start record, and the
-                # response was saved just before its attempt record.
-                acquired_at=record.started_at if role == "provider_request" else record.ended_at,
+                acquired_at=started if role == "provider_request" else ended,
                 format=LAYOUT if decoded else f"{LAYOUT}-{role.removeprefix('provider_')}",
                 format_version=str(LAYOUT_VERSION),
                 parser_version=PARSER_VERSION if decoded else None,
@@ -826,20 +1231,26 @@ class ExperimentExecution:
             )
         return self._listed(role, file.file, source)
 
+    def _earlier(self, path: str) -> ExperimentArtifact | None:
+        """The latest manifest's entry for a file of the experiment's records, which the new
+        manifest lists as it is, its source record included."""
+        return None if self._experiment is None else self._experiment.listed(path)
+
     def _listed(
         self,
         role: ExperimentArtifactRole,
         stored: StoredFile,
         source: SourceRecord | None = None,
+        *,
+        plan: _RecordedPlan | None = None,
     ) -> ExperimentArtifact:
         schema_version = _SCHEMA_VERSIONS.get(role)
-        if role == "configuration":
-            record = self._experiment_record()
-            schema_version = self._configuration_version
+        if role == "configuration" and plan is not None:
+            schema_version = plan.configuration_version
             # Acquired when its plan was recorded, so every session's manifest gives it the
             # same time: the plan's `experiment.json` records when.
             source = SourceRecord(
-                acquired_at=record.created_at,
+                acquired_at=plan.record.created_at,
                 format=EXPERIMENT_CONFIGURATION_FORMAT,
                 format_version=schema_version,
                 parser_version=None,
@@ -905,8 +1316,8 @@ class ExperimentExecution:
                 " have been charged: its start record reads as running. Trial Folio never"
                 " retries it automatically."
             )
-        if self._attempts:
-            last = self._attempts[-1]
+        if self._results:
+            last = self._results[-1]
             record = last.record
             if not last.recorded:
                 if last.start is not None:
@@ -947,6 +1358,79 @@ class ExperimentExecution:
         return fields
 
 
+def _confirmed(
+    plan: PlanV1_1, experiment: SavedExperiment, repeats: Sequence[Repeat]
+) -> tuple[dict[str, Repeat], tuple[Repeat, ...]]:
+    """Checks each confirmed repeat against the plan and the records (repeating a case), and
+    returns the repeats to make, by `case_id`, and those whose confirmation an earlier repeat
+    used, which aren't made."""
+    cases = {saved.case.case_id: saved for saved in experiment.cases(plan)}
+    to_make: dict[str, Repeat] = {}
+    used: list[Repeat] = []
+    for repeat in repeats:
+        if repeat.case_id in to_make or repeat.case_id in {r.case_id for r in used}:
+            raise ValueError("a repeat names each case once")
+        saved = cases.get(repeat.case_id)
+        if saved is None:
+            raise _not_repeated(
+                f"A repeat names case {repeat.case_id}, which the plan doesn't include.",
+                f"A repeat names case {repeat.case_id}, which the plan doesn't include.",
+            )
+        key = f"`{saved.case.case_key}`"
+        if saved.state == "due":
+            message = (
+                "Case {} isn't awaiting a repeat: none of its attempts may have reached"
+                " Portfolio123, so running the experiment sends it without one."
+            )
+            raise _not_repeated(message.format(key), message.format(saved.case.case_id))
+        named = [a for a in saved.attempts if a.attempt_id == repeat.attempt_id]
+        if not named or not named[0].possibly_charged or named[0].outcome == "succeeded":
+            message = (
+                f"A repeat of case {{}} names attempt {repeat.attempt_id}, which isn't an attempt"
+                " of the case whose request may have been charged and that didn't succeed. A"
+                " repeat names the case's latest attempt whose request may have been charged."
+            )
+            raise _not_repeated(message.format(key), message.format(saved.case.case_id))
+        later = saved.attempts[saved.attempts.index(named[0]) + 1 :]
+        if any(attempt.possibly_charged for attempt in later):
+            used.append(repeat)
+        else:
+            to_make[repeat.case_id] = repeat
+    return to_make, tuple(used)
+
+
+def _not_repeated(message: str, log_message: str) -> TrialFolioError:
+    tail = " Nothing was sent."
+    return TrialFolioError("plan.approval_required", message + tail, log_message + tail)
+
+
+def _no_revision(problem: str) -> TrialFolioError:
+    return TrialFolioError(
+        "plan.approval_required",
+        f"A reason for a revision was given, but there's no revision. {problem} Nothing was sent.",
+    )
+
+
+def _another_kind(*, synthetic: bool) -> TrialFolioError:
+    """The demo's client for an experiment that isn't synthetic, or another client for one
+    that is: invented and real attempts never share an experiment."""
+    if synthetic:
+        problem = (
+            "The output directory holds a synthetic experiment, whose values are invented, and"
+            " only the demo's client resumes it."
+        )
+    else:
+        problem = (
+            "The output directory holds an experiment whose attempts are real, and the demo's"
+            " client, which sends nothing, can't add invented ones to it."
+        )
+    return TrialFolioError(
+        "output.not_empty",
+        f"{problem} Nothing was sent or written. Run the configuration into another output"
+        " directory.",
+    )
+
+
 _STOPS: Final[dict[StopReason, str]] = {
     "budget": "the budget can't cover the next case",
     "authentication": "Trial Folio's own authentication call failed",
@@ -976,33 +1460,6 @@ _STOP_MESSAGES: Final[dict[StopReason, str]] = {
         " same hash, resumes the experiment, and runs the cases not started."
     ),
 }
-
-
-def _described(case: _Case) -> str:
-    outcome = case.outcome
-    if outcome == "not_yet_run":
-        return "not yet run"
-    if case.invalid is not None:
-        return f"failed ({case.invalid.code})"
-    error = None if case.result is None else case.result.record.error
-    return outcome if error is None else f"{outcome} ({error.code})"
-
-
-def _awaiting_repeat(case: _Case) -> bool:
-    """Whether the case awaits a repeat: its attempt may have reached Portfolio123, and didn't
-    succeed. One whose response failed validation succeeded, so it's complete."""
-    if case.result is None:
-        return False
-    record = case.result.record
-    return record.possibly_charged and record.outcome != "succeeded"
-
-
-def _authentication_calls(result: ExperimentAttemptResult) -> int:
-    """An attempt's authentication calls: the `POST /auth` exchanges its attempt record holds,
-    or one when its authentication record was written and the attempt record wasn't."""
-    if result.recorded:
-        return sum(e.request == AUTHENTICATION_REQUEST for e in result.record.exchanges)
-    return int(result.authenticated)
 
 
 def _model_json(model: BaseModel) -> bytes:

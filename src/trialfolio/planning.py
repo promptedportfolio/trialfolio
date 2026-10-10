@@ -18,7 +18,8 @@ revisions):
   case, then a case for each variant, the default included, in the order of cases.
 - `plan_revision` builds an experiment's plan again for a run into its own output directory, and
   gives the revision of its current plan, with what changed, or None when the configuration and
-  the versions give the current plan, which the run resumes.
+  the versions give the current plan, which the run resumes. `plan_changes` gives what a
+  revision changed, which the executor records when it's given the revision's plan.
 - `first_experiment_record` and `revised_experiment_record` give the `experiment.json` of a
   plan: the experiment as the plan declares it, its retired cases, and the history of its plans.
 """
@@ -517,7 +518,7 @@ def plan_revision(
     if build_experiment_plan(configuration, versions, current.revises).plan_hash == current_hash:
         return None
     revision = build_experiment_plan(configuration, versions, current_hash)
-    return PlanRevision(revision, _changes(current, revision))
+    return PlanRevision(revision, plan_changes(current, revision))
 
 
 def _versions_of(plan: PlanV1_1) -> dict[VersionedPackage, str]:
@@ -529,7 +530,7 @@ def _versions_of(plan: PlanV1_1) -> dict[VersionedPackage, str]:
     }
 
 
-def _changes(previous: PlanV1_1, revision: PlanV1_1) -> PlanChanges:
+def plan_changes(previous: PlanV1_1, revision: PlanV1_1) -> PlanChanges:
     """What the revision changed from the plan before it: each version that changed, with both
     values; the cases it added, in its order, and those it retired, in the previous plan's; and
     which other parts changed.
