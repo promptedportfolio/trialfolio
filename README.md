@@ -1,5 +1,7 @@
 # Trial Folio
 
+[![check](https://github.com/promptedportfolio/trialfolio/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/promptedportfolio/trialfolio/actions/workflows/check.yml)
+
 Brought to you by [The Prompted Portfolio](https://promptedportfolio.com).
 
 > **Requires a Portfolio123 subscription.** This project works with the Portfolio123 API, which requires a Portfolio123 subscription with the appropriate access.

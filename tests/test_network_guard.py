@@ -272,10 +272,21 @@ def test_local_name_lookups_degrade_instead_of_failing() -> None:
 
 
 @pytest.mark.parametrize("host", ["", "0.0.0.0", "::"])
-def test_wildcard_addresses_resolve(host: str) -> None:
-    # A local server may resolve the address it binds to; these never leave the machine.
+def test_wildcard_address_lookups_pass_through(host: str) -> None:
+    # A local server may resolve the address it binds to; these never leave the machine. The
+    # guard passes the lookup to the platform, which decides the result: macOS resolves "", and
+    # glibc reports it unknown.
     family = socket.AF_INET6 if ":" in host else socket.AF_INET
-    assert socket.getaddrinfo(host, 0, family, socket.SOCK_STREAM, 0, socket.AI_PASSIVE)
+    unguarded = getattr(socket.getaddrinfo, "__wrapped__", None)
+    assert unguarded is not None
+
+    def lookup(function: Callable[..., object]) -> object:
+        try:
+            return function(host, 0, family, socket.SOCK_STREAM, 0, socket.AI_PASSIVE)
+        except socket.gaierror as error:
+            return error.errno
+
+    assert lookup(socket.getaddrinfo) == lookup(unguarded)
 
 
 def test_the_guard_wraps_each_call_once() -> None:

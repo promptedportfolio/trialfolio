@@ -25,6 +25,7 @@ import requests
 
 from tests.provider.conftest import PARAMS, ClientFactory, authenticate
 from tests.support import canaries
+from tests.support.deep_json import DEEP, on_a_fixed_stack
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.socket_faults import SocketFaults
 from trialfolio.attempts import Attempt, AttemptStatus, provider_requests, read_attempt
@@ -471,7 +472,7 @@ def test_a_redirect_on_the_request_is_refused_before_connecting(
         pytest.param(b"", id="empty"),
         # Nested past the decoder's recursion limit, so it raises RecursionError, not a
         # JSONDecodeError: any failure after the 200 means the wrapper couldn't decode it.
-        pytest.param(b"[" * 100_000 + b"]" * 100_000, id="too deep"),
+        pytest.param(DEEP, id="too deep"),
     ],
 )
 def test_a_200_the_wrapper_cant_decode_is_kept_undecoded(
@@ -480,7 +481,8 @@ def test_a_200_the_wrapper_cant_decode_is_kept_undecoded(
     authenticate(server, client)
     server.reply("/screen/backtest", Reply(200, body))
 
-    result = client.screen_backtest(PARAMS)
+    # On a fixed stack, so the deep body is too deep on every machine.
+    result = on_a_fixed_stack(lambda: client.screen_backtest(PARAMS))
 
     assert result == UndecodedResponse(body)
     assert client.exchanges == (AUTHENTICATED, response(BACKTEST, 200))
