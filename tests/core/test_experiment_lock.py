@@ -149,7 +149,9 @@ def refused_lock(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     return errors
 
 
-@pytest.mark.parametrize("code", [errno.ENOLCK, errno.EOPNOTSUPP, errno.EINVAL])
+# EACCES says another process holds the lock only from msvcrt.locking, on Windows: from flock,
+# it's a refusal, as PR #66's review found.
+@pytest.mark.parametrize("code", [errno.ENOLCK, errno.EOPNOTSUPP, errno.EINVAL, errno.EACCES])
 def test_a_refused_lock_fails_the_claim_and_leaves_nothing(
     tmp_path: Path, refused_lock: list[int], code: int
 ) -> None:

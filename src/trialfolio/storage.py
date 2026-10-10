@@ -94,10 +94,15 @@ _NO_HARD_LINKS: Final = frozenset({errno.ENOTSUP, errno.EPERM, errno.ENOSYS})
 as link(2) documents; and `ENOSYS`, which libfuse returns for a file system without a link
 operation."""
 
-_LOCK_HELD: Final = frozenset({errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES})
+_LOCK_HELD: Final = (
+    frozenset({errno.EACCES})
+    if sys.platform == "win32"
+    else frozenset({errno.EAGAIN, errno.EWOULDBLOCK})
+)
 """How taking the experiment lock reports that another process holds it: `EWOULDBLOCK`, which
 is `EAGAIN` on Linux and macOS, from `flock`, and `EACCES` from `msvcrt.locking` on Windows,
-whose C runtime documents it as a locking violation. Any other error refuses the lock."""
+whose C runtime documents it as a locking violation. Any other error refuses the lock, `EACCES`
+from `flock` included."""
 
 _APPLE_DOUBLE: Final = "._"
 """The prefix of the file that holds another file's extended attributes on macOS, where the file
