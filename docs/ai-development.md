@@ -35,7 +35,7 @@ This page explains in plain terms how I, Nathan Slaughter, use AI to build Trial
 
 ## Safeguards
 
-- **Automated checks.** Small test programs check that the software does what the plan says. They run before any code change leaves my computer, and again on GitHub for every proposed change, where anyone can see whether they passed.
+- **Automated checks.** Small test programs check that the software does what the plan says. They run before any code change leaves my computer, and again on GitHub for every proposed change, where anyone can see whether they passed. A change is merged only once they pass.
 - **Portfolio123 credits.** Tests that contact Portfolio123 use real API credits. They run only when I approve them, with a set budget, and while I'm present.
 - **Passwords and keys.** My Portfolio123 keys are kept in a password manager and supplied only to the commands that need them. They're never written into the project's files or logs.
 - **The AI's instructions are public.** The exact instructions I give the AI are in [AGENTS.md](../AGENTS.md), which anyone can read. For example, they tell it never to say a test passed unless it actually ran it.

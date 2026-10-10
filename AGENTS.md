@@ -79,7 +79,7 @@ This workflow is [D-11](docs/spec.md#decisions). Hooks in `.githooks/` enforce i
   - branch names of the form `<type>/<short-name>`
   - `scripts/check` before any push that changes more than docs, Markdown, `LICENSE`, or `reference/`
 
-On GitHub, the `check` workflow, [`.github/workflows/check.yml`](.github/workflows/check.yml), runs `scripts/check` on each pull request and each push to `main`, on Ubuntu with Python 3.12 and 3.14, and shows the result on the pull request. It adds to the `pre-push` hook, which still runs the checks before a push. It uses no secrets, and never runs the reference or live tests.
+On GitHub, the `check` workflow, [`.github/workflows/check.yml`](.github/workflows/check.yml), runs `scripts/check` on each pull request and each push to `main`, on Ubuntu with Python 3.12 and 3.14, and shows the result on the pull request. A pull request merges only once both of its jobs pass, which a ruleset on `main` requires. It adds to the `pre-push` hook, which still runs the checks before a push. It uses no secrets, and never runs the reference or live tests.
 
 The workflow:
 
