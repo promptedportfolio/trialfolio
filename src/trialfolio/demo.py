@@ -19,13 +19,11 @@ from importlib.resources import files
 from typing import Final
 
 from trialfolio.contracts.attempt import Exchange
-from trialfolio.contracts.common import AUTHENTICATION_REQUEST
+from trialfolio.contracts.common import AUTHENTICATION_REQUEST, SCREEN_BACKTEST_REQUEST
 from trialfolio.provider import DecodedResponse, ScreenBacktestResponse
 
 CONFIGURATION_NAME: Final = "demo screen configuration"
 """How messages name the packaged configuration."""
-
-_REQUEST: Final = "POST /screen/backtest"
 
 
 def configuration_bytes() -> bytes:
@@ -61,7 +59,7 @@ class SyntheticScreenBacktestClient:
     def screen_backtest(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
         if not self.authenticated:
             raise RuntimeError("Trial Folio authenticates with its own call before a request")
-        self._exchanges.append(_answered(_REQUEST))
+        self._exchanges.append(_answered(SCREEN_BACKTEST_REQUEST))
         return DecodedResponse(self._payload)
 
     def close(self) -> None:

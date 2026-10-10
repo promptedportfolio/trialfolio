@@ -341,6 +341,9 @@ NotAssessed = Literal["not_assessed"]
 AUTHENTICATION_REQUEST: Final = "POST /auth"
 """The exchange of Trial Folio's own authentication call (HTTP exchanges)."""
 
+SCREEN_BACKTEST_REQUEST: Final = "POST /screen/backtest"
+"""The exchange of the screen backtest request (HTTP exchanges)."""
+
 
 def require_unique[T](values: tuple[T, ...], what: str) -> None:
     """Raises `ValueError` when `values` repeats an element."""

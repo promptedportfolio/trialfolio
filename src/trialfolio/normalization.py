@@ -10,7 +10,11 @@ version 1).
 - `write_tables` does both for an attempt that succeeded, and writes the two tables.
   `write_case_tables` does so for an experiment's case, in `cases/<case_id>/normalized/`, with
   `original_key` and `original_value` from the experiment configuration of the plan its attempt
-  ran under (docs/contracts.md, an experiment's normalized tables).
+  ran under (docs/contracts.md, an experiment's normalized tables). A resume writes them from the
+  bytes of the response its records check read, and `write_case_settings` completes a case's
+  `settings.csv` beside a `metrics.csv` a stopped run wrote, with the coverage that table holds.
+  `case_metrics_rows` gives the rows the installed parser writes, which the check compares with a
+  `metrics.csv` no manifest lists (R03-T09).
 - `holds_series` says whether a decoded response holds the per-period series that 0.1.0 preserves
   without interpreting, for the manifest's `return_series`.
 
@@ -433,6 +437,12 @@ def write_tables(
     )
 
 
+def case_tables_path(case_id: str, path: str) -> str:
+    """`cases/<case_id>/<path>`, relative to the output root, for `METRICS_PATH` or
+    `SETTINGS_PATH`."""
+    return f"cases/{case_id}/{path}"
+
+
 def write_case_tables(
     store: ArtifactStore,
     case: ExperimentPlanCase,
@@ -440,6 +450,7 @@ def write_case_tables(
     *,
     configuration: StoredFile,
     response: SavedResponse,
+    content: bytes | None = None,
 ) -> NormalizedTables:
     """Normalizes the saved response of an experiment's case, and writes
     `cases/<case_id>/normalized/metrics.csv`, then `settings.csv`, as `write_tables` writes a
@@ -448,17 +459,105 @@ def write_case_tables(
 
     `configuration` is the saved `configuration.yaml` of the plan the attempt ran under, and
     `originals` each setting's key path and text in it, as `experiment_original_values` reads
-    them. Raises as `write_tables` does.
+    them. `content` is the response's bytes, when the caller read them already, as a resume's
+    records check did: the response is then never read again. Raises as `write_tables` does.
     """
+    original_values, original_keys = _split(originals)
     return _write(
         store,
         case,
-        {setting: text for setting, (_, text) in originals.items()},
-        {setting: key for setting, (key, _) in originals.items()},
+        original_values,
+        original_keys,
         f"cases/{case.case_id}/",
         configuration=configuration,
         response=response,
+        content=content,
     )
+
+
+def case_metrics_rows(
+    content: bytes, case: ExperimentPlanCase, response: SavedResponse
+) -> tuple[MetricsRow, ...]:
+    """The rows of the `metrics.csv` the installed parser writes for an experiment's case from its
+    saved response, whose bytes are `content`. Raises `TrialFolioError` with
+    `provider.response_invalid` as `write_case_tables` does."""
+    return _metrics(case, response, content)
+
+
+def write_case_settings(
+    store: ArtifactStore,
+    case: ExperimentPlanCase,
+    originals: Mapping[str, tuple[str, str]],
+    *,
+    configuration: StoredFile,
+    metrics: Sequence[MetricsRow],
+) -> tuple[StoredFile, tuple[SettingsRow, ...]]:
+    """Writes `cases/<case_id>/normalized/settings.csv` for a case whose `metrics.csv`, with the
+    rows `metrics`, a stopped run wrote without it, and returns it with its rows.
+
+    The settings are drawn from the configuration of the plan the attempt ran under, which no
+    parser reads. The one thing they take from the response, its coverage dates, for
+    `coverage_mismatch`, comes from `metrics`' coverage rows, so the pair agrees whichever parser
+    wrote `metrics.csv`. Raises `TrialFolioError` with `storage.write_failed` when it can't be
+    written.
+    """
+    original_values, original_keys = _split(originals)
+    rows = settings_rows(
+        case,
+        original_values,
+        label=case.case_id,
+        source_artifact=configuration.artifact_id,
+        coverage=_coverage_of(metrics),
+        original_keys=original_keys,
+    )
+    path = case_tables_path(case.case_id, SETTINGS_PATH)
+    return store.write(path, settings_csv(rows)), rows
+
+
+def _split(
+    originals: Mapping[str, tuple[str, str]],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """An experiment's original values, as `experiment_original_values` gives them, split into
+    each setting's text and its key."""
+    return (
+        {setting: text for setting, (_, text) in originals.items()},
+        {setting: key for setting, (key, _) in originals.items()},
+    )
+
+
+def _coverage_of(metrics: Sequence[MetricsRow]) -> Coverage:
+    """The coverage `metrics.csv`'s first three rows hold."""
+    rows = {row.metric_id: row for row in metrics}
+    start, end, periods = (
+        rows[name] for name in ("coverage_start", "coverage_end", "coverage_periods")
+    )
+    return Coverage(
+        start=Value(start.value, start.unavailable_reason),
+        end=Value(end.value, end.unavailable_reason),
+        periods=int(periods.value or 0),
+    )
+
+
+def _metrics(
+    case: PlanCase | ExperimentPlanCase, response: SavedResponse, content: bytes
+) -> tuple[MetricsRow, ...]:
+    _check_decoded(response)
+    return metrics_rows(
+        read_response(content, response.path),
+        label=case.case_id,
+        benchmark=case.requests[0].params.screen.benchmark,
+        source_artifact=response.artifact_id,
+    )
+
+
+def _check_decoded(response: SavedResponse) -> None:
+    if response.form == "undecoded":
+        raise TrialFolioError(
+            "provider.response_invalid",
+            f"Portfolio123's response couldn't be decoded as JSON, so it was saved as it came, as "
+            f"{response.path}, and the normalized result is unavailable. Report the problem if "
+            "it persists.",
+        )
 
 
 def _write(
@@ -470,15 +569,10 @@ def _write(
     *,
     configuration: StoredFile,
     response: SavedResponse,
+    content: bytes | None = None,
 ) -> NormalizedTables:
-    if response.form == "undecoded":
-        raise TrialFolioError(
-            "provider.response_invalid",
-            f"Portfolio123's response couldn't be decoded as JSON, so it was saved as it came, as "
-            f"{response.path}, and the normalized result is unavailable. Report the problem if "
-            "it persists.",
-        )
-    result = read_response(store.read(response.path), response.path)
+    _check_decoded(response)
+    result = read_response(store.read(response.path) if content is None else content, response.path)
     label = case.case_id
     metrics = metrics_rows(
         result,

@@ -21,6 +21,9 @@ PyYAML's parse events, never through PyYAML's constructors, so it decides what e
   be plain. In an experiment configuration, the same holds for the baseline's text, and for each
   rule variant's `add`, `replace`, and `with`, which are written as rules are.
 
+`experiment_schema_version` gives the schema version an experiment configuration declares, once
+its YAML rules and its `kind` are checked, and before anything else is.
+
 `original_values` gives each top-level value's text exactly as the file writes it, for
 `settings.csv`'s `original_value` (docs/contracts.md, settings.csv), and
 `experiment_original_values` an experiment case's, with the key path that writes each one, such
@@ -178,11 +181,41 @@ def read_experiment_configuration(content: bytes, source_name: str) -> Experimen
     return configuration
 
 
+def experiment_schema_version(content: bytes, source_name: str) -> object:
+    """The `schema_version` an experiment configuration gives, as `read_experiment_configuration`
+    reads it before it checks that the version is supported: the key's value, or None when the
+    file has no such key. So a reader of an experiment's records can tell a saved configuration
+    whose version it has no reader for (docs/contracts.md, artifact compatibility).
+
+    Raises `TrialFolioError` with `config.invalid` when the file breaks a YAML rule, isn't a
+    mapping, or isn't `kind: experiment`, as that function does.
+    """
+    document, _ = _read_kind(content, source_name, "experiment")
+    return document.get("schema_version")
+
+
 def _read_document(
     content: bytes, source_name: str, kind: str, versions: tuple[str, ...]
 ) -> tuple[dict[str, object], list[KeyPath]]:
     """The document of a configuration of `kind`, once its YAML rules, its `kind`, and its
     `schema_version` are checked; and where it writes text as a plain scalar."""
+    document, plain = _read_kind(content, source_name, kind)
+    supported = ", ".join(versions)
+    if "schema_version" not in document:
+        _fail(source_name, [f"`schema_version` is required. Supported versions: {supported}."])
+    if document["schema_version"] not in versions:
+        _fail(
+            source_name,
+            [f"`schema_version` isn't a supported version. Supported versions: {supported}."],
+        )
+    return document, plain
+
+
+def _read_kind(
+    content: bytes, source_name: str, kind: str
+) -> tuple[dict[str, object], list[KeyPath]]:
+    """The document of a configuration of `kind`, once its YAML rules and its `kind` are checked;
+    and where it writes text as a plain scalar."""
     loaded, _, plain, _ = _read_yaml(content, source_name)
     if not isinstance(loaded, dict):
         _fail(source_name, ["The file must be a mapping of keys to values."])
@@ -195,14 +228,6 @@ def _read_document(
         )
     if document["kind"] != kind:
         _fail(source_name, [f"`kind` must be {kind}."])
-    supported = ", ".join(versions)
-    if "schema_version" not in document:
-        _fail(source_name, [f"`schema_version` is required. Supported versions: {supported}."])
-    if document["schema_version"] not in versions:
-        _fail(
-            source_name,
-            [f"`schema_version` isn't a supported version. Supported versions: {supported}."],
-        )
     return document, plain
 
 

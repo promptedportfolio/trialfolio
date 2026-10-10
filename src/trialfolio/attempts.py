@@ -302,6 +302,9 @@ class _AttemptFiles:
         self._files: list[AttemptFile] = []
         self.request: StoredFile | None = None
         self.response: tuple[StoredFile, ScreenBacktestResponse] | None = None
+        self.published_response: ScreenBacktestResponse | None = None
+        """A response whose write failed after the store published it, with `list_published`:
+        it's listed, but `response` stays None, so no record references it."""
 
     @property
     def files(self) -> tuple[AttemptFile, ...]:
@@ -329,21 +332,27 @@ class _AttemptFiles:
         )
 
     def save(self, response: ScreenBacktestResponse, *, list_published: bool = False) -> None:
-        match response:
-            case DecodedResponse(payload=payload):
-                stored = self.write(
-                    "response.json",
-                    _response_json(payload),
-                    "provider_response",
-                    list_published=list_published,
-                )
-            case UndecodedResponse(body=body):
-                stored = self.write(
-                    "response.raw",
-                    body,
-                    "provider_response_undecoded",
-                    list_published=list_published,
-                )
+        listed = len(self._files)
+        try:
+            match response:
+                case DecodedResponse(payload=payload):
+                    stored = self.write(
+                        "response.json",
+                        _response_json(payload),
+                        "provider_response",
+                        list_published=list_published,
+                    )
+                case UndecodedResponse(body=body):
+                    stored = self.write(
+                        "response.raw",
+                        body,
+                        "provider_response_undecoded",
+                        list_published=list_published,
+                    )
+        except BaseException:
+            if len(self._files) > listed:
+                self.published_response = response
+            raise
         self.response = (stored, response)
 
     def published(self, name: str, data: bytes, role: AttemptRole) -> bool:
@@ -636,6 +645,10 @@ class ExperimentAttemptResult:
     """Every file the attempt wrote, in order."""
     response: ScreenBacktestResponse | None
     """The saved response, exactly when the attempt succeeded."""
+    published: ScreenBacktestResponse | None
+    """A response whose write failed after the store published it: `files` lists it, but the
+    attempt record doesn't reference it, so the attempt is `unknown`. The session's manifest
+    reads it all the same, for `return_series`."""
     error: TrialFolioError | None
     """The error the session reports for this attempt, or None. It's the record's, unless an
     interrupt or a storage failure decided the code."""
@@ -845,6 +858,7 @@ class ExperimentAttempt:
             start=self._start,
             files=self.files,
             response=None if saved is None else saved[1],
+            published=self._files.published_response,
             error=error,
             authenticated=self._authenticated,
             authentication_failed=self._authentication_failed,
