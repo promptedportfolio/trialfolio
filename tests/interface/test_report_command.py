@@ -9,15 +9,18 @@ creates no output), through the CLI's entry function in the test process. The ru
 by `trialfolio run`, over the fake server, and by `trialfolio demo`, and one is a copy of the
 committed `runs/synthetic-run-1.0.0/`; the runs that are broken one way are copies of it. The
 network guard is on throughout, so a re-render that connected anywhere but localhost would fail.
-A run directory after a symbolic link is read where the file system leads (docs/contracts.md,
-CLI behavior; a corrected defect, 2026-10-10).
+A run directory after a symbolic link is read where the file system leads, and under a symbolic
+link above both the run and the report, the links reach the run from the report's path as given
+and from where the file system puts it (docs/contracts.md, CLI behavior; corrected defects,
+2026-10-10).
 """
 
 import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
+from urllib.request import url2pathname
 
 import pytest
 
@@ -161,6 +164,30 @@ def test_a_run_directory_after_a_symbolic_link_is_read_where_the_file_system_lea
     assert relative
     for href in relative:
         assert (out / unquote(href)).resolve().is_relative_to(run.resolve())
+
+
+@pytest.mark.skipif(os.name == "nt", reason="creating a symbolic link needs a privilege there")
+def test_rerendered_links_reach_the_run_under_a_symbolic_link_above_both(cli: Cli) -> None:
+    # A corrected defect: the links went from the output directory as given to the run where the
+    # file system resolves it, so from where the report is, they missed the run. The link is at
+    # another depth than its target, as macOS's /tmp is a link to /private/tmp.
+    (cli.tmp / "private" / "tmp").mkdir(parents=True)
+    (cli.tmp / "tmp").symlink_to(cli.tmp / "private" / "tmp", target_is_directory=True)
+    run = demo_run(cli, cli.tmp / "tmp" / "study" / "run")
+    out = cli.tmp / "tmp" / "study" / "report"
+
+    assert cli("report", run, "--out", out).exit_code == 0
+
+    hrefs = [a.attrs["href"] or "" for a in report_document(out).root.find_all("a")]
+    relative = [h for h in hrefs if not h.startswith("#") and not urlsplit(h).scheme]
+    assert relative
+    # The report opened by the path it was written to, and where the file system puts it.
+    for report in (out / "report.html", (out / "report.html").resolve()):
+        for href in relative:
+            # As a browser follows a link: the URL's `..` removed as text, then the file opened.
+            target = Path(url2pathname(urlsplit(urljoin(report.as_uri(), href)).path))
+            assert target.is_file(), (report, href)
+    assert all(href.startswith("../run/") for href in relative)
 
 
 # What isn't a complete run (R01-AC23)

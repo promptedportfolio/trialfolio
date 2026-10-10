@@ -893,9 +893,14 @@ def _resolved(run_dir: str) -> str | None:
 
 def _run_path(run_dir: str, out: str) -> str | None:
     """The run's directory relative to the report's, with `/` separators, or None when there's
-    no relative path, as between two Windows drives."""
+    no relative path, as between two Windows drives. Both are where the file system puts them:
+    `run_dir` is resolved already, and the report's directory is resolved here, so the path
+    reaches the run from where the report is, and a symbolic link above both, such as macOS's
+    `/tmp`, stays out of it."""
     try:
-        relative = os.path.relpath(os.path.abspath(run_dir), os.path.abspath(out))
+        # The store's `abspath` first, which removes the output directory's `..` as text.
+        report_dir = os.path.realpath(os.path.abspath(out))
+        relative = os.path.relpath(run_dir, report_dir)
     except ValueError:
         return None
     return Path(relative).as_posix()
