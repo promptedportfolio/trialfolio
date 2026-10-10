@@ -188,6 +188,9 @@ class StorageFaults:
     def read(self, path: str) -> bytes:
         return self._store.read(path)
 
+    def entries(self, path: str) -> tuple[str, ...]:
+        return self._store.entries(path)
+
 
 def _key(path: str, faults: Collection[str]) -> str:
     """The name a fault for `path` is set under: its whole path, `/` first, when one is set, and

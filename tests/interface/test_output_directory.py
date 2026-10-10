@@ -115,6 +115,9 @@ class Intruded:
     def read(self, path: str) -> bytes:
         return self._store.read(path)
 
+    def entries(self, path: str) -> tuple[str, ...]:
+        return self._store.entries(path)
+
 
 def intruded(root: str) -> ArtifactStore:
     return Intruded(root)

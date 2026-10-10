@@ -1,13 +1,13 @@
 """An experiment runs through the core functions alone, as another interface would run it, with
 no CLI: it's planned, approved, and executed, its progress arrives as events, each once what it
-reports is written, and it's cancelled between provider requests. An exception the progress
-callback raises propagates from the execution.
+reports is written, it's cancelled between provider requests, and it's resumed. An exception the
+progress callback raises propagates from the execution.
 
 Traces to R03-AC13 (D-30) and docs/contracts.md, interface-independent core, progress and
-cancellation, and the executor (when the progress events come). This is R03-T08's part of the
-test; R03-T09 adds the second execution, which resumes the experiment. The real client,
-`requests`, and `urllib3` run over the fake server, with credentials the test passes in, and the
-clock is fixed; the tests of a raising callback run a synthetic experiment with the demo's client.
+cancellation, and the executor (when the progress events come). R03-T08 wrote the first execution,
+and R03-T09 the second, which resumes the experiment. The real client, `requests`, and `urllib3`
+run over the fake server, with credentials the test passes in, and the clock is fixed; the tests
+of a raising callback run a synthetic experiment with the demo's client.
 """
 
 import os
@@ -32,7 +32,13 @@ from trialfolio.experiment_execution import (
     SessionEnded,
     SessionStarted,
 )
-from trialfolio.planning import build_experiment_plan, check_approval, installed_versions
+from trialfolio.experiment_records import open_experiment
+from trialfolio.planning import (
+    build_experiment_plan,
+    check_approval,
+    installed_versions,
+    plan_revision,
+)
 from trialfolio.provider import Credentials, P123ScreenBacktestClient
 from trialfolio.storage import LocalArtifactStore
 
@@ -63,7 +69,7 @@ def test_the_core_plans_approves_executes_and_cancels_an_experiment_without_the_
     complete = (
         Path(__file__).resolve().parents[1] / "fixtures/responses/complete.json"
     ).read_bytes()
-    server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+    server.reply("/auth", Reply(200, canaries.TOKEN.encode()), Reply(200, canaries.TOKEN.encode()))
     server.reply("/screen/backtest", *(Reply(200, complete) for _ in range(5)))
     events: list[ProgressEvent] = []
     # What was on disk, and how many requests the server had received, at each event.
@@ -128,6 +134,29 @@ def test_the_core_plans_approves_executes_and_cancels_an_experiment_without_the_
             )
             error = execution.run(EXAMPLE.read_bytes())
         received = server.requests()
+        # The second execution resumes the experiment: its records are read under the lock, the
+        # configuration gives the same plan, and the same hash approves it.
+        resumed_events: list[ProgressEvent] = []
+        with (
+            P123ScreenBacktestClient(credentials, endpoint=server.endpoint) as client,
+            LocalArtifactStore(out) as store,
+        ):
+            saved = open_experiment(store)
+            again = read_experiment_configuration(EXAMPLE.read_bytes(), "uploaded study")
+            assert plan_revision(again, installed_versions(), saved.plan) is None
+            resumed = ExperimentExecution(
+                saved.plan,
+                approved,
+                "interactive",
+                store,
+                client,
+                command=None,
+                clock=FixedClock(),
+                progress=resumed_events.append,
+                experiment=saved,
+            )
+            resumed_error = resumed.run(EXAMPLE.read_bytes())
+        resumed_received = server.requests()[len(received) :]
     finally:
         server.close()
 
@@ -180,11 +209,31 @@ def test_the_core_plans_approves_executes_and_cancels_an_experiment_without_the_
     assert isinstance(session_ended, SessionEnded)
     assert session_ended.counts == manifest.counts
     assert manifest.counts.cases.not_yet_run == 3
+    # The resume sends cases 3 to 5, after one authentication, and ends completed.
+    assert resumed_error is None
+    assert resumed_received == ["POST /auth", *("POST /screen/backtest" for _ in range(3))]
+    assert resumed_events[0] == SessionStarted(session=2, cases=case_ids[2:])
+    assert [type(e) for e in resumed_events] == [
+        SessionStarted,
+        *((AttemptStarted, AttemptEnded) * 3),
+        SessionEnded,
+    ]
+    assert [e.case_id for e in resumed_events if isinstance(e, AttemptStarted)] == list(
+        case_ids[2:]
+    )
+    second = ExperimentManifest.model_validate_json((out / "sessions/2/manifest.json").read_bytes())
+    assert (second.outcome, second.plan_hash, second.approval) == (
+        "completed",
+        plan.plan_hash,
+        "interactive",
+    )
+    assert second.counts.cases.succeeded == 5
+    assert [outcome for _, outcome in resumed.outcomes] == ["succeeded"] * 5
     # Nothing printed, nothing prompted.
     assert capfd.readouterr() == ("", "")
     # The events hold no text from the configuration: each names a case by its case_id.
     keys = {case.case_key for case in plan.cases} - {"baseline"}
-    assert not any(key in repr(event) for event in events for key in keys)
+    assert not any(key in repr(event) for event in (*events, *resumed_events) for key in keys)
 
 
 class _CallbackFailed(Exception):
