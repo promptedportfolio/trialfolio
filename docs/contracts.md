@@ -1019,7 +1019,7 @@ Each case also holds:
   - a changed `title`, `purpose`, or `prior_research`;
   - a changed case key, description, or `variant`, or a new order of one setting's variants. A `variant` can change while the case's settings don't, as when a `rebalance_weeks` list gives the [default variant](#default-variants)'s value, which makes its `default` false;
   - a changed budget;
-  - a new version of Trial Folio, `p123api`, `requests`, or `urllib3`, even with the same configuration, as an [open question](releases/0.3.0-experiments.md#open-questions) proposed. Its revision records both versions of each, and is a change of versions, not of the configuration.
+  - a new version of Trial Folio, `p123api`, `requests`, or `urllib3`, even with the same configuration, as an [open question](releases/0.3.0-experiments.md#open-questions) recommended. Its revision records both versions of each, and is a change of versions, not of the configuration.
 - **Another `experiment_id` or universe isn't a revision.** Either makes another experiment, so its configuration can't run in this directory: `output.not_empty`, and the message says that it's another experiment, to run into a new output directory. The message names neither experiment's `experiment_id` nor either universe, which are the user's text, so it can be logged as it is ([logging](#logging-and-local-diagnostics)) (R03-T07).
   - **Another `experiment_id`** names another experiment. The alternative was a revision that renames the experiment, which would give one experiment's history two identities.
   - **Another universe** is a separate experiment ([D-19](spec.md#decisions)), which no release through 0.3.0 varies within an experiment. As a revision, it would retire every case and keep it in the record, so one experiment would hold cases on two universes.
@@ -1848,6 +1848,6 @@ JSON Schemas are generated from the models, never maintained by hand, and commit
 
 ## Open questions
 
-| Question | Impact | Proposed default | Resolve by |
+| Question | Impact | Recommended default | Resolve by |
 |---|---|---|---|
 | Are failed screen-backtest requests charged? | Budget accounting for failed and uncertain attempts | Until verified, count every send that may have reached Portfolio123 as possibly charged, whatever its outcome, and no other ([possibly charged](#http-exchanges)) | The owner compares the account's credit history, or asks Portfolio123. R01-T01's and R01-T05's calls didn't settle it. |

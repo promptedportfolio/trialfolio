@@ -285,6 +285,6 @@ Version 1.1 applies from release 0.2.1. Releases 0.1.0 and 0.2.0, whose tags hol
 
 ## Outstanding decisions
 
-| Decision | Impact | Proposed default | Resolve by |
+| Decision | Impact | Recommended default | Resolve by |
 |---|---|---|---|
 | Contributor terms ([LIC-14](#lic-14-contributions)) | Blocks accepting outside contributions | Accept none until terms exist | Before accepting a contribution |

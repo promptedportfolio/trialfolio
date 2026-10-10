@@ -95,7 +95,7 @@ The owner assigns these by ID. They aren't next items: [Doing the next item](../
 
 ## Open questions
 
-| Question | Impact | Proposed default | Resolve by |
+| Question | Impact | Recommended default | Resolve by |
 |---|---|---|---|
 | Which two toolkits? | What gets built, and what the ADR compares | GP-T01 proposes them after its license check. The starting suggestion is PySide6 and pywebview, which keep the app in Python with the existing core. Electron and Tauri, which LIC-17 also lists, need a JavaScript or Rust toolchain to build. | GP-T01 |
 | Where does the code live? | The repository's checks, and the `trialfolio` package | In `prototypes/graphical/` in this repository, as its own `uv` project that depends on the local `trialfolio` package. It's outside `trialfolio`'s wheel, and the toolkits aren't `trialfolio`'s dependencies. Built apps are git-ignored. | GP-T01 |
