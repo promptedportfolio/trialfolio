@@ -1,0 +1,45 @@
+# Runs scripts/check, every check that needs no credentials or reference data, on each pull
+# request and each push to main (AGENTS.md, Git workflow). The pre-push hook runs the same
+# script before a push. This workflow shows the result on GitHub. The reference and live tests
+# never run here: they need the owner's local data, or the owner's credentials and presence.
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# The job only reads the repository, and uses no secrets.
+permissions:
+  contents: read
+
+# A new push to a pull request cancels its earlier run. Every other run, on main or on demand,
+# has a group of its own, so no other run cancels it: GitHub keeps only one waiting run in a
+# group, and cancels it when a newer one arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: check (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest Python that requires-python allows, and the newest.
+        python: ["3.12", "3.14"]
+    steps:
+      # Actions are pinned to a commit, with the release it is in a comment.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          # Pinned, so `uv lock --check` doesn't change with a new uv release.
+          version: "0.12.23"
+          python-version: ${{ matrix.python }}
+      # GitHub sets CI, so the script skips its check that the Git hooks are on.
+      - run: scripts/check

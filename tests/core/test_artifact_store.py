@@ -451,6 +451,8 @@ def test_macos_falls_back_to_fsync_without_a_full_sync(
 ) -> None:
     # ENODEV is what devfs reports, verified on macOS 26.6.2, and ENOTSUP what Go's os package
     # reports for SMB mounts.
+    # The skip doesn't tell pyright the platform, and F_FULLFSYNC exists only on macOS.
+    assert sys.platform == "darwin"
     import fcntl
 
     real_fcntl = fcntl.fcntl
@@ -489,6 +491,7 @@ def test_macos_fails_the_write_when_a_full_sync_fails_otherwise(
     store: LocalArtifactStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # An I/O error isn't a missing feature: a fallback fsync could hide it.
+    assert sys.platform == "darwin"  # For pyright, as above.
     import fcntl
 
     real_fcntl = fcntl.fcntl

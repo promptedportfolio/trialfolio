@@ -47,7 +47,7 @@ R01-T06 set these up. The status column says which have been verified, and when.
 |---|---|---|
 | `scripts/setup` | Once per clone: enable the Git hooks | Verified 2026-10-02 |
 | `uv sync` | Create the environment | Verified 2026-10-02 |
-| `scripts/check` | Every check that needs no credentials or reference data; the `pre-push` hook runs it | Verified 2026-10-02, with the schema drift check since R01-T07. Since R01-T16 (verified 2026-10-04), a pytest step that collects no tests fails. |
+| `scripts/check` | Every check that needs no credentials or reference data; the `pre-push` hook runs it, and so does the `check` workflow on GitHub ([git workflow](#git-workflow)) | Verified 2026-10-02, with the schema drift check since R01-T07. Since R01-T16 (verified 2026-10-04), a pytest step that collects no tests fails. The `check` workflow first passed on GitHub on 2026-10-09, on Python 3.12.3 and 3.14.8. |
 | `uv run pytest` | Default suite; network access blocked; no live calls | Verified 2026-10-02, and with 0.2.0's review tests on 2026-10-06, on Python 3.14.8 and 3.12.13 |
 | `scripts/schemas` | Regenerate the JSON Schemas under `schemas/`; `--check` is the drift check | Verified 2026-10-02 |
 | `uv run pytest -m packaging` | Build the wheel, inspect it, and run the demo, and a review of two demo runs, from a clean install | Verified 2026-10-04, and with the review on 2026-10-06 |
@@ -79,6 +79,8 @@ This workflow is [D-11](docs/spec.md#decisions). Hooks in `.githooks/` enforce i
   - branch names of the form `<type>/<short-name>`
   - `scripts/check` before any push that changes more than docs, Markdown, `LICENSE`, or `reference/`
 
+On GitHub, the `check` workflow, [`.github/workflows/check.yml`](.github/workflows/check.yml), runs `scripts/check` on each pull request and each push to `main`, on Ubuntu with Python 3.12 and 3.14, and shows the result on the pull request. A pull request merges only once both of its jobs pass, which a ruleset on `main` requires. It adds to the `pre-push` hook, which still runs the checks before a push. It uses no secrets, and never runs the reference or live tests.
+
 The workflow:
 
 - Start each change on a feature branch named `<type>/<short-description>`. Push it and open a pull request with `gh pr create`.
@@ -89,7 +91,7 @@ The workflow:
   3. A third review of the fixes, when the first two reviews found anything of medium or high severity or the fixes changed behavior or tests, and only if the fixes pushed a change. Its findings are fixed or declined the same way, which ends the review. Without a third review, the fixes end it.
 
   Each review is posted on the pull request as a review of its own, numbered, even when it finds nothing, so the pull request shows which reviews ran. The owner's approval to merge comes after the review, never in place of it. If the review hasn't run, or hasn't ended, don't merge, even when the owner asks: say so, and stop.
-- Don't bypass the hooks, and don't edit `.githooks/` or `.claude/` unless Nathan asks.
+- Don't bypass the hooks, and don't edit `.githooks/`, `.github/workflows/`, or `.claude/` unless Nathan asks.
 - The repository is public ([ADR 0007](docs/adrs/0007-host-the-source-publicly-on-github.md)). Outside contributions aren't accepted ([LIC-14](docs/licensing-policy.md#lic-14-contributions)): don't merge, copy, or adapt changes from a pull request that Nathan didn't author.
 
 ## Doing the next item
