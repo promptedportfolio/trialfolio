@@ -47,7 +47,7 @@ R01-T06 set these up. The status column says which have been verified, and when.
 |---|---|---|
 | `scripts/setup` | Once per clone: enable the Git hooks | Verified 2026-10-02 |
 | `uv sync` | Create the environment | Verified 2026-10-02 |
-| `scripts/check` | Every check that needs no credentials or reference data; the `pre-push` hook runs it, and so does the `check` workflow on GitHub ([git workflow](#git-workflow)) | Verified 2026-10-02, with the schema drift check since R01-T07. Since R01-T16 (verified 2026-10-04), a pytest step that collects no tests fails. |
+| `scripts/check` | Every check that needs no credentials or reference data; the `pre-push` hook runs it, and so does the `check` workflow on GitHub ([git workflow](#git-workflow)) | Verified 2026-10-02, with the schema drift check since R01-T07. Since R01-T16 (verified 2026-10-04), a pytest step that collects no tests fails. The `check` workflow first passed on GitHub on 2026-10-09, on Python 3.12.3 and 3.14.8. |
 | `uv run pytest` | Default suite; network access blocked; no live calls | Verified 2026-10-02, and with 0.2.0's review tests on 2026-10-06, on Python 3.14.8 and 3.12.13 |
 | `scripts/schemas` | Regenerate the JSON Schemas under `schemas/`; `--check` is the drift check | Verified 2026-10-02 |
 | `uv run pytest -m packaging` | Build the wheel, inspect it, and run the demo, and a review of two demo runs, from a clean install | Verified 2026-10-04, and with the review on 2026-10-06 |
