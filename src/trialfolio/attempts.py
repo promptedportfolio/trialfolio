@@ -308,20 +308,42 @@ class _AttemptFiles:
         """Every file written so far, in order."""
         return tuple(self._files)
 
-    def write(self, name: str, data: bytes, role: AttemptRole) -> StoredFile:
-        stored = self._store.write(f"{self._directory}/{name}", data)
+    def write(
+        self, name: str, data: bytes, role: AttemptRole, *, list_published: bool = False
+    ) -> StoredFile:
+        """Writes `name`, and lists it. With `list_published`, a write that fails after the store
+        published the file, whatever the failure, lists it all the same, so a manifest written
+        later lists every file the attempt wrote."""
+        try:
+            stored = self._store.write(f"{self._directory}/{name}", data)
+        except BaseException:
+            if list_published:
+                self.published(name, data, role)
+            raise
         self._files.append(AttemptFile(role, stored))
         return stored
 
-    def write_request(self, params: dict[str, object]) -> None:
-        self.request = self.write("request.json", _request_json(params), "provider_request")
+    def write_request(self, params: dict[str, object], *, list_published: bool = False) -> None:
+        self.request = self.write(
+            "request.json", _request_json(params), "provider_request", list_published=list_published
+        )
 
-    def save(self, response: ScreenBacktestResponse) -> None:
+    def save(self, response: ScreenBacktestResponse, *, list_published: bool = False) -> None:
         match response:
             case DecodedResponse(payload=payload):
-                stored = self.write("response.json", _response_json(payload), "provider_response")
+                stored = self.write(
+                    "response.json",
+                    _response_json(payload),
+                    "provider_response",
+                    list_published=list_published,
+                )
             case UndecodedResponse(body=body):
-                stored = self.write("response.raw", body, "provider_response_undecoded")
+                stored = self.write(
+                    "response.raw",
+                    body,
+                    "provider_response_undecoded",
+                    list_published=list_published,
+                )
         self.response = (stored, response)
 
     def published(self, name: str, data: bytes, role: AttemptRole) -> bool:
@@ -636,6 +658,12 @@ class ExperimentAttempt:
     session, `sequence`, the attempt whose authentication gave its token, `authenticated_by`,
     and the attempt a repeat repeats, `repeat_of`.
 
+    A file before the attempt record that the store published before its write failed, whatever
+    the failure, is in `files` all the same, so the session's manifest lists every file the
+    attempt wrote. The attempt record references a request or a response only when its write
+    completed, so a 200 whose `response.json` was published that way is `unknown`, as one whose
+    save failed.
+
     The properties stay readable whatever happens, as an `Attempt`'s do.
     """
 
@@ -726,7 +754,7 @@ class ExperimentAttempt:
             if token_from is None:
                 self._authenticate(client)
                 token_from = self._attempt_id
-            self._files.write_request(self._params)
+            self._files.write_request(self._params, list_published=True)
             start = StartRecordV1_1(
                 **self._placed(),
                 authenticated_by=token_from,
@@ -737,7 +765,7 @@ class ExperimentAttempt:
                 exchanges=client.exchanges[first:],
             )
             self._write_start(start)
-            self._files.save(client.screen_backtest(self._params))
+            self._files.save(client.screen_backtest(self._params), list_published=True)
         except KeyboardInterrupt as interrupt:
             ending = interrupt
         # Every ending is recorded. An unexpected one is classified, and logged by its frames.
@@ -770,12 +798,9 @@ class ExperimentAttempt:
             repeat_of=self._repeat_of,
             started_at=self._started_at,
         )
-        data = _model_json(record)
-        try:
-            self._files.write(AUTHENTICATION_RECORD, data, "authentication_record")
-        except KeyboardInterrupt:
-            self._files.published(AUTHENTICATION_RECORD, data, "authentication_record")
-            raise
+        self._files.write(
+            AUTHENTICATION_RECORD, _model_json(record), "authentication_record", list_published=True
+        )
         self._authenticated = True
         try:
             client.authenticate()

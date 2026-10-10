@@ -20,6 +20,7 @@ is at least the number of cases, each case's one attempt makes at most one reque
 authentication call, so the budget always covers it. R03-T09, which writes resume, writes it.
 """
 
+import hashlib
 import json
 import uuid
 from collections.abc import Callable, Iterator, Sequence
@@ -788,6 +789,59 @@ def test_an_attempt_without_a_start_record_or_an_attempt_record_reads_as_its_rec
         assert executed.received == (AUTH, SEND)
         assert not (executed.out / "cases" / second).exists()
         assert outcomes(executed) == ["succeeded", "not_yet_run"]
+
+
+@pytest.mark.parametrize(
+    ("name", "role", "code"),
+    [
+        ("authenticating.json", "authentication_record", "internal.unexpected"),
+        ("request.json", "provider_request", "internal.unexpected"),
+        ("response.json", "provider_response", "provider.outcome_unknown"),
+    ],
+)
+def test_a_file_published_before_an_unexpected_failure_is_in_the_manifest(
+    experiments: Experiments, monkeypatch: pytest.MonkeyPatch, name: str, role: str, code: str
+) -> None:
+    # The attempt is recorded, and the session goes on to its manifest, which lists every file of
+    # the experiment's records. A defect found by PR #66's review: it left out the file.
+    experiments.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
+    experiments.server.reply("/screen/backtest", complete(), complete())
+
+    def faults(store: LocalArtifactStore) -> StorageFaults:
+        faulted = StorageFaults(store, monkeypatch)
+        faulted.fail_after(name, RuntimeError())
+        return faulted
+
+    executed = experiments.run("default-only.yaml", faults=faults)
+
+    error = executed.error
+    assert error is not None and error.code == "execution.partial"
+    first, _ = ids(executed.plan)
+    record = executed.record(first)
+    assert record.error is not None and record.error.code == code
+    # Only a write that completed is referenced: a 200 whose response.json was published before
+    # the failure is unknown, as one whose save failed.
+    assert record.response is None
+    assert (record.request is None) == (name != "response.json")
+    assert outcomes(executed) == [
+        "unknown" if name == "response.json" else "failed",
+        "succeeded",
+    ]
+    (attempt,) = executed.attempts(first)
+    content = (attempt / name).read_bytes()
+    listed = {artifact.path: artifact for artifact in executed.manifest.artifacts}
+    path = (attempt / name).relative_to(executed.out).as_posix()
+    assert (listed[path].role, listed[path].artifact_id, listed[path].size) == (
+        role,
+        "sha256:" + hashlib.sha256(content).hexdigest(),
+        len(content),
+    )
+    written = {
+        file.relative_to(executed.out).as_posix()
+        for file in executed.out.rglob("*")
+        if file.is_file()
+    }
+    assert set(listed) == written - {LOCK_PATH, "sessions/1/manifest.json"}
 
 
 @pytest.mark.parametrize(
