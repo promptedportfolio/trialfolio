@@ -127,6 +127,9 @@ class _AfterWriteStore:
     def read(self, path: str) -> bytes:
         return self._store.read(path)
 
+    def entries(self, path: str) -> tuple[str, ...]:
+        return self._store.entries(path)
+
 
 # Before the claim
 

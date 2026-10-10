@@ -30,6 +30,8 @@ A store serves one output directory, its root, and takes paths relative to it.
 - **Names in logs.** The store logs each file it writes by its path, and names it in its errors'
   logged messages, unless the caller gives another name for logs, because the path holds a
   configuration value: a review's copies are under `inputs/<label>/` (release 0.2.0, R02-T08).
+- **Listing.** `entries` gives the names in a directory, so a resume finds an experiment's
+  records through the store (release 0.3.0, R03-T09).
 
 R01-T08 checked what each platform reports, on macOS 26.6.2 with Python 3.12.13:
 
@@ -234,6 +236,15 @@ class ArtifactStore(Protocol):
         """
         ...
 
+    def entries(self, path: str) -> tuple[str, ...]:
+        """Returns the names of the entries in the directory `path` under the root, sorted,
+        hidden ones included, so a resume can find an experiment's records (R03-T09).
+
+        Raises `FileNotFoundError` if there's no such directory, `NotADirectoryError` if `path`
+        is a file, and `OSError` if it can't be read.
+        """
+        ...
+
 
 class LocalArtifactStore:
     """An `ArtifactStore` for a directory on a local file system.
@@ -411,6 +422,11 @@ class LocalArtifactStore:
         # Reads follow symbolic links, as any file read does. The manifest's hashes, not the
         # store, detect a file that changed.
         return self._root.joinpath(*valid_relative_path(path).split("/")).read_bytes()
+
+    def entries(self, path: str) -> tuple[str, ...]:
+        directory = self._root.joinpath(*valid_relative_path(path).split("/"))
+        with os.scandir(directory) as found:
+            return tuple(sorted(entry.name for entry in found))
 
     def _check_root(self) -> bool:
         """Raises unless the root is a directory, or can be created as one. Returns whether it
