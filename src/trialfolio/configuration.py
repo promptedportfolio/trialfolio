@@ -22,7 +22,10 @@ PyYAML's parse events, never through PyYAML's constructors, so it decides what e
   rule variant's `add`, `replace`, and `with`, which are written as rules are.
 
 `original_values` gives each top-level value's text exactly as the file writes it, for
-`settings.csv`'s `original_value` (docs/contracts.md, settings.csv).
+`settings.csv`'s `original_value` (docs/contracts.md, settings.csv), and
+`experiment_original_values` an experiment case's, with the key path that writes each one, such
+as `baseline.max_holdings` or `variants.max_holdings[0].value` (an experiment's normalized
+tables).
 
 Error messages name the offending key and never include its value, so they're safe to log.
 """
@@ -52,14 +55,23 @@ from yaml.events import (
 )
 from yaml.nodes import Node, ScalarNode
 
-from trialfolio.contracts.common import DATE_PATTERN, INTEGER_PATTERN, LABEL_PATTERN, NOT_BLANK
+from trialfolio.contracts.common import (
+    BASELINE_CASE_KEY,
+    DATE_PATTERN,
+    INTEGER_PATTERN,
+    LABEL_PATTERN,
+    NOT_BLANK,
+)
 from trialfolio.contracts.experiment_configuration import (
     EXPERIMENT_SCHEMA_VERSIONS,
     VARIANT_SETTINGS,
     ExperimentConfiguration,
+    RuleVariant,
+    configured_variants,
 )
 from trialfolio.contracts.review_configuration import REVIEW_SCHEMA_VERSIONS, ReviewConfiguration
 from trialfolio.contracts.screen_configuration import SCREEN_SCHEMA_VERSIONS, ScreenConfiguration
+from trialfolio.contracts.screen_settings import SCREEN_SETTINGS
 from trialfolio.errors import TrialFolioError
 
 type KeyPath = tuple[str | int, ...]
@@ -171,7 +183,7 @@ def _read_document(
 ) -> tuple[dict[str, object], list[KeyPath]]:
     """The document of a configuration of `kind`, once its YAML rules, its `kind`, and its
     `schema_version` are checked; and where it writes text as a plain scalar."""
-    loaded, _, plain = _read_yaml(content, source_name)
+    loaded, _, plain, _ = _read_yaml(content, source_name)
     if not isinstance(loaded, dict):
         _fail(source_name, ["The file must be a mapping of keys to values."])
     document = cast("dict[str, object]", loaded)
@@ -203,7 +215,50 @@ def original_values(content: bytes, source_name: str) -> Mapping[str, str]:
     For a file `read_screen_configuration` accepted. Raises `TrialFolioError` with
     `config.invalid` when the file breaks a YAML rule, as that function does.
     """
-    _, originals, _ = _read_yaml(content, source_name)
+    _, originals, _, _ = _read_yaml(content, source_name)
+    return originals
+
+
+def experiment_original_values(
+    content: bytes, source_name: str, case_key: str
+) -> Mapping[str, tuple[str, str]]:
+    """For the case `case_key` of an experiment configuration, each setting that a key of the file
+    writes, with that key's path and its value's text as the file writes it, as `original_values`
+    gives a screen's (docs/contracts.md, an experiment's normalized tables):
+
+    - **The setting the case's variant changes:** the variant's change, such as
+      `variants.max_holdings[0].value`, or, for a rule, `variants.rules[0].add` or
+      `variants.rules[0].with`.
+    - **Every other setting:** the baseline's key, such as `baseline.max_holdings`.
+    - **The default variant's `rebalance_weeks`,** which no key writes, and a setting no key
+      writes in a screen configuration either: left out.
+
+    For a file `read_experiment_configuration` accepted. Raises `TrialFolioError` with
+    `config.invalid` when the file isn't valid, and `ValueError` when it has no case keyed
+    `case_key`.
+    """
+    configuration = read_experiment_configuration(content, source_name)
+    _, _, _, values = _read_yaml(content, source_name)
+    variant = None
+    if case_key != BASELINE_CASE_KEY:
+        found = [v for v in configured_variants(configuration) if v.key == case_key]
+        if not found:
+            raise ValueError("the configuration has no case with this key")
+        (variant,) = found
+    originals: dict[str, tuple[str, str]] = {}
+    for setting in SCREEN_SETTINGS:
+        key = f"baseline.{setting.name}"
+        if variant is not None and setting.name == variant.setting:
+            if variant.place is None:
+                continue  # The default variant, whose value no key writes.
+            change = variant.variant
+            if isinstance(change, RuleVariant):
+                key = f"{variant.place}.{'add' if change.add is not None else 'with'}"
+            else:
+                key = f"{variant.place}.value"
+        text = values.get(key)
+        if text is not None:
+            originals[setting.name] = (key, text)
     return originals
 
 
@@ -328,16 +383,19 @@ def _describe(detail: ErrorDetails) -> str:
     return f"`{key}` {message[0].lower()}{message[1:]}."
 
 
-def _read_yaml(content: bytes, source_name: str) -> tuple[object, dict[str, str], list[KeyPath]]:
-    """The document's value; each top-level value's text, as `original_values` gives it; and
-    where the file writes text as a plain scalar, without quotes, in the file's order."""
+def _read_yaml(
+    content: bytes, source_name: str
+) -> tuple[object, dict[str, str], list[KeyPath], dict[str, str]]:
+    """The document's value; each top-level value's text, as `original_values` gives it; where
+    the file writes text as a plain scalar, without quotes, in the file's order; and every
+    value's text, by its key path, such as `variants.rules[0].add`."""
     try:
         text = content.decode("utf-8").removeprefix("\ufeff")
     except UnicodeDecodeError:
         _fail(source_name, ["The file isn't UTF-8 text."])
     try:
         builder = _Builder(text)
-        return builder.document(), builder.originals, builder.plain_text
+        return builder.document(), builder.originals, builder.plain_text, builder.values
     except _Invalid as error:
         where = f"`{_format_path(error.path)}`" if error.path else "The file"
         _fail(source_name, [f"{where} {error.problem}"])
@@ -384,6 +442,9 @@ class _Builder:
         collection ends where its last item does."""
         self.originals: dict[str, str] = {}
         """Each top-level value's text, by key, once `document` has returned."""
+        self.values: dict[str, str] = {}
+        """Every value's text, by its key path as messages write it, once `document` has
+        returned."""
         self.plain_text: list[KeyPath] = []
         """Where a plain scalar, without quotes or a block indicator, was read as text."""
 
@@ -417,9 +478,11 @@ class _Builder:
         if event.anchor is not None:
             raise _Invalid(path, "has an anchor. Anchors and aliases aren't accepted.")
         value = self._node(event, path)
-        if len(path) == 1 and isinstance(path[0], str):
-            span = self._text[_index(event.start_mark) : self._end]
-            self.originals[path[0]] = span.rstrip(_YAML_SPACE)
+        if path:
+            span = self._text[_index(event.start_mark) : self._end].rstrip(_YAML_SPACE)
+            self.values[_format_path(path)] = span
+            if len(path) == 1 and isinstance(path[0], str):
+                self.originals[path[0]] = span
         return value
 
     def _node(self, event: NodeEvent, path: KeyPath) -> object:
