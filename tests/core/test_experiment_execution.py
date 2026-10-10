@@ -735,6 +735,59 @@ def test_an_attempt_record_that_wasnt_written_ends_the_session_without_its_manif
     assert executed.execution.manifest is None
     assert not (executed.out / "sessions/1/manifest.json").exists()
     assert not (executed.out / "sessions/1/report.html").exists()
+    # A running start record counts as unknown. A defect found by PR #66's review: the outcomes
+    # read the attempt record that wasn't written, and gave the case as succeeded.
+    assert outcomes(executed) == ["unknown", "not_yet_run"]
+
+
+@pytest.mark.parametrize("records", ["authentication-record", "no-record"])
+def test_an_attempt_without_a_start_record_or_an_attempt_record_reads_as_its_records_do(
+    experiments: Experiments, monkeypatch: pytest.MonkeyPatch, records: str
+) -> None:
+    # As a resume will count it (the cases that are due): with only its authentication record,
+    # failed and not possibly charged, and with no record, as no attempt. A defect found by PR
+    # #66's review: the outcomes read the attempt record that wasn't written.
+    experiments.server.reply("/auth", AUTHENTICATED)
+    experiments.server.reply("/screen/backtest", complete(), complete())
+    _, plan = plan_of("default-only.yaml")
+    first, second = ids(plan)
+    wrapped: list[StorageFaults] = []
+
+    def faults(store: LocalArtifactStore) -> StorageFaults:
+        wrapped.append(StorageFaults(store, monkeypatch))
+        if records == "authentication-record":
+            wrapped[0].fail_before("started.json", RuntimeError())
+            wrapped[0].fail_before("attempt.json", RuntimeError())
+        return wrapped[0]
+
+    class Arming(list[ProgressEvent]):
+        """Fails the second case's request.json and attempt.json, before either is written. It
+        sends with the first case's token, so it has no authentication record."""
+
+        def append(self, event: ProgressEvent) -> None:
+            super().append(event)
+            started = isinstance(event, AttemptStarted) and event.case_id == second
+            if records == "no-record" and started:
+                wrapped[0].fail_before("request.json", RuntimeError())
+                wrapped[0].fail_before("attempt.json", RuntimeError())
+
+    executed = experiments.run("default-only.yaml", faults=faults, progress=Arming())
+
+    error = executed.error
+    assert error is not None and error.code == "internal.unexpected"
+    assert executed.execution.manifest is None
+    if records == "authentication-record":
+        assert executed.received == (AUTH,)
+        (attempt,) = executed.attempts(first)
+        assert sorted(path.name for path in attempt.iterdir()) == [
+            "authenticating.json",
+            "request.json",
+        ]
+        assert outcomes(executed) == ["failed", "not_yet_run"]
+    else:
+        assert executed.received == (AUTH, SEND)
+        assert not (executed.out / "cases" / second).exists()
+        assert outcomes(executed) == ["succeeded", "not_yet_run"]
 
 
 @pytest.mark.parametrize(

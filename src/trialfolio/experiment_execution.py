@@ -257,20 +257,34 @@ class _Case:
 
     @property
     def outcome(self) -> CaseOutcome:
-        if self.result is None:
-            return "not_yet_run"
-        record = self.result.record
-        return case_outcome(
-            (
-                CaseAttempt(
-                    session=record.session,
-                    sequence=record.sequence,
-                    outcome=record.outcome,
-                    possibly_charged=record.possibly_charged,
-                    valid=self.invalid is None,
-                ),
-            )
-        )
+        """The case's outcome, as the records written so far give it."""
+        result = self.result
+        read = None if result is None else _as_written(result, valid=self.invalid is None)
+        return case_outcome(() if read is None else (read,))
+
+
+def _as_written(result: ExperimentAttemptResult, *, valid: bool) -> CaseAttempt | None:
+    """How an attempt's records read. Without its attempt record, which a resume writes, it reads
+    as the resume will count it (the cases that are due): `running` with its start record, and
+    `failed`, not possibly charged, with only its authentication record. With neither, there's no
+    record of the attempt, so None."""
+    record = result.record
+    outcome: Literal["running", "succeeded", "failed", "unknown"]
+    if result.recorded:
+        outcome, charged = record.outcome, record.possibly_charged
+    elif result.start is not None:
+        outcome, charged = "running", True
+    elif any(file.role == "authentication_record" for file in result.files):
+        outcome, charged = "failed", False
+    else:
+        return None
+    return CaseAttempt(
+        session=record.session,
+        sequence=record.sequence,
+        outcome=outcome,
+        possibly_charged=charged,
+        valid=valid,
+    )
 
 
 class ExperimentExecution:
