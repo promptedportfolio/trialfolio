@@ -28,8 +28,9 @@ empty:
 
 A case that fails is recorded, and the session goes on to the next one. An interrupt or a storage
 failure ends the session at once, without its manifest, so the experiment's output reads as
-incomplete until a later run resumes it; resuming is R03-T09's. Every attempt written so far
-stays, and is never replaced.
+incomplete until a later run resumes it; resuming is R03-T09's. So does an attempt whose attempt
+record wasn't written, such as after an unexpected exception while writing it, as for a run: a
+manifest couldn't account for it. Every attempt written so far stays, and is never replaced.
 
 Execution with the demo's client, which sends nothing, writes a synthetic experiment: its plan
 and manifest record the approval `not_required`, and its report says its values are invented.
@@ -380,8 +381,10 @@ class ExperimentExecution:
 
         Returns the error the caller reports, or None when every planned case succeeded:
         `execution.partial` when the session reached its end with a case that didn't succeed;
-        and `command.interrupted` or `storage.write_failed` when an interrupt or a storage
-        failure ended the session without its manifest. Raises `ValueError` before writing
+        `command.interrupted` or `storage.write_failed` when an interrupt or a storage failure
+        ended the session without its manifest; and the attempt's error, such as
+        `internal.unexpected`, when an attempt's record wasn't written, which ends the session
+        the same way. Raises `ValueError` before writing
         anything when `configuration` doesn't give the plan; the claim's `TrialFolioError`,
         `output.not_empty`, `experiment.locked`, or `storage.write_failed`, and a
         `KeyboardInterrupt` during the claim, which removes what the claim created, so nothing
@@ -488,7 +491,8 @@ class ExperimentExecution:
 
     def _run_cases(self, configuration: bytes) -> TrialFolioError | None:
         """Runs each case in the plan's order, until one can't start. Returns the error of an
-        attempt that an interrupt or a storage failure ended, which ends the session."""
+        attempt that an interrupt or a storage failure ended, or whose attempt record wasn't
+        written, which ends the session."""
         token_from: uuid.UUID | None = None
         for place, case in enumerate(self._cases, 1):
             later = place < len(self._cases)
@@ -513,7 +517,11 @@ class ExperimentExecution:
             self._attempts.append(result)
             case.result = result
             error = result.error
-            if error is not None and error.code in ("command.interrupted", "storage.write_failed"):
+            # A manifest can't account for an attempt without its attempt record, whose start
+            # record reads as running, so that ends the session too, whatever stopped the write.
+            if not result.recorded or (
+                error is not None and error.code in ("command.interrupted", "storage.write_failed")
+            ):
                 return error
             self._write_tables(case, result, configuration)
             record = result.record

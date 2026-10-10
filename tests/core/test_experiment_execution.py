@@ -706,6 +706,37 @@ def test_a_storage_failure_after_a_200_leaves_the_case_unknown_without_a_manifes
     assert not (executed.out / "sessions/1/manifest.json").exists()
 
 
+def test_an_attempt_record_that_wasnt_written_ends_the_session_without_its_manifest(
+    experiments: Experiments, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A defect found by PR #66's review: the session went on, and wrote a manifest that counted
+    # the attempt as succeeded, without its attempt record or its case's tables.
+    experiments.server.reply("/auth", AUTHENTICATED)
+    experiments.server.reply("/screen/backtest", complete(), complete())
+
+    def faults(store: LocalArtifactStore) -> StorageFaults:
+        faulted = StorageFaults(store, monkeypatch)
+        faulted.fail_before("attempt.json", RuntimeError())
+        return faulted
+
+    executed = experiments.run("default-only.yaml", faults=faults)
+
+    error = executed.error
+    assert error is not None and error.code == "internal.unexpected"
+    assert executed.received == (AUTH, SEND)
+    first, second = ids(executed.plan)
+    (attempt,) = executed.attempts(first)
+    assert (attempt / "started.json").is_file()
+    assert not (attempt / "attempt.json").exists()
+    assert not (executed.out / "cases" / first / "normalized").exists()
+    assert not (executed.out / "cases" / second).exists()
+    assert "its start record reads as running" in error.message
+    assert "The session has no manifest" in error.message
+    assert executed.execution.manifest is None
+    assert not (executed.out / "sessions/1/manifest.json").exists()
+    assert not (executed.out / "sessions/1/report.html").exists()
+
+
 def test_an_interrupt_once_the_first_plan_is_published_leaves_it_to_resume(
     experiments: Experiments, monkeypatch: pytest.MonkeyPatch
 ) -> None:
