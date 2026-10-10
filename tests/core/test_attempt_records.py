@@ -31,6 +31,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import canaries, launcher
+from tests.support.clock import BackwardClock
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.socket_faults import SocketFaults
 from tests.support.storage_faults import StorageFaults
@@ -759,6 +760,26 @@ def test_an_ending_before_authenticating_is_failed_with_its_code(
     assert record.error is not None
     assert record.error.code == code
     assert "wasn't sent" in record.error.message
+
+
+def test_a_clock_that_moves_backward_during_the_attempt_still_ends_it_with_its_record(
+    server: FakePortfolio123,
+    client: P123ScreenBacktestClient,
+    store: StorageFaults,
+    plan: Plan,
+    out: Path,
+) -> None:
+    # A corrected defect: the attempt's end, by the clock, came before its start, which the
+    # attempt record refuses, so the attempt ended without one, and read as running.
+    answers(server, Reply(200, json.dumps(PAYLOAD).encode()))
+    attempt = Attempt(plan, plan.plan_hash, store, clock=BackwardClock(STARTED_AT))
+
+    result = attempt.run(client)
+
+    record = check_recorded(out, attempt, result)
+    assert record.outcome == "succeeded"
+    assert result.error is None
+    assert record.ended_at == record.started_at == STARTED_AT
 
 
 def test_an_attempt_needs_the_plans_hash_and_ends_once(

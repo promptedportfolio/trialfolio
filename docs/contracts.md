@@ -781,6 +781,7 @@ An attempt with a start record and no attempt record is `running` ([uncertain co
 - **`request` and `response`** reference files by `path`, relative to the output root, and `artifact_id`. A request exchange requires a reference to its saved `request.json`, including when the connection failed. `response.form` is `decoded` for `response.json`, or `undecoded` for `response.raw`. A response is referenced exactly when the attempt is `succeeded`, decoded or not: a 200 the wrapper couldn't decode is `succeeded` for capture.
 - **`provider_metadata`** holds `cost` and `quota_remaining`, Portfolio123's `quotaRemaining`. Each is `null` when the response doesn't carry it.
 - **`possibly_charged`** is true exactly when the attempt is `unknown`, or an exchange other than Trial Folio's `POST /auth` has a result other than `not_connected` ([possibly charged](#http-exchanges)). An attempt restarted without a saved response is `unknown` with only its start record's exchanges ([uncertain completion](#uncertain-completion)).
+- **`ended_at`** is never before `started_at`. It's the clock's time when the attempt ends, or its `started_at` when the clock reads earlier, as after the wall clock moved backward during the attempt, so the attempt record can still be written. The same holds for start and attempt records 1.1.0 ([experiment attempts](#experiment-attempts)).
 
 `schemas/start-record-1.0.0.schema.json` and `schemas/attempt-record-1.0.0.schema.json` give every field.
 

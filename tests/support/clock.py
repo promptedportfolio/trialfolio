@@ -21,3 +21,17 @@ class FixedClock:
         now = self._next
         self._next = now + timedelta(seconds=1)
         return now
+
+
+class BackwardClock:
+    """A wall clock that moves backward, as when the system sets it back: `start` at the first
+    reading, and a second earlier at each reading after it, so an attempt ends, by the clock,
+    before it started."""
+
+    def __init__(self, start: datetime = STARTED) -> None:
+        self._next = start
+
+    def __call__(self) -> datetime:
+        now = self._next
+        self._next = now - timedelta(seconds=1)
+        return now

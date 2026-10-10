@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import canaries
-from tests.support.clock import FixedClock
+from tests.support.clock import BackwardClock, FixedClock
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.storage_faults import StorageFaults
 from trialfolio.configuration import read_experiment_configuration
@@ -562,6 +562,28 @@ def test_the_demos_client_needs_no_approval_and_nothing_else_does(tmp_path: Path
     ):
         ExperimentExecution(plan, plan.plan_hash, "not_required", store, real, command=None)
     assert not (tmp_path / "out").exists()
+
+
+def test_a_clock_that_moves_backward_during_an_attempt_still_ends_it_with_its_record(
+    tmp_path: Path,
+) -> None:
+    # A corrected defect: an attempt's end, by the clock, came before its start, which the
+    # attempt record refuses, so the session ended without the attempt's record.
+    content, plan = plan_of("default-only.yaml")
+    client = SyntheticScreenBacktestClient(response_bytes())
+    out = tmp_path / "out"
+    with LocalArtifactStore(out) as store:
+        error = ExperimentExecution(
+            plan, plan.plan_hash, "not_required", store, client, command=None, clock=BackwardClock()
+        ).run(content)
+
+    assert error is None
+    for case_id in ids(plan):
+        (attempt,) = (out / "cases" / case_id / "attempts").iterdir()
+        record = AttemptRecordV1_1.model_validate_json((attempt / "attempt.json").read_bytes())
+        assert record.outcome == "succeeded"
+        assert record.ended_at == record.started_at
+    assert (out / "sessions/1/manifest.json").is_file()
 
 
 # Before anything is sent

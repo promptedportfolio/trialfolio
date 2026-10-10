@@ -42,6 +42,9 @@ whether the response was saved. An interrupt or a storage failure decides only t
   surrogate the decoder accepted is written back as it came. So are `NaN` and `Infinity`.
 - **`provider_metadata`** takes `cost` and `quotaRemaining` from the top level of a decoded
   response. Each is null when it's absent or isn't a non-negative integer.
+- **`ended_at`** is the clock's time when the attempt ends, or its start time when the clock
+  reads earlier, as after the wall clock moved backward during the attempt, so the attempt record
+  can still be written.
 - **Logs** name the plan hash, the case, and the attempt, and give the outcome, the error code,
   and the duration. For an unexpected exception they give its type and frames, never its message,
   which could hold a value.
@@ -599,7 +602,7 @@ class Attempt:
 
     def _end(self, exchanges: tuple[Exchange, ...], ending: BaseException | None) -> AttemptResult:
         def record(end: _Ending, error: TrialFolioError | None) -> AttemptRecord:
-            fields = self._files.ending_fields(end, error, _utc(self._clock()))
+            fields = self._files.ending_fields(end, error, _ended(self._clock, self.started_at))
             return AttemptRecord(**self._identity, **fields, exchanges=exchanges)
 
         written, recorded, error = self._files.end(exchanges, ending, record)
@@ -825,7 +828,7 @@ class ExperimentAttempt:
         self, exchanges: tuple[Exchange, ...], ending: BaseException | None
     ) -> ExperimentAttemptResult:
         def record(end: _Ending, error: TrialFolioError | None) -> AttemptRecordV1_1:
-            fields = self._files.ending_fields(end, error, _utc(self._clock()))
+            fields = self._files.ending_fields(end, error, _ended(self._clock, self._started_at))
             return AttemptRecordV1_1(
                 **self._placed(),
                 authenticated_by=None if self._start is None else self._start.authenticated_by,
@@ -884,6 +887,13 @@ def _utc(moment: datetime) -> datetime:
     if moment.utcoffset() != timedelta(0):
         raise ValueError("the clock must give UTC times")
     return moment
+
+
+def _ended(clock: Clock, started_at: datetime) -> datetime:
+    """When the attempt ended, for its record: the clock's time, or `started_at` when the clock
+    reads earlier, as after the wall clock moved backward during the attempt. An attempt record
+    never ends before it starts, so it can still be written."""
+    return max(_utc(clock()), started_at)
 
 
 def _outcome(send: Exchange | None, *, saved: bool) -> Outcome:
