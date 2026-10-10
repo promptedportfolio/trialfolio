@@ -153,10 +153,16 @@ class StorageFaults:
     def check_empty(self) -> None:
         self._store.check_empty()
 
-    def claim(self, path: str, data: bytes) -> StoredFile:
-        stored = self._store.claim(path, data)
+    def claim(self, path: str, data: bytes, *, lock: bool = False) -> StoredFile:
+        stored = self._store.claim(path, data, lock=lock)
         self.published.append(path)
         return stored
+
+    def lock(self, path: str) -> None:
+        self._store.lock(path)
+
+    def close(self) -> None:
+        self._store.close()
 
     def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
         before = self._before.pop(_key(path, self._before), None)

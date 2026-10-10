@@ -95,10 +95,16 @@ class Intruded:
     def check_empty(self) -> None:
         self._store.check_empty()
 
-    def claim(self, path: str, data: bytes) -> StoredFile:
+    def claim(self, path: str, data: bytes, *, lock: bool = False) -> StoredFile:
         self._root.mkdir(parents=True, exist_ok=True)
         (self._root / "other.txt").write_bytes(b"another process's file\n")
-        return self._store.claim(path, data)
+        return self._store.claim(path, data, lock=lock)
+
+    def lock(self, path: str) -> None:
+        self._store.lock(path)
+
+    def close(self) -> None:
+        self._store.close()
 
     def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
         return self._store.write(path, data, logged_as=logged_as)

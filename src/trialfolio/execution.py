@@ -35,6 +35,7 @@ from typing import Final, Literal
 from trialfolio.attempts import (
     Attempt,
     AttemptResult,
+    AttemptRole,
     Clock,
     prevailing,
     provider_requests,
@@ -201,7 +202,7 @@ class Execution:
         self._files.append(("plan", plan_file))
         result = self._attempt_run(configuration, client, on_claimed)
         self._result = result
-        self._files.extend((file.role, file.file) for file in result.files)
+        self._files.extend((_run_role(file.role), file.file) for file in result.files)
         error = result.error
         if (
             not result.recorded
@@ -477,6 +478,14 @@ class Execution:
         if self._attempt is not None:
             fields["attempt_id"] = str(self._attempt.attempt_id)
         return fields
+
+
+def _run_role(role: AttemptRole) -> ArtifactRole:
+    """The role of a file a screen run's attempt wrote, which never writes an authentication
+    record: only an experiment's attempts do."""
+    if role == "authentication_record":
+        raise ValueError("a screen run's attempt writes no authentication record")
+    return role
 
 
 def _model_json(model: Plan | RunManifest) -> bytes:

@@ -8,6 +8,9 @@ version 1).
 - `metrics_rows` gives `metrics.csv`'s 20 rows, and `settings_rows` `settings.csv`'s 23, in
   their documented order.
 - `write_tables` does both for an attempt that succeeded, and writes the two tables.
+  `write_case_tables` does so for an experiment's case, in `cases/<case_id>/normalized/`, with
+  `original_key` and `original_value` from the experiment configuration of the plan its attempt
+  ran under (docs/contracts.md, an experiment's normalized tables).
 - `holds_series` says whether a decoded response holds the per-period series that 0.1.0 preserves
   without interpreting, for the manifest's `return_series`.
 
@@ -28,6 +31,7 @@ from typing import Final, Literal, cast
 
 from trialfolio.contracts.attempt import SavedResponse
 from trialfolio.contracts.common import DATE_PATTERN, FlagCode, UnavailableReason
+from trialfolio.contracts.experiment_plan import ExperimentPlanCase
 from trialfolio.contracts.plan import Plan, PlanCase, SettingValue
 from trialfolio.contracts.screen_configuration import FormulaRanking, IdRanking, NameRanking
 from trialfolio.contracts.tables import MetricsRow, SettingsRow
@@ -338,17 +342,20 @@ def _decimals(metric: Metric, value: Value) -> int | None:
 
 
 def settings_rows(
-    case: PlanCase,
+    case: PlanCase | ExperimentPlanCase,
     originals: Mapping[str, str],
     *,
     label: str,
     source_artifact: str,
     coverage: Coverage,
+    original_keys: Mapping[str, str] | None = None,
 ) -> tuple[SettingsRow, ...]:
     """`settings.csv`'s rows for one result, in order, from the plan's resolved settings.
 
     The request was sent, so each value has the provenance the plan expected. `originals` holds
-    each top-level value as the configuration file writes it (`original_values`), and
+    each setting's value as the configuration file writes it, by the setting's name: for a
+    screen, each top-level value (`original_values`). `original_keys` gives the key that writes
+    each one, when it isn't the setting's name, as in an experiment's configuration.
     `source_artifact` is the saved configuration's `artifact_id`. A date setting is flagged
     `coverage_mismatch` when its coverage date is available and differs from it.
     """
@@ -360,6 +367,7 @@ def settings_rows(
         if covered is not None and covered != setting.value:
             flags = (*flags, "coverage_mismatch")
         original = originals.get(setting.setting)
+        key = setting.setting if original_keys is None else original_keys.get(setting.setting)
         rows.append(
             SettingsRow(
                 label=label,
@@ -371,7 +379,7 @@ def settings_rows(
                 interpretation=setting.interpretation,
                 provenance=setting.expected_provenance,
                 inference_rule=setting.inference_rule,
-                original_key=None if original is None else setting.setting,
+                original_key=None if original is None else key,
                 original_value=original,
                 source_artifact=source_artifact,
                 flags=flags,
@@ -413,6 +421,56 @@ def write_tables(
     was saved undecoded or doesn't have the layout's required structure; and with
     `storage.write_failed` when a table can't be written.
     """
+    (case,) = plan.cases
+    return _write(
+        store,
+        case,
+        originals,
+        None,
+        "",
+        configuration=configuration,
+        response=response,
+    )
+
+
+def write_case_tables(
+    store: ArtifactStore,
+    case: ExperimentPlanCase,
+    originals: Mapping[str, tuple[str, str]],
+    *,
+    configuration: StoredFile,
+    response: SavedResponse,
+) -> NormalizedTables:
+    """Normalizes the saved response of an experiment's case, and writes
+    `cases/<case_id>/normalized/metrics.csv`, then `settings.csv`, as `write_tables` writes a
+    run's: the same rows, labeled with the case's `case_id`, apart from `original_key`,
+    `original_value`, and `source_artifact` (docs/contracts.md, an experiment's normalized tables).
+
+    `configuration` is the saved `configuration.yaml` of the plan the attempt ran under, and
+    `originals` each setting's key path and text in it, as `experiment_original_values` reads
+    them. Raises as `write_tables` does.
+    """
+    return _write(
+        store,
+        case,
+        {setting: text for setting, (_, text) in originals.items()},
+        {setting: key for setting, (key, _) in originals.items()},
+        f"cases/{case.case_id}/",
+        configuration=configuration,
+        response=response,
+    )
+
+
+def _write(
+    store: ArtifactStore,
+    case: PlanCase | ExperimentPlanCase,
+    originals: Mapping[str, str],
+    original_keys: Mapping[str, str] | None,
+    prefix: str,
+    *,
+    configuration: StoredFile,
+    response: SavedResponse,
+) -> NormalizedTables:
     if response.form == "undecoded":
         raise TrialFolioError(
             "provider.response_invalid",
@@ -421,7 +479,6 @@ def write_tables(
             "it persists.",
         )
     result = read_response(store.read(response.path), response.path)
-    (case,) = plan.cases
     label = case.case_id
     metrics = metrics_rows(
         result,
@@ -435,10 +492,11 @@ def write_tables(
         label=label,
         source_artifact=configuration.artifact_id,
         coverage=result.coverage,
+        original_keys=original_keys,
     )
     return NormalizedTables(
-        metrics=store.write(METRICS_PATH, metrics_csv(metrics)),
-        settings=store.write(SETTINGS_PATH, settings_csv(settings)),
+        metrics=store.write(prefix + METRICS_PATH, metrics_csv(metrics)),
+        settings=store.write(prefix + SETTINGS_PATH, settings_csv(settings)),
         metrics_rows=metrics,
         settings_rows=settings,
     )

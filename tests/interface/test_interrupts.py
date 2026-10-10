@@ -106,8 +106,14 @@ class _AfterWriteStore:
     def check_empty(self) -> None:
         self._store.check_empty()
 
-    def claim(self, path: str, data: bytes) -> StoredFile:
-        return self._store.claim(path, data)
+    def claim(self, path: str, data: bytes, *, lock: bool = False) -> StoredFile:
+        return self._store.claim(path, data, lock=lock)
+
+    def lock(self, path: str) -> None:
+        self._store.lock(path)
+
+    def close(self) -> None:
+        self._store.close()
 
     def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
         stored = self._store.write(path, data, logged_as=logged_as)

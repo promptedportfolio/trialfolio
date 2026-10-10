@@ -347,7 +347,7 @@ def build_plan(configuration: ScreenConfiguration, versions: Versions) -> Plan:
     return draft.model_copy(update={"plan_hash": plan_hash(draft)})
 
 
-def check_approval(plan: Plan, approved_hash: str | None) -> str:
+def check_approval(plan: Plan | PlanV1_1, approved_hash: str | None) -> str:
     """Returns the plan's hash when `approved_hash` is exactly that hash, recomputed from the
     plan's contents: the full hash, `sha256:` and 64 lowercase hex digits (approval).
 

@@ -17,7 +17,7 @@ import pytest
 
 from tests.support import canaries
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
-from trialfolio.attempts import Attempt, provider_requests
+from trialfolio.attempts import Attempt, AttemptRole, provider_requests
 from trialfolio.configuration import original_values, read_screen_configuration
 from trialfolio.contracts.attempt import SavedResponse
 from trialfolio.contracts.common import ErrorDetail
@@ -398,6 +398,13 @@ def listed(role: ArtifactRole, stored: StoredFile) -> ManifestArtifact:
     )
 
 
+def run_role(role: AttemptRole) -> ArtifactRole:
+    """The role of a file a screen run's attempt wrote: never an authentication record, which
+    only an experiment's attempts write."""
+    assert role != "authentication_record"
+    return role
+
+
 def manifest_json(manifest: RunManifest) -> bytes:
     return (manifest.model_dump_json(indent=2) + "\n").encode()
 
@@ -457,7 +464,7 @@ def write_run(tmp_path: Path) -> Iterator[WriteRun]:
         moments = iter((RUN_STARTED + timedelta(seconds=1), RUN_STARTED + timedelta(seconds=2)))
         with P123ScreenBacktestClient(credentials, endpoint=server.endpoint) as client:
             result = Attempt(plan, plan.plan_hash, store, clock=lambda: next(moments)).run(client)
-        files.extend((file.role, file.file) for file in result.files)
+        files.extend((run_role(file.role), file.file) for file in result.files)
         error = result.error
         tables: NormalizedTables | None = None
         if result.record.response is not None and error is None:

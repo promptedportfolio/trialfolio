@@ -10,6 +10,9 @@ access.
   and `demo` do that just before the manifest.
 - `rerender_report` is the core of `trialfolio report`: it reads and checks a saved run, renders
   its report, and claims a new output directory with it.
+- `write_experiment_report` writes an experiment session's `sessions/<s>/report.html`, just
+  before its manifest (release 0.3.0). R03-T08 wrote this first version, which shows each case
+  and its outcome, and the notices; R03-T10 builds the full report.
 - `write_review_report` writes a review's `report.html`, just before its manifest (release 0.2.0,
   R02-T07). The review report compares each result with the baseline: intended changes apart from
   unexplained mismatches, and each result's metrics beside the baseline's, with the difference
@@ -48,12 +51,15 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Final, Protocol
+from typing import Final, Literal, Protocol
 from urllib.parse import quote
 from uuid import UUID
 
 from trialfolio.contracts.attempt import SavedResponse
-from trialfolio.contracts.common import UnavailableReason
+from trialfolio.contracts.common import ErrorDetail, UnavailableReason
+from trialfolio.contracts.experiment_manifest import ExperimentArtifact, ExperimentManifestCounts
+from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
+from trialfolio.contracts.experiment_record import ExperimentRecord
 from trialfolio.contracts.manifest import ArtifactRole, ManifestArtifact
 from trialfolio.contracts.review_configuration import ReviewConfiguration
 from trialfolio.contracts.review_manifest import ReviewArtifact, ReviewArtifactRole
@@ -139,6 +145,12 @@ class ReportRenderer(Protocol):
         review, and never links a run."""
         ...
 
+    def render_experiment(self, experiment: "ExperimentEvidence") -> str:
+        """The report of an experiment's session, as an HTML document, for
+        `sessions/<s>/report.html`. It links the session's `manifest.json` and each of
+        `experiment.artifacts` by its path relative to the report."""
+        ...
+
 
 def write_report(store: ArtifactStore, run: SavedRun, renderer: ReportRenderer) -> StoredFile:
     """Renders the report of the run being written into `store`, and writes it as `report.html`.
@@ -222,6 +234,9 @@ class HtmlReportRenderer:
 
     def render_review(self, review: ReviewEvidence) -> str:
         return _ReviewReport(review, self._version).document()
+
+    def render_experiment(self, experiment: "ExperimentEvidence") -> str:
+        return _ExperimentReport(experiment, self._version).document()
 
 
 def _base(run_path: str | None) -> tuple[str, ...] | None:
@@ -2591,3 +2606,344 @@ class _ReviewReport:
     def _link(path: str) -> str:
         href = "/".join(quote(part, safe="") for part in path.split("/"))
         return f'<a href="{html.escape(href)}">{_code(path)}</a>'
+
+
+# The experiment report (R03-T08's first version; R03-T10 builds the full report)
+
+
+@dataclass(frozen=True)
+class CaseView:
+    """A planned case, as an experiment's report shows it."""
+
+    case: ExperimentPlanCase
+    outcome: Literal["succeeded", "failed", "unknown", "not_yet_run"]
+    """As the manifest counts it."""
+    attempts: int
+    """Its attempts, of every session."""
+    tables: bool
+    """Whether it has its normalized tables."""
+
+
+@dataclass(frozen=True)
+class ExperimentEvidence:
+    """What an experiment session's report shows: the current plan and its `experiment.json`,
+    each planned case's outcome, and what the session's manifest will record.
+
+    The report is written before the manifest, so `artifacts` holds each file the manifest will
+    list apart from the report itself.
+    """
+
+    plan: PlanV1_1
+    plan_number: int
+    record: ExperimentRecord
+    session: int
+    synthetic: bool
+    outcome: Literal["completed", "partial"]
+    error: ErrorDetail | None
+    cases: tuple[CaseView, ...]
+    """One for each planned case, in the plan's order."""
+    counts: ExperimentManifestCounts
+    artifacts: tuple[ExperimentArtifact, ...]
+
+    def __post_init__(self) -> None:
+        if tuple(view.case for view in self.cases) != self.plan.cases:
+            raise ValueError("each planned case has one view, in the plan's order")
+        if any(artifact.role == "report" for artifact in self.artifacts):
+            raise ValueError("the artifacts are the ones the report links, so not the report")
+
+
+def experiment_report_path(session: int) -> str:
+    """`sessions/<session>/report.html`, relative to the output root."""
+    return f"sessions/{session}/{REPORT_PATH}"
+
+
+def write_experiment_report(
+    store: ArtifactStore, experiment: ExperimentEvidence, renderer: ReportRenderer
+) -> StoredFile:
+    """Renders the report of the experiment session being written into `store`, and writes it
+    as `sessions/<s>/report.html`, just before the session's manifest. Raises `TrialFolioError`
+    with `storage.write_failed` when the report can't be written."""
+    path = experiment_report_path(experiment.session)
+    report = store.write(path, renderer.render_experiment(experiment).encode("utf-8"))
+    _logger.info(
+        "Rendered the session's report, %s.",
+        report.artifact_id,
+        extra={"event": "report.render.completed", "plan_hash": experiment.plan.plan_hash},
+    )
+    return report
+
+
+_CASE_OUTCOMES: Final[dict[str, str]] = {
+    "succeeded": "Succeeded: its response was saved and normalized",
+    "failed": "Failed",
+    "unknown": "Unknown: its request may have been charged, and no response was saved",
+    "not_yet_run": "Not yet run",
+}
+
+
+class _ExperimentReport:
+    def __init__(self, experiment: ExperimentEvidence, version: str) -> None:
+        self._experiment = experiment
+        self._version = version
+        self._plan = experiment.plan
+
+    def document(self) -> str:
+        title = self._plan.title
+        parts = [
+            "<!DOCTYPE html>",
+            '<html lang="en">',
+            "<head>",
+            '<meta charset="utf-8">',
+            '<meta name="viewport" content="width=device-width, initial-scale=1">',
+            f'<meta name="generator" content="Trial Folio {self._version}">',
+            f"<title>{_text(title)} · Trial Folio experiment report</title>",
+            f"<style>\n{_CSS}</style>",
+            "</head>",
+            "<body>",
+            '<div class="page">',
+            "<header>",
+            '<p class="kind">Trial Folio experiment report'
+            + (" · Synthetic experiment" if self._experiment.synthetic else "")
+            + "</p>",
+            f"<h1>{_text(title)}</h1>",
+            _concise_notice(),
+            *self._synthetic_banner(),
+            *self._status(),
+            *_contents(_SECTIONS),
+            "</header>",
+            "<main>",
+            *self._objective(),
+            *self._definitions(),
+            *self._data(),
+            *self._results(),
+            *self._cases(),
+            *self._not_assessed("robustness", "No robustness or concentration analysis is run."),
+            *self._not_assessed(
+                "statistics",
+                "No statistical method is applied, so no multiplicity correction either."
+                f" The experiment's plan has {len(self._plan.cases)} cases, each recorded with"
+                " its outcome.",
+            ),
+            *self._not_assessed(
+                "evidence",
+                "The cases share one period. There's no separate holdout or forward period.",
+            ),
+            *self._not_assessed(
+                "feasibility",
+                "Neither feasibility nor capacity is assessed, and no execution evidence beyond"
+                " the backtests is held.",
+            ),
+            *self._conclusion(),
+            "</main>",
+            *_closing(self._version, "the experiment's saved records"),
+            "</div>",
+            "</body>",
+            "</html>",
+        ]
+        return "\n".join(parts) + "\n"
+
+    def _synthetic_banner(self) -> list[str]:
+        if not self._experiment.synthetic:
+            return []
+        return [
+            (
+                '<p class="synthetic"><strong>Synthetic experiment.</strong> Trial Folio wrote'
+                " this experiment with the demo's client, from invented values. Every value,"
+                " attempt, and count in it is invented: none comes from Portfolio123, and nothing"
+                " was sent to it or charged.</p>"
+            )
+        ]
+
+    def _status(self) -> list[str]:
+        experiment = self._experiment
+        outcome = experiment.outcome
+        if experiment.error is not None:
+            outcome += f" ({_code(experiment.error.code)})"
+        return [
+            "<dl>",
+            (
+                f"<dt>Session {experiment.session} outcome</dt><dd>{outcome}. An execution"
+                " status, not a research finding.</dd>"
+            ),
+            f"<dt>Statistical validation</dt><dd>{NOT_ASSESSED}</dd>",
+            f"<dt>Trading readiness</dt><dd>{NOT_ASSESSED}</dd>",
+            f"<dt>Results</dt><dd>{self._nature()}</dd>",
+            "</dl>",
+        ]
+
+    def _nature(self) -> str:
+        if self._experiment.synthetic:
+            return "Synthetic: invented values, neither backtested nor actual results."
+        return (
+            "Backtested: from applying each case's screen rules to historical data, not from"
+            " actual trades."
+        )
+
+    def _objective(self) -> list[str]:
+        plan = self._plan
+        declared = plan.prior_research
+        description = (
+            f"<p>{_text(declared.description)}</p>" if declared.description is not None else ""
+        )
+        return [
+            _heading("objective"),
+            "<dl>",
+            f"<dt>Experiment</dt><dd>{_code(plan.experiment_id)}</dd>",
+            f"<dt>Purpose</dt><dd>{_text(plan.purpose)}</dd>",
+            (f"<dt>Plan</dt><dd>Plan {self._experiment.plan_number}, {_code(plan.plan_hash)}</dd>"),
+            "</dl>",
+            "<h3>Declared prior research</h3>",
+            f"<p>Status: {_code(declared.status)}, as the configuration declares it.</p>",
+            description,
+            (
+                "<p>Trial Folio records the declaration as the user supplied it, and can't verify"
+                " it.</p>"
+            ),
+            "</section>",
+        ]
+
+    def _definitions(self) -> list[str]:
+        (baseline, *_) = self._plan.cases
+        rows = [
+            f"<tr><th>{_code(row.setting)}</th><td>{_code(setting_text(row.value))}</td></tr>"
+            for row in baseline.settings
+        ]
+        return [
+            _heading("definitions"),
+            (
+                "<p>Each case is the baseline screen with exactly one change. The baseline's"
+                " resolved settings:</p>"
+            ),
+            '<div class="wide"><table>',
+            "<tbody>",
+            *rows,
+            "</tbody></table></div>",
+            "</section>",
+        ]
+
+    def _data(self) -> list[str]:
+        return [
+            _heading("data"),
+            (
+                "<p>Each case that succeeded has its own normalized tables,"
+                " <code>metrics.csv</code> and <code>settings.csv</code>, in"
+                " <code>cases/&lt;case_id&gt;/normalized/</code>, with each setting's provenance"
+                " and the response's coverage. They're listed among the artifacts below. This"
+                " version of the experiment report doesn't repeat them.</p>"
+            ),
+            "</section>",
+        ]
+
+    def _results(self) -> list[str]:
+        return [
+            _heading("results"),
+            (
+                "<p>Each case's metrics are in its <code>metrics.csv</code>. This report doesn't"
+                " compare them, and orders and marks no case by any metric.</p>"
+            ),
+            "</section>",
+        ]
+
+    def _cases(self) -> list[str]:
+        counts = self._experiment.counts
+        cases = counts.cases
+        rows: list[str] = []
+        for view in self._experiment.cases:
+            case = view.case
+            change = "The baseline" if case.variant is None else _variant_change(case)
+            description = "" if case.description is None else _text(case.description)
+            rows.append(
+                f"<tr><td>{_code(case.case_key)}</td><td>{_code(case.case_id)}</td>"
+                f"<td>{change}</td><td>{description}</td>"
+                f"<td>{_CASE_OUTCOMES[view.outcome]}</td><td>{view.attempts}</td></tr>"
+            )
+        budget = counts.budget
+        return [
+            _heading("cases"),
+            (
+                f"<p>Planned cases: {cases.planned} = {cases.succeeded} succeeded +"
+                f" {cases.failed} failed + {cases.skipped} skipped + {cases.unknown} unknown +"
+                f" {cases.not_yet_run} not yet run. Every case appears below, in the plan's"
+                " order.</p>"
+            ),
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Case</th><th>case_id</th><th>Change</th><th>Description</th>"
+                "<th>Outcome</th><th>Attempts</th></tr></thead>"
+            ),
+            "<tbody>",
+            *rows,
+            "</tbody></table></div>",
+            (
+                f"<p>Attempts: {counts.attempts.succeeded} succeeded, {counts.attempts.failed}"
+                f" failed, {counts.attempts.unknown} unknown. Provider requests counted against"
+                f" the budget: {counts.provider_requests} of {budget.provider_requests}."
+                f" Authentication calls: {counts.authentication_calls} of"
+                f" {budget.authentication_calls}.</p>"
+            ),
+            "</section>",
+        ]
+
+    def _not_assessed(self, key: str, why: str) -> list[str]:
+        return [_heading(key), f"<p>{NOT_ASSESSED}. {why}</p>", "</section>"]
+
+    def _conclusion(self) -> list[str]:
+        experiment = self._experiment
+        if experiment.outcome == "completed":
+            execution = "Every planned case succeeded."
+        else:
+            execution = "Not every planned case succeeded; each one's outcome is listed above."
+        rows = [
+            (
+                f"<tr><td>{self._link('sessions/' + str(experiment.session) + '/manifest.json')}"
+                "</td><td>manifest</td><td></td><td></td></tr>"
+            ),
+            *(
+                f'<tr><td class="long">{self._link(artifact.path)}</td>'
+                f"<td>{_code(artifact.role)}</td><td>{artifact.size}</td>"
+                f'<td class="long">{_code(artifact.artifact_id)}</td></tr>'
+                for artifact in experiment.artifacts
+            ),
+        ]
+        return [
+            _heading("conclusion"),
+            "<h3>Permitted conclusion</h3>",
+            (
+                f"<p>{execution} That's a statement about execution, not about any strategy. No"
+                " case is ranked or called best. Statistical validation and trading readiness are"
+                " not assessed, so this report permits no conclusion about whether a strategy is"
+                " useful.</p>"
+            ),
+            "<h3>Artifacts</h3>",
+            (
+                "<p>Each file links to the experiment's copy, by a path relative to this report."
+                " An <code>artifact_id</code> is the SHA-256 of the file's bytes.</p>"
+            ),
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>File</th><th>Role</th><th>Size, bytes</th><th>artifact_id</th>"
+                "</tr></thead>"
+            ),
+            "<tbody>",
+            *rows,
+            "</tbody></table></div>",
+            "</section>",
+        ]
+
+    @staticmethod
+    def _link(path: str) -> str:
+        # The report is in sessions/<s>/, two levels below the output root.
+        segments = ("..", "..", *(quote(part, safe="") for part in path.split("/")))
+        return f'<a href="{html.escape("/".join(segments))}">{_code(path)}</a>'
+
+
+def _variant_change(case: ExperimentPlanCase) -> str:
+    variant = case.variant
+    if variant is None:
+        return "The baseline"
+    if variant.value is not None:
+        default = ", the default rebalance variant" if variant.default else ""
+        return f"{_code(variant.setting)} set to {_code(str(variant.value))}{default}"
+    if variant.add is not None:
+        return f"Adds the rule {_code(variant.add)}"
+    return f"Replaces the rule {_code(variant.replace or '')} with {_code(variant.with_ or '')}"
