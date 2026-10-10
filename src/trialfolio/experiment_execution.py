@@ -485,8 +485,18 @@ class ExperimentExecution:
                     self._tables[case_id] = _Tables(
                         tables.metrics, tables.settings, tables.parser_version
                     )
-        self._invalid: dict[str, TrialFolioError] = {}
-        """The `provider.response_invalid` each case's saved response got, by `case_id`."""
+        self._invalid: dict[str, TrialFolioError] = (
+            {}
+            if experiment is None
+            else {
+                case_id: missing.invalid
+                for case_id, missing in experiment.missing.items()
+                if missing.invalid is not None
+            }
+        )
+        """The `provider.response_invalid` each case's saved response got, by `case_id`: in a
+        resume, from the start, those the records check found, so the outcomes are the records'
+        before step 8 logs them, and after a failure that ends the session before it does."""
         self._results: list[ExperimentAttemptResult] = []
         self._current: ExperimentAttempt | None = None
         self._stopped: tuple[StopReason, TrialFolioError | None] | None = None

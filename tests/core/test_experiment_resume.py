@@ -660,6 +660,24 @@ def test_a_saved_response_that_fails_validation_leaves_its_case_failed_without_t
     assert lab.manifest(2).counts.cases.failed == 1
 
 
+def test_a_case_whose_saved_response_fails_validation_is_failed_before_step_8(lab: Lab) -> None:
+    # The records check found the case's saved response invalid, so the execution gives its
+    # outcome as failed from the start, as the records do, even when the resume ends before step
+    # 8 reaches the case: here, when its session record can't be written.
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply(
+        "/screen/backtest", Reply(200, (RESPONSES / "invalid-structure.json").read_bytes())
+    )
+    lab.new("default-only.yaml", arm=lambda store: store.fail_os("attempt.json"))
+    assert [case.outcome for case in lab.read().cases(DEFAULT_ONLY)] == ["failed", "not_yet_run"]
+
+    stopped = lab.resume("default-only.yaml", arm=lambda store: store.fail_os("session.json"))
+
+    assert refused(stopped, "storage.write_failed")
+    assert stopped.received == () and stopped.published == ()
+    assert outcomes(stopped) == ["failed", "not_yet_run"]
+
+
 @pytest.mark.parametrize("change", ["no-request", "two-responses"])
 def test_a_running_attempt_needs_its_request_and_one_saved_response(lab: Lab, change: str) -> None:
     lab.server.reply("/auth", AUTHENTICATED)
