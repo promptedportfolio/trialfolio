@@ -22,7 +22,8 @@ A store serves one output directory, its root, and takes paths relative to it.
   file that claims its directory, `experiment.lock`, before writing it, and a resumed experiment
   takes it on the existing file: `fcntl.flock` on Linux and macOS, and `msvcrt.locking` on the
   file's first byte on Windows. The store holds it until `close`, or until the process ends,
-  however it ends, so a killed process leaves no stale lock (docs/contracts.md, the lock).
+  however it ends, so a killed process leaves no stale lock (docs/contracts.md, the lock). On
+  Windows, `close` unlocks the byte before closing the file, as Microsoft's documentation asks.
 - **Discarding.** A write can fail after it has published its file. `discard` removes that file,
   when it holds exactly the write's bytes, for a caller whose file says something by being
   there, such as the manifest.
@@ -341,8 +342,7 @@ class LocalArtifactStore:
         with _defer_sigint():
             descriptor, self._lock = self._lock, None
             if descriptor is not None:
-                with suppress(OSError):
-                    os.close(descriptor)
+                _release_lock(descriptor)
 
     def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
         parts = valid_relative_path(path).split("/")
@@ -572,8 +572,7 @@ class _Claim:
         with _defer_sigint():
             descriptor, self.lock = self.lock, None
             if descriptor is not None:
-                with suppress(OSError):
-                    os.close(descriptor)
+                _release_lock(descriptor)
 
     def undo(self) -> None:
         if self.owns_file():
@@ -680,6 +679,21 @@ def _take_lock(descriptor: int, name: str) -> None:
             " that only one process runs it at a time. Choose an output directory on another"
             " file system. Nothing was sent.",
         ) from error
+
+
+def _release_lock(descriptor: int) -> None:
+    """Releases the experiment lock that `descriptor` holds, and closes it. On Windows, it first
+    unlocks the file's first byte, as Microsoft's `_locking` documentation asks before a file is
+    closed: the system releases a lock left at close only when its resources allow, so the
+    store's owner could find it still held. `msvcrt.locking` unlocks from the file's position,
+    which writing the claim's line moved. Closing releases `flock`'s lock on Linux and macOS.
+    Errors are ignored, since closing the descriptor releases the lock either way."""
+    if sys.platform == "win32":
+        with suppress(OSError):
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+    with suppress(OSError):
+        os.close(descriptor)
 
 
 def _part_of(name: str, claimed: str) -> bool:
