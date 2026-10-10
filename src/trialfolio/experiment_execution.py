@@ -1121,20 +1121,20 @@ class ExperimentExecution:
         )
 
     def _holds_series(self) -> bool:
-        """Whether a saved response of the experiment holds per-period series."""
-        if any(
-            isinstance(result.response, DecodedResponse) and holds_series(result.response.payload)
-            for result in self._results
-        ):
+        """Whether a saved response of the experiment holds per-period series: each decoded
+        response the manifest lists, one whose write failed after the store published it
+        included, though no attempt record references it."""
+        responses = [r for result in self._results for r in (result.response, result.published)]
+        if any(isinstance(r, DecodedResponse) and holds_series(r.payload) for r in responses):
             return True
         experiment = self._experiment
         if experiment is None:
             return False
         for attempt in experiment.attempts:
-            if attempt.response is None or attempt.response[0].form != "decoded":
+            if attempt.decoded_response is None:
                 continue
             try:
-                payload: object = json.loads(attempt.response[1])
+                payload: object = json.loads(attempt.decoded_response)
             except (UnicodeDecodeError, ValueError, RecursionError):
                 continue
             if holds_series(payload):

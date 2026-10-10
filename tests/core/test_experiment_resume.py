@@ -554,6 +554,51 @@ def test_an_attempt_directory_without_its_records_is_no_attempt(lab: Lab) -> Non
     assert not any(left.name in artifact.path for artifact in lab.manifest(2).artifacts)
 
 
+@pytest.mark.parametrize(
+    "failure",
+    [
+        RuntimeError(),
+        TrialFolioError(
+            "storage.write_failed",
+            "Couldn't write response.json durably: Input/output error. Check the output"
+            " directory's free space and permissions.",
+        ),
+    ],
+    ids=["unexpected", "storage-failure"],
+)
+def test_return_series_reads_a_response_published_before_its_write_failed(
+    lab: Lab, failure: Exception
+) -> None:
+    # The response is listed, though its attempt record doesn't reference it, so its attempt is
+    # unknown. return_series reads it all the same: in the manifest of its own session, which an
+    # unexpected failure lets go on, and in a resume's. The other case's request gets a 503,
+    # which saves no response. A defect found by PR #68's review: both declared absent.
+    lab.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
+    lab.server.reply("/screen/backtest", complete(), Reply(503))
+    baseline, _ = ids(DEFAULT_ONLY)
+    first = lab.new(
+        "default-only.yaml", arm=lambda store: store.fail_after("response.json", failure)
+    )
+    if isinstance(failure, TrialFolioError):
+        assert refused(first, "storage.write_failed")
+        assert not (lab.out / "sessions/1/manifest.json").exists()
+    else:
+        assert refused(first, "execution.partial")
+        assert lab.manifest(1).capabilities.return_series == "source_only"
+
+    resumed = lab.resume("default-only.yaml")
+
+    assert refused(resumed, "execution.partial")
+    (record,) = lab.attempts(baseline)
+    assert (record.outcome, record.response) == ("unknown", None)
+    assert outcomes(resumed) == ["unknown", "unknown"]
+    manifest = lab.manifest(2)
+    (directory,) = lab.attempt_directories(baseline)
+    published = (directory / "response.json").relative_to(lab.out).as_posix()
+    assert {a.path: a.role for a in manifest.artifacts}[published] == "provider_response"
+    assert manifest.capabilities.return_series == "source_only"
+
+
 def test_a_metrics_table_without_its_settings_table_is_completed(
     lab: Lab, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

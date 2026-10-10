@@ -259,6 +259,11 @@ class SavedExperimentAttempt:
     response: tuple[SavedResponse, bytes] | None
     """The saved response its attempt record references, or, without an attempt record, the one
     its directory holds, with its bytes."""
+    decoded_response: bytes | None
+    """The bytes of the `response.json` its directory holds, if it holds one: its saved
+    response's, or one whose write failed after the store published it, which its attempt record
+    doesn't reference, so it isn't `response` (docs/contracts.md, the executor). A manifest lists
+    it either way, and `return_series` reads it."""
 
     @property
     def directory(self) -> str:
@@ -986,6 +991,7 @@ def _attempt(
     )
     contents = {file.file.path: file.file for file in files}
     response = _response(reader, directory, names, start, record, contents)
+    decoded = reader.require(f"{directory}/{RESPONSE}") if RESPONSE in names else None
     return SavedExperimentAttempt(
         case_id=case_id,
         attempt_id=attempt_id,
@@ -998,6 +1004,7 @@ def _attempt(
         record=record,
         files=files,
         response=response,
+        decoded_response=decoded,
     )
 
 
