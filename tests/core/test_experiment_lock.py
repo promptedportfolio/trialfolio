@@ -6,7 +6,8 @@ module is the core part: the store holds the lock until it's closed, `experiment
 one line, another holder gets `experiment.locked`, and a refused lock, other than one another
 process holds, gives `storage.write_failed` before any record is written. The lock is the real
 `flock` (or `msvcrt.locking` on Windows); only a lock the file system refuses is injected, at
-`fcntl.flock`, a storage boundary.
+`fcntl.flock`, a storage boundary. A claim that fails releases the lock before it removes its
+file, which `os.unlink`, another storage boundary, is watched for.
 """
 
 import errno
@@ -197,10 +198,27 @@ def test_a_refused_lock_on_resume_writes_nothing(tmp_path: Path, refused_lock: l
     assert held_elsewhere(out) == "acquired"  # the failed attempt holds nothing
 
 
-def test_a_claim_that_fails_after_taking_the_lock_releases_it(
+def lock_at_removal(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Records what another store gets when it tries to take the lock on `experiment.lock` just
+    before the store removes the file. A claim that failed releases the lock first, since Windows
+    can't remove a file that a descriptor holds open (docs/contracts.md, the lock)."""
+    seen: list[str] = []
+    real_unlink = os.unlink
+
+    def unlink(path: str | os.PathLike[str], *, dir_fd: int | None = None) -> None:
+        if Path(path).name == LOCK_PATH:
+            seen.append(held_elsewhere(Path(path).parent))
+        real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "unlink", unlink)
+    return seen
+
+
+def test_a_claim_interrupted_as_it_writes_its_line_releases_the_lock_before_removing_its_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     out = tmp_path / "out"
+    seen = lock_at_removal(monkeypatch)
     real_write = os.write
 
     def interrupted(descriptor: int, data: bytes | memoryview) -> int:
@@ -211,7 +229,26 @@ def test_a_claim_that_fails_after_taking_the_lock_releases_it(
         LocalArtifactStore(out).claim(LOCK_PATH, LOCK_LINE, lock=True)
     monkeypatch.setattr(os, "write", real_write)
 
+    assert seen == ["acquired"]
     assert snapshot(tmp_path) == {}
     with LocalArtifactStore(out) as again:
         again.claim(LOCK_PATH, LOCK_LINE, lock=True)
         assert held_elsewhere(out) == "experiment.locked"
+
+
+def test_a_claim_that_fails_once_it_holds_the_lock_releases_it_before_removing_its_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Another process's file, there before the claim, which finds it only when it lists the
+    # directory: once the store holds the lock. PR #66's review found that no test failed there.
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "other.txt").write_bytes(b"another process's file\n")
+    seen = lock_at_removal(monkeypatch)
+
+    with pytest.raises(TrialFolioError) as raised:
+        LocalArtifactStore(out).claim(LOCK_PATH, LOCK_LINE, lock=True)
+
+    assert raised.value.code == "output.not_empty"
+    assert seen == ["acquired"]
+    assert snapshot(out) == {"other.txt": b"another process's file\n"}
