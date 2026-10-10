@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from tests.core.conftest import CONFIGS, RESPONSES, Execute, execute_run
+from tests.support.deep_json import DEEP, on_a_fixed_stack
 from trialfolio.configuration import original_values
 from trialfolio.contracts.manifest import ExternalReference, RunManifest
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS_BY_NAME
@@ -644,9 +645,10 @@ def test_extra_keys_and_a_missing_chart_dont_make_a_response_invalid() -> None:
 
 
 def test_a_response_nested_too_deeply_to_read_is_invalid() -> None:
-    deep = b"[" * 100_000 + b"]" * 100_000
-
+    # On a fixed stack, so the decoder raises RecursionError on every machine. Decoded, the
+    # response would be invalid for its top level instead.
     with pytest.raises(TrialFolioError) as raised:
-        read_response(deep, "response.json")
+        on_a_fixed_stack(lambda: read_response(DEEP, "response.json"))
 
     assert raised.value.code == "provider.response_invalid"
+    assert "it isn't JSON" in raised.value.message
