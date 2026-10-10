@@ -181,7 +181,8 @@ class AttemptEnded:
 
 @dataclass(frozen=True)
 class SessionEnded:
-    """The session wrote its report and its manifest, whose counts these are."""
+    """The session wrote its report and its manifest, whose counts these are, so it's complete,
+    whatever the callback does with this event."""
 
     session: int
     counts: ExperimentManifestCounts
@@ -191,7 +192,10 @@ type ProgressEvent = SessionStarted | AttemptStarted | AttemptEnded | SessionEnd
 
 type Progress = Callable[[ProgressEvent], object]
 """Receives each progress event, in order, in the thread that runs the execution. An exception
-it raises ends the session as an unexpected exception would, without its manifest."""
+it raises propagates from `run`, as an unexpected exception would. Raised at an event before the
+session's end, it ends the session without its manifest. Raised at `SessionEnded`, which comes
+once the manifest is written, it leaves the session complete, with its manifest: no record is
+ever removed."""
 
 
 class Cancellation:
