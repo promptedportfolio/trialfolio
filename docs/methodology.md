@@ -298,7 +298,7 @@ Each check traces to a METH requirement and is recorded as actual evidence in th
 
 ## Open questions
 
-| Question | Impact | Recommended default | Resolve by |
+| Question | Impact | Proposed default | Resolve by |
 |---|---|---|---|
 | HAC estimator or time-block bootstrap for individual uncertainty | Every p-value and interval in Statistical evaluation | Time-block bootstrap with joint resampling across strategies, because it preserves the cross-strategy dependence a family-wise procedure needs; HAC as an independent reference calculation. Decided in a methods ADR | Before the Statistical evaluation increment is marked Ready |
 | What forms the hypothesis family | The size and meaning of every adjustment | All candidates frozen for one confirmation period within one study; predefined diagnostics and universe slices are not separate hypotheses unless they influence selection | Methods ADR, then each study protocol |

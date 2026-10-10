@@ -742,12 +742,12 @@ The initial documentation is complete when:
 - Protocols are narrow and justified by real boundaries.
 - Data and research history needed later are preserved from the earliest applicable release.
 - No missing evidence is represented as a successful assessment.
-- Material open questions identify what they block and recommend a default.
+- Material open questions identify what they block and propose a default.
 - Source observations have links and are distinguished from proposed design.
 - Licensing drafts implement the owner's restrictions, identify Nathan Slaughter and his contact, and preserve non-waivable rights without claiming guaranteed exemption or immunity.
 - Links and examples are checked; intended files and commands are not described as already implemented.
 
-Finish the authoring task with the created-file list, the next implementable release, actual checks performed, and any remaining substantive questions with recommended defaults. Do not present the documentation pass as application implementation.
+Finish the authoring task with the created-file list, the next implementable release, actual checks performed, and any remaining substantive questions with proposed defaults. Do not present the documentation pass as application implementation.
 
 ## 16. Defaults and decisions still to resolve
 
@@ -773,7 +773,7 @@ No further substantive clarification is required to start authoring the initial 
 | Runtime LLM use | Optional, deferred, bounded to development; Anthropic, OpenAI, and local-model backends (section 11) | Discovery release |
 | Public sample data | Clearly labeled synthetic fixtures | First release |
 
-If a question becomes necessary, ask it with a recommendation. Example: “Which ScreenBacktest export version should 0.1.0 support? Recommended default: the current version from one representative export, with all other layouts explicitly unsupported until verified.”
+If a question becomes necessary, ask it with a recommendation. Example: “Which ScreenBacktest export version should 0.1.0 support? Proposed default: the current version from one representative export, with all other layouts explicitly unsupported until verified.”
 
 The goal of the documentation is executable clarity: a narrow first release, honest evidence, and a preserved path to scientifically rigorous evaluation.
 

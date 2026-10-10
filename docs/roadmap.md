@@ -136,7 +136,7 @@ The graphical workflow, descriptive analysis, rank diagnostics, and reproduction
 
 ## Open questions
 
-| Question | Impact | Recommended default | Resolve by |
+| Question | Impact | Proposed default | Resolve by |
 |---|---|---|---|
 | Which variant types can 0.3.0 offer? | 0.3.0 scope | Only the types whose backend support is recorded with integration evidence in 0.2.0 or 0.3.0 | Resolved at 0.3.0's sign-off (2026-10-08): the types [R03-T01 verified](releases/0.3.0-experiments.md#what-r03-t01-verified) |
 | Which platforms and application toolkit will the first graphical release support? | Installation, packaging, distribution, and maintenance | Prove a small packaged workflow on the initial supported platform set, starting with the prototype of [D-29](spec.md#decisions); record the toolkit and license review in the LIC-17 ADR | 0.4.0 specification Ready |

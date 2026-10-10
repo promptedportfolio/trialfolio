@@ -180,6 +180,6 @@ These are outside Trial Folio unless a later decision adds them after the analys
 
 ## Open questions
 
-| Question | Impact | Recommended default | Resolve by |
+| Question | Impact | Proposed default | Resolve by |
 |---|---|---|---|
 | How are the default sell rules at rank 99 and rank 95 defined ([P-13](#proposed-defaults))? | Simulation turnover and results | Sell a holding when its rank falls below 99, or below 95 | The Simulation review specification |
