@@ -1605,6 +1605,32 @@ def test_a_schema_version_without_a_reader_fails_the_check(
     assert ran.published == ()
 
 
+def test_a_saved_configuration_whose_schema_version_has_no_reader_fails_the_check(
+    lab: Lab,
+) -> None:
+    # A plan's configuration.yaml that no manifest lists, as when the run that recorded its plan
+    # stopped before its manifest, gives its own schema version, and one without a reader fails
+    # as a record's does, not as a broken record.
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", complete())
+    lab.new("default-only.yaml", arm=lambda store: store.fail_os("attempt.json"))
+    path = "plans/1/configuration.yaml"
+    data = (lab.out / path).read_bytes().replace(b"schema_version: 1.0.0", b"schema_version: 9.9.9")
+    assert b"9.9.9" in data
+    (lab.out / path).write_bytes(data)
+    # Its experiment.json records the file's new artifact_id, so only the version can fail.
+    record = json.loads((lab.out / "plans/1/experiment.json").read_bytes())
+    record["plans"][-1]["configuration_artifact_id"] = "sha256:" + sha256_hex(data)
+    (lab.out / "plans/1/experiment.json").write_text(json.dumps(record, indent=2) + "\n")
+
+    ran = lab.resume("default-only.yaml")
+
+    error = refused(ran, "artifact.unknown_schema_version")
+    assert f"`{path}`" in error.message
+    assert "It reads experiment configurations 1.0.0." in error.message
+    assert ran.received == () and ran.published == ()
+
+
 @pytest.mark.parametrize("status", [401, 403])
 def test_a_request_sent_with_a_token_a_401_or_403_dropped_fails_the_check(
     lab: Lab, status: int

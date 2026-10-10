@@ -72,7 +72,11 @@ from trialfolio.attempts import (
     request_detail,
 )
 from trialfolio.canonical import sha256_hex
-from trialfolio.configuration import experiment_original_values, read_experiment_configuration
+from trialfolio.configuration import (
+    experiment_original_values,
+    experiment_schema_version,
+    read_experiment_configuration,
+)
 from trialfolio.contracts.attempt import (
     ArtifactReference,
     AttemptRecordV1_1,
@@ -808,18 +812,27 @@ def _plan(reader: _Reader, number: int, previous: SavedPlan | None) -> SavedPlan
 
 def _with_version(saved: SavedPlan, listed: Mapping[str, ExperimentArtifact]) -> SavedPlan:
     """`saved` with its configuration's schema version: the latest manifest's, when it lists the
-    file, and otherwise the version the configuration gives, read as a configuration is."""
+    file, and otherwise the version the configuration gives, read as a configuration is. A
+    version this version has no reader for is `artifact.unknown_schema_version`, as the latest
+    manifest's entry for the file would be."""
     path = saved.configuration.path
     entry = listed.get(path)
     if entry is not None and entry.schema_version is not None:
         return replace(saved, configuration_version=entry.schema_version)
+    content = saved.configuration_content
     try:
-        read = read_experiment_configuration(saved.configuration_content, path)
+        read = read_experiment_configuration(content, path)
     except TrialFolioError:
-        raise _refused(
-            f"{_named(path)} isn't an experiment configuration this version reads."
-        ) from None
-    return replace(saved, configuration_version=read.schema_version)
+        pass
+    else:
+        return replace(saved, configuration_version=read.schema_version)
+    try:
+        version = experiment_schema_version(content, path)
+    except TrialFolioError:
+        version = None
+    if isinstance(version, str):
+        _check_version(version, path, "configuration")
+    raise _refused(f"{_named(path)} isn't an experiment configuration this version reads.")
 
 
 def _sessions(reader: _Reader) -> tuple[list[SessionRecord], int | None, int]:
