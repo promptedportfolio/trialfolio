@@ -784,12 +784,13 @@ class ExperimentAttempt:
             raise
 
     def _write_start(self, start: StartRecordV1_1) -> None:
-        """Writes the start record. After an interrupt while it's written, a record that was
+        """Writes the start record. After a failure while it's written, an interrupt or a
+        storage failure such as a sync after the store published it, a record that was
         published counts as written, so the attempt record agrees with it."""
         data = _model_json(start)
         try:
             self._files.write(START_RECORD, data, "start_record")
-        except KeyboardInterrupt:
+        except BaseException:
             if self._files.published(START_RECORD, data, "start_record"):
                 self._start = start
             raise

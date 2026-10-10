@@ -737,6 +737,50 @@ def test_an_attempt_record_that_wasnt_written_ends_the_session_without_its_manif
     assert not (executed.out / "sessions/1/report.html").exists()
 
 
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [
+        (KeyboardInterrupt(), "command.interrupted"),
+        # What the store raises when the sync after publishing a file fails. A defect found by
+        # PR #66's review: the attempt record then had no authenticated_by.
+        (
+            TrialFolioError(
+                "storage.write_failed",
+                "Couldn't write started.json durably: Input/output error. Check the output"
+                " directory's free space and permissions.",
+            ),
+            "storage.write_failed",
+        ),
+    ],
+    ids=["interrupt", "storage-failure"],
+)
+def test_a_start_record_published_before_a_failure_agrees_with_the_attempt_record(
+    experiments: Experiments, monkeypatch: pytest.MonkeyPatch, failure: BaseException, code: str
+) -> None:
+    experiments.server.reply("/auth", AUTHENTICATED)
+
+    def faults(store: LocalArtifactStore) -> StorageFaults:
+        faulted = StorageFaults(store, monkeypatch)
+        faulted.fail_after("started.json", failure)
+        return faulted
+
+    executed = experiments.run("default-only.yaml", faults=faults)
+
+    error = executed.error
+    assert error is not None and error.code == code
+    assert executed.received == (AUTH,)
+    (attempt,) = executed.attempts(ids(executed.plan)[0])
+    start = StartRecordV1_1.model_validate_json((attempt / "started.json").read_bytes())
+    record = AttemptRecordV1_1.model_validate_json((attempt / "attempt.json").read_bytes())
+    # An attempt record has authenticated_by exactly when it has a start record, and the same.
+    assert record.authenticated_by == start.authenticated_by == start.attempt_id
+    assert (record.outcome, record.possibly_charged) == ("failed", False)
+    (result,) = executed.execution.attempts
+    assert result.start == start
+    assert [file.role for file in result.files].count("start_record") == 1
+    assert not (executed.out / "sessions/1/manifest.json").exists()
+
+
 def test_an_interrupt_once_the_first_plan_is_published_leaves_it_to_resume(
     experiments: Experiments, monkeypatch: pytest.MonkeyPatch
 ) -> None:
