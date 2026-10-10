@@ -27,7 +27,8 @@ PyYAML's parse events, never through PyYAML's constructors, so it decides what e
 as `baseline.max_holdings` or `variants.max_holdings[0].value` (an experiment's normalized
 tables).
 
-Error messages name the offending key and never include its value, so they're safe to log.
+Error messages name the offending key and never include its value, so they're safe to log. A
+key's control and formatting characters and lone surrogates are written as escapes.
 """
 
 import re
@@ -72,6 +73,7 @@ from trialfolio.contracts.experiment_configuration import (
 from trialfolio.contracts.review_configuration import REVIEW_SCHEMA_VERSIONS, ReviewConfiguration
 from trialfolio.contracts.screen_configuration import SCREEN_SCHEMA_VERSIONS, ScreenConfiguration
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS
+from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError
 
 type KeyPath = tuple[str | int, ...]
@@ -326,12 +328,16 @@ def _fail(source_name: str, problems: Sequence[str]) -> NoReturn:
 
 
 def _format_path(path: KeyPath) -> str:
+    """The key path as messages name it, such as `variants.rules[0].add`. A key's control and
+    formatting characters and lone surrogates are written as escapes, as the plan display writes
+    text from the configuration, so a key can't act on a terminal, and the JSON summary can hold
+    the message."""
     text = ""
     for part in path:
         if isinstance(part, int):
             text += f"[{part}]"
         else:
-            name = part or "''"
+            name = visible(part) or "''"
             text += f".{name}" if text else name
     return text
 

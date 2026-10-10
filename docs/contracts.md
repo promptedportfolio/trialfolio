@@ -89,7 +89,7 @@ Configuration files are YAML documents owned by the user. The rules apply to eve
 - Duplicate keys are rejected; a YAML loader must not silently keep the last one.
 - Non-empty text, wherever a configuration requires it, has a character that isn't whitespace: one of Unicode's White_Space characters.
 - A file is UTF-8 text, with or without a byte-order mark, and holds one YAML document: a mapping whose keys are text, with no value nested more than 16 levels deep. Null values, anchors, aliases, and explicit tags are rejected. To omit an optional key, leave it out; don't write it empty. An optional text value, when present, must not be empty or all whitespace.
-- Error messages name each offending key, and never include its value, so they're safe to log.
+- Error messages name each offending key, and never include its value, so they're safe to log. A key's control and formatting characters, its line and paragraph separators, and its lone surrogates are written as escapes, such as `\u001b`, as the [plan display](#approval) writes text from the configuration, so a key can't act on a terminal, and the [JSON summary](#json-summary) can hold the message.
 
 ### Screen configuration
 
