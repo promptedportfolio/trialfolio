@@ -1,20 +1,21 @@
 """JSON nested too deeply for the decoder, and a thread to decode it on, so the decoder raises
 `RecursionError` on every machine.
 
-Python 3.12 counts the decoder's nested calls, but Python 3.14 measures the stack they use. On
-the main thread, that stack's size is the platform's limit, such as `ulimit -s`, and where it's
-large enough, as on GitHub's Ubuntu runner, Python 3.14 decodes all 100,000 levels. A thread's
-stack has the size the test sets. At 4 MiB, Python 3.14 raises `RecursionError` before the levels
-fit, and Python 3.12 reaches its count before the stack runs out: at 1 MiB, Python 3.12 crashed,
-on Linux and macOS.
+Python 3.12 counts the decoder's nested calls, but Python 3.14 measures the stack they use, so
+how deep it decodes depends on the machine. On the main thread, the stack's size is the
+platform's limit, such as `ulimit -s`. A thread's stack has the size the test sets. On GitHub's
+Ubuntu runner, Python 3.14 decoded 100,000 levels on the main thread, and on a thread with a
+4 MiB stack too. A million levels don't fit in 4 MiB at even 5 bytes a level, so Python 3.14
+raises `RecursionError`. Python 3.12 reaches its count before the stack runs out: with a 1 MiB
+stack, it crashed, on Linux and macOS.
 """
 
 import threading
 from collections.abc import Callable
 from typing import Final
 
-DEEP: Final = b"[" * 100_000 + b"]" * 100_000
-"""Valid JSON, nested 100,000 levels deep."""
+DEEP: Final = b"[" * 1_000_000 + b"]" * 1_000_000
+"""Valid JSON, nested a million levels deep."""
 
 STACK_SIZE: Final = 4 << 20
 """The thread's stack, 4 MiB."""
