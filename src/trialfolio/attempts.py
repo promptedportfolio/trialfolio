@@ -32,6 +32,10 @@ same way.
 
 No file is written twice, and none is replaced. The outcome follows the request's exchange and
 whether the response was saved. An interrupt or a storage failure decides only the error code.
+A file before the attempt record that the store published before its write failed, whatever the
+failure, is among the attempt's files all the same, so a manifest written later lists every file
+the attempt wrote. The attempt record references a request or a response only when its write
+completed.
 
 - **`request.json`** is `json.dumps` of the `params` sent, indented. `requests` writes the body
   with the same function, unindented, so each number's text is the body's. Non-ASCII text is
@@ -569,13 +573,11 @@ class Attempt:
         ending: BaseException | None = None
         try:
             client.authenticate()
-            self._files.write_request(self._params)
+            self._files.write_request(self._params, list_published=True)
             # Exactly the authentication exchange; the model refuses anything else.
             exchanges = cast("tuple[Exchange]", client.exchanges)
-            start = StartRecord(**self._identity, exchanges=exchanges)
-            self._files.write(START_RECORD, _model_json(start), "start_record")
-            self._start = start
-            self._files.save(client.screen_backtest(self._params))
+            self._write_start(StartRecord(**self._identity, exchanges=exchanges))
+            self._files.save(client.screen_backtest(self._params), list_published=True)
         except KeyboardInterrupt as interrupt:
             ending = interrupt
         # Every ending is recorded. An unexpected one is classified, and logged by its frames.
@@ -599,6 +601,18 @@ class Attempt:
         if self._ended:
             raise RuntimeError("an attempt ends once")
         self._ended = True
+
+    def _write_start(self, start: StartRecord) -> None:
+        """Writes the start record. After a failure while it's written, whatever the failure, a
+        record the store published counts as written, as an `ExperimentAttempt`'s does."""
+        data = _model_json(start)
+        try:
+            self._files.write(START_RECORD, data, "start_record")
+        except BaseException:
+            if self._files.published(START_RECORD, data, "start_record"):
+                self._start = start
+            raise
+        self._start = start
 
     def _end(self, exchanges: tuple[Exchange, ...], ending: BaseException | None) -> AttemptResult:
         def record(end: _Ending, error: TrialFolioError | None) -> AttemptRecord:
