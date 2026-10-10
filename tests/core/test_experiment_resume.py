@@ -21,6 +21,7 @@ by a cancellation, by storage faults, or by an interrupt, as a stopped process l
 """
 
 import json
+import logging
 import shutil
 import uuid
 from collections.abc import Callable, Iterator, Sequence
@@ -298,6 +299,14 @@ def test_a_resume_lists_every_file_of_the_experiment_and_keeps_the_earlier_entri
     lab.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
     lab.server.reply("/screen/backtest", *(complete() for _ in range(5)))
     lab.new(cancel_after=2)
+
+    # A time no entry rebuilt from the records would give, so a kept entry can't pass for one.
+    def acquired_earlier(manifest: Json) -> None:
+        for artifact in manifest["artifacts"]:
+            if artifact["source"] is not None:
+                artifact["source"]["acquired_at"] = "2026-10-01T00:00:00Z"
+
+    _edit(lab.out, "sessions/1/manifest.json", acquired_earlier)
     earlier = {artifact.path: artifact for artifact in lab.manifest(1).artifacts}
 
     resumed = lab.resume()
@@ -319,6 +328,11 @@ def test_a_resume_lists_every_file_of_the_experiment_and_keeps_the_earlier_entri
     # again as it was, its source record included.
     kept = {path: entry for path, entry in earlier.items() if not path.startswith("sessions/")}
     assert {path: listed[path] for path in kept} == kept
+    assert {entry.role for entry in kept.values() if entry.source is not None} == {
+        "configuration",
+        "provider_request",
+        "provider_response",
+    }
     assert {a.path for a in manifest.artifacts if a.role in ("session_record", "report")} == {
         "sessions/2/session.json",
         "sessions/2/report.html",
@@ -1056,6 +1070,48 @@ def test_a_repeat_whose_authentication_fails_leaves_its_confirmation_unused(lab:
     assert lab.attempts(baseline)[-1].repeat_of == unknown.attempt_id
 
 
+def test_d32s_stop_in_a_resume_needs_a_later_case_the_session_sends(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Only the second case awaits a repeat, and the cases after it are complete, so its repeat is
+    # the session's only send. Its authentication fails, but no case the session sends or repeats
+    # remains, so D-32's stop doesn't apply, though later cases of the plan do remain.
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", complete(), Reply(503), complete(), complete(), complete())
+    assert refused(lab.new(), "execution.partial")
+    liquidity = EXAMPLE.cases[1].case_id
+    (unknown,) = lab.attempts(liquidity)
+    lab.server.reply("/auth", Reply(401))
+
+    with caplog.at_level(logging.WARNING, logger="trialfolio"):
+        failed = lab.resume(repeats=[Repeat(liquidity, unknown.attempt_id)])
+
+    error = refused(failed, "execution.partial")
+    assert failed.received == (AUTH,)
+    assert outcomes(failed) == ["succeeded", "unknown", "succeeded", "succeeded", "succeeded"]
+    assert "no later case started" not in error.message
+    assert "authentication call failed" not in error.message
+    assert not [r for r in caplog.records if getattr(r, "event", None) == "experiment.stopped"]
+
+
+def test_the_repeats_are_checked_before_the_approval(lab: Lab) -> None:
+    # Steps 5 and 6: a revision without its reason, and with a repeat that names a due case,
+    # fails for the repeat, which is checked first.
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", Reply(503), complete())
+    lab.new("example.yaml", cancel_after=2)
+    baseline, due = EXAMPLE.cases[0].case_id, EXAMPLE.cases[3].case_id
+    (unknown,) = lab.attempts(baseline)
+    _, revised = plan_of("revisions/holdings-40.yaml")
+    assert due in ids(revised)
+
+    ran = lab.resume("revisions/holdings-40.yaml", repeats=[Repeat(due, unknown.attempt_id)])
+
+    error = refused(ran, "plan.approval_required")
+    assert "isn't awaiting a repeat" in error.message
+    assert ran.received == () and ran.published == ()
+
+
 @pytest.mark.parametrize("which", ["no-case", "due", "other-attempt", "succeeded", "twice"])
 def test_a_repeat_that_cant_apply_fails_before_anything_is_written(lab: Lab, which: str) -> None:
     lab.server.reply("/auth", AUTHENTICATED)
@@ -1480,6 +1536,14 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
     ),
     "an experiment.json that doesn't record its plan's declaration": (
         lambda out: _edit(out, "plans/2/experiment.json", lambda d: d.update(title="Another")),
+        "doesn't record the experiment and its planned cases as its plan declares them",
+    ),
+    "an experiment.json that doesn't record its plan's cases": (
+        lambda out: _edit(
+            out,
+            "plans/2/experiment.json",
+            lambda d: d["planned_cases"][1].update(description="Another description."),
+        ),
         "doesn't record the experiment and its planned cases as its plan declares them",
     ),
     "a plan of another experiment": (
