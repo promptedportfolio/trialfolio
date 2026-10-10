@@ -679,17 +679,23 @@ def test_a_running_attempt_needs_its_request_and_one_saved_response(lab: Lab, ch
     assert ran.published == ()
 
 
-def test_the_manifest_names_the_parser_that_wrote_each_table(lab: Lab) -> None:
+@pytest.mark.parametrize("left", ["none", "metrics", "both"])
+def test_the_manifest_names_the_parser_that_wrote_each_table(lab: Lab, left: str) -> None:
     # As a later version, whose parser is 2, would have left the records: the latest manifest
     # names parser 2 for both responses, and lists the baseline's tables, which parser 2 read
-    # differently from the installed one, but not the other case's, which a stopped run didn't
-    # write. The resume keeps the baseline's, and writes the others with the installed parser,
-    # which its manifest then names for that response; the baseline's keeps parser 2.
+    # differently from the installed one, but not the other case's, as when parser 2 found its
+    # response invalid. A resume with the installed parser may then have written the other
+    # case's metrics.csv, or both its tables, before it stopped without its manifest. This resume
+    # keeps the baseline's, and writes the others' that are missing with the installed parser,
+    # which its manifest then names for that response, and in `parsers`, whatever the latest
+    # manifest named for the response; the baseline's keeps parser 2.
     lab.server.reply("/auth", AUTHENTICATED)
     lab.server.reply("/screen/backtest", complete(), complete())
     assert lab.new("default-only.yaml").error is None
     baseline, default = ids(DEFAULT_ONLY)
     listed = f"cases/{baseline}/normalized/metrics.csv"
+    normalized = lab.out / "cases" / default / "normalized"
+    tables = {name: (normalized / name).read_bytes() for name in ("metrics.csv", "settings.csv")}
 
     def written_by_parser_2(manifest: Json) -> None:
         artifacts: list[Json] = []
@@ -703,7 +709,10 @@ def test_the_manifest_names_the_parser_that_wrote_each_table(lab: Lab) -> None:
         manifest["parsers"][0]["parser_version"] = 2
 
     _edit(lab.out, "sessions/1/manifest.json", written_by_parser_2)
-    shutil.rmtree(lab.out / "cases" / default / "normalized")
+    if left == "none":
+        shutil.rmtree(normalized)
+    elif left == "metrics":
+        (normalized / "settings.csv").unlink()
     rows = read_metrics_csv((lab.out / listed).read_bytes(), "metrics")
     other = [
         row.model_copy(update={"value": _another_digit(row.value)})
@@ -718,6 +727,7 @@ def test_the_manifest_names_the_parser_that_wrote_each_table(lab: Lab) -> None:
 
     assert resumed.error is None and resumed.received == ()
     assert (lab.out / listed).read_bytes() == parser_2
+    assert {name: (normalized / name).read_bytes() for name in tables} == tables
     manifest = lab.manifest(2)
     parsers = {
         artifact.path.split("/")[1]: artifact.source.parser_version

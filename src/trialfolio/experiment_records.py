@@ -1227,13 +1227,18 @@ def _tables(
             metrics=_stored(metrics_path, content),
             metrics_rows=metrics,
             settings=settings,
-            parser_version=_parser_of(response[0].path, listed),
+            # A table no manifest lists is what the installed parser writes, as checked above,
+            # whichever parser the latest manifest names for its response.
+            parser_version=(
+                PARSER_VERSION if entry is None else _parser_of(response[0].path, listed)
+            ),
         )
     return tables
 
 
 def _parser_of(response: str, listed: Mapping[str, ExperimentArtifact]) -> int:
-    """The parser the latest manifest names for a response whose table it lists."""
+    """The parser the latest manifest names for a response whose table it lists. Never for one
+    whose table it doesn't list: it may name the parser that found the response invalid."""
     entry = listed.get(response)
     if entry is None or entry.source is None or entry.source.parser_version is None:
         return PARSER_VERSION
