@@ -51,6 +51,7 @@ from trialfolio.experiment_execution import (
     SessionStarted,
 )
 from trialfolio.experiment_records import SavedExperiment, open_experiment, read_experiment
+from trialfolio.normalization import case_metrics_rows
 from trialfolio.planning import build_experiment_plan, installed_versions, plan_hash, plan_revision
 from trialfolio.provider import Credentials, P123ScreenBacktestClient, ScreenBacktestClient
 from trialfolio.storage import ArtifactStore, LocalArtifactStore
@@ -338,6 +339,22 @@ def test_resuming_a_complete_experiment_sends_nothing_and_writes_a_session(lab: 
     assert lab.manifest(2).capabilities.return_series == "source_only"
 
 
+def test_a_session_number_is_never_reused(lab: Lab) -> None:
+    # A process killed while writing the next session's record leaves its directory, with only
+    # the store's hidden temporary file. The resume skips that name, and takes the number after.
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", complete(), complete())
+    assert lab.new("default-only.yaml").error is None
+    (lab.out / "sessions/2").mkdir()
+    (lab.out / "sessions/2/.session.json.0123456789abcdef.tmp").write_bytes(b"{")
+
+    resumed = lab.resume("default-only.yaml")
+
+    assert resumed.error is None
+    assert resumed.events[0] == SessionStarted(session=3, cases=())
+    assert lab.manifest(3).session == 3
+
+
 def test_the_same_configuration_written_differently_resumes_its_plan(lab: Lab) -> None:
     lab.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
     lab.server.reply("/screen/backtest", *(complete() for _ in range(5)))
@@ -394,6 +411,9 @@ def test_a_running_attempt_with_a_saved_response_is_recorded_as_succeeded(lab: L
         (AUTH, "response", 200, None),
         (SEND, "response", 200, "completed_from_saved_response"),
     ]
+    # Portfolio123's cost and quota, from the saved response, as the attempt would have recorded
+    # them.
+    assert (record.provider_metadata.cost, record.provider_metadata.quota_remaining) == (5, 4321)
     assert record.response is not None and record.response.path.endswith("/response.json")
     assert record.request is not None and record.request.path.endswith("/request.json")
     # The tables a stopped run didn't write, from its saved response.
@@ -405,6 +425,10 @@ def test_a_running_attempt_with_a_saved_response_is_recorded_as_succeeded(lab: L
     manifest = lab.manifest(2)
     assert manifest.counts.cases.succeeded == 2
     assert (manifest.counts.provider_requests, manifest.counts.authentication_calls) == (2, 2)
+    # The manifest lists the attempt record the resume wrote, and counts its cost.
+    written = f"cases/{baseline}/attempts/{record.attempt_id}/attempt.json"
+    assert written in {artifact.path for artifact in manifest.artifacts}
+    assert manifest.counts.cost == 10
     assert default in {a.path.split("/")[1] for a in manifest.artifacts if a.role == "metrics"}
 
 
@@ -438,6 +462,9 @@ def test_a_running_attempt_without_a_saved_response_is_unknown_and_not_sent_agai
     assert record.error is not None and record.error.code == "command.interrupted"
     assert "may have been charged" in record.error.message
     assert [(e.request, e.status) for e in record.exchanges] == [(AUTH, 200)]
+    # It references the request.json written before its start record, and no response.
+    assert record.request is not None and record.request.path.endswith("/request.json")
+    assert record.response is None
     assert record.attempt_id == latest.attempt_id
     assert outcomes(resumed) == ["unknown", "succeeded"]
     assert "`baseline`, unknown (command.interrupted)" in error.message
@@ -492,6 +519,27 @@ def test_an_attempt_with_only_its_authentication_record_is_failed_and_its_case_i
     )
 
 
+def test_an_attempt_directory_without_its_records_is_no_attempt(lab: Lab) -> None:
+    # A process killed after an attempt that sends with the session's token wrote its
+    # request.json, and before its start record, leaves a directory without any of the attempt's
+    # records. There's no record of the attempt: its case is due, and nothing lists the file.
+    lab.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
+    lab.server.reply("/screen/backtest", complete(), complete())
+    _, default = ids(DEFAULT_ONLY)
+    lab.new("default-only.yaml", cancel_after=1)
+    left = lab.out / "cases" / default / "attempts" / str(uuid.uuid4())
+    left.mkdir(parents=True)
+    params = DEFAULT_ONLY.cases[1].requests[0].params.model_dump(mode="json")
+    (left / "request.json").write_text(json.dumps(params, indent=2))
+    assert lab.read().cases(DEFAULT_ONLY)[1].state == "due"
+
+    resumed = lab.resume("default-only.yaml")
+
+    assert resumed.error is None and resumed.received == (AUTH, SEND)
+    assert (left / "request.json").exists()
+    assert not any(left.name in artifact.path for artifact in lab.manifest(2).artifacts)
+
+
 def test_a_metrics_table_without_its_settings_table_is_completed(
     lab: Lab, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -544,6 +592,47 @@ def test_a_metrics_table_without_its_settings_table_is_completed(
         a for a in lab.manifest(2).artifacts if a.role == "provider_response" and default in a.path
     )
     assert response.source is not None and response.source.parser_version == 1
+    assert [parser.parser_version for parser in lab.manifest(2).parsers] == [1]
+
+
+def test_the_tables_a_resume_writes_come_from_the_response_its_check_read(lab: Lab) -> None:
+    # The resume writes a stopped run's tables from the response's bytes as its records check
+    # read them, never by reading the file again: a response changed after the check doesn't
+    # reach the tables.
+    lab.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
+    lab.server.reply("/screen/backtest", complete(), complete())
+    baseline, _ = ids(DEFAULT_ONLY)
+    stopped = lab.new(
+        "default-only.yaml",
+        arm=lambda store: store.fail_os(f"/cases/{baseline}/normalized/metrics.csv"),
+    )
+    assert refused(stopped, "storage.write_failed")
+    content, _ = plan_of("default-only.yaml")
+    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
+    with (
+        LocalArtifactStore(lab.out) as store,
+        P123ScreenBacktestClient(credentials, endpoint=lab.server.endpoint) as client,
+    ):
+        saved = open_experiment(store)
+        (response,) = (lab.out / "cases" / baseline / "attempts").rglob("response.json")
+        response.unlink()
+        response.write_bytes((RESPONSES / "changed-metrics.json").read_bytes())
+        execution = ExperimentExecution(
+            saved.plan,
+            saved.plan.plan_hash,
+            "option",
+            store,
+            client,
+            command=None,
+            clock=FixedClock(),
+            experiment=saved,
+        )
+        assert execution.run(content) is None
+    metrics = (lab.out / f"cases/{baseline}/normalized/metrics.csv").read_bytes()
+    (record,) = lab.attempts(baseline)
+    assert record.response is not None
+    expected = case_metrics_rows(complete().body, DEFAULT_ONLY.cases[0], record.response)
+    assert metrics == metrics_csv(expected)
 
 
 def test_a_saved_response_that_fails_validation_leaves_its_case_failed_without_tables(
@@ -592,13 +681,15 @@ def test_a_running_attempt_needs_its_request_and_one_saved_response(lab: Lab, ch
 
 def test_the_manifest_names_the_parser_that_wrote_each_table(lab: Lab) -> None:
     # As a later version, whose parser is 2, would have left the records: the latest manifest
-    # names parser 2 for both responses, and lists the baseline's tables, but not the other
-    # case's, which a stopped run didn't write. The resume writes those with the installed
-    # parser, which its manifest then names for that response; the baseline's keeps parser 2.
+    # names parser 2 for both responses, and lists the baseline's tables, which parser 2 read
+    # differently from the installed one, but not the other case's, which a stopped run didn't
+    # write. The resume keeps the baseline's, and writes the others with the installed parser,
+    # which its manifest then names for that response; the baseline's keeps parser 2.
     lab.server.reply("/auth", AUTHENTICATED)
     lab.server.reply("/screen/backtest", complete(), complete())
     assert lab.new("default-only.yaml").error is None
     baseline, default = ids(DEFAULT_ONLY)
+    listed = f"cases/{baseline}/normalized/metrics.csv"
 
     def written_by_parser_2(manifest: Json) -> None:
         artifacts: list[Json] = []
@@ -613,10 +704,20 @@ def test_the_manifest_names_the_parser_that_wrote_each_table(lab: Lab) -> None:
 
     _edit(lab.out, "sessions/1/manifest.json", written_by_parser_2)
     shutil.rmtree(lab.out / "cases" / default / "normalized")
+    rows = read_metrics_csv((lab.out / listed).read_bytes(), "metrics")
+    other = [
+        row.model_copy(update={"value": _another_digit(row.value)})
+        if (row.subject, row.metric_id) == ("strategy", "sharpe_ratio")
+        else row
+        for row in rows
+    ]
+    _rewrite(lab.out, listed, metrics_csv(other))
+    parser_2 = (lab.out / listed).read_bytes()
 
     resumed = lab.resume("default-only.yaml")
 
     assert resumed.error is None and resumed.received == ()
+    assert (lab.out / listed).read_bytes() == parser_2
     manifest = lab.manifest(2)
     parsers = {
         artifact.path.split("/")[1]: artifact.source.parser_version
@@ -701,6 +802,41 @@ def test_a_revision_writes_its_plan_sends_its_new_case_and_retires_the_old_one(
     assert manifest.counts.cases.planned == 5 and manifest.counts.cases.succeeded == 5
     # The retired case and its attempt stay, and are listed.
     assert any(a.path.startswith(f"cases/{old}/attempts/") for a in manifest.artifacts)
+
+
+def test_a_revision_whose_experiment_json_wasnt_written_isnt_a_plan(lab: Lab) -> None:
+    # The run that revised the plan stopped while writing plans/2/experiment.json, so plans/2/
+    # isn't a plan, and nothing was sent under it. The same revision, approved again, takes the
+    # next number, plans/3/, and plans/2/ is left as it is, and listed nowhere.
+    lab.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
+    lab.server.reply("/screen/backtest", *(complete() for _ in range(6)))
+    assert lab.new().error is None
+    reason = "Holdings of 40, not 50."
+
+    stopped = lab.resume(
+        "revisions/holdings-40.yaml",
+        reason=reason,
+        arm=lambda store: store.fail_os("/plans/2/experiment.json"),
+    )
+    assert refused(stopped, "storage.write_failed")
+    assert stopped.received == ()
+    assert sorted(p.name for p in (lab.out / "plans/2").iterdir()) == [
+        "configuration.yaml",
+        "plan.json",
+    ]
+    assert lab.read().current.number == 1
+
+    resumed = lab.resume("revisions/holdings-40.yaml", reason=reason)
+
+    assert resumed.error is None and resumed.received == (AUTH, SEND)
+    record = ExperimentRecord.model_validate_json(
+        (lab.out / "plans/3/experiment.json").read_bytes()
+    )
+    assert [entry.plan for entry in record.plans] == [1, 3]
+    assert not (lab.out / "plans/2/experiment.json").exists()
+    manifest = lab.manifest(3)
+    assert manifest.plan == 3
+    assert not any(a.path.startswith("plans/2/") for a in manifest.artifacts)
 
 
 def test_removing_a_variant_and_bringing_it_back_keeps_its_case_and_attempt(lab: Lab) -> None:
@@ -843,6 +979,9 @@ def test_a_repeat_names_the_unknown_attempt_and_isnt_made_twice(lab: Lab) -> Non
     _, again = lab.attempts(baseline)
     assert (again.repeat_of, again.outcome) == (unknown.attempt_id, "unknown")
     assert lab.manifest(2).counts.attempts.repeats == 1
+    # The repeat is now the case's latest possibly charged attempt, which a new confirmation names.
+    latest = lab.read().cases(EXAMPLE)[0].latest_charged
+    assert latest is not None and latest.attempt_id == again.attempt_id
     # The same command again: the repeat may have reached Portfolio123, so its confirmation is
     # used, and the case isn't repeated a second time.
     second = lab.resume(repeats=[repeat])
@@ -877,6 +1016,11 @@ def test_a_repeat_whose_authentication_fails_leaves_its_confirmation_unused(lab:
     assert (attempt.repeat_of, attempt.possibly_charged) == (unknown.attempt_id, False)
     # Still unknown, by its latest possibly charged attempt.
     assert outcomes(failed)[0] == "unknown"
+    # A repeat names an attempt whose request may have been charged, never one that sent nothing.
+    uncharged = lab.resume(repeats=[Repeat(baseline, attempt.attempt_id)])
+    error = refused(uncharged, "plan.approval_required")
+    assert "isn't an attempt of the case whose request may have been charged" in error.message
+    assert uncharged.received == () and uncharged.published == ()
     lab.server.reply("/auth", AUTHENTICATED)
     lab.server.reply("/screen/backtest", *(complete() for _ in range(4)))
     again = lab.resume(repeats=[repeat])
@@ -1089,8 +1233,38 @@ def _table(out: Path, case: int, name: str, change: dict[str, str]) -> None:
     _rewrite(out, path, data)
 
 
+def _without_last_row(out: Path, case: int, name: str) -> None:
+    """Drops the last row of the case's table, which stays a valid table."""
+    path = f"cases/{EXAMPLE.cases[case].case_id}/normalized/{name}"
+    if name == "metrics.csv":
+        data = metrics_csv(read_metrics_csv((out / path).read_bytes(), name)[:-1])
+    else:
+        data = settings_csv(read_settings_csv((out / path).read_bytes(), name)[:-1])
+    _rewrite(out, path, data)
+
+
+def _manifest_of_session_2(out: Path) -> None:
+    """Changes the latest manifest, `sessions/3/manifest.json`, to name session 2, with its own
+    session's files those of `sessions/2/`, so its model accepts it."""
+
+    def change(manifest: Json) -> None:
+        manifest["session"] = 2
+        for artifact in manifest["artifacts"]:
+            if artifact["path"].startswith("sessions/3/"):
+                path = artifact["path"].replace("sessions/3/", "sessions/2/")
+                data = (out / path).read_bytes()
+                artifact.update(path=path, artifact_id="sha256:" + sha256_hex(data), size=len(data))
+
+    _edit(out, "sessions/3/manifest.json", change)
+
+
+def _attempt_id(out: Path, case: int) -> str:
+    """The `attempt_id` of the one attempt of `EXAMPLE`'s case at that place."""
+    return json.loads((out / _attempt_of(out, case) / "attempt.json").read_bytes())["attempt_id"]
+
+
 def _first_attempt_id(out: Path) -> str:
-    return json.loads((out / _attempt_of(out, 0) / "attempt.json").read_bytes())["attempt_id"]
+    return _attempt_id(out, 0)
 
 
 _ANOTHER_ATTEMPT = str(uuid.uuid4())
@@ -1150,6 +1324,14 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         lambda out: _copied(out, 3, to_case="case-0123456789abcdef", sequence=9),
         "name a case their plan doesn't have",
     ),
+    "an attempt naming a plan the experiment doesn't have": (
+        lambda out: _records(out, 3, lambda d: d.update(plan_hash="sha256:" + "1" * 64)),
+        "name a plan the experiment doesn't have",
+    ),
+    "records that name another attempt than their directory's": (
+        lambda out: _records(out, 3, lambda d: d.update(attempt_id=_ANOTHER_ATTEMPT)),
+        "name another attempt",
+    ),
     "an attempt naming a session the experiment doesn't have": (
         lambda out: _records(out, 3, lambda d: d.update(session=9)),
         "name a session the experiment doesn't have",
@@ -1160,6 +1342,11 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
     ),
     "a request sent with another session's token": (
         lambda out: _records(out, 3, lambda d: d.update(authenticated_by=_first_attempt_id(out))),
+        "was sent with a token no attempt of its session obtained",
+    ),
+    # The fifth case's request, sent with the token of the fourth, which sent with the third's.
+    "a request sent with the token of an attempt that didn't authenticate": (
+        lambda out: _records(out, 4, lambda d: d.update(authenticated_by=_attempt_id(out, 3))),
         "was sent with a token no attempt of its session obtained",
     ),
     "a repeat_of that names no charged attempt": (
@@ -1175,6 +1362,11 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
             out / "cases" / EXAMPLE.cases[0].case_id / "normalized",
             out / "cases" / "case-0123456789abcdef" / "normalized",
         ),
+        "has normalized tables, but no succeeded attempt",
+    ),
+    # Tables are written after the attempt record, so a running attempt's case has none.
+    "tables beside an attempt without its attempt record": (
+        lambda out: _unlisted(out, f"{_attempt_of(out, 1)}/attempt.json"),
         "has normalized tables, but no succeeded attempt",
     ),
     "settings.csv without its metrics.csv": (
@@ -1194,6 +1386,43 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
     "a stray entry in plans/": (
         lambda out: _stray(out, "plans/latest/plan.json"),
         "holds an entry that isn't a numbered directory",
+    ),
+    "a stray entry in cases/": (
+        lambda out: _stray(out, "cases/notes.txt"),
+        "holds an entry that isn't a case's directory",
+    ),
+    "a stray entry in a case's directory": (
+        lambda out: _stray(out, f"cases/{EXAMPLE.cases[1].case_id}/notes.txt"),
+        "holds an entry no case has",
+    ),
+    "a stray entry in a case's attempts": (
+        lambda out: _stray(out, f"cases/{EXAMPLE.cases[1].case_id}/attempts/notes.txt"),
+        "holds an entry that isn't an attempt's directory",
+    ),
+    "a stray file in a plan's directory": (
+        lambda out: _stray(out, "plans/2/notes.txt"),
+        "holds a file no plan has",
+    ),
+    "a stray file in a session's directory": (
+        lambda out: _stray(out, "sessions/2/notes.txt"),
+        "holds a file no session has",
+    ),
+    "a session record that names another session": (
+        lambda out: _edit(out, "sessions/1/session.json", lambda d: d.update(session=2)),
+        "`sessions/1/session.json` names another session than its directory's",
+    ),
+    # Not an experiment's, whatever its version: the type is checked before the version.
+    "a manifest that isn't an experiment's": (
+        lambda out: _edit(
+            out,
+            "sessions/3/manifest.json",
+            lambda d: d.update(artifact_type="run", schema_version="9.9.9"),
+        ),
+        "isn't an experiment's manifest",
+    ),
+    "a manifest that names another session": (
+        _manifest_of_session_2,
+        "`sessions/3/manifest.json` names another session than its directory's",
     ),
     "an attempt record that doesn't hold its start record's": (
         lambda out: _edit(
@@ -1265,9 +1494,21 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         lambda out: _table(out, 1, "metrics.csv", {"label": EXAMPLE.cases[2].case_id}),
         "labels its rows with another case",
     ),
+    "a metrics.csv without one of the layout's metrics": (
+        lambda out: _without_last_row(out, 1, "metrics.csv"),
+        "doesn't hold one row for each of the layout's metrics",
+    ),
+    "a settings.csv without one of its plan's settings": (
+        lambda out: _without_last_row(out, 1, "settings.csv"),
+        "doesn't hold one row for each of its plan's settings",
+    ),
     "a metrics.csv drawn from another response": (
         lambda out: _table(out, 1, "metrics.csv", {"source_artifact": "sha256:" + "0" * 64}),
         "was drawn from another response",
+    ),
+    "a settings.csv labeled with another case": (
+        lambda out: _table(out, 1, "settings.csv", {"label": EXAMPLE.cases[2].case_id}),
+        "settings.csv` labels its rows with another case",
     ),
     "a settings.csv drawn from another configuration": (
         lambda out: _table(out, 1, "settings.csv", {"source_artifact": "sha256:" + "0" * 64}),
@@ -1336,12 +1577,17 @@ def test_a_schema_version_without_a_reader_fails_the_check(
     assert ran.published == ()
 
 
-def test_a_request_sent_with_a_token_a_403_dropped_fails_the_check(lab: Lab) -> None:
-    # The second case's request got a 403, which dropped the token the first case obtained, so
-    # the third case authenticated again. A copy of the fifth case's attempt that names the
-    # first case's token can't have been sent.
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_request_sent_with_a_token_a_401_or_403_dropped_fails_the_check(
+    lab: Lab, status: int
+) -> None:
+    # The second case's request got a 401 or 403, which dropped the token the first case
+    # obtained, so the third case authenticated again. A copy of the fifth case's attempt that
+    # names the first case's token can't have been sent.
     lab.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
-    lab.server.reply("/screen/backtest", complete(), Reply(403), complete(), complete(), complete())
+    lab.server.reply(
+        "/screen/backtest", complete(), Reply(status), complete(), complete(), complete()
+    )
     assert refused(lab.new(), "execution.partial")
     _copied(lab.out, 4, sequence=9, authenticated_by=_first_attempt_id(lab.out))
 
@@ -1349,6 +1595,22 @@ def test_a_request_sent_with_a_token_a_403_dropped_fails_the_check(lab: Lab) -> 
 
     error = refused(ran, "input.not_a_run")
     assert "a token that a 401 or 403 to an earlier request had dropped" in error.message
+    assert ran.received == () and ran.published == ()
+
+
+def test_a_request_sent_with_a_later_attempts_token_fails_the_check(lab: Lab) -> None:
+    # The second case's request got a 403, so the third case authenticated again. The second
+    # case's records, changed to name the third case's token, name one obtained after its send.
+    lab.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
+    lab.server.reply("/screen/backtest", complete(), Reply(403), complete(), complete(), complete())
+    assert refused(lab.new(), "execution.partial")
+    later = json.loads((lab.out / _attempt_of(lab.out, 2) / "attempt.json").read_bytes())
+    _records(lab.out, 1, lambda d: d.update(authenticated_by=later["attempt_id"]))
+
+    ran = lab.resume()
+
+    error = refused(ran, "input.not_a_run")
+    assert "was sent with a token no attempt of its session obtained before it" in error.message
     assert ran.received == () and ran.published == ()
 
 

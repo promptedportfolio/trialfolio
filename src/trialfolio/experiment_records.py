@@ -997,10 +997,11 @@ def _check_agreement(
     """The records agree with each other: the attempt record holds its start record's contents,
     and an attempt that authenticated wrote its authentication record first."""
     if start is not None and record is not None:
+        # Their exchanges then agree too: both name the same `authenticated_by`, and the models
+        # hold an attempt that authenticated to one successful `POST /auth` exchange, first, and
+        # one sent with another's token to none.
         fields = set(StartRecordV1_1.model_fields) - {"exchanges"}
-        if record.model_dump(include=fields) != start.model_dump(include=fields) or (
-            record.exchanges[: len(start.exchanges)] != start.exchanges
-        ):
+        if record.model_dump(include=fields) != start.model_dump(include=fields):
             raise _refused(f"{disagree}: the attempt record doesn't hold its start record's.")
     if start is None and record is not None and record.authenticated_by is not None:
         raise _refused(f"{disagree}: the attempt record names a token, without a start record.")
