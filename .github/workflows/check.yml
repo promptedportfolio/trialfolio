@@ -14,9 +14,11 @@ on:
 permissions:
   contents: read
 
-# A new push to a pull request cancels its earlier run. Runs on main all finish.
+# A new push to a pull request cancels its earlier run. Every other run, on main or on demand,
+# has a group of its own, so no other run cancels it: GitHub keeps only one waiting run in a
+# group, and cancels it when a newer one arrives.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
