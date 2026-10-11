@@ -3,18 +3,19 @@ the attempts a stopped run left without their attempt records, writes the tables
 didn't, sends only the cases that are due and those a confirmed repeat names, revises the plan
 when it's given a revision with its reason, and counts every attempt of the experiment.
 
-Traces to docs/contracts.md, running an experiment (a resumed experiment, checking the records,
-the cases that are due, and the executor), uncertain completion, experiment attempts, an
-experiment's normalized tables, experiment plans and revisions (approving a revision, what a
-revision keeps, and the budget across runs), repeating a case, and the experiment manifest; and,
-at the core, to R03-AC02 (case identities are stable across restarts), R03-AC04 (an interruption
-after case n resumes at case n + 1, with no repeated provider call), R03-AC06 (a restart skips
-complete cases and flags an attempt with uncertain completion, which isn't repeated), R03-AC07
-(an approved revision gives the changed case a new identity and keeps the old one), R03-AC08 (the
-counts add up), R03-AC14 (execution given a repeat checks it, and never asks), R03-AC17 (records
-that are incomplete or changed fail with `input.not_a_run`, and send and write nothing), and
-R03-AC18 (a resume writes the tables a stopped run didn't). The real client, `requests`, and
-`urllib3` run over the fake server; storage faults wrap the real store; the clock is fixed.
+Traces to docs/contracts.md, running an experiment (a resumed experiment, checking the records, the
+cases that are due, and the executor), uncertain completion, experiment attempts, an experiment's
+normalized tables, experiment plans and revisions (approving a revision, what a revision keeps, and
+the budget across runs), repeating a case, the experiment manifest, and the experiment report's
+evidence; and, at the core, to R03-AC02 (case identities are stable across restarts), R03-AC04 (an
+interruption after case n resumes at case n + 1, with no repeated provider call), R03-AC06 (a
+restart skips complete cases and flags an attempt with uncertain completion, which isn't repeated),
+R03-AC07 (an approved revision gives the changed case a new identity and keeps the old one),
+R03-AC08 (the counts add up), R03-AC14 (execution given a repeat checks it, and never asks),
+R03-AC17 (records that are incomplete or changed fail with `input.not_a_run`, and send and write
+nothing), and R03-AC18 (a resume writes the tables a stopped run didn't). The real client,
+`requests`, and `urllib3` run over the fake server; storage faults wrap the real store; the clock is
+fixed.
 
 Each experiment is built during the test, through the core, and stopped where the test needs it:
 by a cancellation, by storage faults, or by an interrupt, as a stopped process leaves it.
@@ -645,6 +646,10 @@ def test_a_metrics_table_without_its_settings_table_is_completed(
     )
     assert {row.source_artifact for row in rows} == {configuration}
     assert {row.label for row in rows} == {default}
+    # The evidence the session's report shows holds the rows the resume wrote, flag and all.
+    assert resumed.execution is not None and resumed.execution.evidence is not None
+    (view,) = (v for v in resumed.execution.evidence.cases if v.case.case_id == default)
+    assert view.settings == rows
     # The manifest names the installed parser for the case's response, whose table no manifest
     # had listed.
     (response,) = (
