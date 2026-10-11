@@ -7,8 +7,9 @@ credentials injected as AGENTS.md describes. The marker keeps it out of the defa
 `scripts/check`. It runs only with the owner present, who grants its network access for this one
 command.
 
-The test refuses to start, with a failure that says why, without both credentials, or with a
-budget that's missing or below the plan's `credits`, as 0.1.0's live check does.
+The test refuses to start, with a failure that says why, when the command selects another live
+check, without both credentials, or with a budget that's missing or below the plan's `credits`,
+as 0.1.0's live check does. Each live check reads the whole budget, so it runs alone.
 
 The experiment is `default-only.yaml`'s: the documented example's baseline, ranked by a formula,
 and the default variant, `rebalance-weeks-1`. Its two requests are those R01-T01 and R01-T05
@@ -37,7 +38,13 @@ from pathlib import Path
 import pytest
 import trialfolio_network_guard as network_guard
 
-from tests.live.test_screen_backtest import error_code, portfolio123_host, refuse, trialfolio
+from tests.live.test_screen_backtest import (
+    error_code,
+    portfolio123_host,
+    refuse,
+    refuse_beside_another,
+    trialfolio,
+)
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
 from trialfolio.cli import API_ID_VARIABLE, API_KEY_VARIABLE
 from trialfolio.configuration import read_experiment_configuration
@@ -57,8 +64,11 @@ BUDGET_VARIABLE = "TRIALFOLIO_LIVE_BUDGET_CREDITS"
 BACKTEST_REQUEST = "POST /screen/backtest"
 
 
-def test_a_real_experiment_authenticates_once_within_its_budget_and_resumes_offline() -> None:
+def test_a_real_experiment_authenticates_once_within_its_budget_and_resumes_offline(
+    request: pytest.FixtureRequest,
+) -> None:
     # Before anything else, the test refuses to start without what it needs.
+    refuse_beside_another(request)
     missing = [name for name in (API_ID_VARIABLE, API_KEY_VARIABLE) if not os.environ.get(name)]
     if missing:
         refuse(f"set {' and '.join(missing)}, as AGENTS.md says, for this command only.")
