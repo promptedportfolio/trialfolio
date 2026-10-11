@@ -6,9 +6,11 @@ Portfolio123, the same command, run again, doesn't repeat the case again; and a 
 apply fails before anything is sent.
 
 Traces to R03-AC14's interface part (D-31), and to docs/contracts.md, repeating a case (the
-prompt, the usage errors, and what fails and what doesn't) and CLI behavior (a usage error has no
-JSON summary). Each test writes `example.yaml`'s experiment with the experiment builder, with a
-503 for `holdings-50`'s request, which leaves it `unknown`, or with a 401 for Trial Folio's
+prompt, the usage errors, and what fails and what doesn't), running an experiment (the plan
+display's progress and budget, whose sends, like the prompt's, are the core's, as R03-T13's
+review corrected) and CLI behavior (a usage error has no JSON summary). Each test writes
+`example.yaml`'s experiment with the experiment builder, with a 503 for `holdings-50`'s request,
+which leaves it `unknown`, a 402, which stops the later cases, or a 401 for Trial Folio's
 authentication call, which leaves every case due, through the CLI's entry function in the test
 process, over the fake server. The terminal is a real pseudo-terminal in the test process, and
 the socket faults interrupt a repeat during its send, as Ctrl-C does.
@@ -32,6 +34,7 @@ from tests.support.experiment_builder import (
     plan_hash,
     returns,
 )
+from tests.support.fake_portfolio123 import Reply
 from tests.support.socket_faults import SocketFaults
 from tests.support.terminal import PseudoTerminal
 from trialfolio.contracts.attempt import AttemptRecordV1_1, StartRecordV1_1
@@ -501,8 +504,153 @@ def test_the_display_gives_each_cases_progress_and_the_cases_the_budget_cant_cov
     ) in shown
     assert f"--repeat slippage-050:{slippage}" in shown
     assert "The remaining budget can't cover slippage-050, so this run won't start it." in shown
-    assert "this run sends 2 requests, with the cases that are due, more than remain" in shown
+    assert "this run sends 2 requests, with the cases that are due and the repeats" in shown
+    assert "more than remain" in shown
     # One request remained: the first repeat is sent, and the budget stops the second.
     assert outcome.exit_code == 6, shown
     assert cli.server.requests()[received:] == ["POST /auth", "POST /screen/backtest"]
     assert cases_of(outcome)["slippage-050"]["repeat_attempt_id"] == slippage
+
+
+# What the run sends: the cases that are due, and each repeat it makes (R03-T13's review)
+
+QUOTA = Reply(402, b"")
+"""A 402 to a case's request: `failed`, possibly charged, with `provider.quota_exceeded`, which
+stops the later cases (D-32)."""
+
+REBALANCE = "rebalance-weeks-1"
+DUE = "slippage-050"
+
+
+def two_awaiting_and_one_due(cli: Cli, experiments: Builder) -> tuple[Path, str, str]:
+    """Writes `example.yaml`'s experiment with a 503 for `holdings-50`'s request, and a 402 for
+    `rebalance-weeks-1`'s, which stops `slippage-050`: two cases await a repeat, the last is due,
+    and 2 of the budget's 6 provider requests remain. Returns its directory, and the attempt IDs
+    that confirm a repeat of `holdings-50` and of `rebalance-weeks-1`."""
+    cli.ready()
+    out = cli.tmp / "experiment"
+    outcome = experiments.run(EXAMPLE, out, sends=[returns(), returns(), UNAVAILABLE, QUOTA])
+    assert outcome.exit_code == 6, outcome.stderr
+    cases = cases_of(outcome)
+    assert cases[DUE]["outcome"] == "not_yet_run"
+    return (
+        out,
+        cast("str", cases[HOLDINGS]["repeat_attempt_id"]),
+        cast("str", cases[REBALANCE]["repeat_attempt_id"]),
+    )
+
+
+@posix_only
+def test_the_repeat_prompt_counts_the_cases_due_and_the_repeats_an_attempt_id_confirmed(
+    cli: Cli, experiments: Builder
+) -> None:
+    out, _, rebalance = two_awaiting_and_one_due(cli, experiments)
+    before = snapshot(out)
+    received = len(cli.server.received)
+    shown: list[str] = []
+    for options in ([], ["--repeat", f"{REBALANCE}:{rebalance}"]):
+        with PseudoTerminal() as terminal:
+            # Any answer but repeat refuses, so nothing is sent or written.
+            terminal.press("approve\nno\n")
+            outcome = cli(
+                "run",
+                EXAMPLE,
+                "--out",
+                out,
+                "--repeat",
+                HOLDINGS,
+                *options,
+                "--json",
+                stdin=terminal.stdin,
+                stderr=terminal.stderr,
+            )
+        shown.append(terminal.shown())
+        assert_refused(cli, outcome, before, out)
+    alone, mixed = shown
+
+    # The case that's due is sent too.
+    assert "So far: not yet run. This run sends it." in alone
+    assert "of its 6 provider requests, 2 remain, and this run sends 2 requests" in alone
+    assert "which leaves 0 provider requests" in alone
+    # And so is the repeat its attempt ID confirmed, which the prompt doesn't ask about.
+    assert "of its 6 provider requests, 2 remain, and this run sends 3 requests" in mixed
+    assert "more than remain, so the cases the budget can't cover won't start" in mixed
+    assert f"The remaining budget can't cover {DUE}, so this run won't start it." in mixed
+    assert len(cli.server.received) == received
+
+
+@posix_only
+def test_a_used_confirmation_isnt_among_the_sends_the_remaining_budget_must_cover(
+    cli: Cli, experiments: Builder
+) -> None:
+    out, holdings, _ = two_awaiting_and_one_due(cli, experiments)
+    option = f"{HOLDINGS}:{holdings}"
+    # The repeat gets a 402 too, which uses its confirmation and stops the case that's due
+    # again: 1 provider request remains.
+    assert experiments.run(EXAMPLE, out, "--repeat", option, sends=[QUOTA]).exit_code == 6
+    cli.server.reply("/auth", AUTHENTICATED)
+    cli.server.reply("/screen/backtest", returns())
+    received = len(cli.server.received)
+
+    with PseudoTerminal() as terminal:
+        terminal.press("approve\n")
+        outcome = cli(
+            "run",
+            EXAMPLE,
+            "--out",
+            out,
+            "--repeat",
+            option,
+            "--json",
+            stdin=terminal.stdin,
+            stderr=terminal.stderr,
+        )
+    shown = terminal.shown()
+
+    # The run sends only the case that's due, which the remaining request covers.
+    assert "which leaves 1 provider request and 4 authentication calls." in shown
+    assert "The remaining budget can't cover" not in shown
+    assert (
+        f"Case {HOLDINGS} isn't repeated: the repeat confirmed for its attempt {holdings}" in shown
+    )
+    assert outcome.exit_code == 6, shown
+    assert cli.server.requests()[received:] == ["POST /auth", "POST /screen/backtest"]
+    assert cases_of(outcome)[DUE]["outcome"] == "succeeded"
+
+
+@posix_only
+def test_with_no_authentication_call_left_the_budget_covers_no_case(
+    cli: Cli, experiments: Builder
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    # Each run's authentication call gets a 401, so no case's request is sent, until the
+    # budget's 6 authentication calls are spent: every case is due, and no provider request is.
+    for _ in range(6):
+        assert experiments.run(EXAMPLE, out, authenticates=[REFUSED]).exit_code == 6
+    before = snapshot(out)
+    received = len(cli.server.received)
+
+    with PseudoTerminal() as terminal:
+        terminal.press("no\n")
+        outcome = cli(
+            "run", EXAMPLE, "--out", out, "--json", stdin=terminal.stdin, stderr=terminal.stderr
+        )
+    shown = terminal.shown()
+
+    assert_refused(cli, outcome, before, out)
+    assert (
+        "So far: failed (provider.auth_failed), after 6 attempts, none of whose requests could"
+        " have reached Portfolio123. This run sends it."
+    ) in shown
+    assert f"Case {DUE} " in shown
+    assert "So far: not yet run. This run sends it." in shown
+    assert (
+        "Counted so far: 0 provider requests and 6 authentication calls, which leaves 6 provider"
+        " requests and 0 authentication calls."
+    ) in shown
+    assert (
+        "The remaining budget can't cover baseline, liquidity-100m, holdings-50,"
+        f" {REBALANCE}, {DUE}, so this run won't start them."
+    ) in shown
+    assert len(cli.server.received) == received

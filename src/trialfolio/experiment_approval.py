@@ -120,21 +120,39 @@ class ExperimentRun:
             if saved.state == "awaiting_repeat" and (attempt := saved.latest_charged) is not None
         ]
 
-    def uncovered(self) -> list[ExperimentPlanCase]:
-        """The cases this run would send, those that are due and those `--repeat` names, that
-        the remaining budget can't cover, in the plan's order. The run authenticates before its
-        first send, so with no authentication call left, it covers none."""
-        named = {option.case_key for option in self.repeats}
-        sends = [
+    def sends(self) -> list[ExperimentPlanCase]:
+        """The cases this run would send, in the plan's order, as the core picks them: each
+        that's due, and each awaiting a repeat that `--repeat` names, by its key alone or with
+        an attempt ID whose confirmation isn't used. A used one repeats nothing (repeating a
+        case)."""
+        named = {option.case_key: option.attempt_id for option in self.repeats}
+        return [
             saved.case
             for saved in self.cases
             if saved.state == "due"
-            or (saved.state == "awaiting_repeat" and saved.case.case_key in named)
+            or (
+                saved.state == "awaiting_repeat"
+                and saved.case.case_key in named
+                and not _used(saved, named[saved.case.case_key])
+            )
         ]
+
+    def uncovered(self) -> list[ExperimentPlanCase]:
+        """The cases this run would send that the remaining budget can't cover, in the plan's
+        order. The run authenticates before its first send, so with no authentication call
+        left, it covers none."""
+        sends = self.sends()
         budget = self.plan.budget
         if self.authentication_calls >= budget.authentication_calls:
             return sends
         return sends[max(0, budget.provider_requests - self.provider_requests) :]
+
+
+def _used(saved: SavedCase, attempt_id: uuid.UUID | None) -> bool:
+    """Whether the confirmation that names `attempt_id` is used: a later attempt of the case may
+    have reached Portfolio123. A key alone names no attempt, so it has none to use."""
+    named = [index for index, a in enumerate(saved.attempts) if a.attempt_id == attempt_id]
+    return bool(named) and any(a.possibly_charged for a in saved.attempts[named[0] + 1 :])
 
 
 @dataclass(frozen=True)
@@ -613,8 +631,7 @@ def _check_repeats(run: ExperimentRun, *, asks: bool) -> _CheckedRepeats:
                 problem.format(case_id, option.attempt_id),
             )
         confirmed.append(Repeat(case_id, option.attempt_id))
-        later = saved.attempts[saved.attempts.index(named[0]) + 1 :]
-        if not any(attempt.possibly_charged for attempt in later):
+        if not _used(saved, option.attempt_id):
             made = True
             continue
         again = (
@@ -675,8 +692,9 @@ def _ask_repeats(
         )
     budget = run.plan.budget
     remaining = max(0, budget.provider_requests - run.provider_requests)
-    due = sum(saved.state == "due" for saved in run.cases)
-    sends = due + len(cases)
+    # Every send of the run: these repeats, the cases that are due, and the repeats an attempt
+    # ID confirmed, as the core runs them.
+    sends = len(run.sends())
     left = remaining - sends
     leaves = (
         f"which leaves {counted(left, 'provider request')}"
@@ -689,7 +707,8 @@ def _ask_repeats(
             f" charged again, and it counts against the experiment's budget: of its"
             f" {counted(budget.provider_requests, 'provider request')},"
             f" {remaining} {'remains' if remaining == 1 else 'remain'}, and this run sends"
-            f" {counted(sends, 'request')}, with the cases that are due, {leaves}."
+            f" {counted(sends, 'request')}, with the cases that are due and the repeats an"
+            f" attempt ID confirmed, {leaves}."
         ),
         "",
         (
