@@ -6,7 +6,7 @@ Synthetic experiment configurations for Trial Folio's tests ([fixtures](../../..
 - **Schema version:** [experiment configuration](../../../docs/contracts.md#experiment-configuration) 1.0.0.
 - **Redistribution:** synthetic, so they may be committed and shared.
 
-R03-T06 wrote `example.yaml`, `no-microcaps.yaml`, and `invalid/`, and R03-T07 `written-differently.yaml`, `default-only.yaml`, and `revisions/`. Release 0.3.0's [test pairing](../../../docs/releases/0.3.0-experiments.md#test-pairing) lists the others the later tasks write, with what each holds.
+R03-T06 wrote `example.yaml`, `no-microcaps.yaml`, and `invalid/`, R03-T07 `written-differently.yaml`, `default-only.yaml`, and `revisions/`, and R03-T13 `canaries.yaml`. Release 0.3.0's [test pairing](../../../docs/releases/0.3.0-experiments.md#test-pairing) lists the others the later tasks write, with what each holds.
 
 | File | Contents | Criteria |
 |---|---|---|
@@ -14,3 +14,4 @@ R03-T06 wrote `example.yaml`, `no-microcaps.yaml`, and `invalid/`, and R03-T07 `
 | `no-microcaps.yaml` | The second example as a whole file: `example.yaml` with the universe `'Easy to Trade US'`, and the second example's `variants`, the `no-microcaps` rule and `rebalance_weeks: []`, so two cases | The documented examples' check; and, in the tests later tasks write, R03-AC01 and R03-AC18 |
 | `written-differently.yaml` | `example.yaml`'s experiment, written differently: keys, and the settings in `variants`, in another order; comments; a baseline slippage of `0.250` and a variant's of `0.50`; dates as quoted strings; and the universe and benchmark in double quotes. It gives `example.yaml`'s plan. | R03-AC02, in `tests/core/test_experiment_plan.py`; and, in the tests later tasks write, R03-AC18 |
 | `default-only.yaml` | `example.yaml`'s research context and baseline, with no `variants`, so its cases are `baseline` and the default `rebalance-weeks-1`, and a budget of 2 | The default variant, in `tests/core/test_experiment_plan.py`; and, in the tests later tasks write, R03-AC06, R03-AC10, R03-AC12, R03-AC14, and R03-AC19 |
+| `canaries.yaml` | `example.yaml`'s cases, with distinct canary strings in the title, the purpose, the prior-research description, each variant's description, the universe, the baseline's rule, the formula a variant puts in its place, the ranking formula, and the benchmark, and canary-like slugs, such as `canary-key-5a66f676`, as the `experiment_id` and each variant's key. `tests/support/canaries.py` lists them. | R03-AC01, in `tests/interface/test_experiment_run.py`; and, in the tests R03-T11 writes, R03-AC15 |

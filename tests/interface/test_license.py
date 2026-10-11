@@ -8,8 +8,9 @@ Traces to R01-AC20 (without an acknowledgment or a terminal, `run` fails with
 0.2.0's failure behavior gives; R01-AC21 (`license --accept` writes exactly the four documented
 fields, later runs don't ask, and another license identifier or notice version asks again,
 including license 1.0's, which 0.1.0 and 0.2.0 recorded, as release 0.2.1 gives); and R01-AC22 (the exact `<license_id>/<notice_version>` acknowledges for the
-process without a record, and any other value is rejected); and to docs/contracts.md, license
-acknowledgment. Through the CLI's entry function in the test process, with the per-user
+process without a record, and any other value is rejected); to release 0.3.0's other checks in the
+default suite, which R03-T13 wrote ahead of R03-T11: `run` with an experiment's configuration,
+new or resumed, needs the acknowledgment too; and to docs/contracts.md, license acknowledgment. Through the CLI's entry function in the test process, with the per-user
 directories under a temporary home; the terminal is a real pseudo-terminal.
 """
 
@@ -20,7 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.interface.conftest import Cli, config, snapshot
+from tests.interface.conftest import Cli, Outcome, config, snapshot
+from tests.support.experiment_builder import ExperimentBuilder, experiment_config, returns
 from tests.support.run_builder import REVIEW_CONFIGS
 from tests.support.terminal import PseudoTerminal
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
@@ -96,6 +98,32 @@ def test_without_an_acknowledgment_or_a_terminal_a_command_fails_and_writes_noth
     assert not out.exists()
     assert snapshot(cli.tmp) == {"home": None}
     assert cli.server.requests() == []
+
+
+@pytest.mark.parametrize("resumed", [False, True], ids=["new", "resumed"])
+def test_without_an_acknowledgment_an_experiment_fails_and_writes_nothing(
+    cli: Cli,
+    experiments: ExperimentBuilder[Outcome],
+    monkeypatch: pytest.MonkeyPatch,
+    resumed: bool,
+) -> None:
+    out = cli.tmp / "experiment"
+    example = experiment_config("example.yaml")
+    if resumed:
+        with monkeypatch.context() as patch:
+            patch.setenv(ACCEPT_VARIABLE, ACCEPT_VALUE)
+            cli.credentials()
+            assert experiments.run(example, out, sends=[returns()] * 5).exit_code == 0
+    cli.credentials()
+    before = snapshot(cli.tmp)
+    received = len(cli.server.received)
+
+    outcome = experiments.run(example, out, sends=[returns()] * 5)
+
+    assert outcome.exit_code == 2
+    assert error_code(outcome.stdout) == "license.not_acknowledged"
+    assert snapshot(cli.tmp) == before
+    assert len(cli.server.received) == received
 
 
 def test_version_and_help_work_without_an_acknowledgment(cli: Cli) -> None:

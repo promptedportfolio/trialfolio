@@ -1,7 +1,8 @@
 """Reads configuration files: YAML text in, validated models out (docs/contracts.md,
 configuration files). `read_screen_configuration` reads a `kind: screen` file,
 `read_review_configuration` a `kind: review` one, and `read_experiment_configuration` a
-`kind: experiment` one.
+`kind: experiment` one. `read_run_configuration` reads the configuration `trialfolio run` takes, a
+screen's or an experiment's, choosing the reader by its `kind` (D-24).
 
 Reading is a named adapter step before model validation (ADR 0002). It builds plain values from
 PyYAML's parse events, never through PyYAML's constructors, so it decides what each scalar means:
@@ -183,6 +184,23 @@ def read_experiment_configuration(content: bytes, source_name: str) -> Experimen
     return configuration
 
 
+def read_run_configuration(
+    content: bytes, source_name: str
+) -> ScreenConfiguration | ExperimentConfiguration:
+    """Reads the configuration `trialfolio run` takes, from the bytes of a file named
+    `source_name` in messages: a screen configuration, or an experiment configuration, by its
+    `kind` (D-24).
+
+    Raises `TrialFolioError` with `config.invalid` as the screen's or the experiment's reader
+    does. A file that breaks a YAML rule, isn't a mapping, or whose `kind` is missing or is
+    neither, such as `review`, fails before either reads it, and the message names both kinds.
+    """
+    document, _ = _read_kind(content, source_name, ("screen", "experiment"))
+    if document["kind"] == "experiment":
+        return read_experiment_configuration(content, source_name)
+    return read_screen_configuration(content, source_name)
+
+
 def experiment_schema_version(content: bytes, source_name: str) -> object:
     """The `schema_version` an experiment configuration gives, as `read_experiment_configuration`
     reads it before it checks that the version is supported: the key's value, or None when the
@@ -192,7 +210,7 @@ def experiment_schema_version(content: bytes, source_name: str) -> object:
     Raises `TrialFolioError` with `config.invalid` when the file breaks a YAML rule, isn't a
     mapping, or isn't `kind: experiment`, as that function does.
     """
-    document, _ = _read_kind(content, source_name, "experiment")
+    document, _ = _read_kind(content, source_name, ("experiment",))
     return document.get("schema_version")
 
 
@@ -201,7 +219,7 @@ def _read_document(
 ) -> tuple[dict[str, object], list[KeyPath]]:
     """The document of a configuration of `kind`, once its YAML rules, its `kind`, and its
     `schema_version` are checked; and where it writes text as a plain scalar."""
-    document, plain = _read_kind(content, source_name, kind)
+    document, plain = _read_kind(content, source_name, (kind,))
     supported = ", ".join(versions)
     if "schema_version" not in document:
         _fail(source_name, [f"`schema_version` is required. Supported versions: {supported}."])
@@ -214,22 +232,23 @@ def _read_document(
 
 
 def _read_kind(
-    content: bytes, source_name: str, kind: str
+    content: bytes, source_name: str, kinds: tuple[str, ...]
 ) -> tuple[dict[str, object], list[KeyPath]]:
-    """The document of a configuration of `kind`, once its YAML rules and its `kind` are checked;
-    and where it writes text as a plain scalar."""
+    """The document of a configuration of one of `kinds`, once its YAML rules and its `kind` are
+    checked; and where it writes text as a plain scalar."""
     loaded, _, plain, _ = _read_yaml(content, source_name)
     if not isinstance(loaded, dict):
         _fail(source_name, ["The file must be a mapping of keys to values."])
     document = cast("dict[str, object]", loaded)
     if "kind" not in document:
-        article = "An" if kind[0] in "aeiou" else "A"
-        _fail(
-            source_name,
-            [f"`kind` is required. {article} {kind} configuration has `kind: {kind}`."],
-        )
-    if document["kind"] != kind:
-        _fail(source_name, [f"`kind` must be {kind}."])
+        named = [
+            f"{'an' if kind[0] in 'aeiou' else 'a'} {kind} configuration has `kind: {kind}`"
+            for kind in kinds
+        ]
+        listed = ", and ".join(named)
+        _fail(source_name, [f"`kind` is required. {listed[0].upper()}{listed[1:]}."])
+    if document["kind"] not in kinds:
+        _fail(source_name, [f"`kind` must be {' or '.join(kinds)}."])
     return document, plain
 
 

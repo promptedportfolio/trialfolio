@@ -5,13 +5,15 @@ looks for them, and the scans that look.
   scans every file in the directories it's given, such as the output, configuration, and log
   directories, and stdout and stderr, for them.
 - **The canary fixtures' values,** from `screen-configs/canaries.yaml`,
-  `responses/canaries.json`, and `review-configs/canaries.yaml`, belong in some outputs, such as
+  `responses/canaries.json`, `review-configs/canaries.yaml`, and
+  `experiment-configs/canaries.yaml`, belong in some outputs, such as
   `configuration.yaml`, `settings.csv`, the report, and the plan display. `logged` scans only log
   files for them, and stderr where a criterion says so.
 
 R01-T09 created the credential and token values; R01-T15 added the fixtures' values and the
-scans, and R02-T09 the review configuration's. Each value is ASCII without characters JSON
-escapes, so a scan of the bytes finds it however a file encodes it.
+scans, R02-T09 the review configuration's, and R03-T13 the experiment configuration's. Each value
+is ASCII without characters JSON escapes, so a scan of the bytes finds it however a file encodes
+it.
 """
 
 from collections.abc import Iterable
@@ -67,6 +69,28 @@ REVIEW: Final = (
 description, each reason, each label, and each `run` path's directory name, where the run
 builder writes the result's run."""
 
+EXPERIMENT: Final = (
+    "canary-experiment-1f2e3d4c",
+    "canary-experiment-title-2c9f4e81",
+    "canary-experiment-purpose-7b3d0a56",
+    "canary-prior-research-e4a19c37",
+    "canary-experiment-universe-9d4c2b17",
+    "canary-experiment-rule-6e0f3a98",
+    "canary-experiment-with-b72d5c41",
+    "canary-experiment-formula-0c8e1f64",
+    "canary-experiment-benchmark-4a7b9d20",
+    "canary-key-5a66f676",
+    "canary-variant-description-one-58c2f0b4",
+    "canary-key-0d3b7e19",
+    "canary-variant-description-two-a1e7d963",
+    "canary-key-c84f2a65",
+    "canary-variant-description-three-3f6b8e02",
+)
+"""Every canary in `experiment-configs/canaries.yaml`: the `experiment_id`, a canary-like slug;
+the title, the purpose, and the prior-research description; the universe, the baseline's rule,
+the formula a variant puts in its place, the ranking formula, and the benchmark; and each
+variant's key, also a canary-like slug, and its description."""
+
 LOG_FILE: Final = "trialfolio.log"
 """A log file's name, and with a number after it, a rotated one's."""
 
@@ -95,7 +119,7 @@ def logged(
 ) -> list[str]:
     """Where a canary fixture's value, or one of `more`, appears in a log file under `roots`,
     and in `stderr` when it's given. Each finding names the file or stream and the canary."""
-    canaries = (*CONFIGURATION, *RESPONSE, *REVIEW, *more)
+    canaries = (*CONFIGURATION, *RESPONSE, *REVIEW, *EXPERIMENT, *more)
     found = [
         f"{path}: {canary}"
         for path in log_files(roots)

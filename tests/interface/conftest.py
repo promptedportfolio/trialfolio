@@ -13,7 +13,9 @@ and an environment without the variables Trial Folio reads, so nothing on the ma
 tests leaks in. stdin is empty and isn't a terminal, unless a test gives a pseudo-terminal.
 
 A review's tests read runs that the run builder writes, once for each module, beside a copy of the
-review configuration that names them (`built`). A review only reads them.
+review configuration that names them (`built`). A review only reads them. An experiment's tests
+write their experiments with the experiment builder (`experiments`), through this `Cli`, over the
+test's own server.
 """
 
 import io
@@ -31,6 +33,7 @@ import pytest
 from tests.support import canaries, launcher
 from tests.support.clock import FixedClock
 from tests.support.environment import VARIABLES
+from tests.support.experiment_builder import ExperimentBuilder
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.run_builder import RunBuilder
 from tests.support.storage_faults import StorageFaults
@@ -215,6 +218,12 @@ def server() -> Iterator[FakePortfolio123]:
 @pytest.fixture
 def cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, server: FakePortfolio123) -> Cli:
     return Cli(monkeypatch, tmp_path, server)
+
+
+@pytest.fixture
+def experiments(cli: Cli, server: FakePortfolio123) -> ExperimentBuilder[Outcome]:
+    """The experiment builder, running `trialfolio run` through `cli`, over `server`."""
+    return ExperimentBuilder(server, cli)
 
 
 @pytest.fixture

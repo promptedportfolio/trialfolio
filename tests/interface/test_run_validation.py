@@ -3,7 +3,9 @@
 credentials and an `--approve` given.
 
 Traces to R01-AC02's interface part, through the CLI's entry function in the test process, over
-the fake server. `tests/contract/test_screen_configuration.py` checks every invalid file at the
+the fake server; and to release 0.3.0's other checks in the default suite, which R03-T13 wrote
+ahead of R03-T11: `run` chooses the experiment's reader by the configuration's `kind`, and an
+invalid experiment configuration fails the same way, as does a `kind` `run` doesn't take. `tests/contract/test_screen_configuration.py` checks every invalid file at the
 reader. A key the message names is escaped, so it can't act on the terminal, and the JSON summary
 can hold the message (docs/contracts.md, configuration files; a corrected defect, 2026-10-10).
 """
@@ -13,6 +15,7 @@ from typing import cast
 import pytest
 
 from tests.interface.conftest import Cli, config, serve_success
+from tests.support.experiment_builder import experiment_config
 
 
 @pytest.mark.parametrize(
@@ -71,3 +74,57 @@ def test_a_key_in_an_error_message_cant_act_on_the_terminal(
     assert f"Error (config.invalid): {error['message']}" in outcome.stderr
     assert "\x1b" not in outcome.stderr
     assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "key"),
+    [
+        ("invalid/misspelled-key.yaml", "`purpos`"),
+        ("invalid/variant-universe.yaml", "`variants.universe`"),
+        ("invalid/budget-below-cases.yaml", "`budget.provider_requests`"),
+    ],
+)
+def test_an_invalid_experiment_configuration_fails_before_anything_is_created_or_sent(
+    cli: Cli, name: str, key: str
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+
+    outcome = cli(
+        "run", experiment_config(name), "--out", out, "--approve", "sha256:" + "a" * 64, "--json"
+    )
+
+    assert outcome.exit_code == 3
+    error = cast("dict[str, str]", outcome.summary["error"])
+    assert error["code"] == "config.invalid"
+    assert key in error["message"]
+    assert outcome.summary["ids"] == {}
+    assert not out.exists()
+    assert cli.server.requests() == []
+
+
+@pytest.mark.parametrize(
+    ("document", "problem"),
+    [
+        pytest.param(b"kind: review\n", "`kind` must be screen or experiment.", id="another-kind"),
+        pytest.param(
+            b"title: No kind\n",
+            "`kind` is required. A screen configuration has `kind: screen`, and an experiment"
+            " configuration has `kind: experiment`.",
+            id="no-kind",
+        ),
+    ],
+)
+def test_run_takes_a_screen_or_an_experiment_by_its_kind(
+    cli: Cli, document: bytes, problem: str
+) -> None:
+    cli.ready()
+    path = cli.tmp / "other.yaml"
+    path.write_bytes(document)
+
+    outcome = cli("run", path, "--out", cli.tmp / "out", "--json")
+
+    assert outcome.exit_code == 3
+    error = cast("dict[str, str]", outcome.summary["error"])
+    assert error["code"] == "config.invalid"
+    assert problem in error["message"]
