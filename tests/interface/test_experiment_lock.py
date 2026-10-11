@@ -11,7 +11,9 @@ reserves its session only once approved), and JSON summary (`output_dir` and `co
 pseudo-terminal, where it waits at its prompt holding the lock until it's killed with `SIGKILL`;
 the run it locks out runs through the CLI's entry function in the test process, and the
 experiment it resumes is written with the experiment builder. The two claims run under the test
-launcher, in two processes started at once, in two rounds. Each runs over the fake server.
+launcher, in two processes started at once, in two rounds, each over a fake server of its own,
+which holds the claim that took the lock at its authentication call until the other claim has
+ended. Each test runs over the fake server.
 """
 
 import json
@@ -19,6 +21,8 @@ import os
 import signal
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import cast
 
@@ -34,7 +38,7 @@ from tests.support.experiment_builder import (
     plan_hash,
     returns,
 )
-from tests.support.fake_portfolio123 import Reply
+from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
 from trialfolio.experiment_records import read_experiment
 from trialfolio.storage import LOCK_LINE, LOCK_PATH, LocalArtifactStore
@@ -46,6 +50,9 @@ posix_only = pytest.mark.skipif(
 EXAMPLE = experiment_config("example.yaml")
 AUTH = "POST /auth"
 SEND = "POST /screen/backtest"
+RACE_SECONDS = 60.0
+"""How long the claim that took the lock is held for the other to end: far longer than a process
+takes to start and try its claim, so only two claims that both took the lock wait it out."""
 
 type Builder = ExperimentBuilder[Outcome]
 
@@ -116,33 +123,45 @@ def test_a_run_while_a_resume_waits_at_its_prompt_is_locked_out_until_the_resume
     assert (resumed_manifest.session, resumed_manifest.outcome) == (2, "completed")
 
 
-def claim_at_once(cli: Cli, out: Path) -> list[tuple[int, str, str]]:
+def claim_at_once(out: Path, cwd: Path) -> tuple[list[tuple[int, str, str]], list[str]]:
     """Runs two new experiments of `example.yaml` into `out`, approved, in two processes started
-    at once under the test launcher, and gives each one's exit code, stdout, and stderr. The
-    server has replies for both, so that two claims that both succeeded could each complete. Its
-    first authentication call's reply waits half a second, so the process that claimed the
-    directory holds the lock while the other tries."""
-    cli.server.reply("/auth", Reply(200, canaries.TOKEN.encode(), delay=0.5), AUTHENTICATED)
-    cli.server.reply("/screen/backtest", *[returns() for _ in range(10)])
-    command = launcher.command(
-        cli.server.endpoint, "run", EXAMPLE, "--out", out, "--approve", plan_hash(EXAMPLE, out)
-    )
-    processes = [
-        subprocess.Popen(
-            [*command, "--json"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=cli.tmp,
+    at once under the test launcher, over a new fake server, and gives each one's exit code,
+    stdout, and stderr, and the requests the server received. The server holds each
+    authentication call's reply until one of the processes has ended, so the process that claimed
+    the directory holds the lock until the other has tried to claim it, however late that one
+    starts. It has replies for both, so that two claims that both succeeded could each complete,
+    once `RACE_SECONDS` have passed."""
+    release = threading.Event()
+    authenticated = Reply(200, canaries.TOKEN.encode(), release=release)
+    server = FakePortfolio123()
+    try:
+        server.reply("/auth", authenticated, authenticated)
+        server.reply("/screen/backtest", *[returns() for _ in range(10)])
+        command = launcher.command(
+            server.endpoint, "run", EXAMPLE, "--out", out, "--approve", plan_hash(EXAMPLE, out)
         )
-        for _ in range(2)
-    ]
-    ended: list[tuple[int, str, str]] = []
-    for process in processes:
-        stdout, stderr = process.communicate(timeout=120)
-        ended.append((process.returncode, stdout, stderr))
-    return ended
+        processes = [
+            subprocess.Popen(
+                [*command, "--json"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=cwd,
+            )
+            for _ in range(2)
+        ]
+        deadline = time.monotonic() + RACE_SECONDS
+        while all(p.poll() is None for p in processes) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        release.set()
+        ended: list[tuple[int, str, str]] = []
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=120)
+            ended.append((process.returncode, stdout, stderr))
+        return ended, server.requests()
+    finally:
+        server.close()
 
 
 def test_two_new_experiments_claiming_one_directory_at_once_give_at_most_one_success(
@@ -152,9 +171,8 @@ def test_two_new_experiments_claiming_one_directory_at_once_give_at_most_one_suc
     successes = 0
     for place in (1, 2):
         out = cli.tmp / f"experiment-{place}"
-        received = len(cli.server.received)
 
-        ended = claim_at_once(cli, out)
+        ended, requests = claim_at_once(out, cli.tmp)
 
         succeeded = [code for code, _, _ in ended].count(0)
         assert succeeded <= 1, ended
@@ -171,7 +189,7 @@ def test_two_new_experiments_claiming_one_directory_at_once_give_at_most_one_suc
                 saved = read_experiment(store)
             assert saved.manifest is not None and saved.manifest.outcome == "completed"
             assert (out / LOCK_PATH).read_bytes() == LOCK_LINE
-            assert cli.server.requests()[received:] == [AUTH, *[SEND] * 5]
+            assert requests == [AUTH, *[SEND] * 5]
     # Neither succeeds only when one takes the lock in the moment between the other's creating
     # experiment.lock and locking it. If neither ever did, the other's files couldn't be shown to
     # be left alone: as when a claim that fails removes the file another claim created, so that
