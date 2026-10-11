@@ -12,8 +12,10 @@ option that repeats it, the prior-research declaration, which Trial Folio can't 
 performance-based selection, "Not assessed", R01-AC13's rules, and a synthetic experiment's
 invented values), and to the report's part of R03-AC08 (the report shows each count, equal to
 the manifest's, and a case whose repeat's authentication failed as still `unknown`, by its latest
-possibly charged attempt). R03-T11's `tests/interface/test_experiment_report.py` checks the
-report through the command.
+possibly charged attempt). The rest trace to the experiment report's rules in docs/contracts.md:
+its status, the baseline's settings, the coverage, the sources and exclusions, the versions,
+section 7's statement of METH-03.2, and the limitations. R03-T11's
+`tests/interface/test_experiment_report.py` checks the report through the command.
 
 Each experiment is written through the core during the test, over the fake server, as another
 interface would write it, and the test reads the session's report from its directory. Every
@@ -1019,6 +1021,109 @@ def test_each_cases_coverage_is_compared_with_the_requested_dates(sessions: Sess
     ) in document.root.by_id("data").text
 
 
+def test_coverage_that_couldnt_be_established_is_never_shown_as_matching(
+    sessions: Sessions,
+) -> None:
+    # The default variant's response has no periods.
+    document = sessions("repeated")[0].document
+
+    assert table_after(document, "Coverage")[1] == [
+        "rebalance-weeks-1",
+        "Unavailable (blank_in_source)",
+        "Unavailable (blank_in_source)",
+        "0",
+        "The start couldn't be established and the end couldn't be established.",
+    ]
+
+
+def test_the_baseline_settings_are_its_settings_csvs_or_else_the_plans(
+    sessions: Sessions,
+) -> None:
+    recorded = sessions("completed")[0].document
+    planned = sessions("troubled")[0].document
+    heading = "The baseline's settings"
+
+    assert (
+        "As the baseline's settings.csv records them. As written is the value's text in the"
+        " experiment configuration."
+    ) in recorded.root.by_id("definitions").text
+    assert header(recorded, heading)[4] == "Provenance"
+    assert table_after(recorded, heading)[8] == [
+        "start_date",
+        "dates",
+        "2016-01-01",
+        "",
+        "verified",
+        "",
+        "2016-01-01",
+        "",
+    ]
+    # troubled's baseline is unknown, so it has no settings.csv.
+    assert (
+        "The baseline has no settings.csv, so these are the plan's resolved settings, each with"
+        " the provenance the plan expects it to have once the request is sent."
+    ) in planned.root.by_id("definitions").text
+    assert header(planned, heading) == [
+        "Setting",
+        "Category",
+        "Value",
+        "Unit",
+        "Expected provenance",
+        "Flags",
+        "As written",
+        "Notes",
+    ]
+    assert table_after(planned, heading)[8] == [
+        "start_date",
+        "dates",
+        "2016-01-01",
+        "",
+        "verified",
+        "",
+        "",
+        "",
+    ]
+
+
+def test_the_layout_and_the_per_period_series_are_named_once_a_response_has_them(
+    sessions: Sessions,
+) -> None:
+    saved = sessions("completed")[0].document
+    unsaved = sessions("stopped")[0].document
+    missing = [
+        "Actual trades: none.",
+        (
+            "Commission: Not modeled by this provider path: the API documents no commission"
+            " parameter, and slippage is its only trading-cost input."
+        ),
+        (
+            "Parameters not sent, whose defaults aren't documented: max_pos_pct, rank_tolerance,"
+            " carry_cost, long_weight, short_weight."
+        ),
+    ]
+
+    assert saved.dd("Response layout") == ["p123api-screen-backtest version 1, parser version 1"]
+    assert saved.root.by_id("data").text.endswith(
+        "Exclusions None. Trial Folio excludes nothing from the saved responses, and keeps each"
+        " whole, as it was saved. Their per-period series are preserved there, but not"
+        " interpreted."
+    )
+    assert [li.text for li in saved.root.by_id("feasibility").find_all("li")] == [
+        *missing,
+        (
+            "Turnover, positions, and per-period returns: preserved in the saved responses, but"
+            " not interpreted."
+        ),
+    ]
+    assert unsaved.dd("Response layout") == [
+        "Unavailable: no planned case's response was normalized."
+    ]
+    assert unsaved.root.by_id("data").text.endswith(
+        "Exclusions None: the experiment saved no response."
+    )
+    assert [li.text for li in unsaved.root.by_id("feasibility").find_all("li")] == missing
+
+
 def test_the_missing_values_name_their_case_and_reason(sessions: Sessions) -> None:
     document = sessions("completed")[0].document
 
@@ -1237,6 +1342,21 @@ def test_the_plan_its_approval_and_the_budget_are_shown(sessions: Sessions) -> N
     assert document.dd("Report rendered by") == [f"Trial Folio {VERSION}"]
 
 
+def test_the_versions_name_the_command_that_wrote_the_session(sessions: Sessions) -> None:
+    session = sessions("repeated")[2]
+
+    assert session.manifest.command is not None
+    assert session.document.dd("Session written by") == [
+        f"Trial Folio {VERSION}, command run, started 2026-10-03T14:00:00Z"
+    ]
+
+
+def test_a_partial_sessions_status_gives_its_error_code(sessions: Sessions) -> None:
+    assert sessions("troubled")[0].document.dd("Session 1 outcome") == [
+        "partial (execution.partial). An execution status, not a research finding."
+    ]
+
+
 def test_the_conclusion_says_how_the_session_ended_and_permits_nothing_more(
     sessions: Sessions,
 ) -> None:
@@ -1263,8 +1383,37 @@ def test_the_conclusion_says_how_the_session_ended_and_permits_nothing_more(
     assert "No normalized result for liquidity-100m: section 5 gives each case's outcome." in (
         partial
     )
-    assert "The coverage differs from the requested dates for rebalance-weeks-1." in completed
-    assert "3 metrics are unavailable, with their reasons above." in completed
+    assert items_after(sessions("completed")[0].document, "Limitations") == [
+        (
+            "Backtested: from applying each case's screen rules to historical data, not from"
+            " actual trades."
+        ),
+        (
+            "Reproducibility is incomplete: universe names an object in the Portfolio123 account"
+            " whose definition wasn't captured. If it changes, the same configuration can give"
+            " different results."
+        ),
+        (
+            "Portfolio123's data and engines change, so sending a case's request again may give"
+            " different results. A repeat is a new attempt, never a replacement."
+        ),
+        (
+            "The prior research is declared partial, and Trial Folio can't verify the"
+            " declaration. Earlier outcome-informed work on this idea isn't fully recorded, so a"
+            " claim drawn from these cases is limited accordingly."
+        ),
+        "Inferred defaults, not reported by Portfolio123: data_vendor, risk_stats_period.",
+        "The coverage differs from the requested dates for rebalance-weeks-1.",
+        "3 metrics are unavailable, with their reasons above.",
+        (
+            "Only summary statistics are reported: no return series, drawdown history, or"
+            " interval is shown."
+        ),
+        (
+            "This is session 1's report. Each later run of the experiment that reaches its end"
+            " writes its own report and manifest, which supersede this one, and replaces no file."
+        ),
+    ]
 
 
 # A synthetic experiment (R03-AC11)
