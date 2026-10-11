@@ -1177,6 +1177,44 @@ def test_the_report_shows_each_count_as_the_manifest_records_it(sessions: Sessio
     )
 
 
+def test_section_7_calls_the_counts_research_history_not_a_multiple_testing_family(
+    sessions: Sessions,
+) -> None:
+    # METH-03.2. Between them, the two sessions give different values to each pair of counts.
+    for session, counts in (
+        (
+            sessions("troubled")[1],
+            (
+                "The current plan has 5 cases, and revisions retired 1. Attempts made: 7, with 1"
+                " repeat among them."
+            ),
+        ),
+        (
+            sessions("repeated")[2],
+            (
+                "The current plan has 2 cases, and revisions retired 0. Attempts made: 4, with 2"
+                " repeats among them."
+            ),
+        ),
+    ):
+        statistics = session.document.root.by_id("statistics")
+
+        assert [p.text for p in statistics.find_all("p")] == [
+            (
+                "Statistical validation: Not assessed. No statistical method was applied, so the"
+                " report states no uncertainty, multiple-testing adjustment, or power. Summary"
+                " statistics alone don't support intervals, a return series, or a drawdown"
+                " history, so none is shown or reconstructed."
+            ),
+            (
+                f"{counts} These counts are the experiment's research history, not a"
+                " multiple-testing family: an attempt or a repeat is a provider operation, not a"
+                " hypothesis, and a predefined variant isn't one either, unless its outcome"
+                " informs a selection."
+            ),
+        ]
+
+
 def test_the_plan_its_approval_and_the_budget_are_shown(sessions: Sessions) -> None:
     session = sessions("completed")[0]
     document = session.document

@@ -3699,6 +3699,7 @@ class _ExperimentReport:
         counts = self._experiment.counts
         attempts = counts.attempts
         made = attempts.succeeded + attempts.failed + attempts.unknown + attempts.running
+        repeats = f"{attempts.repeats} {'repeat' if attempts.repeats == 1 else 'repeats'}"
         return [
             self._heading("statistics"),
             (
@@ -3709,11 +3710,10 @@ class _ExperimentReport:
             ),
             (
                 f"<p>The current plan has {counts.cases.planned} cases, and revisions retired"
-                f" {counts.retired_cases}. Attempts made: {made}, with {attempts.repeats}"
-                " repeats among them. These counts are the experiment's research history, not a"
-                " multiple-testing family: an attempt or a repeat is a provider operation, not a"
-                " hypothesis, and a predefined variant isn't one either, unless its outcome"
-                " informs a selection.</p>"
+                f" {counts.retired_cases}. Attempts made: {made}, with {repeats} among them. These"
+                " counts are the experiment's research history, not a multiple-testing family: an"
+                " attempt or a repeat is a provider operation, not a hypothesis, and a predefined"
+                " variant isn't one either, unless its outcome informs a selection.</p>"
             ),
             "</section>",
         ]
