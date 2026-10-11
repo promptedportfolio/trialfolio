@@ -418,6 +418,8 @@ def test_run_doesnt_resume_a_synthetic_experiment(cli: Cli, experiments: Builder
     assert error_code(outcome) == "output.not_empty"
     assert "trialfolio run doesn't resume one" in outcome.stderr
     assert "Plan hash" not in outcome.stderr
+    # Its counts are invented, and the summary has no label that says so (R03-T13's review).
+    assert outcome.summary["counts"] == {}
     assert snapshot(out) == before
     assert cli.server.requests() == []
     assert plan_hash(EXAMPLE, out) == plan.plan_hash

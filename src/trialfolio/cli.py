@@ -374,7 +374,8 @@ class _Experiment:
     resume: bool = False
     """Whether the output directory holds the experiment, which the run resumes or revises."""
     experiment: "SavedExperiment | None" = None
-    """The experiment's records, once a resume has read and checked them."""
+    """The experiment's records, once a resume has read and checked them, and found them this
+    configuration's experiment's, and not synthetic (running an experiment, step 4)."""
     plan: PlanV1_1 | None = None
     """The plan this run builds, once it's built: the current plan, or its revision."""
     run: "ExperimentRun | None" = None
@@ -971,7 +972,6 @@ def _run_experiment(
     changes = None
     if state.resume:
         saved = read_experiment(store)
-        state.experiment = saved
         if saved.synthetic:
             raise TrialFolioError(
                 "output.not_empty",
@@ -981,6 +981,9 @@ def _run_experiment(
                 " output directory.",
             )
         revision = plan_revision(configuration, versions, saved.plan)
+        # Only now are the records this experiment's: a synthetic experiment, or another
+        # experiment, in the directory has counts that aren't this configuration's.
+        state.experiment = saved
         plan = saved.plan if revision is None else revision.plan
         changes = None if revision is None else revision.changes
     else:

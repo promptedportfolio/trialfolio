@@ -859,21 +859,22 @@ def test_an_experiment_whose_revision_isnt_approved_gives_the_revisions_cases(
     assert (counts["cases_retired"], counts["cases_succeeded"], counts["attempts"]) == (1, 4, 5)
 
 
-def test_another_experiment_in_the_output_directory_gives_the_current_plans_counts(
-    cli: Cli, experiments: ExperimentBuilder[Outcome]
+@pytest.mark.parametrize("name", ["other-experiment-id.yaml", "other-universe.yaml"])
+def test_another_experiment_in_the_output_directory_has_no_counts(
+    cli: Cli, experiments: ExperimentBuilder[Outcome], name: str
 ) -> None:
+    # R03-T13's review: the summary gave the configuration's experiment_id with the counts of
+    # the experiment in the directory, which isn't the configuration's.
     cli.ready()
     out = cli.tmp / "experiment"
     assert experiments.run(EXAMPLE, out, sends=[returns()] * 5).exit_code == 0
-    other = experiment_config("revisions/other-experiment-id.yaml")
+    other = experiment_config(f"revisions/{name}")
 
     summary = experiment_summary_of(experiments.run(other, out, approve=False))
 
     assert cast("dict[str, str]", summary["error"])["code"] == "output.not_empty"
     assert "cases" not in summary
-    assert summary["output_dir"] is None
-    counts = cast("dict[str, int]", summary["counts"])
-    assert (counts["cases_planned"], counts["cases_succeeded"]) == (5, 5)
+    assert (summary["counts"], summary["output_dir"]) == ({}, None)
 
 
 @pytest.mark.parametrize("hold", ["lock", "break"])
