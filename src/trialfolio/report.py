@@ -1,18 +1,21 @@
-"""The report: one self-contained, script-free HTML file showing a run's or a review's evidence,
-with the notices (docs/contracts.md, reports; docs/disclaimers.md, DSC-02, DSC-03, and DSC-06;
-REQ-08 and REQ-13).
+"""The report: one self-contained, script-free HTML file showing a run's, a review's, or an
+experiment session's evidence, with the notices (docs/contracts.md, reports; docs/disclaimers.md,
+DSC-02, DSC-03, and DSC-06; REQ-08 and REQ-13).
 
 `ReportRenderer` is the protocol, and `HtmlReportRenderer` its implementation. Rendering reads
-only the `SavedRun` or the `ReviewEvidence` it's given, so it needs no provider or network
-access.
+only the `SavedRun`, the `ReviewEvidence`, or the `ExperimentEvidence` it's given, so it needs
+no provider or network access.
 
 - `write_report` writes `report.html` into the output directory of the run being written. `run`
   and `demo` do that just before the manifest.
 - `rerender_report` is the core of `trialfolio report`: it reads and checks a saved run, renders
   its report, and claims a new output directory with it.
 - `write_experiment_report` writes an experiment session's `sessions/<s>/report.html`, just
-  before its manifest (release 0.3.0). R03-T08 wrote this first version, which shows each case
-  and its outcome, and the notices; R03-T10 builds the full report.
+  before its manifest (release 0.3.0, R03-T10). The experiment report shows every planned case in
+  the plan's order, with its change from the baseline, its outcome, and its attempts; each case's
+  metrics side by side, without a difference; the retired cases; every plan with its reason; each
+  repeat with the attempt it repeated; and each case awaiting a repeat with the option that
+  repeats it. It orders, ranks, and marks no case by a value.
 - `write_review_report` writes a review's `report.html`, just before its manifest (release 0.2.0,
   R02-T07). The review report compares each result with the baseline: intended changes apart from
   unexplained mismatches, and each result's metrics beside the baseline's, with the difference
@@ -22,8 +25,9 @@ What a report holds:
 
 - **Nothing that runs or loads.** Inline CSS only: no script, event-handler attribute, or
   external resource. Its only links are in-page fragments, relative paths to the run's artifacts,
-  or to the review's files, and the two outside links D-21 allows: the LICENSE of the version
-  that rendered it, and Portfolio123's terms. A review report never links a run.
+  to the review's files, or to the experiment's, and the two outside links D-21 allows: the
+  LICENSE of the version that rendered it, and Portfolio123's terms. A review report never links
+  a run.
 - **The notices.** The concise notice near the top, before any result, linking to the full
   notice. The Portfolio123 data statement in the closing section, and after it the full notice in
   a `<details>` element, with the license's name and identifier, the notice version, and the
@@ -40,8 +44,8 @@ What a report holds:
 - **Neutral status.** No status is styled as a pass; execution success is kept apart from any
   statement about the strategy.
 
-Rendering is deterministic: the same run, or review, and version give the same bytes. Nothing
-here logs the report's contents.
+Rendering is deterministic: the same run, review, or session, and version give the same bytes.
+Nothing here logs the report's contents.
 """
 
 import html
@@ -55,15 +59,31 @@ from typing import Final, Literal, Protocol
 from urllib.parse import quote
 from uuid import UUID
 
-from trialfolio.contracts.attempt import SavedResponse
-from trialfolio.contracts.common import ErrorDetail, UnavailableReason
-from trialfolio.contracts.experiment_manifest import ExperimentArtifact, ExperimentManifestCounts
-from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
-from trialfolio.contracts.experiment_record import ExperimentRecord
-from trialfolio.contracts.manifest import ArtifactRole, ManifestArtifact
+from trialfolio.contracts.attempt import AttemptRecordV1_1, Exchange, SavedResponse
+from trialfolio.contracts.common import (
+    Approval,
+    ErrorDetail,
+    PriorResearchStatus,
+    UnavailableReason,
+)
+from trialfolio.contracts.experiment_manifest import (
+    ExperimentArtifact,
+    ExperimentArtifactRole,
+    ExperimentCommandRecord,
+    ExperimentManifestCounts,
+)
+from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1, PlanVariant
+from trialfolio.contracts.experiment_record import ExperimentRecord, PlanChanges, RetiredCase
+from trialfolio.contracts.manifest import (
+    ArtifactRole,
+    Capabilities,
+    ManifestArtifact,
+    ParserVersion,
+    Reproducibility,
+)
 from trialfolio.contracts.review_configuration import ReviewConfiguration
 from trialfolio.contracts.review_manifest import ReviewArtifact, ReviewArtifactRole
-from trialfolio.contracts.tables import DifferenceReason, DifferencesRow, MetricsRow
+from trialfolio.contracts.tables import DifferenceReason, DifferencesRow, MetricsRow, SettingsRow
 from trialfolio.differences import METHOD, METHOD_VERSION, Differences
 from trialfolio.display import visible
 from trialfolio.normalization import LAYOUT, METRICS, setting_text
@@ -2608,26 +2628,61 @@ class _ReviewReport:
         return f'<a href="{html.escape(href)}">{_code(path)}</a>'
 
 
-# The experiment report (R03-T08's first version; R03-T10 builds the full report)
+# The experiment report (R03-T10)
 
 
 @dataclass(frozen=True)
 class CaseView:
-    """A planned case, as an experiment's report shows it."""
+    """A case of the experiment, as its report shows it: a case of the current plan, with its
+    outcome, attempts, and normalized tables."""
 
     case: ExperimentPlanCase
     outcome: Literal["succeeded", "failed", "unknown", "not_yet_run"]
     """As the manifest counts it."""
-    attempts: int
-    """Its attempts, of every session."""
-    tables: bool
-    """Whether it has its normalized tables."""
+    attempts: tuple[AttemptRecordV1_1, ...]
+    """Every attempt of the case, under any plan, by session and then sequence."""
+    metrics: tuple[MetricsRow, ...] | None
+    """Its `metrics.csv`'s rows, once its attempt succeeded and its response was normalized."""
+    settings: tuple[SettingsRow, ...] | None
+    """Its `settings.csv`'s rows, with `metrics`."""
+    invalid: ErrorDetail | None
+    """The `provider.response_invalid` its succeeded attempt's response got, which left it
+    `failed` without tables."""
+
+    def __post_init__(self) -> None:
+        if (self.metrics is None) != (self.settings is None):
+            raise ValueError("a case has both of its normalized tables, or neither")
+        if self.metrics is not None and self.outcome != "succeeded":
+            raise ValueError("only a case that succeeded has normalized tables")
+        if [(a.session, a.sequence) for a in self.attempts] != sorted(
+            (a.session, a.sequence) for a in self.attempts
+        ):
+            raise ValueError("a case's attempts are in the order they were made")
+
+    @property
+    def repeat_attempt(self) -> AttemptRecordV1_1 | None:
+        """When the case awaits a repeat, its latest possibly charged attempt, whose
+        `attempt_id` confirms the repeat; otherwise None (repeating a case)."""
+        if any(attempt.outcome == "succeeded" for attempt in self.attempts):
+            return None
+        charged = [attempt for attempt in self.attempts if attempt.possibly_charged]
+        return charged[-1] if charged else None
+
+
+@dataclass(frozen=True)
+class RetiredCaseView:
+    """A case a revision retired, as the experiment's record keeps it, with its attempts."""
+
+    case: RetiredCase
+    outcome: Literal["succeeded", "failed", "unknown", "not_yet_run"]
+    """By its attempts, as the manifest counts a planned case's."""
+    attempts: tuple[AttemptRecordV1_1, ...]
 
 
 @dataclass(frozen=True)
 class ExperimentEvidence:
     """What an experiment session's report shows: the current plan and its `experiment.json`,
-    each planned case's outcome, and what the session's manifest will record.
+    each case with its attempts and tables, and what the session's manifest will record.
 
     The report is written before the manifest, so `artifacts` holds each file the manifest will
     list apart from the report itself.
@@ -2636,18 +2691,29 @@ class ExperimentEvidence:
     plan: PlanV1_1
     plan_number: int
     record: ExperimentRecord
+    """The current plan's `experiment.json`."""
     session: int
     synthetic: bool
+    approval: Approval
+    """How this session approved the current plan."""
+    command: ExperimentCommandRecord | None
     outcome: Literal["completed", "partial"]
     error: ErrorDetail | None
     cases: tuple[CaseView, ...]
     """One for each planned case, in the plan's order."""
+    retired: tuple[RetiredCaseView, ...]
+    """One for each retired case, in the order `experiment.json` gives them."""
     counts: ExperimentManifestCounts
+    parsers: tuple[ParserVersion, ...]
+    capabilities: Capabilities
+    reproducibility: Reproducibility
     artifacts: tuple[ExperimentArtifact, ...]
 
     def __post_init__(self) -> None:
         if tuple(view.case for view in self.cases) != self.plan.cases:
             raise ValueError("each planned case has one view, in the plan's order")
+        if tuple(view.case for view in self.retired) != self.record.retired_cases:
+            raise ValueError("each retired case has one view, in the record's order")
         if any(artifact.role == "report" for artifact in self.artifacts):
             raise ValueError("the artifacts are the ones the report links, so not the report")
 
@@ -2673,12 +2739,71 @@ def write_experiment_report(
     return report
 
 
-_CASE_OUTCOMES: Final[dict[str, str]] = {
-    "succeeded": "Succeeded: its response was saved and normalized",
-    "failed": "Failed",
-    "unknown": "Unknown: its request may have been charged, and no response was saved",
-    "not_yet_run": "Not yet run",
+_EXPERIMENT_SECTIONS: Final = (
+    ("objective", "Objective, purpose, and research status"),
+    ("definitions", "Definitions, and changes from the baseline"),
+    ("data", "Data sources, coverage, provenance, and missing values"),
+    ("results", "Returns, risks, costs, and assumptions"),
+    ("cases", "Cases and attempts"),
+    ("robustness", "Robustness and concentration"),
+    ("statistics", "Statistical methods and uncertainty"),
+    ("evidence", "Development, selection, holdout, and forward evidence"),
+    ("feasibility", "Feasibility, capacity, and missing execution evidence"),
+    ("conclusion", "Conclusion, limitations, and artifacts"),
+)
+"""An experiment report's sections: a run report's, with the same `id`s, and headings for an
+experiment."""
+
+_PRIOR_RESEARCH: Final[dict[PriorResearchStatus, str]] = {
+    "complete": (
+        "the description accounts for all the earlier outcome-informed work on this idea, or"
+        " says there was none"
+    ),
+    "partial": (
+        "the description accounts for some of the earlier outcome-informed work on this idea,"
+        " and there was more that it doesn't describe"
+    ),
+    "unknown": "the user can't say what earlier outcome-informed work on this idea there was",
 }
+"""What each prior-research status declares (docs/contracts.md, prior research)."""
+
+_EXPERIMENT_APPROVALS: Final[dict[Approval, str]] = {
+    "interactive": "Approved interactively: the plan was shown, and <code>approve</code> typed.",
+    "option": "Approved with the plan's full hash, as <code>--approve</code> gives it.",
+    "not_required": "Not required: the synthetic experiment sends nothing.",
+}
+"""How a plan was approved, as HTML."""
+
+_EXPERIMENT_ROLES: Final[dict[ExperimentArtifactRole, str]] = {
+    "configuration": "Experiment configuration, byte for byte",
+    "plan": "Plan",
+    "experiment_record": "Experiment record",
+    "authentication_record": "Authentication record",
+    "start_record": "Start record",
+    "attempt_record": "Attempt record",
+    "provider_request": "Request, redacted",
+    "provider_response": "Response, decoded",
+    "provider_response_undecoded": "Response, undecoded",
+    "metrics": "Normalized metrics",
+    "settings": "Normalized settings",
+    "session_record": "Session record",
+    "report": "Report",
+}
+
+_EXPERIMENT_VERIFIED: Final = (
+    "Sent in the case's request, or captured from Portfolio123's response, by the case's attempt."
+)
+
+_SYNTHETIC_EXPERIMENT_VERIFIED: Final = (
+    "Where a real experiment's value is sent to Portfolio123 or captured from its response. Here"
+    " it comes from the experiment's configuration or its invented responses: nothing was sent,"
+    " and no value came from Portfolio123."
+)
+"""What `verified` means in a synthetic experiment's report, which never calls its values
+Portfolio123's (DSC-04)."""
+
+_COSTS: Final = ("slippage_percent", "commission", "carry_cost")
+_ASSUMPTIONS: Final = ("transaction_price", "rebalance_weeks", "max_holdings", "pit_method")
 
 
 class _ExperimentReport:
@@ -2686,6 +2811,14 @@ class _ExperimentReport:
         self._experiment = experiment
         self._version = version
         self._plan = experiment.plan
+        self._synthetic = experiment.synthetic
+        self._cases = experiment.cases
+        (self._baseline, *_) = experiment.cases
+        self._baseline_settings = {
+            setting.name: setting for setting in _case_settings(self._baseline)
+        }
+        self._plan_numbers = {entry.plan_hash: entry.plan for entry in experiment.record.plans}
+        self._tokens = _TOKENS | ({"not_sent": _SYNTHETIC_NOT_SENT} if self._synthetic else {})
 
     def document(self) -> str:
         title = self._plan.title
@@ -2703,36 +2836,24 @@ class _ExperimentReport:
             '<div class="page">',
             "<header>",
             '<p class="kind">Trial Folio experiment report'
-            + (" · Synthetic experiment" if self._experiment.synthetic else "")
+            + (" · Synthetic experiment" if self._synthetic else "")
             + "</p>",
             f"<h1>{_text(title)}</h1>",
             _concise_notice(),
             *self._synthetic_banner(),
             *self._status(),
-            *_contents(_SECTIONS),
+            *_contents(_EXPERIMENT_SECTIONS),
             "</header>",
             "<main>",
             *self._objective(),
             *self._definitions(),
             *self._data(),
             *self._results(),
-            *self._cases(),
-            *self._not_assessed("robustness", "No robustness or concentration analysis is run."),
-            *self._not_assessed(
-                "statistics",
-                "No statistical method is applied, so no multiplicity correction either."
-                f" The experiment's plan has {len(self._plan.cases)} cases, each recorded with"
-                " its outcome.",
-            ),
-            *self._not_assessed(
-                "evidence",
-                "The cases share one period. There's no separate holdout or forward period.",
-            ),
-            *self._not_assessed(
-                "feasibility",
-                "Neither feasibility nor capacity is assessed, and no execution evidence beyond"
-                " the backtests is held.",
-            ),
+            *self._case_section(),
+            *self._robustness(),
+            *self._statistics(),
+            *self._evidence(),
+            *self._feasibility(),
             *self._conclusion(),
             "</main>",
             *_closing(self._version, "the experiment's saved records"),
@@ -2742,8 +2863,16 @@ class _ExperimentReport:
         ]
         return "\n".join(parts) + "\n"
 
+    def _heading(self, key: str) -> str:
+        return _heading(key, _EXPERIMENT_SECTIONS)
+
+    def _baseline_value(self, name: str) -> str:
+        return self._baseline_settings[name].value
+
+    # The top of the report
+
     def _synthetic_banner(self) -> list[str]:
-        if not self._experiment.synthetic:
+        if not self._synthetic:
             return []
         return [
             (
@@ -2772,100 +2901,552 @@ class _ExperimentReport:
         ]
 
     def _nature(self) -> str:
-        if self._experiment.synthetic:
+        """What kind of results the experiment holds (DSC-04)."""
+        if self._synthetic:
             return "Synthetic: invented values, neither backtested nor actual results."
         return (
             "Backtested: from applying each case's screen rules to historical data, not from"
             " actual trades."
         )
 
+    # 1. Objective
+
     def _objective(self) -> list[str]:
         plan = self._plan
         declared = plan.prior_research
         description = (
-            f"<p>{_text(declared.description)}</p>" if declared.description is not None else ""
+            f"<p>{_text(declared.description)}</p>"
+            if declared.description is not None
+            else '<p class="muted">No description was declared.</p>'
         )
         return [
-            _heading("objective"),
+            self._heading("objective"),
             "<dl>",
+            (
+                "<dt>Objective</dt><dd>Unavailable: an experiment declares no research objective"
+                " or criteria, only its title, purpose, and prior research.</dd>"
+            ),
             f"<dt>Experiment</dt><dd>{_code(plan.experiment_id)}</dd>",
-            f"<dt>Purpose</dt><dd>{_text(plan.purpose)}</dd>",
-            (f"<dt>Plan</dt><dd>Plan {self._experiment.plan_number}, {_code(plan.plan_hash)}</dd>"),
+            f"<dt>Title</dt><dd>{_text(plan.title)}</dd>",
+            (
+                f"<dt>Benchmark</dt><dd>{_code(self._baseline_value('benchmark'))}, every"
+                " case's: no variant changes it.</dd>"
+            ),
+            f"<dt>Statistical validation</dt><dd>{NOT_ASSESSED}</dd>",
+            f"<dt>Trading readiness</dt><dd>{NOT_ASSESSED}</dd>",
             "</dl>",
+            "<h3>Declared purpose</h3>",
+            f"<p>{_text(plan.purpose)}</p>",
             "<h3>Declared prior research</h3>",
-            f"<p>Status: {_code(declared.status)}, as the configuration declares it.</p>",
+            f"<p>Status: {_code(declared.status)}: {_PRIOR_RESEARCH[declared.status]}.</p>",
             description,
             (
                 "<p>Trial Folio records the declaration as the user supplied it, and can't verify"
                 " it.</p>"
             ),
+            "<h3>Plans and revisions</h3>",
+            *self._plans(),
             "</section>",
         ]
 
-    def _definitions(self) -> list[str]:
-        (baseline, *_) = self._plan.cases
-        rows = [
-            f"<tr><th>{_code(row.setting)}</th><td>{_code(setting_text(row.value))}</td></tr>"
-            for row in baseline.settings
-        ]
+    def _plans(self) -> list[str]:
+        entries = self._experiment.record.plans
+        rows: list[str] = []
+        for entry in entries:
+            current = " (current)" if entry is entries[-1] else ""
+            reason = "None: the first plan" if entry.reason is None else _text(entry.reason)
+            rows.append(
+                f'<tr><td>{entry.plan}{current}</td><td class="long">{_code(entry.plan_hash)}'
+                f"</td><td>{_code(entry.approval)}</td><td>{reason}</td>"
+                f"<td>{_plan_changes(entry.changes)}</td></tr>"
+            )
+        used = {entry.approval for entry in entries}
         return [
-            _heading("definitions"),
             (
-                "<p>Each case is the baseline screen with exactly one change. The baseline's"
-                " resolved settings:</p>"
+                "<p>Every plan of the experiment, oldest first. Each was approved before anything"
+                " was sent under it. A revision records the reason the user gave for it, which"
+                " Trial Folio can't verify, and what changed from the plan before it.</p>"
             ),
             '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Plan</th><th>Plan hash</th><th>Approval</th><th>Reason</th>"
+                "<th>Changes</th></tr></thead>"
+            ),
             "<tbody>",
             *rows,
+            "</tbody></table></div>",
+            "<ul>",
+            *(
+                f"<li>{_code(code)}: {meaning}</li>"
+                for code, meaning in _EXPERIMENT_APPROVALS.items()
+                if code in used
+            ),
+            "</ul>",
+        ]
+
+    # 2. Definitions
+
+    def _definitions(self) -> list[str]:
+        own = _LAYOUT_METRICS if self._synthetic else {}
+        definitions = [
+            f"<tr><td>{name}</td><td>{_code(metric_id)}</td>"
+            f"<td>{own.get(metric_id, definition)}</td></tr>"
+            for metric_id, (name, definition) in _METRICS.items()
+        ]
+        changes = [
+            f"<tr><td>{_code(view.case.case_key)}</td><td>{_code(view.case.case_id)}</td>"
+            f"<td>{_variant_change(view.case.variant)}</td>"
+            f"<td>{_description(view.case.description)}</td></tr>"
+            for view in self._cases
+        ]
+        return [
+            self._heading("definitions"),
+            (
+                "<p>Each case is the baseline screen with exactly one change, its variant, which"
+                " the plan compiled before any request was sent. So each case's settings are the"
+                " baseline's, apart from the one setting its change names.</p>"
+            ),
+            "<h3>Changes from the baseline</h3>",
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Case</th><th>case_id</th><th>Change</th><th>Description</th>"
+                "</tr></thead>"
+            ),
+            "<tbody>",
+            *changes,
+            "</tbody></table></div>",
+            "<h3>The baseline's settings</h3>",
+            *self._baseline_table(),
+            "<h3>Metric definitions</h3>",
+            (
+                f"<p>{self._metric_source()} The benchmark's metrics are defined as the"
+                " strategy's.</p>"
+            ),
+            '<div class="wide"><table>',
+            "<thead><tr><th>Metric</th><th>Identifier</th><th>Definition</th></tr></thead>",
+            "<tbody>",
+            *definitions,
             "</tbody></table></div>",
             "</section>",
         ]
 
-    def _data(self) -> list[str]:
+    def _metric_source(self) -> str:
+        layout = f"laid out as {_code(LAYOUT)} version 1"
+        if self._synthetic:
+            return (
+                f"The metrics are read from each case's invented response, {layout}: none comes"
+                " from Portfolio123. Each is defined as that layout defines it."
+            )
+        return f"The metrics are read from each case's response from Portfolio123, {layout}."
+
+    def _baseline_table(self) -> list[str]:
+        expected = self._baseline.settings is None
+        if expected:
+            intro = (
+                "The baseline has no settings.csv, so these are the plan's resolved settings, each"
+                " with the provenance the plan expects it to have once the request is sent."
+            )
+        else:
+            intro = (
+                "As the baseline's settings.csv records them. <em>As written</em> is the value's"
+                " text in the experiment configuration."
+            )
+        body: list[str] = []
+        for setting in self._baseline_settings.values():
+            if setting.inference_rule is not None:
+                note = _text(setting.inference_rule)
+            else:
+                note = self._tokens.get(setting.value, "")
+            original = _code(setting.original_value) if setting.original_value is not None else ""
+            body.append(
+                f"<tr><td>{_code(setting.name)}</td><td>{_code(setting.category)}</td>"
+                f"<td>{_code(setting.value)}</td><td>{_unit(setting.unit)}</td>"
+                f"<td>{_code(setting.provenance)}</td><td>{_flag_list(setting.flags)}</td>"
+                f"<td>{original}</td><td>{note}</td></tr>"
+            )
         return [
-            _heading("data"),
+            f"<p>{intro}</p>",
+            '<div class="wide"><table>',
             (
-                "<p>Each case that succeeded has its own normalized tables,"
-                " <code>metrics.csv</code> and <code>settings.csv</code>, in"
-                " <code>cases/&lt;case_id&gt;/normalized/</code>, with each setting's provenance"
-                " and the response's coverage. They're listed among the artifacts below. This"
-                " version of the experiment report doesn't repeat them.</p>"
+                "<thead><tr><th>Setting</th><th>Category</th><th>Value</th><th>Unit</th>"
+                f"<th>{'Expected provenance' if expected else 'Provenance'}</th><th>Flags</th>"
+                "<th>As written</th><th>Notes</th></tr></thead>"
             ),
+            "<tbody>",
+            *body,
+            "</tbody></table></div>",
+        ]
+
+    # 3. Data sources
+
+    def _data(self) -> list[str]:
+        if self._synthetic:
+            source = (
+                "Invented values: the demo's packaged response, in the layout of Portfolio123's"
+                " screen backtest response, for every case. Nothing was sent to Portfolio123."
+            )
+        else:
+            source = (
+                "Portfolio123's screen backtest, through <code>p123api</code>'s"
+                " <code>screen_backtest</code>, one request for each attempt that sent one."
+            )
+        if any(view.metrics is not None for view in self._cases):
+            layouts = ", ".join(
+                f"{_code(parser.layout)} version {parser.layout_version}, parser version"
+                f" {parser.parser_version}"
+                for parser in self._experiment.parsers
+            )
+        else:
+            layouts = "Unavailable: no planned case's response was normalized."
+        vendor = self._baseline_settings.get("data_vendor")
+        pit = self._baseline_settings.get("pit_method")
+        verified = _SYNTHETIC_EXPERIMENT_VERIFIED if self._synthetic else _EXPERIMENT_VERIFIED
+        meanings = _PROVENANCE | {"verified": verified}
+        found = self._provenances()
+        return [
+            self._heading("data"),
+            "<h3>Sources</h3>",
+            "<dl>",
+            f"<dt>Source</dt><dd>{source}</dd>",
+            f"<dt>Response layout</dt><dd>{layouts}</dd>",
+            "<dt>Data vendor</dt><dd>"
+            + (_setting_brief(vendor) if vendor else "Unavailable")
+            + "</dd>",
+            "<dt>Point-in-time method</dt><dd>"
+            + (_setting_brief(pit) if pit else "Unavailable")
+            + "</dd>",
+            "</dl>",
+            "<h3>Coverage</h3>",
+            *self._coverage(),
+            "<h3>Provenance</h3>",
+            "<p>Each setting and metric records where its value came from:</p>",
+            "<ul>",
+            *(
+                f"<li>{_code(name)}: {meaning}</li>"
+                for name, meaning in meanings.items()
+                if name in found
+            ),
+            "</ul>",
+            "<h3>Missing values</h3>",
+            *self._missing(),
+            "<h3>Exclusions</h3>",
+            f"<p>{self._exclusions()}</p>",
             "</section>",
         ]
+
+    def _provenances(self) -> set[str]:
+        found: set[str] = set()
+        for view in self._cases:
+            found.update(setting.provenance for setting in _case_settings(view))
+            found.update(row.provenance for row in view.metrics or ())
+        return found
+
+    def _coverage(self) -> list[str]:
+        rows: list[str] = []
+        for view in self._cases:
+            if view.metrics is None:
+                cells = ["Unavailable"] * 3 + [f"Unavailable: {self._no_tables(view)}"]
+            else:
+                metrics = {row.metric_id: row for row in view.metrics if row.subject == "strategy"}
+                cells = [
+                    *(_metric_value(metrics[metric_id]) for metric_id in _COVERAGE),
+                    self._coverage_against(view, metrics),
+                ]
+            rows.append(
+                f"<tr><td>{_code(view.case.case_key)}</td>"
+                + "".join(f"<td>{cell}</td>" for cell in cells)
+                + "</tr>"
+            )
+        return [
+            (
+                "<p>Each case's coverage is read from the dates of its response's periods, and"
+                " compared with the requested dates, which every case shares:"
+                f" {_code(self._baseline_value('start_date'))} to"
+                f" {_code(self._baseline_value('end_date'))}. A case without normalized tables"
+                " has none. Coverage that couldn't be established is never shown as"
+                " matching.</p>"
+            ),
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Case</th><th>Coverage start</th><th>Coverage end</th>"
+                "<th>Coverage periods</th><th>Against the requested dates</th></tr></thead>"
+            ),
+            "<tbody>",
+            *rows,
+            "</tbody></table></div>",
+        ]
+
+    def _coverage_against(self, view: CaseView, metrics: dict[str, MetricsRow]) -> str:
+        flagged = {row.setting for row in view.settings or () if "coverage_mismatch" in row.flags}
+        found: list[str] = []
+        for name, metric_id, which in (
+            ("start_date", "coverage_start", "start"),
+            ("end_date", "coverage_end", "end"),
+        ):
+            value = metrics[metric_id].value
+            if value is None:
+                found.append(f"the {which} couldn't be established")
+            elif value != self._baseline_value(name):
+                flag = ", flagged <code>coverage_mismatch</code>" if name in flagged else ""
+                found.append(f"the {which} differs{flag}")
+        if not found:
+            return "Matches"
+        sentence = _series(found)
+        return f"{sentence[0].upper()}{sentence[1:]}."
+
+    def _missing(self) -> list[str]:
+        tabled = [view for view in self._cases if view.metrics is not None]
+        if not tabled:
+            return ["<p>Unavailable: no planned case has normalized tables.</p>"]
+        rows = [
+            f"<tr><td>{_code(view.case.case_key)}</td><td>{_metric_label(row)}</td>"
+            f"<td>{_unavailable(row.unavailable_reason)}</td></tr>"
+            for view in tabled
+            for row in view.metrics or ()
+            if row.value is None
+        ]
+        if not rows:
+            return ["<p>None: every metric of every case with normalized tables is available.</p>"]
+        metrics = "metric is" if len(rows) == 1 else "metrics are"
+        cases = "case" if len(tabled) == 1 else "cases"
+        return [
+            (
+                f"<p>{len(rows)} {metrics} unavailable, across the {len(tabled)} {cases} with"
+                " normalized tables. None is shown as zero.</p>"
+            ),
+            '<div class="wide"><table>',
+            "<thead><tr><th>Case</th><th>Metric</th><th>Reason</th></tr></thead>",
+            "<tbody>",
+            *rows,
+            "</tbody></table></div>",
+        ]
+
+    def _exclusions(self) -> str:
+        forms = {
+            attempt.response.form
+            for view in (*self._cases, *self._experiment.retired)
+            for attempt in view.attempts
+            if attempt.response is not None
+        }
+        if not forms:
+            return "None: the experiment saved no response."
+        kept = (
+            "None. Trial Folio excludes nothing from the saved responses, and keeps each whole, as"
+            " it was saved"
+        )
+        kept += ", an undecoded one as it came." if "undecoded" in forms else "."
+        if self._experiment.capabilities.return_series == "source_only":
+            kept += " Their per-period series are preserved there, but not interpreted."
+        return kept
+
+    def _no_tables(self, view: CaseView) -> str:
+        """Why a planned case has no normalized tables."""
+        if view.invalid is not None:
+            if any(
+                attempt.response is not None and attempt.response.form == "undecoded"
+                for attempt in view.attempts
+            ):
+                return (
+                    "its response couldn't be decoded as JSON, so it was saved as it came, and"
+                    " wasn't normalized."
+                )
+            return (
+                "its saved response doesn't have the layout's required structure, so it wasn't"
+                " normalized."
+            )
+        if view.outcome == "not_yet_run":
+            return "it hasn't been run yet."
+        return "no attempt of it succeeded, so there's no response to normalize."
+
+    # 4. Results
 
     def _results(self) -> list[str]:
+        shown = [view for view in self._cases if view.metrics is not None]
+        parts = [self._heading("results")]
+        if not shown:
+            parts.append(
+                "<p>Unavailable: no planned case has normalized tables, so there are no metrics"
+                " to show.</p>"
+            )
+        else:
+            source = "invented, as every value here is" if self._synthetic else "Portfolio123's"
+            parts.append(
+                "<p>Each case's metrics, as its metrics.csv holds them, side by side in the"
+                " plan's order. Each value has exactly the digits the response carries, never"
+                f" padded or rounded. The risk statistics are {source}, for the period the"
+                " settings give as <code>risk_stats_period</code>. The report computes no"
+                " difference between cases, and orders, ranks, and marks no case by a value.</p>"
+            )
+            without = [view for view in self._cases if view.metrics is None]
+            if without:
+                parts.append(
+                    "<p>Not shown, without normalized tables: "
+                    + _series([_code(view.case.case_key) for view in without])
+                    + ". The coverage above says why.</p>"
+                )
+            for subject, heading in (("strategy", "Strategy"), ("benchmark", "Benchmark")):
+                if subject == "benchmark":
+                    heading += f": {_code(self._baseline_value('benchmark'))}"
+                parts.extend([f"<h3>{heading}</h3>", *self._metrics_across(shown, subject)])
+        if self._experiment.retired:
+            parts.append(
+                "<p>The retired cases' tables are kept in their directories, and listed among the"
+                " artifacts. They aren't shown here.</p>"
+            )
+        parts.extend(
+            [
+                "<h3>Costs</h3>",
+                *self._settings_across(_COSTS),
+                "<h3>Exposures</h3>",
+                "<p>Unavailable: the responses report no exposures.</p>",
+                "<h3>Implementation assumptions</h3>",
+                *self._settings_across(_ASSUMPTIONS),
+                "</section>",
+            ]
+        )
+        return parts
+
+    def _metrics_across(self, shown: Sequence[CaseView], subject: str) -> list[str]:
+        by_case = [
+            {row.metric_id: row for row in view.metrics or () if row.subject == subject}
+            for view in shown
+        ]
+        metric_ids = [
+            metric.metric_id
+            for metric in METRICS
+            if metric.subject == subject and metric.metric_id not in _COVERAGE
+        ]
+        periods = {
+            (rows[metric_id].period_start, rows[metric_id].period_end)
+            for rows in by_case
+            for metric_id in metric_ids
+        }
+        if len(periods) == 1:
+            ((start, end),) = periods
+            caption = (
+                f"Over {start.isoformat()} to {end.isoformat()}, every case's coverage."
+                if start is not None and end is not None
+                else "Over a period that couldn't be established."
+            )
+        else:
+            caption = "The cases' rows cover different periods; the coverage above gives each."
+        if self._synthetic:
+            caption += " Every value is invented."
+        body: list[str] = []
+        for metric_id in metric_ids:
+            first = by_case[0][metric_id]
+            name = _text(_METRICS[metric_id][0])
+            if first.benchmark is not None:
+                name += f" vs. {_text(first.benchmark)}"
+            cells = "".join(f"<td>{_metric_value(rows[metric_id])}</td>" for rows in by_case)
+            body.append(
+                f"<tr><td>{name}<br>{_code(metric_id)}</td><td>{_code(first.unit)}</td>{cells}</tr>"
+            )
+        heads = "".join(f"<th>{_code(view.case.case_key)}</th>" for view in shown)
         return [
-            _heading("results"),
-            (
-                "<p>Each case's metrics are in its <code>metrics.csv</code>. This report doesn't"
-                " compare them, and orders and marks no case by any metric.</p>"
-            ),
-            "</section>",
+            '<div class="wide"><table>',
+            f"<caption>{caption}</caption>",
+            f"<thead><tr><th>Metric</th><th>Unit</th>{heads}</tr></thead>",
+            "<tbody>",
+            *body,
+            "</tbody></table></div>",
         ]
 
-    def _cases(self) -> list[str]:
-        counts = self._experiment.counts
-        cases = counts.cases
+    def _settings_across(self, names: Sequence[str]) -> list[str]:
         rows: list[str] = []
-        for view in self._experiment.cases:
-            case = view.case
-            change = "The baseline" if case.variant is None else _variant_change(case)
-            description = "" if case.description is None else _text(case.description)
+        for name in names:
+            setting = self._baseline_settings.get(name)
+            if setting is None:
+                continue
+            changed = [
+                f"{_code(view.case.case_key)}: {_code(_plan_value(view.case, name))}"
+                for view in self._cases
+                if view.case.variant is not None and view.case.variant.setting == name
+            ]
+            note = self._tokens.get(setting.value, "")
             rows.append(
-                f"<tr><td>{_code(case.case_key)}</td><td>{_code(case.case_id)}</td>"
-                f"<td>{change}</td><td>{description}</td>"
-                f"<td>{_CASE_OUTCOMES[view.outcome]}</td><td>{view.attempts}</td></tr>"
+                f"<tr><td>{_code(name)}</td><td>{_code(setting.value)}</td>"
+                f"<td>{_unit(setting.unit)}</td>"
+                f"<td>{_series(changed) if changed else 'No case'}</td><td>{note}</td></tr>"
             )
-        budget = counts.budget
         return [
-            _heading("cases"),
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Setting</th><th>The baseline's</th><th>Unit</th>"
+                "<th>Changed by</th><th>Notes</th></tr></thead>"
+            ),
+            "<tbody>",
+            *rows,
+            "</tbody></table></div>",
+        ]
+
+    # 5. Cases and attempts
+
+    def _case_section(self) -> list[str]:
+        experiment = self._experiment
+        plan = self._plan
+        budget = plan.budget
+        counts = experiment.counts
+        cases = counts.cases
+        attempts = counts.attempts
+        if counts.cost is None:
+            cost = "Not reported"
+        elif self._synthetic:
+            cost = f"{counts.cost} credits, as the invented responses report: nothing was charged"
+        else:
+            cost = f"{counts.cost} credits, as Portfolio123 reported"
+        rows = [
+            f"<tr><td>{_code(view.case.case_key)}</td><td>{_code(view.case.case_id)}</td>"
+            f"<td>{_variant_change(view.case.variant)}</td>"
+            f"<td>{_description(view.case.description)}</td>"
+            f"<td>{self._outcome(view)}</td><td>{_attempt_count(view.attempts)}</td></tr>"
+            for view in self._cases
+        ]
+        return [
+            self._heading("cases"),
             (
                 f"<p>Planned cases: {cases.planned} = {cases.succeeded} succeeded +"
                 f" {cases.failed} failed + {cases.skipped} skipped + {cases.unknown} unknown +"
-                f" {cases.not_yet_run} not yet run. Every case appears below, in the plan's"
-                " order.</p>"
+                f" {cases.not_yet_run} not yet run. Every case of the current plan appears below,"
+                " in the plan's order, whatever its outcome, and so does every case a revision"
+                " retired, with all its attempts.</p>"
             ),
+            *self._synthetic_records(),
+            "<dl>",
+            (
+                f"<dt>Plan</dt><dd>Plan {experiment.plan_number}, {_code(plan.plan_hash)}, the"
+                " current plan</dd>"
+            ),
+            f"<dt>Approval</dt><dd>{_EXPERIMENT_APPROVALS[experiment.approval]}</dd>",
+            (
+                f"<dt>Budget</dt><dd>{budget.provider_requests} provider requests, at most"
+                f" {budget.credits} credits at Portfolio123's documented cost"
+                f" ({_text(budget.credits_per_request_source.title)}, checked"
+                f" {budget.credits_per_request_source.checked.isoformat()}), and at most"
+                f" {budget.authentication_calls} authentication calls, for every run of the"
+                " experiment.</dd>"
+            ),
+            (
+                "<dt>Counted against the budget</dt><dd>Provider requests:"
+                f" {counts.provider_requests} of the budget's {counts.budget.provider_requests}."
+                f" Authentication calls: {counts.authentication_calls} of its"
+                f" {counts.budget.authentication_calls}. Each counts every attempt of the"
+                " experiment. A provider request is a send that may have reached Portfolio123,"
+                " which may be charged even when it fails.</dd>"
+            ),
+            (
+                f"<dt>Attempts</dt><dd>{attempts.succeeded} succeeded, {attempts.failed} failed,"
+                f" {attempts.unknown} unknown, {attempts.running} running</dd>"
+            ),
+            (
+                f"<dt>Repeats</dt><dd>{attempts.repeats}: the attempts that repeat a case, each"
+                " after a confirmation</dd>"
+            ),
+            f"<dt>Retired cases</dt><dd>{counts.retired_cases}</dd>",
+            f"<dt>Retries</dt><dd>{counts.retries}</dd>",
+            f"<dt>Cost</dt><dd>{cost}</dd>",
+            "</dl>",
+            "<h3>Planned cases</h3>",
             '<div class="wide"><table>',
             (
                 "<thead><tr><th>Case</th><th>case_id</th><th>Change</th><th>Description</th>"
@@ -2874,47 +3455,441 @@ class _ExperimentReport:
             "<tbody>",
             *rows,
             "</tbody></table></div>",
+            *self._awaiting(),
+            *self._retired(),
+            *self._attempts(),
+            *self._versions(),
+            "</section>",
+        ]
+
+    def _synthetic_records(self) -> list[str]:
+        if not self._synthetic:
+            return []
+        return [
             (
-                f"<p>Attempts: {counts.attempts.succeeded} succeeded, {counts.attempts.failed}"
-                f" failed, {counts.attempts.unknown} unknown. Provider requests counted against"
-                f" the budget: {counts.provider_requests} of {budget.provider_requests}."
-                f" Authentication calls: {counts.authentication_calls} of"
-                f" {budget.authentication_calls}.</p>"
+                "<p>The experiment is synthetic, so its attempts, their exchanges, and the counts"
+                " below are invented, as a real experiment would record them. Nothing was sent"
+                " to Portfolio123, and nothing was charged.</p>"
+            )
+        ]
+
+    def _outcome(self, view: CaseView) -> str:
+        """The case's outcome, with the error code of the attempt that gives it, what it means,
+        and whether it awaits a repeat or a resume sends it."""
+        outcome = view.outcome
+        code = _outcome_code(view)
+        shown = _code(outcome) + (f" ({_code(code)})" if code is not None else "")
+        if outcome == "succeeded":
+            response = "invented response" if self._synthetic else "response"
+            meaning = f"its {response} was saved and normalized."
+        elif view.invalid is not None:
+            meaning = "its response was saved, but couldn't be normalized."
+        elif view.repeat_attempt is not None:
+            if outcome == "unknown":
+                meaning = "its request may have been charged, and no response was saved."
+            else:
+                meaning = "its request may have reached Portfolio123, and may have been charged."
+            meaning += " Awaiting a repeat."
+        elif outcome == "failed":
+            meaning = (
+                "no attempt's request could have reached Portfolio123. A resume sends it, within"
+                " the budget."
+            )
+        else:
+            meaning = "it has no attempt. A resume sends it, within the budget."
+        return f"{shown}: {meaning}"
+
+    def _awaiting(self) -> list[str]:
+        awaiting = [
+            (view, attempt) for view in self._cases if (attempt := view.repeat_attempt) is not None
+        ]
+        parts = ["<h3>Cases awaiting a repeat</h3>"]
+        if not awaiting:
+            return [
+                *parts,
+                (
+                    "<p>None: no planned case has a request that may have been charged without"
+                    " succeeding.</p>"
+                ),
+            ]
+        items: list[str] = []
+        for view, attempt in awaiting:
+            code = "" if attempt.error is None else f" ({_code(attempt.error.code)})"
+            lead = (
+                f"{_code(view.case.case_key)}, {_code(view.case.case_id)}: attempt"
+                f" {_code(str(attempt.attempt_id))}, {_code(attempt.outcome)}{code}."
+            )
+            if self._synthetic:
+                items.append(f"<li>{lead}</li>")
+            else:
+                option = f"--repeat {view.case.case_key}:{attempt.attempt_id}"
+                items.append(f"<li>{lead} The option that repeats it: {_code(option)}</li>")
+        if self._synthetic:
+            how = (
+                " <code>trialfolio run</code> doesn't resume a synthetic experiment: only Trial"
+                " Folio's core repeats a case of one, with the demo's client, given the attempt"
+                " below."
+            )
+        else:
+            how = (
+                " Running the experiment again with the option given below for a case, and the"
+                " plan's approval, repeats it: the option confirms the possible repeat charge, by"
+                " naming the attempt."
+            )
+        return [
+            *parts,
+            (
+                "<p>A case awaiting a repeat has an attempt whose request may have reached"
+                " Portfolio123, and so may have been charged, and no attempt that succeeded. A"
+                " resume never sends its request again on its own. A repeat sends it again, as a"
+                " new attempt of the same case, which may be charged again, and counts against"
+                " the budget. Each case is listed with its latest attempt whose request may have"
+                f" been charged.{how}</p>"
+            ),
+            "<ul>",
+            *items,
+            "</ul>",
+        ]
+
+    def _retired(self) -> list[str]:
+        retired = self._experiment.retired
+        parts = ["<h3>Retired cases</h3>"]
+        if not retired:
+            return [*parts, "<p>None: no revision retired a case.</p>"]
+        rows = [
+            f"<tr><td>{_code(view.case.case_key)}</td><td>{_code(view.case.case_id)}</td>"
+            f"<td>{_variant_change(view.case.variant)}</td>"
+            f"<td>{_description(view.case.description)}</td><td>{view.case.plan}</td>"
+            f"<td>{_code(view.outcome)}</td><td>{_attempt_count(view.attempts)}</td></tr>"
+            for view in retired
+        ]
+        return [
+            *parts,
+            (
+                "<p>Each case an earlier plan included and the current plan doesn't, with the key,"
+                " description, and change it had in the last plan that included it. It and its"
+                " attempts stay in the record, and the budget counts its attempts.</p>"
+            ),
+            '<div class="wide"><table>',
+            (
+                "<thead><tr><th>Case</th><th>case_id</th><th>Change</th><th>Description</th>"
+                "<th>Last plan</th><th>Outcome</th><th>Attempts</th></tr></thead>"
+            ),
+            "<tbody>",
+            *rows,
+            "</tbody></table></div>",
+        ]
+
+    def _attempts(self) -> list[str]:
+        parts = [
+            "<h3>Attempts</h3>",
+            (
+                "<p>Every attempt of the experiment, by case: the current plan's cases in its"
+                " order, then the retired cases. A case's attempts are in the order they were"
+                " made: by session, and then by their place in the session. A repeat names the"
+                " attempt whose possible charge its confirmation acknowledged.</p>"
+            ),
+        ]
+        views: list[tuple[str, CaseView | RetiredCaseView]] = [
+            *(("", view) for view in self._cases),
+            *((" (retired)", view) for view in self._experiment.retired),
+        ]
+        if not any(view.attempts for _, view in views):
+            return [*parts, "<p>The experiment has no attempt yet.</p>"]
+        for retired, view in views:
+            if not view.attempts:
+                continue
+            rows = [self._attempt_row(attempt) for attempt in view.attempts]
+            parts.extend(
+                [
+                    '<div class="wide"><table>',
+                    (
+                        f"<caption>{_code(view.case.case_key)}{retired},"
+                        f" {_code(view.case.case_id)}</caption>"
+                    ),
+                    (
+                        "<thead><tr><th>Attempt</th><th>Session · place</th><th>Plan</th>"
+                        "<th>Started</th><th>Outcome</th><th>Possibly charged</th><th>Error</th>"
+                        "<th>Repeats</th><th>Exchanges</th></tr></thead>"
+                    ),
+                    "<tbody>",
+                    *rows,
+                    "</tbody></table></div>",
+                ]
+            )
+        return parts
+
+    def _attempt_row(self, attempt: AttemptRecordV1_1) -> str:
+        plan = self._plan_numbers.get(attempt.plan_hash)
+        error = (
+            ""
+            if attempt.error is None
+            else f"{_code(attempt.error.code)}: {_text(attempt.error.message)}"
+        )
+        repeats = (
+            "" if attempt.repeat_of is None else f"Repeats attempt {_code(str(attempt.repeat_of))}"
+        )
+        exchanges = "<br>".join(_exchange(exchange) for exchange in attempt.exchanges) or "None"
+        return (
+            f'<tr><td class="long">{_code(str(attempt.attempt_id))}</td>'
+            f"<td>{attempt.session} · {attempt.sequence}</td>"
+            f"<td>{plan if plan is not None else _code(attempt.plan_hash)}</td>"
+            f"<td>{_moment(attempt.started_at)}</td><td>{_code(attempt.outcome)}</td>"
+            f"<td>{'Yes' if attempt.possibly_charged else 'No'}</td><td>{error}</td>"
+            f'<td class="long">{repeats}</td><td>{exchanges}</td></tr>'
+        )
+
+    def _versions(self) -> list[str]:
+        experiment = self._experiment
+        plan = self._plan
+        command = experiment.command
+        if command is not None:
+            written = (
+                f"Trial Folio {_text(plan.trialfolio_version)}, command {_code(command.name)},"
+                f" started {_moment(command.started_at)}"
+            )
+        elif self._synthetic:
+            written = (
+                f"Trial Folio {_text(plan.trialfolio_version)}, through its core, with the demo's"
+                " client: no <code>trialfolio</code> command writes a synthetic experiment"
+            )
+        else:
+            written = (
+                f"Trial Folio {_text(plan.trialfolio_version)}, through its core, for an"
+                " interface other than the <code>trialfolio</code> commands"
+            )
+        return [
+            "<h3>Versions</h3>",
+            "<dl>",
+            f"<dt>Session written by</dt><dd>{written}</dd>",
+            (
+                f"<dt>Plan built by</dt><dd>Trial Folio {_text(plan.trialfolio_version)},"
+                f" canonicalization version {plan.canonicalization_version}</dd>"
+            ),
+            (
+                f"<dt>Provider wrapper</dt><dd><code>p123api</code>"
+                f" {_text(plan.provider_wrapper.p123api)}</dd>"
+            ),
+            (
+                f"<dt>Transport</dt><dd><code>requests</code> {_text(plan.transport.requests)},"
+                f" <code>urllib3</code> {_text(plan.transport.urllib3)}</dd>"
+            ),
+            (
+                f"<dt>License and notice</dt><dd>Recorded with the session: {_code(LICENSE_ID)},"
+                f" notice version {NOTICE_VERSION}</dd>"
+            ),
+            f"<dt>Report rendered by</dt><dd>Trial Folio {self._version}</dd>",
+            "</dl>",
+        ]
+
+    # 6 to 9
+
+    def _robustness(self) -> list[str]:
+        return [
+            self._heading("robustness"),
+            (
+                f"<p>{NOT_ASSESSED}. The cases are variants of one baseline, predefined in the"
+                " plan before any request was sent, but Trial Folio doesn't assess robustness or"
+                " the concentration of contributions from them. A variant whose outcome is used"
+                " to choose a candidate is part of the search, not independent evidence for that"
+                " candidate.</p>"
             ),
             "</section>",
         ]
 
-    def _not_assessed(self, key: str, why: str) -> list[str]:
-        return [_heading(key), f"<p>{NOT_ASSESSED}. {why}</p>", "</section>"]
+    def _statistics(self) -> list[str]:
+        counts = self._experiment.counts
+        attempts = counts.attempts
+        made = attempts.succeeded + attempts.failed + attempts.unknown + attempts.running
+        repeats = f"{attempts.repeats} {'repeat' if attempts.repeats == 1 else 'repeats'}"
+        return [
+            self._heading("statistics"),
+            (
+                f"<p>Statistical validation: {NOT_ASSESSED}. No statistical method was applied, so"
+                " the report states no uncertainty, multiple-testing adjustment, or power. Summary"
+                " statistics alone don't support intervals, a return series, or a drawdown"
+                " history, so none is shown or reconstructed.</p>"
+            ),
+            (
+                f"<p>The current plan has {counts.cases.planned} cases, and revisions retired"
+                f" {counts.retired_cases}. Attempts made: {made}, with {repeats} among them. These"
+                " counts are the experiment's research history, not a multiple-testing family: an"
+                " attempt or a repeat is a provider operation, not a hypothesis, and a predefined"
+                " variant isn't one either, unless its outcome informs a selection.</p>"
+            ),
+            "</section>",
+        ]
+
+    def _evidence(self) -> list[str]:
+        each = "a synthetic example" if self._synthetic else "a backtest"
+        return [
+            self._heading("evidence"),
+            (
+                f"<p>Unavailable: each case is {each} over the same requested dates. The"
+                " experiment has no separate development, selection, holdout, or forward"
+                " period.</p>"
+            ),
+            f"<p>{self._nature()}</p>",
+            "</section>",
+        ]
+
+    def _feasibility(self) -> list[str]:
+        missing = ["<li>Actual trades: none.</li>"]
+        commission = self._baseline_settings.get("commission")
+        if commission is not None and commission.value == "not_modeled":
+            missing.append(f"<li>Commission: {_TOKENS['not_modeled']}</li>")
+        unsent = [s.name for s in self._baseline_settings.values() if s.value == "not_sent"]
+        if unsent:
+            missing.append(
+                "<li>Parameters not sent, whose defaults aren't documented: "
+                + ", ".join(_code(name) for name in unsent)
+                + ".</li>"
+            )
+        if self._experiment.capabilities.return_series == "source_only":
+            missing.append(
+                "<li>Turnover, positions, and per-period returns: preserved in the saved"
+                " responses, but not interpreted.</li>"
+            )
+        return [
+            self._heading("feasibility"),
+            f"<p>Trading readiness: {NOT_ASSESSED}. Feasibility and capacity aren't assessed.</p>",
+            "<p>Execution evidence this experiment doesn't have:</p>",
+            "<ul>",
+            *missing,
+            "</ul>",
+            "</section>",
+        ]
+
+    # 10. Conclusion
 
     def _conclusion(self) -> list[str]:
         experiment = self._experiment
+        cases = experiment.counts.cases
         if experiment.outcome == "completed":
-            execution = "Every planned case succeeded."
+            response = "invented response" if self._synthetic else "response"
+            execution = f"Every planned case succeeded: its {response} was saved and normalized."
         else:
-            execution = "Not every planned case succeeded; each one's outcome is listed above."
+            code = experiment.error.code if experiment.error is not None else ""
+            execution = (
+                f"Session {experiment.session} ended with {_code(code)}: {cases.succeeded} of the"
+                f" {cases.planned} planned cases succeeded, and section 5 gives each case's"
+                " outcome."
+            )
+        conclusion = (
+            f"{execution} That's a statement about execution, not about any strategy. No case is"
+            " ranked, selected, or called best. Statistical validation and trading readiness are"
+            " not assessed, so this report permits no conclusion about whether any case's"
+            " strategy is useful, or whether its results could be achieved."
+        )
+        return [
+            self._heading("conclusion"),
+            "<h3>Permitted conclusion</h3>",
+            f"<p>{conclusion}</p>",
+            "<h3>Limitations</h3>",
+            "<ul>",
+            *(f"<li>{item}</li>" for item in self._limitations()),
+            "</ul>",
+            "<h3>Artifacts</h3>",
+            *self._artifacts(),
+            "</section>",
+        ]
+
+    def _limitations(self) -> list[str]:
+        experiment = self._experiment
+        items = [self._nature()]
+        reproducibility = experiment.reproducibility
+        unsnapshotted = [
+            reference.setting
+            for reference in reproducibility.external_references
+            if not reference.snapshotted
+        ]
+        if reproducibility.status == "incomplete":
+            names = " and ".join(_code(name) for name in unsnapshotted)
+            verb = "names an object" if len(unsnapshotted) == 1 else "name objects"
+            items.append(
+                f"Reproducibility is incomplete: {names} {verb} in the Portfolio123 account whose"
+                " definition wasn't captured. If it changes, the same configuration can give"
+                " different results."
+            )
+        else:
+            items.append("Reproducibility is complete: every setting is recorded in full.")
+        if not self._synthetic:
+            items.append(
+                "Portfolio123's data and engines change, so sending a case's request again may"
+                " give different results. A repeat is a new attempt, never a replacement."
+            )
+        status = self._plan.prior_research.status
+        prior = (
+            f"The prior research is declared {_code(status)}, and Trial Folio can't verify the"
+            " declaration."
+        )
+        if status != "complete":
+            prior += (
+                " Earlier outcome-informed work on this idea isn't fully recorded, so a claim"
+                " drawn from these cases is limited accordingly."
+            )
+        items.append(prior)
+        inferred = [
+            s.name for s in self._baseline_settings.values() if "inferred_default" in s.flags
+        ]
+        if inferred:
+            items.append(
+                "Inferred defaults, not reported by Portfolio123: "
+                + ", ".join(_code(name) for name in inferred)
+                + "."
+            )
+        mismatched = [
+            view.case.case_key
+            for view in self._cases
+            if any("coverage_mismatch" in row.flags for row in view.settings or ())
+        ]
+        if mismatched:
+            items.append(
+                "The coverage differs from the requested dates for "
+                + _series([_code(key) for key in mismatched])
+                + "."
+            )
+        unavailable = sum(row.value is None for view in self._cases for row in view.metrics or ())
+        if unavailable:
+            items.append(
+                "1 metric is unavailable, with its reason above."
+                if unavailable == 1
+                else f"{unavailable} metrics are unavailable, with their reasons above."
+            )
+        without = [view.case.case_key for view in self._cases if view.metrics is None]
+        if without:
+            items.append(
+                "No normalized result for "
+                + _series([_code(key) for key in without])
+                + ": section 5 gives each case's outcome."
+            )
+        items.append(
+            "Only summary statistics are reported: no return series, drawdown history, or"
+            " interval is shown."
+        )
+        items.append(
+            f"This is session {experiment.session}'s report. Each later run of the experiment"
+            " that reaches its end writes its own report and manifest, which supersede this one,"
+            " and replaces no file."
+        )
+        return items
+
+    def _artifacts(self) -> list[str]:
+        experiment = self._experiment
+        manifest = experiment_manifest_path(experiment.session)
         rows = [
             (
-                f"<tr><td>{self._link('sessions/' + str(experiment.session) + '/manifest.json')}"
-                "</td><td>manifest</td><td></td><td></td></tr>"
+                f"<tr><td>{self._link(manifest)}</td><td>Manifest, written last</td><td></td>"
+                "<td></td></tr>"
             ),
             *(
                 f'<tr><td class="long">{self._link(artifact.path)}</td>'
-                f"<td>{_code(artifact.role)}</td><td>{artifact.size}</td>"
+                f"<td>{_EXPERIMENT_ROLES[artifact.role]}</td><td>{artifact.size}</td>"
                 f'<td class="long">{_code(artifact.artifact_id)}</td></tr>'
                 for artifact in experiment.artifacts
             ),
         ]
         return [
-            _heading("conclusion"),
-            "<h3>Permitted conclusion</h3>",
-            (
-                f"<p>{execution} That's a statement about execution, not about any strategy. No"
-                " case is ranked or called best. Statistical validation and trading readiness are"
-                " not assessed, so this report permits no conclusion about whether a strategy is"
-                " useful.</p>"
-            ),
-            "<h3>Artifacts</h3>",
             (
                 "<p>Each file links to the experiment's copy, by a path relative to this report."
                 " An <code>artifact_id</code> is the SHA-256 of the file's bytes.</p>"
@@ -2927,7 +3902,6 @@ class _ExperimentReport:
             "<tbody>",
             *rows,
             "</tbody></table></div>",
-            "</section>",
         ]
 
     @staticmethod
@@ -2937,8 +3911,50 @@ class _ExperimentReport:
         return f'<a href="{html.escape("/".join(segments))}">{_code(path)}</a>'
 
 
-def _variant_change(case: ExperimentPlanCase) -> str:
-    variant = case.variant
+def experiment_manifest_path(session: int) -> str:
+    """`sessions/<session>/manifest.json`, relative to the output root."""
+    return f"sessions/{session}/{MANIFEST_PATH}"
+
+
+def _case_settings(view: CaseView) -> tuple[_Setting, ...]:
+    """A case's resolved settings: its `settings.csv` rows, or, without them, its plan's."""
+    if view.settings is not None:
+        return tuple(
+            _Setting(
+                row.setting,
+                row.category,
+                row.value,
+                row.unit,
+                row.provenance,
+                row.inference_rule,
+                row.flags,
+                row.original_value,
+                expected=False,
+            )
+            for row in view.settings
+        )
+    return tuple(
+        _Setting(
+            row.setting,
+            row.category,
+            setting_text(row.value),
+            row.unit,
+            row.expected_provenance,
+            row.inference_rule,
+            row.flags,
+            None,
+            expected=True,
+        )
+        for row in view.case.settings
+    )
+
+
+def _plan_value(case: ExperimentPlanCase, name: str) -> str:
+    """The case's resolved value of a setting, as `settings.csv` writes it."""
+    return next(setting_text(row.value) for row in case.settings if row.setting == name)
+
+
+def _variant_change(variant: PlanVariant | None) -> str:
     if variant is None:
         return "The baseline"
     if variant.value is not None:
@@ -2947,3 +3963,62 @@ def _variant_change(case: ExperimentPlanCase) -> str:
     if variant.add is not None:
         return f"Adds the rule {_code(variant.add)}"
     return f"Replaces the rule {_code(variant.replace or '')} with {_code(variant.with_ or '')}"
+
+
+def _description(description: str | None) -> str:
+    return "" if description is None else _text(description)
+
+
+def _unit(unit: str | None) -> str:
+    return "" if unit is None else _code(unit)
+
+
+def _metric_value(row: MetricsRow) -> str:
+    """A metric's value as `metrics.csv` holds it, or why it's unavailable."""
+    if row.value is None:
+        reason = row.unavailable_reason
+        return "Unavailable" if reason is None else f"Unavailable ({_code(reason)})"
+    return _code(row.value)
+
+
+def _attempt_count(attempts: Sequence[AttemptRecordV1_1]) -> str:
+    repeats = sum(attempt.repeat_of is not None for attempt in attempts)
+    if not repeats:
+        return str(len(attempts))
+    return f"{len(attempts)}, {repeats} of them {'a repeat' if repeats == 1 else 'repeats'}"
+
+
+def _outcome_code(view: CaseView) -> str | None:
+    """The error code that gives a case's outcome: its response's `provider.response_invalid`,
+    or the error of its latest possibly charged attempt, or else of its latest attempt."""
+    if view.invalid is not None:
+        return view.invalid.code
+    if view.outcome in ("succeeded", "not_yet_run"):
+        return None
+    charged = [attempt for attempt in view.attempts if attempt.possibly_charged]
+    latest = (charged or list(view.attempts))[-1]
+    return None if latest.error is None else latest.error.code
+
+
+def _exchange(exchange: Exchange) -> str:
+    result = _EXCHANGE_RESULTS[exchange.result]
+    status = "" if exchange.status is None else f" {exchange.status}"
+    note = "" if exchange.note is None else f", {_code(exchange.note)}"
+    return f"{_code(exchange.request)}: {result}{status}{note}"
+
+
+def _plan_changes(changes: PlanChanges | None) -> str:
+    """What a revision changed from the plan before it, one kind of change to a line."""
+    if changes is None:
+        return "The first plan"
+    lines = [
+        f"{_code(change.package)} from {_text(change.previous)} to {_text(change.current)}"
+        for change in changes.versions
+    ]
+    for cases, verb in ((changes.cases_added, "added"), (changes.cases_retired, "retired")):
+        if cases:
+            named = [f"{_code(case.case_key)} ({_code(case.case_id)})" for case in cases]
+            lines.append(f"Cases {verb}: {_series(named)}")
+    if changes.parts:
+        lines.append("Other parts changed: " + _series([_code(part) for part in changes.parts]))
+    return "<br>".join(lines)
