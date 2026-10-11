@@ -1084,6 +1084,7 @@ def test_the_costs_and_assumptions_name_the_cases_that_change_them(sessions: Ses
 
 def test_the_report_shows_each_count_as_the_manifest_records_it(sessions: Sessions) -> None:
     first, second = sessions("troubled")
+    *_, repeated = sessions("repeated")
 
     for session, expected in (
         (
@@ -1112,6 +1113,20 @@ def test_the_report_shows_each_count_as_the_manifest_records_it(sessions: Sessio
                     "Provider requests: 7 of the budget's 8. Authentication calls: 2 of its 8."
                 ),
                 "Cost": "25 credits, as Portfolio123 reported",
+            },
+        ),
+        (
+            repeated,
+            {
+                "planned": "Planned cases: 2 = 1 succeeded + 1 failed + 0 skipped + 0 unknown + 0"
+                " not yet run.",
+                "Attempts": "1 succeeded, 2 failed, 1 unknown, 0 running",
+                "Repeats": "2: the attempts that repeat a case, each after a confirmation",
+                "Retired cases": "0",
+                "Counted against the budget": (
+                    "Provider requests: 3 of the budget's 4. Authentication calls: 3 of its 4."
+                ),
+                "Cost": "5 credits, as Portfolio123 reported",
             },
         ),
     ):
@@ -1149,6 +1164,17 @@ def test_the_report_shows_each_count_as_the_manifest_records_it(sessions: Sessio
             f" {counts.authentication_calls} of its {counts.budget.authentication_calls}."
         )
         assert document.dd("Cost") == [f"{counts.cost} credits, as Portfolio123 reported"]
+    # A plan's two limits are equal, so the counts are rendered with limits that differ, to show
+    # that each is the limit it's named as.
+    evidence = first.evidence
+    limits = evidence.counts.budget.model_copy(update={"authentication_calls": 9})
+    counts = evidence.counts.model_copy(update={"budget": limits})
+    document = parse(
+        HtmlReportRenderer(VERSION).render_experiment(replace(evidence, counts=counts))
+    )
+    assert document.dd("Counted against the budget")[0].startswith(
+        "Provider requests: 5 of the budget's 6. Authentication calls: 1 of its 9."
+    )
 
 
 def test_the_plan_its_approval_and_the_budget_are_shown(sessions: Sessions) -> None:
