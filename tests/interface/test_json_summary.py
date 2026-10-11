@@ -938,6 +938,47 @@ def test_an_experiment_that_stops_without_its_manifest(
     assert (counts["attempts"], counts["provider_requests"]) == (on_disk, on_disk)
 
 
+@pytest.mark.parametrize(
+    ("fail", "code"),
+    [
+        pytest.param(
+            lambda faults: faults.fail_os("settings.csv"), "storage.write_failed", id="storage"
+        ),
+        pytest.param(
+            lambda faults: faults.fail_after("metrics.csv", KeyboardInterrupt()),
+            "command.interrupted",
+            id="interrupt",
+        ),
+    ],
+)
+def test_a_metrics_table_written_without_its_settings_table_is_counted(
+    cli: Cli,
+    experiments: ExperimentBuilder[Outcome],
+    faults: FaultyStores,
+    fail: Callable[[FaultyStores], None],
+    code: str,
+) -> None:
+    # R03-T13's review: the summary counted only a case's pair of tables, so a failure between
+    # them left the saved metrics.csv's unavailable rows out.
+    cli.ready()
+    out = cli.tmp / "experiment"
+    fail(faults)
+
+    summary = experiment_summary_of(
+        experiments.run(
+            EXAMPLE,
+            out,
+            sends=[returns("missing-metrics.json"), *[returns()] * 4],
+            store_factory=faults,
+        )
+    )
+
+    assert cast("dict[str, str]", summary["error"])["code"] == code
+    assert list(out.glob("cases/*/normalized/settings.csv")) == []
+    counts = cast("dict[str, int]", summary["counts"])
+    assert counts["metrics_unavailable"] == unavailable_rows(out, summary) > 0
+
+
 class RefusingLock(LocalArtifactStore):
     """The output directory's store, whose experiment lock is refused with `code`: as another
     process's, at a new experiment's claim, or by the file system, at a resume's lock. An

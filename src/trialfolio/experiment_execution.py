@@ -124,7 +124,9 @@ from trialfolio.experiment_records import (
 from trialfolio.normalization import (
     LAYOUT,
     LAYOUT_VERSION,
+    METRICS_PATH,
     PARSER_VERSION,
+    case_tables_path,
     holds_series,
     write_case_settings,
     write_case_tables,
@@ -150,6 +152,7 @@ from trialfolio.report import (
     write_experiment_report,
 )
 from trialfolio.storage import LOCK_LINE, LOCK_PATH, ArtifactStore, StoredFile
+from trialfolio.tables import read_metrics_csv
 
 _logger = logging.getLogger(__name__)
 
@@ -485,6 +488,9 @@ class ExperimentExecution:
             [] if experiment is None else [_saved(attempt) for attempt in experiment.attempts]
         )
         self._tables: dict[str, _Tables] = {}
+        self._metrics_alone: dict[str, tuple[MetricsRow, ...]] = {}
+        """The rows of each `metrics.csv` this session published whose `settings.csv` it didn't
+        write, because a failure came between them: a resume completes the pair."""
         if experiment is not None:
             for case_id, tables in experiment.tables.items():
                 if tables.settings is not None and tables.settings_rows is not None:
@@ -608,8 +614,12 @@ class ExperimentExecution:
 
     @property
     def metrics_unavailable(self) -> int:
-        """The `unavailable` rows of the planned cases' `metrics.csv` files, as written so far."""
+        """The `unavailable` rows of the planned cases' `metrics.csv` files, as written so far,
+        those whose `settings.csv` a failure kept this session from writing included, so the
+        count agrees with the records however the session ends."""
         rows = {case_id: tables.metrics_rows for case_id, tables in self._tables.items()}
+        for case_id, metrics in self._metrics_alone.items():
+            rows.setdefault(case_id, metrics)
         if self._experiment is not None:
             for case_id, saved in self._experiment.tables.items():
                 rows.setdefault(case_id, saved.metrics_rows)
@@ -838,14 +848,18 @@ class ExperimentExecution:
             self._case_invalid(case_id, missing.invalid)
             return
         if missing.metrics_rows is not None:
-            tables = write_case_tables(
-                self._store,
-                missing.case,
-                missing.originals,
-                configuration=missing.configuration,
-                response=missing.response,
-                content=missing.content,
-            )
+            try:
+                tables = write_case_tables(
+                    self._store,
+                    missing.case,
+                    missing.originals,
+                    configuration=missing.configuration,
+                    response=missing.response,
+                    content=missing.content,
+                )
+            except BaseException:
+                self._keep_published_metrics(case_id)
+                raise
             self._tables[case_id] = _Tables(
                 tables.metrics,
                 tables.settings,
@@ -1002,9 +1016,13 @@ class ExperimentExecution:
             )
         except TrialFolioError as failure:
             if failure.code != "provider.response_invalid":
+                self._keep_published_metrics(case.case_id)
                 raise
             self._case_invalid(case.case_id, failure)
             return
+        except BaseException:
+            self._keep_published_metrics(case.case_id)
+            raise
         self._tables[case.case_id] = _Tables(
             tables.metrics,
             tables.settings,
@@ -1012,6 +1030,18 @@ class ExperimentExecution:
             tables.metrics_rows,
             tables.settings_rows,
         )
+
+    def _keep_published_metrics(self, case_id: str) -> None:
+        """After a failed write of the case's tables, keeps the rows of its `metrics.csv` if the
+        store published it, as when `settings.csv`'s write fails, or an interrupt comes between
+        them. The records then hold it, so `metrics_unavailable` counts it. It's read back, as
+        an attempt's file published before its write failed is, because the store may publish
+        a file and still fail its write."""
+        path = case_tables_path(case_id, METRICS_PATH)
+        try:
+            self._metrics_alone[case_id] = read_metrics_csv(self._store.read(path), path)
+        except (OSError, TrialFolioError):
+            return  # Never published, or not readable: a resume's records check reads it.
 
     def _case_invalid(self, case_id: str, failure: TrialFolioError) -> None:
         self._invalid[case_id] = failure
