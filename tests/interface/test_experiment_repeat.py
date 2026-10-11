@@ -8,11 +8,12 @@ apply fails before anything is sent.
 Traces to R03-AC14's interface part (D-31), and to docs/contracts.md, repeating a case (the
 prompt, the usage errors, and what fails and what doesn't), running an experiment (the plan
 display's progress and budget, whose sends, like the prompt's, are the core's, as R03-T13's
-review corrected) and CLI behavior (a usage error has no JSON summary). Each test writes
-`example.yaml`'s experiment with the experiment builder, with a 503 for `holdings-50`'s request,
-which leaves it `unknown`, a 402, which stops the later cases, or a 401 for Trial Folio's
-authentication call, which leaves every case due, through the CLI's entry function in the test
-process, over the fake server. The terminal is a real pseudo-terminal in the test process, and
+review corrected), CLI behavior (a usage error has no JSON summary), and logging
+(`execution.partial`'s loggable message counts the cases awaiting a repeat, and names none by
+its key). Each test writes `example.yaml`'s experiment with the experiment builder, with a 503
+for `holdings-50`'s request, which leaves it `unknown`, a 402, which stops the later cases, or a
+401 for Trial Folio's authentication call, which leaves every case due, through the CLI's entry
+function in the test process, over the fake server. The terminal is a real pseudo-terminal in the test process, and
 the socket faults interrupt a repeat during its send, as Ctrl-C does.
 """
 
@@ -99,6 +100,15 @@ def test_without_repeat_a_resume_doesnt_send_the_case_awaiting_one(
     assert len(cli.server.received) == received
     assert cases_of(outcome)[HOLDINGS]["repeat_attempt_id"] == attempt
     assert f"--repeat {HOLDINGS}:{attempt}" in error_of(outcome)["message"]
+    # The log gives how many cases await a repeat, and never a case key, which is the user's.
+    events = [
+        json.loads(line)
+        for line in (out / "logs/trialfolio.log").read_text(encoding="utf-8").splitlines()
+    ]
+    completed = [event for event in events if event["event"] == "cli.command.completed"][-1]
+    assert "execution.partial" in str(completed["message"])
+    assert "1 of the planned cases await a repeat." in str(completed["message"])
+    assert HOLDINGS not in str(completed["message"])
     # Without a terminal, the counts so far, and nothing from the configuration.
     assert (
         "Counted so far, across every run of the experiment: 5 provider requests and 1"

@@ -55,6 +55,7 @@ from tests.interface.conftest import (
 )
 from tests.support.experiment_builder import (
     REJECTED,
+    UNAVAILABLE,
     ExperimentBuilder,
     experiment_config,
     plan_hash,
@@ -725,24 +726,37 @@ def experiment_summary_of(outcome: Outcome) -> dict[str, object]:
             "manifest": f"sessions/{manifest.session}/manifest.json",
             "report": f"sessions/{manifest.session}/report.html",
         }
-        recorded = manifest.counts
-        attempts = recorded.attempts
-        assert {name: value for name, value in counts.items() if name != "warnings"} == {
-            "cases_planned": recorded.cases.planned,
-            "cases_succeeded": recorded.cases.succeeded,
-            "cases_failed": recorded.cases.failed,
-            "cases_skipped": recorded.cases.skipped,
-            "cases_unknown": recorded.cases.unknown,
-            "cases_not_yet_run": recorded.cases.not_yet_run,
-            "cases_retired": recorded.retired_cases,
-            "attempts": attempts.succeeded + attempts.failed + attempts.unknown + attempts.running,
-            "repeats": attempts.repeats,
-            "provider_requests": recorded.provider_requests,
-            "authentication_calls": recorded.authentication_calls,
-            "cost": recorded.cost,
-            "metrics_unavailable": unavailable_rows(out, summary),
-        }
+        assert without_warnings(counts) == recorded_counts(manifest, out, summary)
     return summary
+
+
+def without_warnings(counts: dict[str, int | None]) -> dict[str, int | None]:
+    """A summary's counts, but `warnings`, which are this command's."""
+    return {name: value for name, value in counts.items() if name != "warnings"}
+
+
+def recorded_counts(
+    manifest: ExperimentManifest, out: Path, summary: dict[str, object]
+) -> dict[str, int | None]:
+    """The counts, but `warnings`, that `manifest` records, with `metrics_unavailable` the
+    `unavailable` rows of the summary's cases' `metrics.csv` files."""
+    recorded = manifest.counts
+    attempts = recorded.attempts
+    return {
+        "cases_planned": recorded.cases.planned,
+        "cases_succeeded": recorded.cases.succeeded,
+        "cases_failed": recorded.cases.failed,
+        "cases_skipped": recorded.cases.skipped,
+        "cases_unknown": recorded.cases.unknown,
+        "cases_not_yet_run": recorded.cases.not_yet_run,
+        "cases_retired": recorded.retired_cases,
+        "attempts": attempts.succeeded + attempts.failed + attempts.unknown + attempts.running,
+        "repeats": attempts.repeats,
+        "provider_requests": recorded.provider_requests,
+        "authentication_calls": recorded.authentication_calls,
+        "cost": recorded.cost,
+        "metrics_unavailable": unavailable_rows(out, summary),
+    }
 
 
 def unavailable_rows(out: Path, summary: dict[str, object]) -> int:
@@ -839,6 +853,52 @@ def test_an_invalid_experiment_configuration_gives_a_runs_counts(cli: Cli) -> No
 
     assert cast("dict[str, str]", summary["error"])["code"] == "config.invalid"
     assert summary["ids"] == {}
+
+
+def test_a_resume_that_stops_before_its_session_gives_the_records_counts_and_repeats(
+    cli: Cli, experiments: ExperimentBuilder[Outcome]
+) -> None:
+    # R03-T13's review: before its session, a resume's cases and counts come from the records,
+    # which no other summary check compared with them.
+    cli.ready()
+    out = cli.tmp / "experiment"
+    first = experiment_summary_of(
+        experiments.run(
+            EXAMPLE,
+            out,
+            sends=[returns("missing-metrics.json"), returns(), UNAVAILABLE, returns(), returns()],
+        )
+    )
+    unknown = cast("list[dict[str, str]]", first["cases"])[2]
+    assert (unknown["case_key"], unknown["outcome"]) == ("holdings-50", "unknown")
+    option = f"holdings-50:{unknown['repeat_attempt_id']}"
+    # The repeat's request gets a 503 too: it's unknown, and awaits a repeat of its own.
+    repeated = experiment_summary_of(
+        experiments.run(EXAMPLE, out, "--repeat", option, sends=[UNAVAILABLE])
+    )
+    repeat = cast("list[dict[str, str]]", repeated["cases"])[2]["repeat_attempt_id"]
+    assert repeat != unknown["repeat_attempt_id"]
+
+    summary = experiment_summary_of(experiments.run(EXAMPLE, out, approve=False))
+
+    assert cast("dict[str, str]", summary["error"])["code"] == "plan.approval_required"
+    assert summary["output_dir"] is None
+    counts = cast("dict[str, int | None]", summary["counts"])
+    recorded = ExperimentManifest.model_validate_json(
+        (out / "sessions/2/manifest.json").read_bytes()
+    )
+    assert without_warnings(counts) == recorded_counts(recorded, out, summary)
+    assert (counts["repeats"], counts["provider_requests"], counts["authentication_calls"]) == (
+        1,
+        6,
+        2,
+    )
+    assert (counts["cost"] or 0) > 0
+    assert (counts["metrics_unavailable"] or 0) > 0
+    # The outcomes the records give, and the repeat's attempt confirms the next repeat.
+    assert summary["cases"] == repeated["cases"]
+    cases = cast("list[dict[str, str | None]]", summary["cases"])
+    assert [case["repeat_attempt_id"] for case in cases] == [None, None, repeat, None, None]
 
 
 def test_an_experiment_whose_revision_isnt_approved_gives_the_revisions_cases(
