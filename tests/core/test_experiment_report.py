@@ -11,8 +11,9 @@ with its reason, each repeat with the attempt it repeated, each case awaiting a 
 option that repeats it, the prior-research declaration, which Trial Folio can't verify, no
 performance-based selection, "Not assessed", R01-AC13's rules, and a synthetic experiment's
 invented values), and to the report's part of R03-AC08 (the report shows each count, equal to
-the manifest's). R03-T11's `tests/interface/test_experiment_report.py` checks the report through
-the command.
+the manifest's, and a case whose repeat's authentication failed as still `unknown`, by its latest
+possibly charged attempt). R03-T11's `tests/interface/test_experiment_report.py` checks the
+report through the command.
 
 Each experiment is written through the core during the test, over the fake server, as another
 interface would write it, and the test reads the session's report from its directory. Every
@@ -30,11 +31,11 @@ from urllib.parse import unquote, urlsplit
 import pytest
 
 from tests.support import canaries
-from tests.support.clock import FixedClock
+from tests.support.clock import STARTED, FixedClock
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.html_report import Document, Element, parse
 from trialfolio.configuration import read_experiment_configuration
-from trialfolio.contracts.experiment_manifest import ExperimentManifest
+from trialfolio.contracts.experiment_manifest import ExperimentCommandRecord, ExperimentManifest
 from trialfolio.contracts.experiment_plan import PlanV1_1
 from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 from trialfolio.errors import TrialFolioError
@@ -155,7 +156,12 @@ class Experiment:
         return self._run(content, execution, synthetic=synthetic)
 
     def resume(
-        self, content: bytes, *, reason: str | None = None, repeats: Sequence[Repeat] = ()
+        self,
+        content: bytes,
+        *,
+        reason: str | None = None,
+        repeats: Sequence[Repeat] = (),
+        command: ExperimentCommandRecord | None = None,
     ) -> Session:
         configuration = read_experiment_configuration(content, "experiment.yaml")
 
@@ -169,7 +175,7 @@ class Experiment:
                 "option",
                 store,
                 client,
-                command=None,
+                command=command,
                 clock=FixedClock(),
                 experiment=saved,
                 reason=reason,
@@ -268,6 +274,35 @@ def _stopped(experiment: Experiment) -> list[Session]:
     return [experiment.new((CONFIGS / "default-only.yaml").read_bytes())]
 
 
+def _repeated(experiment: Experiment) -> list[Session]:
+    """`default-only.yaml`, with a budget of 4: an `unknown` baseline (a 503), and a default
+    variant whose response has no periods, so its coverage can't be established; then a repeat
+    of the baseline whose authentication call gets a 401, so it sends nothing; then, by a
+    `trialfolio run` command, a repeat of the baseline that gets a 400."""
+    content = (CONFIGS / "default-only.yaml").read_bytes()
+    content = content.replace(b"provider_requests: 2", b"provider_requests: 4")
+    experiment.server.reply("/auth", AUTHENTICATED)
+    experiment.server.reply("/screen/backtest", Reply(503), response("no-periods.json"))
+    first = experiment.new(content)
+    (unknown,) = first.attempt_ids(BASELINE)
+    repeat = Repeat(BASELINE, unknown)
+    experiment.server.reply("/auth", Reply(401))
+    refused = experiment.resume(content, repeats=[repeat])
+    experiment.server.reply("/auth", AUTHENTICATED)
+    experiment.server.reply("/screen/backtest", Reply(400))
+    command = ExperimentCommandRecord(
+        name="run",
+        options={
+            "approve": first.plan.plan_hash,
+            "json": False,
+            "revision_reason": False,
+            "repeat": True,
+        },
+        started_at=STARTED,
+    )
+    return [first, refused, experiment.resume(content, repeats=[repeat], command=command)]
+
+
 def _synthetic(experiment: Experiment) -> list[Session]:
     return [experiment.new((CONFIGS / "default-only.yaml").read_bytes(), synthetic=True)]
 
@@ -308,6 +343,7 @@ SCENARIOS: dict[str, Callable[[Experiment, Path], list[Session]]] = {
     "swapped": lambda experiment, _: _completed(experiment, swapped=True),
     "troubled": _troubled,
     "stopped": lambda experiment, _: _stopped(experiment),
+    "repeated": lambda experiment, _: _repeated(experiment),
     "synthetic": lambda experiment, _: _synthetic(experiment),
     "hostile": lambda experiment, _: _hostile(experiment),
 }
@@ -606,6 +642,53 @@ def test_a_case_awaiting_a_repeat_is_marked_with_the_option_that_repeats_it(
         " with the option given below for a case, and the plan's approval, repeats it: the"
         " option confirms the possible repeat charge, by naming the attempt."
     ) in document.root.by_id("cases").text
+
+
+def test_the_option_and_the_outcome_follow_the_latest_possibly_charged_attempt(
+    sessions: Sessions,
+) -> None:
+    # A repeat whose authentication call got a 401 sent nothing: the case is still unknown, by
+    # its latest possibly charged attempt (R03-AC08), and the option names that attempt, whose
+    # confirmation nothing used. A later repeat that got a 400 is then the latest.
+    _, refused, rejected = sessions("repeated")
+    unknown, unsent = refused.attempt_ids(BASELINE)
+    *_, latest = rejected.attempt_ids(BASELINE)
+
+    assert table_after(refused.document, "Planned cases")[0][4:] == [
+        (
+            "unknown (provider.outcome_unknown): its request may have been charged, and no"
+            " response was saved. Awaiting a repeat."
+        ),
+        "2, 1 of them a repeat",
+    ]
+    assert items_after(refused.document, "Cases awaiting a repeat") == [
+        (
+            f"baseline, {BASELINE}: attempt {unknown}, unknown (provider.outcome_unknown). The"
+            f" option that repeats it: --repeat baseline:{unknown}"
+        )
+    ]
+    row = attempts_table(refused.document, f"baseline, {BASELINE}")[1]
+    assert [row[0], *row[4:6], row[6].split(":")[0], *row[7:]] == [
+        str(unsent),
+        "failed",
+        "No",
+        "provider.auth_failed",
+        f"Repeats attempt {unknown}",
+        "POST /auth: Response 401",
+    ]
+    assert table_after(rejected.document, "Planned cases")[0][4:] == [
+        (
+            "failed (provider.unsupported_capability): its request may have reached"
+            " Portfolio123, and may have been charged. Awaiting a repeat."
+        ),
+        "3, 2 of them repeats",
+    ]
+    assert items_after(rejected.document, "Cases awaiting a repeat") == [
+        (
+            f"baseline, {BASELINE}: attempt {latest}, failed (provider.unsupported_capability)."
+            f" The option that repeats it: --repeat baseline:{latest}"
+        )
+    ]
 
 
 def test_no_case_is_marked_awaiting_a_repeat_once_none_is(sessions: Sessions) -> None:
