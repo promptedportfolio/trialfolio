@@ -19,7 +19,9 @@ timeout. As in 0.1.0's live check, only that process may reach Portfolio123's AP
 localhost. Then the same command runs again under the full guard, without credentials, so it
 can't send anything: it resumes, finds no case due, and writes `sessions/2/` from the records
 alone. Nothing from the responses leaves the git-ignored folder: no assertion shows anything from
-them, only outcomes, counts, codes, and the credits used.
+them, only outcomes, counts, codes, and the credits used. So what the records say is read out as
+plain values before it's checked: a failing assertion shows its operands, and the records'
+representations hold the responses' bytes, and values read from them.
 
 Before and after the test, the owner notes the account's ranking systems in the Portfolio123
 website. If one changed, a formula ranking updates a shared object, and 0.3.0 needs the
@@ -105,30 +107,51 @@ def test_a_real_experiment_authenticates_once_within_its_budget_and_resumes_offl
     assert cost <= budget, f"the requests used {cost} credits, over the budget of {budget}"
     with LocalArtifactStore(str(out)) as store:
         experiment = read_experiment(store)
-    assert experiment.manifest is not None
-    assert experiment.manifest.synthetic is False
-    assert experiment.manifest.approval == "option"
-    first, second = experiment.attempts
-    assert [first.case_id, second.case_id] == [case.case_id for case in plan.cases]
-    assert (first.session, first.sequence, second.session, second.sequence) == (1, 1, 1, 2)
-    for attempt in (first, second):
-        assert attempt.outcome == "succeeded"
-        assert attempt.possibly_charged is True
-        assert attempt.provider_requests == 1
-        assert attempt.case_id in experiment.tables
+    # Plain values, read out of the records before they're checked, as the docstring says: the
+    # representation of the experiment, a manifest, an attempt, or a record holds the responses.
+    saved_manifest = experiment.manifest
+    provenance = (
+        None if saved_manifest is None else (saved_manifest.synthetic, saved_manifest.approval)
+    )
+    attempts = [
+        (
+            attempt.case_id,
+            attempt.session,
+            attempt.sequence,
+            attempt.outcome,
+            attempt.possibly_charged,
+            attempt.provider_requests,
+            attempt.case_id in experiment.tables,
+        )
+        for attempt in experiment.attempts
+    ]
+    attempt_ids = [attempt.attempt_id for attempt in experiment.attempts]
+    # Whether each attempt authenticated, its exchanges, and the attempt whose token it sent.
+    authentication = [
+        (
+            attempt.authentication is not None,
+            None
+            if attempt.record is None
+            else [(e.request, e.result, e.status) for e in attempt.record.exchanges],
+            None if attempt.record is None else attempt.record.authenticated_by,
+        )
+        for attempt in experiment.attempts
+    ]
+    assert provenance == (False, "option")
+    assert attempts == [
+        (case.case_id, 1, sequence, "succeeded", True, 1, True)
+        for sequence, case in enumerate(plan.cases, start=1)
+    ]
     # One POST /auth, before the first case, whose token the second case's request was sent with.
-    assert first.record is not None and second.record is not None
-    assert first.authentication is not None
-    assert second.authentication is None
-    assert [(e.request, e.result, e.status) for e in first.record.exchanges] == [
-        (AUTHENTICATION_REQUEST, "response", 200),
-        (BACKTEST_REQUEST, "response", 200),
+    first_id = attempt_ids[0]
+    assert authentication == [
+        (
+            True,
+            [(AUTHENTICATION_REQUEST, "response", 200), (BACKTEST_REQUEST, "response", 200)],
+            first_id,
+        ),
+        (False, [(BACKTEST_REQUEST, "response", 200)], first_id),
     ]
-    assert [(e.request, e.result, e.status) for e in second.record.exchanges] == [
-        (BACKTEST_REQUEST, "response", 200),
-    ]
-    assert first.record.authenticated_by == first.attempt_id
-    assert second.record.authenticated_by == first.attempt_id
 
     # The resume, under the full guard: localhost only, and no credentials, so nothing can be sent.
     offline = {
@@ -148,9 +171,10 @@ def test_a_real_experiment_authenticates_once_within_its_budget_and_resumes_offl
     manifest = ExperimentManifest.model_validate_json(
         (out / "sessions" / "2" / "manifest.json").read_bytes()
     )
-    assert manifest.outcome == "completed"
-    assert manifest.counts.cases.succeeded == 2
+    ended = (manifest.outcome, manifest.counts.cases.succeeded)
+    assert ended == ("completed", 2)
     assert (out / "sessions" / "2" / "report.html").is_file()
     with LocalArtifactStore(str(out)) as store:
         resumed = read_experiment(store)
-    assert [a.attempt_id for a in resumed.attempts] == [first.attempt_id, second.attempt_id]
+    resumed_ids = [attempt.attempt_id for attempt in resumed.attempts]
+    assert resumed_ids == attempt_ids
