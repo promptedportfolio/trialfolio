@@ -1,0 +1,25 @@
+label,setting,category,critical,value,unit,interpretation,provenance,inference_rule,original_key,original_value,source_artifact,flags
+case-e29404ddebf86363,universe,universe,true,SP500,,interpreted,verified,,baseline.universe,'SP500',sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,not_snapshotted
+case-e29404ddebf86363,screen_type,universe,true,stock,,interpreted,verified,,,,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,rules,strategy,true,"[""AvgDailyTot(30) > 1000000""]",,interpreted,verified,,baseline.rules,- 'AvgDailyTot(30) > 1000000',sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,ranking,strategy,true,"{""formula"": ""EarnYield"", ""lower_is_better"": false}",,interpreted,verified,,baseline.ranking,"formula: 'EarnYield'
+    lower_is_better: false",sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,max_holdings,strategy,true,25,count,interpreted,verified,,baseline.max_holdings,25,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,position_method,strategy,true,long,,interpreted,verified,,,,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,benchmark,benchmark,true,SPY,,interpreted,verified,,baseline.benchmark,'SPY',sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,currency,currency,true,USD,,interpreted,verified,,,,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,start_date,dates,true,2016-01-01,,interpreted,verified,,baseline.start_date,2016-01-01,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,end_date,dates,true,2025-12-31,,interpreted,verified,,baseline.end_date,2025-12-31,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,rebalance_weeks,execution,true,4,weeks,interpreted,verified,,baseline.rebalance_weeks,4,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,transaction_price,execution,true,open,,interpreted,verified,,baseline.transaction_price,open,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,slippage_percent,costs,true,0.25,percent,interpreted,verified,,baseline.slippage_percent,0.25,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,commission,costs,true,not_modeled,,interpreted,inferred,"Portfolio123's API: Screen page documents no commission parameter, and slippage is its only trading-cost input (checked 2026-10-01).",,,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,pit_method,data_source,true,complete,,interpreted,verified,,baseline.pit_method,complete,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,data_vendor,data_source,true,FactSet,,interpreted,inferred,"D-16: FactSet is the only supported data vendor. The endpoint documents no vendor parameter, so none is sent, and the response doesn't report the vendor.",,,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,inferred_default
+case-e29404ddebf86363,precision,other,false,4,,interpreted,verified,,baseline.precision,4,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,risk_stats_period,other,false,monthly,,interpreted,inferred,"Portfolio123's documented default: the API: Screen page lists riskStatsPeriod's values as ['Monthly'] | 'Weekly' | 'Daily' (checked 2026-10-01), and the wrapper's documentation says an optional parameter defaults to the first value.",,,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,inferred_default
+case-e29404ddebf86363,max_pos_pct,strategy,true,not_sent,,not_interpreted,unknown,,,,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,rank_tolerance,strategy,true,not_sent,,not_interpreted,unknown,,,,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,carry_cost,costs,true,not_sent,,not_interpreted,unknown,,,,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,long_weight,strategy,true,not_sent,,not_interpreted,unknown,,,,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,
+case-e29404ddebf86363,short_weight,strategy,true,not_sent,,not_interpreted,unknown,,,,sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5,

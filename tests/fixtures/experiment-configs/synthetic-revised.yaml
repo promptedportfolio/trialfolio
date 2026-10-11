@@ -1,0 +1,33 @@
+# synthetic.yaml, with one change: a holdings variant added. The synthetic experiment's writer
+# executes it as synthetic.yaml's revision, with the reason "Adds a holdings variant.".
+kind: experiment
+schema_version: 1.0.0
+experiment_id: synthetic-earnyield
+title: 'Synthetic experiment: earnings yield with a liquidity floor'
+purpose: Shows an experiment's files and report offline, from invented values.
+prior_research:
+  status: complete
+  description: None. This experiment is invented for Trial Folio's tests, and no earlier work informed it.
+baseline:
+  universe: 'SP500'
+  rules:
+    - 'AvgDailyTot(30) > 1000000'
+  ranking:
+    formula: 'EarnYield'
+    lower_is_better: false
+  max_holdings: 25
+  benchmark: 'SPY'
+  start_date: 2016-01-01
+  end_date: 2025-12-31
+  rebalance_weeks: 4
+  transaction_price: open
+  slippage_percent: 0.25
+  pit_method: complete
+  precision: 4
+variants:
+  max_holdings:
+    - key: holdings-50
+      description: Twice the baseline's holdings.
+      value: 50
+budget:
+  provider_requests: 3

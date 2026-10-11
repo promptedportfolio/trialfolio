@@ -15,9 +15,11 @@ named file, once:
 
 A name matches a path's last segment, such as `response.json`. A name that starts with `/`
 matches a whole path instead, for `fail_os`, `fail_before`, and `fail_after`: `/manifest.json` is a
-review's own manifest, written after its copies of each run's, `inputs/<label>/manifest.json`.
-R01-T11 created this ahead of R01-T15, which added the failed `os.link`, and R02-T08 added whole
-paths.
+review's own manifest, written after its copies of each run's, `inputs/<label>/manifest.json`. For
+those three, a name of the form `<case_id>/<name>` matches the file `<name>` of that case of an
+experiment, in any of its attempts, or in its `normalized/`, since an attempt's ID is random:
+`case-0123456789abcdef/started.json`. R01-T11 created this ahead of R01-T15, which added the
+failed `os.link`, R02-T08 added whole paths, and R03-T11 a case's files.
 
 `placeholder_identities` stands for the other way FAT and exFAT differ on macOS: each new, empty
 file has a temporary inode of its own until its first write gives it a lasting one. It patches
@@ -168,9 +170,10 @@ class StorageFaults:
         before = self._before.pop(_key(path, self._before), None)
         if before is not None:
             raise before
-        whole = "/" + path
-        if whole in self._os_errors:
-            self._os_errors.discard(whole)
+        key = _key(path, self._os_errors)
+        # A whole path, or a case's file, which the temporary file's name can't give.
+        if "/" in key:
+            self._os_errors.discard(key)
             self._armed = True
         try:
             stored = self._store.write(path, data, logged_as=logged_as)
@@ -193,7 +196,14 @@ class StorageFaults:
 
 
 def _key(path: str, faults: Collection[str]) -> str:
-    """The name a fault for `path` is set under: its whole path, `/` first, when one is set, and
-    otherwise its last segment."""
+    """The name a fault for `path` is set under: its whole path, `/` first, when one is set; then,
+    for a file of an experiment's case, `<case_id>/<name>`, when one is set; and otherwise its last
+    segment."""
     whole = "/" + path
-    return whole if whole in faults else path.rsplit("/", 1)[-1]
+    if whole in faults:
+        return whole
+    parts = path.split("/")
+    name = parts[-1]
+    if len(parts) > 2 and parts[0] == "cases" and f"{parts[1]}/{name}" in faults:
+        return f"{parts[1]}/{name}"
+    return name

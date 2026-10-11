@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0.0",
+  "trialfolio_version": "0.3.0",
+  "created_at": "2026-10-03T14:00:01Z",
+  "experiment_id": "synthetic-earnyield",
+  "title": "Synthetic experiment: earnings yield with a liquidity floor",
+  "purpose": "Shows an experiment's files and report offline, from invented values.",
+  "prior_research": {
+    "status": "complete",
+    "description": "None. This experiment is invented for Trial Folio's tests, and no earlier work informed it."
+  },
+  "planned_cases": [
+    {
+      "case_key": "baseline",
+      "case_id": "case-e29404ddebf86363",
+      "description": null,
+      "variant": null
+    },
+    {
+      "case_key": "rebalance-weeks-1",
+      "case_id": "case-0492159b4461ceff",
+      "description": null,
+      "variant": {
+        "setting": "rebalance_weeks",
+        "value": 1,
+        "add": null,
+        "replace": null,
+        "with": null,
+        "default": true
+      }
+    }
+  ],
+  "retired_cases": [],
+  "plans": [
+    {
+      "plan": 1,
+      "plan_hash": "sha256:ed9d5bb8d4e1b232b1768c2f7da08c0c328dd71a1d1f708d0205f1d96055979b",
+      "revises": null,
+      "plan_artifact_id": "sha256:e8977dfbda837843d8066e8ccb3b85afed6b052ad0753a77ce7573ffd35bc383",
+      "configuration_artifact_id": "sha256:a292a789518aa3db8bc11b0ddbcaab10b66a46784c14dd7151aeab8b4aa931e5",
+      "approval": "not_required",
+      "reason": null,
+      "changes": null
+    }
+  ]
+}

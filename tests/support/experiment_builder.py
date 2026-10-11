@@ -10,20 +10,25 @@ directory. Its values are invented, but nothing labels them synthetic, so it's n
 (DSC-04). A test stops a run with a `KeyboardInterrupt` from the storage faults by giving the
 command its `store_factory`.
 
-R03-T13 wrote it for the command's tests. R03-T11 adds stopping a run with `SIGKILL` under the
-test launcher, while the fake server holds a reply.
+R03-T13 wrote it for the command's tests. R03-T11 added `kill`, which stops a run with `SIGKILL`
+under the test launcher, in a new process, while the fake server holds a reply.
 """
 
+import os
+import signal
+import subprocess
+import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Final, Protocol
 
-from tests.support import canaries
+from tests.support import canaries, launcher
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.experiment_records import read_experiment
 from trialfolio.planning import build_experiment_plan, installed_versions, plan_revision
+from trialfolio.provider import REQUEST_TIMEOUT_SECONDS
 from trialfolio.storage import ArtifactStore, LocalArtifactStore
 
 FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
@@ -42,6 +47,15 @@ REJECTED: Final = Reply(400, b"Unsupported value")
 
 REFUSED: Final = Reply(401, b"")
 """A 401 to Trial Folio's authentication call: `provider.auth_failed`, nothing sent."""
+
+HELD_SECONDS: Final = 600.0
+"""How long a held reply waits: far longer than any test, which kills the run, or closes the
+server, which cuts the wait short, well before."""
+
+
+def held(reply: Reply) -> Reply:
+    """`reply`, held by the server until the test is done with it, as `kill` needs."""
+    return Reply(reply.status, reply.body, reply.headers, delay=HELD_SECONDS, action=reply.action)
 
 
 def experiment_config(name: str) -> Path:
@@ -122,3 +136,49 @@ class ExperimentBuilder[R: Ran]:
         if approve:
             argv += ["--approve", plan_hash(config, out)]
         return self._command(*argv, store_factory=store_factory, clock=clock)
+
+    def kill(
+        self,
+        config: Path,
+        out: Path,
+        *options: str,
+        sends: Sequence[Reply] = (),
+        authenticates: Sequence[Reply] | None = None,
+        received: int,
+        timeout: int = REQUEST_TIMEOUT_SECONDS,
+    ) -> None:
+        """Runs `config` into `out` as `run` does, with `--approve` and the plan's hash, but in a
+        new process under the test launcher, with the test's environment, and kills it with
+        `SIGKILL` once the server has received `received` requests, authentication calls
+        included. The reply to the last of them should be `held`, so the process is killed while
+        it waits for it. The server's replies are scripted first, as `run` scripts them.
+
+        Fails the test if the process ends before then, or the requests don't arrive within a
+        minute. POSIX only: Windows has no `SIGKILL`."""
+        if authenticates is None:
+            authenticates = (AUTHENTICATED,) if sends else ()
+        self.server.reply("/auth", *authenticates)
+        self.server.reply("/screen/backtest", *sends)
+        before = len(self.server.received)
+        argv = ["run", config, "--out", out, "--json", *options]
+        argv += ["--approve", plan_hash(config, out)]
+        stderr_path = out.parent / f".{out.name}-killed-stderr.txt"
+        with stderr_path.open("w") as stderr:
+            process = subprocess.Popen(
+                launcher.command(self.server.endpoint, *argv, timeout=timeout),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=stderr,
+            )
+            try:
+                deadline = time.monotonic() + 60
+                while len(self.server.received) - before < received:
+                    assert process.poll() is None, stderr_path.read_text()
+                    assert time.monotonic() < deadline, "the requests never arrived"
+                    time.sleep(0.01)
+                os.kill(process.pid, signal.SIGKILL)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+            assert process.wait(60) == -signal.SIGKILL
+        stderr_path.unlink()

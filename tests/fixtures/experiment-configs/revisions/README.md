@@ -1,12 +1,12 @@
 # Revisions of the experiment example
 
-Synthetic experiment configurations, each [`example.yaml`](../example.yaml) with one change, or, for `two-holdings-reordered.yaml`, `two-holdings.yaml` with one, given in its first line's comment ([fixtures](../../../../docs/contracts.md#fixtures)). Each tests a kind of change that [experiment plans and revisions](../../../../docs/contracts.md#experiment-plans-and-revisions) lists: a revision, with the cases it keeps, adds, and retires, and the parts it changes, or another experiment, which isn't a revision.
+Synthetic experiment configurations, each [`example.yaml`](../example.yaml) with one change, or, for `two-holdings-reordered.yaml`, `two-holdings.yaml` with one, and for `default-only-budget-3.yaml`, [`default-only.yaml`](../default-only.yaml) with one, given in its first line's comment ([fixtures](../../../../docs/contracts.md#fixtures)). Each tests a kind of change that [experiment plans and revisions](../../../../docs/contracts.md#experiment-plans-and-revisions) lists: a revision, with the cases it keeps, adds, and retires, and the parts it changes, or another experiment, which isn't a revision.
 
 - **Origin:** written for Trial Folio's tests from `example.yaml`. The changed values are invented. No value comes from Portfolio123 or from the owner's account.
 - **Schema version:** [experiment configuration](../../../../docs/contracts.md#experiment-configuration) 1.0.0.
 - **Redistribution:** synthetic, so they may be committed and shared.
 
-R03-T07 wrote these files, for `tests/core/test_experiment_plan.py`, which plans `example.yaml`, or `two-holdings.yaml`, and then each file as its revision, for R03-AC07's core check, and for R03-AC02's with `key-renamed.yaml` and `two-holdings-reordered.yaml`. The last column gives the criteria that the tests later tasks write use each one for. Release 0.3.0's [test pairing](../../../../docs/releases/0.3.0-experiments.md#test-pairing) names one more, `default-only-budget-3.yaml`, which a later task writes with its test.
+R03-T07 wrote these files, for `tests/core/test_experiment_plan.py`, which plans `example.yaml`, or `two-holdings.yaml`, and then each file as its revision, for R03-AC07's core check, and for R03-AC02's with `key-renamed.yaml` and `two-holdings-reordered.yaml`. The last column gives the criteria that the tests later tasks write use each one for. R03-T11 wrote one more, `default-only-budget-3.yaml`, [`default-only.yaml`](../default-only.yaml) with one change, for R03-AC10.
 
 | File | The change | What it is to the plan before it | Later criteria |
 |---|---|---|---|
@@ -23,3 +23,4 @@ R03-T07 wrote these files, for `tests/core/test_experiment_plan.py`, which plans
 | `other-universe.yaml` | The universe `'Easy to Trade US'` | Another experiment, not a revision: `output.not_empty` | R03-AC07 |
 | `two-holdings.yaml` | Two `max_holdings` variants, `holdings-40` and then `holdings-50` | A revision that adds `holdings-40` | R03-AC07 |
 | `two-holdings-reordered.yaml` | From `two-holdings.yaml`: its two variants in the other order | To `two-holdings.yaml`'s plan, a revision of `case_order` that keeps every case | R03-AC07 |
+| `default-only-budget-3.yaml` | From `default-only.yaml`: a budget of 3 | To `default-only.yaml`'s plan, a revision of `budget` | R03-AC10 |
