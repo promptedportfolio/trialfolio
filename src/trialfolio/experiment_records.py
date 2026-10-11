@@ -98,7 +98,7 @@ from trialfolio.contracts.experiment_manifest import (
 )
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
 from trialfolio.contracts.experiment_record import ExperimentRecord, RecordedCase, SessionRecord
-from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow
+from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, SettingsRow
 from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError
 from trialfolio.normalization import (
@@ -445,6 +445,8 @@ class SavedTables:
     metrics_rows: tuple[MetricsRow, ...]
     settings: StoredFile | None
     """None when a stopped run wrote `metrics.csv` alone."""
+    settings_rows: tuple[SettingsRow, ...] | None
+    """`settings.csv`'s rows, with `settings`."""
     parser_version: int
     """The parser that wrote `metrics.csv`: the one the latest manifest names, when it lists the
     table, and otherwise the installed one, which the check found writes it."""
@@ -1227,6 +1229,7 @@ def _tables(
         if entry is None:
             _check_parser(content, case, response, metrics_path, since)
         settings: StoredFile | None = None
+        settings_rows: tuple[SettingsRow, ...] | None = None
         if "settings.csv" in names:
             settings_content = reader.require(settings_path)
             rows = _table_rows(read_settings_csv, settings_content, settings_path)
@@ -1243,10 +1246,12 @@ def _tables(
                     " the plan its case's attempt ran under."
                 )
             settings = _stored(settings_path, settings_content)
+            settings_rows = rows
         tables[case_id] = SavedTables(
             metrics=_stored(metrics_path, content),
             metrics_rows=metrics,
             settings=settings,
+            settings_rows=settings_rows,
             # A table no manifest lists is what the installed parser writes, as checked above,
             # whichever parser the latest manifest names for its response.
             parser_version=(

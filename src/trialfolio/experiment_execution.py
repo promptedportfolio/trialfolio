@@ -108,7 +108,7 @@ from trialfolio.contracts.manifest import (
     Reproducibility,
     SourceRecord,
 )
-from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION
+from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, SettingsRow
 from trialfolio.demo import SyntheticScreenBacktestClient
 from trialfolio.errors import TrialFolioError
 from trialfolio.experiment_records import (
@@ -147,6 +147,7 @@ from trialfolio.report import (
     CaseView,
     ExperimentEvidence,
     HtmlReportRenderer,
+    RetiredCaseView,
     write_experiment_report,
 )
 from trialfolio.storage import ArtifactStore, StoredFile
@@ -343,11 +344,13 @@ def _ended(result: ExperimentAttemptResult) -> _Attempt:
 
 @dataclass(frozen=True)
 class _Tables:
-    """A case's normalized tables, and the parser that wrote its `metrics.csv`."""
+    """A case's normalized tables, their rows, and the parser that wrote its `metrics.csv`."""
 
     metrics: StoredFile
     settings: StoredFile
     parser_version: int
+    metrics_rows: tuple[MetricsRow, ...]
+    settings_rows: tuple[SettingsRow, ...]
 
 
 @dataclass(frozen=True)
@@ -481,9 +484,13 @@ class ExperimentExecution:
         self._tables: dict[str, _Tables] = {}
         if experiment is not None:
             for case_id, tables in experiment.tables.items():
-                if tables.settings is not None:
+                if tables.settings is not None and tables.settings_rows is not None:
                     self._tables[case_id] = _Tables(
-                        tables.metrics, tables.settings, tables.parser_version
+                        tables.metrics,
+                        tables.settings,
+                        tables.parser_version,
+                        tables.metrics_rows,
+                        tables.settings_rows,
                     )
         self._invalid: dict[str, TrialFolioError] = (
             {}
@@ -501,6 +508,7 @@ class ExperimentExecution:
         self._current: ExperimentAttempt | None = None
         self._stopped: tuple[StopReason, TrialFolioError | None] | None = None
         self._report: StoredFile | None = None
+        self._evidence: ExperimentEvidence | None = None
         self._manifest: ExperimentManifest | None = None
         self._manifest_file: StoredFile | None = None
         self._manifest_left = False
@@ -584,6 +592,12 @@ class ExperimentExecution:
     @property
     def report(self) -> StoredFile | None:
         return self._report
+
+    @property
+    def evidence(self) -> ExperimentEvidence | None:
+        """What the session's report shows, once the report is rendered: an interface can render
+        it again, or show it its own way."""
+        return self._evidence
 
     def run(
         self, configuration: bytes, *, on_claimed: Callable[[], object] | None = None
@@ -797,17 +811,25 @@ class ExperimentExecution:
                 response=missing.response,
                 content=missing.content,
             )
-            self._tables[case_id] = _Tables(tables.metrics, tables.settings, PARSER_VERSION)
+            self._tables[case_id] = _Tables(
+                tables.metrics,
+                tables.settings,
+                PARSER_VERSION,
+                tables.metrics_rows,
+                tables.settings_rows,
+            )
             return
         saved = experiment.tables[case_id]
-        settings, _ = write_case_settings(
+        settings, rows = write_case_settings(
             self._store,
             missing.case,
             missing.originals,
             configuration=missing.configuration,
             metrics=saved.metrics_rows,
         )
-        self._tables[case_id] = _Tables(saved.metrics, settings, saved.parser_version)
+        self._tables[case_id] = _Tables(
+            saved.metrics, settings, saved.parser_version, saved.metrics_rows, rows
+        )
 
     # The cases
 
@@ -948,7 +970,13 @@ class ExperimentExecution:
                 raise
             self._case_invalid(case.case_id, failure)
             return
-        self._tables[case.case_id] = _Tables(tables.metrics, tables.settings, PARSER_VERSION)
+        self._tables[case.case_id] = _Tables(
+            tables.metrics,
+            tables.settings,
+            PARSER_VERSION,
+            tables.metrics_rows,
+            tables.settings_rows,
+        )
 
     def _case_invalid(self, case_id: str, failure: TrialFolioError) -> None:
         self._invalid[case_id] = failure
@@ -996,26 +1024,33 @@ class ExperimentExecution:
         """Writes the session's report, then its manifest. A write of the manifest that fails,
         an interrupt included, discards it if the store had published it."""
         created_at = _utc(self._clock())
+        record = self._experiment_record()
         evidence = ExperimentEvidence(
             plan=self._plan,
             plan_number=self._plan_number,
-            record=self._experiment_record(),
+            record=record,
             session=self._session,
             synthetic=self._synthetic,
+            approval=self._approval,
+            command=self._command,
             outcome="completed" if error is None else "partial",
             error=None if error is None else ErrorDetail(code=error.code, message=error.message),
-            cases=tuple(
-                CaseView(
-                    case=case,
-                    outcome=self._outcome(case.case_id),
-                    attempts=sum(a.outcome is not None for a in self._of(case.case_id)),
-                    tables=case.case_id in self._tables,
+            cases=tuple(self._case_view(case) for case in self._plan.cases),
+            retired=tuple(
+                RetiredCaseView(
+                    case=retired,
+                    outcome=self._outcome(retired.case_id),
+                    attempts=self._records_of(retired.case_id),
                 )
-                for case in self._plan.cases
+                for retired in record.retired_cases
             ),
             counts=self._counts(),
+            parsers=self._parsers(),
+            capabilities=self._capabilities(),
+            reproducibility=self._reproducibility(),
             artifacts=self._artifacts(),
         )
+        self._evidence = evidence
         self._report = write_experiment_report(
             self._store, evidence, HtmlReportRenderer(self._plan.trialfolio_version)
         )
@@ -1039,6 +1074,33 @@ class ExperimentExecution:
             "no error" if error is None else error.code,
             extra=self._log_fields("experiment.session.ended"),
         )
+
+    def _case_view(self, case: ExperimentPlanCase) -> CaseView:
+        tables = self._tables.get(case.case_id)
+        invalid = self._invalid.get(case.case_id)
+        return CaseView(
+            case=case,
+            outcome=self._outcome(case.case_id),
+            attempts=self._records_of(case.case_id),
+            metrics=None if tables is None else tables.metrics_rows,
+            settings=None if tables is None else tables.settings_rows,
+            invalid=(
+                None if invalid is None else ErrorDetail(code=invalid.code, message=invalid.message)
+            ),
+        )
+
+    def _records_of(self, case_id: str) -> tuple[AttemptRecordV1_1, ...]:
+        """The case's attempt records, by session and then sequence. Once the session reaches
+        its end, every attempt has one: step 8 wrote those a stopped run left, and an attempt of
+        this session that left none ended the session before its end."""
+        records: list[AttemptRecordV1_1] = []
+        for attempt in self._of(case_id):
+            if attempt.outcome is None:
+                continue
+            if attempt.record is None:
+                raise RuntimeError("every attempt has its record before the session's report")
+            records.append(attempt.record)
+        return tuple(records)
 
     def _partial(self) -> TrialFolioError | None:
         """`execution.partial` when a planned case didn't succeed, with what happened to each,
@@ -1077,16 +1139,6 @@ class ExperimentExecution:
         artifacts = self._artifacts()
         if self._report is not None:
             artifacts = (*artifacts, self._listed("report", self._report))
-        references: dict[str, ExternalReference] = {}
-        for case in self._plan.cases:
-            for row in case.settings:
-                if "not_snapshotted" in row.flags:
-                    references.setdefault(
-                        row.setting, ExternalReference(setting=row.setting, snapshotted=False)
-                    )
-        parsers = sorted({tables.parser_version for tables in self._tables.values()}) or [
-            PARSER_VERSION
-        ]
         return ExperimentManifest(
             schema_version=SCHEMA_VERSION,
             artifact_type="experiment",
@@ -1102,22 +1154,42 @@ class ExperimentExecution:
             outcome="completed" if error is None else "partial",
             error=None if error is None else ErrorDetail(code=error.code, message=error.message),
             artifacts=artifacts,
-            parsers=tuple(
-                ParserVersion(layout=LAYOUT, layout_version=LAYOUT_VERSION, parser_version=version)
-                for version in parsers
-            ),
+            parsers=self._parsers(),
             license_id=LICENSE_ID,
             notice_version=NOTICE_VERSION,
-            capabilities=Capabilities(
-                return_series="source_only" if self._holds_series() else "absent",
-                statistical_validation="not_assessed",
-                trading_readiness="not_assessed",
-            ),
-            reproducibility=Reproducibility(
-                status="incomplete" if references else "complete",
-                external_references=tuple(references.values()),
-            ),
+            capabilities=self._capabilities(),
+            reproducibility=self._reproducibility(),
             counts=self._counts(),
+        )
+
+    def _parsers(self) -> tuple[ParserVersion, ...]:
+        """Each parser that wrote a case's `metrics.csv`, or the installed one when none did."""
+        versions = sorted({tables.parser_version for tables in self._tables.values()}) or [
+            PARSER_VERSION
+        ]
+        return tuple(
+            ParserVersion(layout=LAYOUT, layout_version=LAYOUT_VERSION, parser_version=version)
+            for version in versions
+        )
+
+    def _capabilities(self) -> Capabilities:
+        return Capabilities(
+            return_series="source_only" if self._holds_series() else "absent",
+            statistical_validation="not_assessed",
+            trading_readiness="not_assessed",
+        )
+
+    def _reproducibility(self) -> Reproducibility:
+        references: dict[str, ExternalReference] = {}
+        for case in self._plan.cases:
+            for row in case.settings:
+                if "not_snapshotted" in row.flags:
+                    references.setdefault(
+                        row.setting, ExternalReference(setting=row.setting, snapshotted=False)
+                    )
+        return Reproducibility(
+            status="incomplete" if references else "complete",
+            external_references=tuple(references.values()),
         )
 
     def _holds_series(self) -> bool:
