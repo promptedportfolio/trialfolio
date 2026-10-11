@@ -97,6 +97,14 @@ _NO_HARD_LINKS: Final = frozenset({errno.ENOTSUP, errno.EPERM, errno.ENOSYS})
 as link(2) documents; and `ENOSYS`, which libfuse returns for a file system without a link
 operation."""
 
+LOCK_PATH: Final = "experiment.lock"
+"""The file that claims an experiment's output directory, and on which the lock is taken. It's
+here, beside the lock, so the CLI can take the lock of an experiment to resume before it loads
+the modules that read the experiment's records (docs/contracts.md, running an experiment)."""
+
+LOCK_LINE: Final = b"Trial Folio experiment lock: it claims this directory for one experiment.\n"
+"""The lock file's one fixed line, so the file is never empty (docs/contracts.md, the lock)."""
+
 _LOCK_HELD: Final = (
     frozenset({errno.EACCES})
     if sys.platform == "win32"
@@ -183,7 +191,8 @@ class ArtifactStore(Protocol):
         claimed it for an experiment, and holds it until `close`, so a resumed experiment owns
         its directory: the store can `write` once it holds it, without claiming the root.
 
-        Raises `FileNotFoundError` if there's no such file; `TrialFolioError` with
+        Raises `FileNotFoundError` if there's no such file, as when the root isn't a directory;
+        `TrialFolioError` with
         `experiment.locked` if another process holds the lock, and with `storage.write_failed`
         if the file can't be opened or the file system refuses the lock. It writes nothing.
         """
@@ -332,6 +341,8 @@ class LocalArtifactStore:
             descriptor = os.open(self._root / path, os.O_WRONLY | _BINARY)
         except FileNotFoundError:
             raise
+        except NotADirectoryError as error:  # The root, or a parent of it, is a file.
+            raise FileNotFoundError(error.errno, error.strerror) from error
         except OSError as error:
             raise TrialFolioError(
                 "storage.write_failed",

@@ -110,14 +110,8 @@ from trialfolio.normalization import (
     case_tables_path,
 )
 from trialfolio.planning import plan_hash
-from trialfolio.storage import ArtifactStore, StoredFile
+from trialfolio.storage import LOCK_PATH, ArtifactStore, StoredFile
 from trialfolio.tables import metrics_csv, read_metrics_csv, read_settings_csv
-
-LOCK_PATH: Final = "experiment.lock"
-"""The file that claims an experiment's output directory, and on which the lock is taken."""
-
-LOCK_LINE: Final = b"Trial Folio experiment lock: it claims this directory for one experiment.\n"
-"""The lock file's one fixed line, so the file is never empty (docs/contracts.md, the lock)."""
 
 CONFIGURATION: Final = "configuration.yaml"
 PLAN: Final = "plan.json"

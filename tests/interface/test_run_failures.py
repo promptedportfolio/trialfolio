@@ -10,7 +10,9 @@ client, `requests`, and `urllib3` over the fake server. An unexpected exception 
 injected by storage faults, says what the attempt's records say about the request (R01-T14), and
 one while `configuration.yaml` is saved leaves no manifest, which would have to list it. One
 after the store published an attempt's file still leaves a manifest that lists the file
-(docs/contracts.md, execution outcomes and attempts; a corrected defect, 2026-10-10).
+(docs/contracts.md, execution outcomes and attempts; a corrected defect, 2026-10-10). Where stderr
+says the run's records are, the output directory is escaped, as an error message escapes a path
+(docs/contracts.md, CLI behavior; a corrected defect, 2026-10-11).
 """
 
 import hashlib
@@ -256,6 +258,23 @@ def test_a_400s_message_includes_portfolio123s_sanitized_text(cli: Cli) -> None:
     manifest = accounted_for(out, "provider.unsupported_capability")
     assert manifest.error is not None
     assert manifest.error.message == message
+
+
+def test_where_the_runs_records_are_escapes_the_output_directory(cli: Cli) -> None:
+    # R03-T13's review: stderr named the output directory as given, so a control character in
+    # it could act on the terminal, though an error message escapes each path it names.
+    cli.ready()
+    cli.server.reply("/auth", AUTHENTICATED)
+    cli.server.reply("/screen/backtest", Reply(400, b"Unsupported value"))
+    out = cli.tmp / "out \x1b[2J"
+
+    outcome = approved_run(cli, out)
+
+    assert error_of(outcome)["code"] == "provider.unsupported_capability"
+    escaped = str(out).replace("\x1b", "\\u001b")
+    assert f"The run's records are in {escaped}." in outcome.stderr
+    assert "\x1b" not in outcome.stderr
+    assert outcome.summary["output_dir"] == str(out)
 
 
 def test_a_response_that_fails_validation_is_flagged_after_it_is_saved(cli: Cli) -> None:

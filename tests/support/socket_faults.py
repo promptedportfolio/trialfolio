@@ -58,12 +58,14 @@ class SocketFaults:
         """`connect` times out, as it does when the server never answers the handshake."""
         self._replace_connect(TimeoutError(errno.ETIMEDOUT, "timed out"))
 
-    def interrupt_send(self) -> None:
-        """`sendall`, which sends the request, raises `KeyboardInterrupt`, as Ctrl-C does."""
+    def interrupt_send(self, containing: bytes = b"") -> None:
+        """`sendall`, which sends the request, raises `KeyboardInterrupt`, as Ctrl-C does, when
+        what it sends holds `containing`, such as an experiment case's request line,
+        `b"POST /screen/backtest"`, so its session's authentication call goes through first."""
         real: Callable[..., Any] = socket.socket.sendall
 
         def sendall(sock: socket.socket, data: Any, *args: Any) -> None:
-            if threading.current_thread() is self._thread:
+            if threading.current_thread() is self._thread and containing in bytes(data):
                 raise KeyboardInterrupt
             real(sock, data, *args)
 

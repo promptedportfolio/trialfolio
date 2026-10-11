@@ -35,7 +35,8 @@ whether the response was saved. An interrupt or a storage failure decides only t
 A file before the attempt record that the store published before its write failed, whatever the
 failure, is among the attempt's files all the same, so a manifest written later lists every file
 the attempt wrote. The attempt record references a request or a response only when its write
-completed.
+completed. An attempt record the store published before an interrupt or a storage failure counts
+as written, so the attempt reads as the record says.
 
 - **`request.json`** is `json.dumps` of the `params` sent, indented. `requests` writes the body
   with the same function, unindented, so each number's text is the body's. Non-ASCII text is
@@ -154,8 +155,8 @@ class AttemptResult:
     record: AttemptRecord
     """The attempt record: as written, or, when `recorded` is false, as it would have been."""
     recorded: bool
-    """Whether `attempt.json` was written. If it wasn't, an attempt with a start record reads as
-    `running`."""
+    """Whether `attempt.json` was written, or published whole before its write failed. If it
+    wasn't, an attempt with a start record reads as `running`."""
     files: tuple[AttemptFile, ...]
     """Every file the attempt wrote, in order."""
     response: ScreenBacktestResponse | None
@@ -435,7 +436,10 @@ class _AttemptFiles:
         record, which an interrupt can change before it's written.
 
         After an interrupt while it's written, a record that was published is left as it is.
-        Otherwise it's written once more, with `command.interrupted` unless it succeeded.
+        Otherwise it's written once more, with `command.interrupted` unless it succeeded. After a
+        storage failure, a record that was published counts as written too: the store can
+        publish a file and then fail a later step, such as the directory's sync, and the attempt
+        then reads as its record says, not as running.
         """
         data = _model_json(record)
         try:
@@ -448,7 +452,8 @@ class _AttemptFiles:
                 record = record.model_copy(update={"error": _detail_of(error)})
             return self._write_again(record), error, record
         except TrialFolioError as failure:
-            return False, prevailing(_with_detail(failure, end), error), record
+            recorded = self.published(ATTEMPT_RECORD, data, "attempt_record")
+            return recorded, prevailing(_with_detail(failure, end), error), record
         # Unwritten, the start record, if any, reads as running.
         except Exception as failure:  # noqa: BLE001
             self.log_unexpected(failure)
@@ -654,8 +659,9 @@ class ExperimentAttemptResult:
     record: AttemptRecordV1_1
     """The attempt record: as written, or, when `recorded` is false, as it would have been."""
     recorded: bool
-    """Whether `attempt.json` was written. If it wasn't, an attempt with a start record reads as
-    `running`, and one with only its authentication record stopped before its send."""
+    """Whether `attempt.json` was written, or published whole before its write failed. If it
+    wasn't, an attempt with a start record reads as `running`, and one with only its
+    authentication record stopped before its send."""
     start: StartRecordV1_1 | None
     """The start record, when it was written."""
     files: tuple[AttemptFile, ...]

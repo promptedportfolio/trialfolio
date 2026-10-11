@@ -80,6 +80,7 @@ from trialfolio.attempts import (
     request_detail,
     utc_now,
 )
+from trialfolio.canonical import sha256_hex
 from trialfolio.configuration import experiment_original_values, read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1
 from trialfolio.contracts.common import (
@@ -112,8 +113,6 @@ from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, Setti
 from trialfolio.demo import SyntheticScreenBacktestClient
 from trialfolio.errors import TrialFolioError
 from trialfolio.experiment_records import (
-    LOCK_LINE,
-    LOCK_PATH,
     CaseAttempt,
     CaseOutcome,
     MissingTables,
@@ -126,7 +125,9 @@ from trialfolio.experiment_records import (
 from trialfolio.normalization import (
     LAYOUT,
     LAYOUT_VERSION,
+    METRICS_PATH,
     PARSER_VERSION,
+    case_tables_path,
     holds_series,
     write_case_settings,
     write_case_tables,
@@ -140,6 +141,7 @@ from trialfolio.planning import (
     first_experiment_record,
     plan_changes,
     plan_hash,
+    retired_cases,
     revised_experiment_record,
 )
 from trialfolio.provider import DecodedResponse, ScreenBacktestClient
@@ -150,7 +152,8 @@ from trialfolio.report import (
     RetiredCaseView,
     write_experiment_report,
 )
-from trialfolio.storage import ArtifactStore, StoredFile
+from trialfolio.storage import LOCK_LINE, LOCK_PATH, ArtifactStore, StoredFile
+from trialfolio.tables import read_metrics_csv
 
 _logger = logging.getLogger(__name__)
 
@@ -258,6 +261,7 @@ class _Attempt:
     budget, and manifest read it."""
 
     case_id: str
+    attempt_id: uuid.UUID
     session: int
     sequence: int
     outcome: Literal["running", "succeeded", "failed", "unknown"] | None
@@ -284,6 +288,7 @@ class _Attempt:
 def _saved(attempt: SavedExperimentAttempt) -> _Attempt:
     return _Attempt(
         case_id=attempt.case_id,
+        attempt_id=attempt.attempt_id,
         session=attempt.session,
         sequence=attempt.sequence,
         outcome=attempt.outcome,
@@ -300,6 +305,7 @@ def _saved(attempt: SavedExperimentAttempt) -> _Attempt:
 def _recorded(record: AttemptRecordV1_1, files: tuple[AttemptFile, ...]) -> _Attempt:
     return _Attempt(
         case_id=record.case_id,
+        attempt_id=record.attempt_id,
         session=record.session,
         sequence=record.sequence,
         outcome=record.outcome,
@@ -329,6 +335,7 @@ def _ended(result: ExperimentAttemptResult) -> _Attempt:
         outcome, charged, requests = None, False, 0
     return _Attempt(
         case_id=record.case_id,
+        attempt_id=record.attempt_id,
         session=record.session,
         sequence=record.sequence,
         outcome=outcome,
@@ -482,6 +489,9 @@ class ExperimentExecution:
             [] if experiment is None else [_saved(attempt) for attempt in experiment.attempts]
         )
         self._tables: dict[str, _Tables] = {}
+        self._metrics_alone: dict[str, tuple[MetricsRow, ...]] = {}
+        """The rows of each `metrics.csv` this session published whose `settings.csv` it didn't
+        write, because a failure came between them: a resume completes the pair."""
         if experiment is not None:
             for case_id, tables in experiment.tables.items():
                 if tables.settings is not None and tables.settings_rows is not None:
@@ -583,6 +593,42 @@ class ExperimentExecution:
         """The confirmed repeats this session doesn't make, because an earlier repeat used their
         confirmation: a later attempt of the case may have reached Portfolio123."""
         return self._used
+
+    @property
+    def repeat_attempts(self) -> dict[str, uuid.UUID]:
+        """Each planned case awaiting a repeat, by its `case_id`, with its latest possibly
+        charged attempt's `attempt_id`, which confirms a repeat of it (repeating a case)."""
+        return {
+            case.case_id: [a for a in self._of(case.case_id) if a.possibly_charged][-1].attempt_id
+            for case in self._plan.cases
+            if self._awaiting_repeat(case.case_id)
+        }
+
+    @property
+    def counts(self) -> ExperimentManifestCounts:
+        """The experiment's counts, as the session's manifest counts them, over the plan this
+        execution runs: the manifest's, once it's written, and otherwise as the records now give
+        them, so an interface can report them after an ending without a manifest too."""
+        if self._manifest is not None:
+            return self._manifest.counts
+        return self._counts()
+
+    @property
+    def metrics_unavailable(self) -> int:
+        """The `unavailable` rows of the planned cases' `metrics.csv` files, as written so far,
+        those whose `settings.csv` a failure kept this session from writing included, so the
+        count agrees with the records however the session ends."""
+        rows = {case_id: tables.metrics_rows for case_id, tables in self._tables.items()}
+        for case_id, metrics in self._metrics_alone.items():
+            rows.setdefault(case_id, metrics)
+        if self._experiment is not None:
+            for case_id, saved in self._experiment.tables.items():
+                rows.setdefault(case_id, saved.metrics_rows)
+        return sum(
+            row.availability == "unavailable"
+            for case in self._plan.cases
+            for row in rows.get(case.case_id, ())
+        )
 
     @property
     def manifest(self) -> ExperimentManifest | None:
@@ -780,7 +826,17 @@ class ExperimentExecution:
                 continue
             plan = experiment.saved_plan(saved.plan).plan
             record = saved.completed_record(plan, _utc(self._clock()))
-            stored = self._store.write(f"{saved.directory}/{ATTEMPT_RECORD}", _model_json(record))
+            path, data = f"{saved.directory}/{ATTEMPT_RECORD}", _model_json(record)
+            try:
+                stored = self._store.write(path, data)
+            except BaseException:
+                # The store may publish the record and still fail its write, as when the
+                # directory's sync fails. The records then hold it, so the counts read it.
+                published = self._published(path, data)
+                if published is not None:
+                    files = (*saved.files, AttemptFile("attempt_record", published))
+                    self._attempts[place] = _recorded(record, files)
+                raise
             files = (*saved.files, AttemptFile("attempt_record", stored))
             self._attempts[place] = _recorded(record, files)
             _logger.warning(
@@ -803,14 +859,18 @@ class ExperimentExecution:
             self._case_invalid(case_id, missing.invalid)
             return
         if missing.metrics_rows is not None:
-            tables = write_case_tables(
-                self._store,
-                missing.case,
-                missing.originals,
-                configuration=missing.configuration,
-                response=missing.response,
-                content=missing.content,
-            )
+            try:
+                tables = write_case_tables(
+                    self._store,
+                    missing.case,
+                    missing.originals,
+                    configuration=missing.configuration,
+                    response=missing.response,
+                    content=missing.content,
+                )
+            except BaseException:
+                self._keep_published_metrics(case_id)
+                raise
             self._tables[case_id] = _Tables(
                 tables.metrics,
                 tables.settings,
@@ -967,9 +1027,13 @@ class ExperimentExecution:
             )
         except TrialFolioError as failure:
             if failure.code != "provider.response_invalid":
+                self._keep_published_metrics(case.case_id)
                 raise
             self._case_invalid(case.case_id, failure)
             return
+        except BaseException:
+            self._keep_published_metrics(case.case_id)
+            raise
         self._tables[case.case_id] = _Tables(
             tables.metrics,
             tables.settings,
@@ -977,6 +1041,28 @@ class ExperimentExecution:
             tables.metrics_rows,
             tables.settings_rows,
         )
+
+    def _keep_published_metrics(self, case_id: str) -> None:
+        """After a failed write of the case's tables, keeps the rows of its `metrics.csv` if the
+        store published it, as when `settings.csv`'s write fails, or an interrupt comes between
+        them. The records then hold it, so `metrics_unavailable` counts it. It's read back, as
+        an attempt's file published before its write failed is, because the store may publish
+        a file and still fail its write."""
+        path = case_tables_path(case_id, METRICS_PATH)
+        try:
+            self._metrics_alone[case_id] = read_metrics_csv(self._store.read(path), path)
+        except (OSError, TrialFolioError):
+            return  # Never published, or not readable: a resume's records check reads it.
+
+    def _published(self, path: str, data: bytes) -> StoredFile | None:
+        """The file `path`, if a write of `data` that failed published it whole."""
+        try:
+            published = self._store.read(path) == data
+        except OSError:
+            return None  # Never published, or not readable: a resume's records check reads it.
+        if not published:
+            return None
+        return StoredFile(path=path, artifact_id="sha256:" + sha256_hex(data), size=len(data))
 
     def _case_invalid(self, case_id: str, failure: TrialFolioError) -> None:
         self._invalid[case_id] = failure
@@ -1228,7 +1314,7 @@ class ExperimentExecution:
                 unknown=outcomes.count("unknown"),
                 not_yet_run=outcomes.count("not_yet_run"),
             ),
-            retired_cases=len(self._experiment_record().retired_cases),
+            retired_cases=self._retired(),
             attempts=ExperimentAttemptCounts(
                 succeeded=sum(a.outcome == "succeeded" for a in attempts),
                 failed=sum(a.outcome == "failed" for a in attempts),
@@ -1245,6 +1331,14 @@ class ExperimentExecution:
             ),
             cost=sum(costs) if costs else None,
         )
+
+    def _retired(self) -> int:
+        """How many cases revisions retired, once the plan this execution runs is current: the
+        current plan's, or a revision's before its `plans/<n>/` is written."""
+        record = self._record
+        if record is None:  # a new experiment's, before its first plan is recorded
+            return 0
+        return len(retired_cases(record, self._plan))
 
     def _provider_requests(self) -> int:
         """The sends counted against the budget: each that may have reached Portfolio123, of

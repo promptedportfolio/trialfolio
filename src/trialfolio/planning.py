@@ -636,6 +636,23 @@ def first_experiment_record(
     return _record(plan, (), (entry,), created_at)
 
 
+def retired_cases(previous: ExperimentRecord, plan: PlanV1_1) -> tuple[RetiredCase, ...]:
+    """The retired cases of the experiment once `plan` is its current plan, from `previous`, the
+    current plan's `experiment.json`: `previous`'s retired cases, without each case `plan`
+    includes again, followed by each case the current plan included and `plan` doesn't, as the
+    current plan held it, with its number. With the current plan itself, they're `previous`'s."""
+    planned = {case.case_id for case in plan.cases}
+    current = previous.plans[-1].plan
+    return (
+        *(case for case in previous.retired_cases if case.case_id not in planned),
+        *(
+            RetiredCase.model_validate({**_recorded(case), "plan": current})
+            for case in previous.planned_cases
+            if case.case_id not in planned
+        ),
+    )
+
+
 def revised_experiment_record(
     previous: ExperimentRecord,
     revision: PlanRevision,
@@ -660,16 +677,7 @@ def revised_experiment_record(
     current plan's, the revision doesn't revise it, or `previous` isn't its record, as the
     revision's changes show; or when `reason` isn't a valid reason.
     """
-    planned = {case.case_id for case in revision.plan.cases}
-    current = previous.plans[-1].plan
-    retired = (
-        *(case for case in previous.retired_cases if case.case_id not in planned),
-        *(
-            RetiredCase.model_validate({**_recorded(case), "plan": current})
-            for case in previous.planned_cases
-            if case.case_id not in planned
-        ),
-    )
+    retired = retired_cases(previous, revision.plan)
     entry = PlanEntry(
         plan=number,
         plan_hash=plan_hash(revision.plan),

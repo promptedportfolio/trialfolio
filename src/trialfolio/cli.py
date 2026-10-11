@@ -10,6 +10,9 @@ to exit codes (REQ-03). Commands:
   holds only its starter files.
 - `trialfolio run <config> --out <dir> [--approve <plan-hash>]` plans and executes one screen
   backtest, once its plan is approved, in the order of steps docs/contracts.md's approval gives.
+  Given an experiment's configuration, by its `kind`, it plans and executes the experiment
+  instead, and run again into the experiment's directory, it resumes or revises it, with
+  `--revision-reason` and `--repeat` (release 0.3.0; running an experiment).
 - `trialfolio report <run-dir> --out <dir>` re-renders a saved run's report offline.
 - `trialfolio demo --out <dir>` writes a synthetic example run offline, labeled synthetic.
 - `trialfolio review <config> --out <dir>` compares saved runs with a baseline offline, as a
@@ -38,27 +41,49 @@ import importlib.metadata
 import json
 import logging
 import os
+import re
 import sys
 import time
 import traceback
+import uuid
 from collections.abc import Callable, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal, NoReturn, TextIO
+from typing import TYPE_CHECKING, Final, Literal, NoReturn, TextIO, cast
+
+from pydantic import TypeAdapter, ValidationError
 
 from trialfolio import acknowledgment
 from trialfolio.approval import obtain_approval
-from trialfolio.configuration import read_review_configuration, read_screen_configuration
-from trialfolio.contracts.common import ErrorDetail
+from trialfolio.configuration import (
+    read_review_configuration,
+    read_run_configuration,
+    read_screen_configuration,
+)
+from trialfolio.contracts.attempt import Exchange
+from trialfolio.contracts.common import (
+    LABEL_PATTERN,
+    AttemptId,
+    ErrorDetail,
+    RevisionReason,
+)
+from trialfolio.contracts.experiment_configuration import (
+    ExperimentConfiguration,
+    configured_variants,
+)
+from trialfolio.contracts.experiment_manifest import ExperimentCommandRecord
+from trialfolio.contracts.experiment_plan import PlanV1_1
 from trialfolio.contracts.manifest import CommandRecord
 from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.review_manifest import ReviewCommandRecord
 from trialfolio.contracts.summary import (
+    ExperimentCounts,
     JsonSummaryV1_2,
     NoCounts,
     ReviewCounts,
     RunCounts,
+    SummaryCase,
     SummaryIdsV1_2,
 )
 from trialfolio.display import visible
@@ -67,11 +92,14 @@ from trialfolio.logs import LOGS_DIRECTORY, CommandLogs
 from trialfolio.notices import CONCISE_NOTICE, FULL_NOTICE, LICENSE_ID, LICENSE_NAME, NOTICE_VERSION
 from trialfolio.planning import build_plan, installed_versions
 from trialfolio.starter import CONFIGURATION, starter_files
-from trialfolio.storage import ArtifactStore, LocalArtifactStore
+from trialfolio.storage import LOCK_PATH, ArtifactStore, LocalArtifactStore
 
 if TYPE_CHECKING:
     from trialfolio.execution import Execution
-    from trialfolio.provider import Credentials
+    from trialfolio.experiment_approval import ExperimentRun
+    from trialfolio.experiment_execution import ExperimentExecution
+    from trialfolio.experiment_records import CaseOutcome, SavedExperiment
+    from trialfolio.provider import Credentials, ScreenBacktestClient
     from trialfolio.review import Review
 
 _logger = logging.getLogger(__name__)
@@ -151,7 +179,8 @@ def _parser(version: str) -> argparse.ArgumentParser:
         prog="trialfolio",
         description=(
             "Plan, run, and record Portfolio123 screen backtests, keeping each run's settings with"
-            " its results, and compare saved runs with a baseline."
+            " its results, run experiments of a screen's variants, and compare saved runs with a"
+            " baseline."
         ),
         allow_abbrev=False,
     )
@@ -177,14 +206,44 @@ def _parser(version: str) -> argparse.ArgumentParser:
 
     run = command(
         "run",
-        "Plan and execute one screen backtest, once its plan is approved.",
+        "Plan and execute a screen backtest, or an experiment, once its plan is approved. Run an"
+        " experiment's configuration again into its output directory to resume or revise it.",
     )
-    run.add_argument("config", help="the screen configuration, a YAML file")
-    _out(run, "the new output directory for the run")
+    run.add_argument("config", help="the screen or experiment configuration, a YAML file")
+    run.add_argument(
+        "--out",
+        required=True,
+        metavar="DIR",
+        type=_directory,
+        help=(
+            "the output directory: absent, or an empty directory, or, for an experiment, its own"
+            " output directory, to resume or revise it"
+        ),
+    )
     run.add_argument(
         "--approve",
         metavar="PLAN_HASH",
         help="approve the plan with its full hash, as shown, without asking",
+    )
+    run.add_argument(
+        "--revision-reason",
+        metavar="TEXT",
+        type=_revision_reason,
+        help=(
+            "why the experiment's plan changed: needed, with the revision's approval, when the"
+            " configuration or the installed versions no longer give the current plan"
+        ),
+    )
+    run.add_argument(
+        "--repeat",
+        metavar="CASE_KEY[:ATTEMPT_ID]",
+        type=_repeat,
+        action=_Repeats,
+        help=(
+            "send again the request of an experiment's case that may already have been charged,"
+            " which may be charged again: once for each case, with the attempt ID the plan shows"
+            " to confirm it, or asked to confirm in a terminal"
+        ),
     )
     _json(run)
 
@@ -246,6 +305,58 @@ def _directory(value: str) -> str:
     return value
 
 
+_REASON: Final = TypeAdapter[str](RevisionReason)
+_ATTEMPT_ID: Final = TypeAdapter[uuid.UUID](AttemptId)
+_CASE_KEY: Final = re.compile(LABEL_PATTERN)
+
+
+def _revision_reason(value: str) -> str:
+    """`--revision-reason` as given, unless it isn't a valid reason: 1 to 2,000 characters, not
+    all whitespace, in valid UTF-8 text, which `experiment.json` can hold."""
+    try:
+        return _REASON.validate_python(value)
+    except ValidationError:
+        raise argparse.ArgumentTypeError(
+            "it must be 1 to 2,000 characters of text, not all whitespace, in UTF-8"
+        ) from None
+
+
+def _repeat(value: str) -> tuple[str, uuid.UUID | None]:
+    """`--repeat` as given: a case key, and the attempt ID after a colon, if there's one."""
+    key, colon, attempt = value.partition(":")
+    if not _CASE_KEY.fullmatch(key):
+        raise argparse.ArgumentTypeError(
+            "it must be a case key, such as holdings-50, or a case key, a colon, and an attempt"
+            " ID, as the plan shows it"
+        )
+    if not colon:
+        return key, None
+    try:
+        return key, _ATTEMPT_ID.validate_python(attempt)
+    except ValidationError:
+        raise argparse.ArgumentTypeError(
+            "the attempt ID after the colon must be a version 4 UUID in canonical form, as the"
+            " plan shows it"
+        ) from None
+
+
+class _Repeats(argparse.Action):
+    """Collects each `--repeat`, and refuses a case key given twice, as a usage error."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: str | None = None,
+    ) -> None:
+        given: list[tuple[str, uuid.UUID | None]] = getattr(namespace, self.dest) or []
+        key, attempt = cast("tuple[str, uuid.UUID | None]", values)
+        if any(other == key for other, _ in given):
+            raise argparse.ArgumentError(self, f"case {key} is given more than once")
+        setattr(namespace, self.dest, [*given, (key, attempt)])
+
+
 def _json(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--json", action="store_true", help="write the result to stdout as one JSON summary"
@@ -253,6 +364,28 @@ def _json(parser: argparse.ArgumentParser) -> None:
 
 
 # One invocation
+
+
+@dataclass
+class _Experiment:
+    """What `run` has done so far with an experiment's configuration, for its summary."""
+
+    configuration: ExperimentConfiguration
+    resume: bool = False
+    """Whether the output directory holds the experiment, which the run resumes or revises."""
+    experiment: "SavedExperiment | None" = None
+    """The experiment's records, once a resume has read and checked them, and found them this
+    configuration's experiment's, and not synthetic (running an experiment, step 4)."""
+    plan: PlanV1_1 | None = None
+    """The plan this run builds, once it's built: the current plan, or its revision."""
+    run: "ExperimentRun | None" = None
+    execution: "ExperimentExecution | None" = None
+
+    @property
+    def counts_known(self) -> bool:
+        """Whether the experiment's counts are known: once a new experiment's configuration is
+        valid, and once a resumed experiment's records are read and checked."""
+        return not self.resume or self.experiment is not None
 
 
 @dataclass
@@ -278,6 +411,10 @@ class _Invocation:
     report: str | None = None
     """`report.html`, once `trialfolio report` has written it."""
     review: "Review | None" = None
+    experiment: _Experiment | None = None
+    lock_holder: ArtifactStore | None = None
+    """The store that holds an experiment's lock, which the command closes once it has written
+    its result, so it holds the lock until it ends."""
     results: int = 0
     """The results a valid review configuration names, once it's read."""
     result: list[str] = field(default_factory=list[str])
@@ -325,7 +462,12 @@ class _Invocation:
             detail if detail.endswith(".") else f"{detail}.",
             extra={**_event("cli.command.completed", False), **self._linked_ids()},
         )
-        self._write_result(error, exit_code)
+        try:
+            self._write_result(error, exit_code)
+        finally:
+            # An experiment's lock is held until the command ends, its summary written.
+            if self.lock_holder is not None:
+                self.lock_holder.close()
         return exit_code
 
     def _write_result(self, error: TrialFolioError | None, exit_code: int) -> None:
@@ -338,8 +480,13 @@ class _Invocation:
         try:
             if error is not None:
                 self.stderr.write(f"Error ({error.code}): {error.message}\n")
-                if self.output_dir is not None and self.name in ("run", "demo"):
-                    self.stderr.write(f"The run's records are in {self.output_dir}.\n")
+                # `--out` as given, escaped as an error message escapes a path, so it can't act
+                # on the terminal; the summary's `output_dir` keeps it as given.
+                output_dir = self._output_dir()
+                if self.experiment is not None and output_dir is not None:
+                    self.stderr.write(f"The experiment's records are in {_shown(output_dir)}.\n")
+                elif self.output_dir is not None and self.name in ("run", "demo"):
+                    self.stderr.write(f"The run's records are in {_shown(self.output_dir)}.\n")
                 self.stderr.flush()
             self.stdout.write(result)
             self.stdout.flush()
@@ -354,6 +501,7 @@ class _Invocation:
             if error.code == "execution.partial"
             else "failed"
         )
+        cases = self._cases()
         return JsonSummaryV1_2.model_validate(
             {
                 "schema_version": SUMMARY_SCHEMA_VERSION,
@@ -364,7 +512,8 @@ class _Invocation:
                 "ids": self._ids(),
                 "output_dir": self._output_dir(),
                 "outputs": self._outputs(),
-                "counts": self._counts(),
+                **({} if cases is None else {"cases": cases}),
+                "counts": self._counts(error),
                 "statistical_validation": "not_assessed",
                 "trading_readiness": "not_assessed",
                 "error": None
@@ -376,15 +525,24 @@ class _Invocation:
     def _output_dir(self) -> str | None:
         """`output_dir`, or a review's once it has claimed its directory. A review's claim is
         read from the review, as its `review_id` is, so the summary gives both even when an
-        interrupt stops the review before `claimed` has run."""
+        interrupt stops the review before `claimed` has run. A resumed experiment's is given
+        once its session record is written: the command writes nothing into it before."""
         if self.review is not None and self.review.claimed:
             return self.args.out
+        experiment = self.experiment
+        if experiment is not None and experiment.resume:
+            execution = experiment.execution
+            return None if execution is None or execution.session is None else self.args.out
         return self.output_dir
 
     def _ids(self) -> SummaryIdsV1_2:
         ids = SummaryIdsV1_2(**self.ids)
         if self.review is not None and self.review.claimed:
             ids["review_id"] = self.review.review_id
+        experiment = self.experiment
+        execution = None if experiment is None else experiment.execution
+        if execution is not None and execution.session is not None:
+            ids["session"] = execution.session
         attempt = self.execution.attempt if self.execution is not None else None
         result = self.execution.result if self.execution is not None else None
         if attempt is not None and (
@@ -410,6 +568,13 @@ class _Invocation:
                 if stored is not None:
                     outputs[role] = stored.path
             return outputs
+        if self.experiment is not None:
+            ran = self.experiment.execution
+            if ran is not None and ran.manifest is not None:
+                outputs["manifest"] = _session_file(ran.manifest.session, "manifest.json")
+            if ran is not None and ran.report is not None:
+                outputs["report"] = ran.report.path
+            return outputs
         execution = self.execution
         if execution is None:
             return outputs
@@ -422,7 +587,11 @@ class _Invocation:
             outputs["settings"] = execution.tables.settings.path
         return outputs
 
-    def _counts(self) -> RunCounts | ReviewCounts | NoCounts:
+    def _counts(
+        self, error: TrialFolioError | None
+    ) -> RunCounts | ReviewCounts | ExperimentCounts | NoCounts:
+        if self.experiment is not None:
+            return self._experiment_counts(error)
         if self.name == "review":
             differences = None if self.review is None else self.review.differences
             return ReviewCounts(
@@ -456,6 +625,126 @@ class _Invocation:
             metrics_unavailable=unavailable,
             warnings=self.log.warnings,
             cost=cost,
+        )
+
+    def _cases(self) -> tuple[SummaryCase, ...] | None:
+        """An experiment's `cases`, once its plan is built: each case of the plan this run
+        builds, with its outcome as the records give it, as the command leaves them, and the
+        attempt that confirms a repeat of a case awaiting one."""
+        experiment = self.experiment
+        plan = None if experiment is None else experiment.plan
+        if experiment is None or plan is None:
+            return None
+        execution, run = experiment.execution, experiment.run
+        outcomes: dict[str, CaseOutcome]
+        if execution is not None:
+            outcomes = {case.case_id: outcome for case, outcome in execution.outcomes}
+            repeats = execution.repeat_attempts
+        elif run is not None:
+            outcomes = {saved.case.case_id: saved.outcome for saved in run.cases}
+            repeats = {
+                saved.case.case_id: attempt.attempt_id for saved, attempt in run.awaiting_repeat()
+            }
+        else:  # Built, and not yet approved: no record read gives it an attempt.
+            outcomes, repeats = {}, {}
+        return tuple(
+            SummaryCase(
+                case_key=case.case_key,
+                case_id=case.case_id,
+                outcome=outcomes.get(case.case_id, "not_yet_run"),
+                repeat_attempt_id=repeats.get(case.case_id),
+            )
+            for case in plan.cases
+        )
+
+    def _experiment_counts(self, error: TrialFolioError | None) -> ExperimentCounts | NoCounts:
+        """An experiment's counts, as its manifest counts them: the session's manifest's, once
+        it's written, and otherwise as the records give them, over the plan this run builds, or
+        the current plan before it's built. `{}` until they're known, and after
+        `experiment.locked`, whose run read nothing."""
+        experiment = self.experiment
+        if experiment is None:
+            raise RuntimeError("the counts of an experiment's run")
+        if not experiment.counts_known or (error is not None and error.code == "experiment.locked"):
+            return NoCounts()
+        warnings = self.log.warnings
+        execution = experiment.execution
+        if execution is not None:
+            counts = execution.counts
+            return ExperimentCounts(
+                cases_planned=counts.cases.planned,
+                cases_succeeded=counts.cases.succeeded,
+                cases_failed=counts.cases.failed,
+                cases_skipped=counts.cases.skipped,
+                cases_unknown=counts.cases.unknown,
+                cases_not_yet_run=counts.cases.not_yet_run,
+                cases_retired=counts.retired_cases,
+                attempts=sum(
+                    (
+                        counts.attempts.succeeded,
+                        counts.attempts.failed,
+                        counts.attempts.unknown,
+                        counts.attempts.running,
+                    )
+                ),
+                repeats=counts.attempts.repeats,
+                provider_requests=counts.provider_requests,
+                authentication_calls=counts.authentication_calls,
+                cost=counts.cost,
+                metrics_unavailable=execution.metrics_unavailable,
+                warnings=warnings,
+            )
+        saved = experiment.experiment
+        if saved is None:  # a new experiment's, before anything is sent
+            plan = experiment.plan
+            planned = (
+                len(plan.cases)
+                if plan is not None
+                else len(configured_variants(experiment.configuration)) + 1
+            )
+            return ExperimentCounts(
+                cases_planned=planned,
+                cases_succeeded=0,
+                cases_failed=0,
+                cases_skipped=0,
+                cases_unknown=0,
+                cases_not_yet_run=planned,
+                cases_retired=0,
+                attempts=0,
+                repeats=0,
+                provider_requests=0,
+                authentication_calls=0,
+                cost=None,
+                metrics_unavailable=0,
+                warnings=warnings,
+            )
+        from trialfolio.planning import retired_cases
+
+        plan = saved.plan if experiment.plan is None else experiment.plan
+        outcomes = [case.outcome for case in saved.cases(plan)]
+        records = [attempt.record for attempt in saved.attempts if attempt.record is not None]
+        costs = [r.provider_metadata.cost for r in records if r.provider_metadata.cost is not None]
+        planned_ids = {case.case_id for case in plan.cases}
+        return ExperimentCounts(
+            cases_planned=len(outcomes),
+            cases_succeeded=outcomes.count("succeeded"),
+            cases_failed=outcomes.count("failed"),
+            cases_skipped=0,
+            cases_unknown=outcomes.count("unknown"),
+            cases_not_yet_run=outcomes.count("not_yet_run"),
+            cases_retired=len(retired_cases(saved.record, plan)),
+            attempts=len(saved.attempts),
+            repeats=sum(attempt.repeat_of is not None for attempt in saved.attempts),
+            provider_requests=saved.provider_requests,
+            authentication_calls=saved.authentication_calls,
+            cost=sum(costs) if costs else None,
+            metrics_unavailable=sum(
+                row.availability == "unavailable"
+                for case_id, tables in saved.tables.items()
+                if case_id in planned_ids
+                for row in tables.metrics_rows
+            ),
+            warnings=warnings,
         )
 
     def _linked_ids(self) -> dict[str, str]:
@@ -493,6 +782,9 @@ class _Invocation:
         has; None before."""
         if self.review is not None:
             return self.review.ending_detail() if self.review.claimed else None
+        if self.experiment is not None:
+            ran = self.experiment.execution
+            return ran.ending_detail() if ran is not None and ran.claimed else None
         execution = self.execution
         if execution is None or not execution.claimed:
             return None
@@ -506,6 +798,12 @@ class _Invocation:
             "Claimed the output directory.",
             extra={**_event("cli.output.claimed", True), **self._linked_ids()},
         )
+
+    def resuming(self, out: str) -> None:
+        """Called once a resumed experiment begins writing into its output directory, which it
+        holds the lock of: logs go there from now. Its summary's `output_dir` comes from its
+        session record."""
+        self.log.attach(Path(os.path.abspath(out)) / LOGS_DIRECTORY)
 
 
 def _event(name: str, terminal: bool) -> dict[str, object]:
@@ -561,16 +859,25 @@ def _init(invocation: _Invocation) -> TrialFolioError | None:
 
 
 def _run(invocation: _Invocation) -> TrialFolioError | None:
+    """Runs a screen's configuration, or an experiment's, by its `kind` (D-24)."""
     args = invocation.args
     _ignore_key_log(invocation.environ)
     _require_acknowledgment(invocation)
     started_at = _started(invocation)
     content = _read_input(args.config)
-    configuration = read_screen_configuration(content, _shown(args.config))
+    configuration = read_run_configuration(content, _shown(args.config))
+    if isinstance(configuration, ExperimentConfiguration):
+        return _run_experiment(invocation, configuration, content, started_at)
     store = invocation.store_factory(args.out)
     store.check_empty()
     plan = _plan(invocation, build_plan(configuration, installed_versions()))
-    approval = obtain_approval(plan, args.approve, stdin=invocation.stdin, stderr=invocation.stderr)
+    approval = obtain_approval(
+        plan,
+        args.approve,
+        stdin=invocation.stdin,
+        stderr=invocation.stderr,
+        refused=_experiment_options(args),
+    )
     _logger.info(
         "Plan approved (%s).",
         approval.method,
@@ -604,6 +911,212 @@ def _run(invocation: _Invocation) -> TrialFolioError | None:
     if error is None:
         invocation.result = _run_result(args.out, plan, execution, synthetic=False)
     return error
+
+
+def _experiment_options(args: argparse.Namespace) -> str | None:
+    """Why a screen's run refuses `--revision-reason` or `--repeat`, when either is given: each
+    applies only to an experiment that has run already."""
+    given = [
+        option
+        for option, value in (
+            ("--revision-reason", args.revision_reason),
+            ("--repeat", args.repeat),
+        )
+        if value
+    ]
+    if not given:
+        return None
+    return (
+        f"{' and '.join(given)} {'applies' if len(given) == 1 else 'apply'} only to an"
+        " experiment's configuration, run again into its output directory. A screen's run has no"
+        " plan to revise, and no case to repeat. Run the command without"
+        f" {'it' if len(given) == 1 else 'them'}."
+    )
+
+
+def _run_experiment(
+    invocation: _Invocation,
+    configuration: ExperimentConfiguration,
+    content: bytes,
+    started_at: datetime,
+) -> TrialFolioError | None:
+    """Plans and executes a new experiment, or resumes or revises one, in the order of steps
+    docs/contracts.md's running an experiment gives. A directory that isn't empty is resumed
+    when it holds `experiment.lock`, whose lock the store takes before anything else is read,
+    and holds until the command ends. The installed versions are checked once it's taken, before
+    the records are read, since the modules that read them import `p123api`, `requests`, and
+    `urllib3`."""
+    args = invocation.args
+    invocation.ids["experiment_id"] = configuration.experiment_id
+    state = _Experiment(configuration)
+    invocation.experiment = state
+    store = invocation.store_factory(args.out)
+    invocation.lock_holder = store
+    try:
+        store.check_empty()
+    except TrialFolioError as occupied:
+        if occupied.code != "output.not_empty":
+            raise
+        # Its counts are unknown until its records are read, whatever stops the run first.
+        state.resume = True
+        try:
+            store.lock(LOCK_PATH)
+        except FileNotFoundError:
+            # Anything else, and no experiment.lock: as for a screen.
+            state.resume = False
+            raise occupied from None
+    versions = installed_versions()
+
+    from trialfolio.experiment_approval import ExperimentRun, RepeatOption, approve_experiment
+    from trialfolio.experiment_execution import ExperimentExecution
+    from trialfolio.experiment_records import read_experiment
+    from trialfolio.planning import build_experiment_plan, plan_revision
+
+    changes = None
+    if state.resume:
+        saved = read_experiment(store)
+        if saved.synthetic:
+            raise TrialFolioError(
+                "output.not_empty",
+                "The output directory holds a synthetic experiment, whose values are invented,"
+                " and trialfolio run doesn't resume one, so invented and real attempts never share"
+                " an experiment. Nothing was sent or written. Run the configuration into another"
+                " output directory.",
+            )
+        revision = plan_revision(configuration, versions, saved.plan)
+        # Only now are the records this experiment's: a synthetic experiment, or another
+        # experiment, in the directory has counts that aren't this configuration's.
+        state.experiment = saved
+        plan = saved.plan if revision is None else revision.plan
+        changes = None if revision is None else revision.changes
+    else:
+        saved = None
+        plan = build_experiment_plan(configuration, versions)
+    state.plan = plan
+    invocation.ids["plan_hash"] = plan.plan_hash
+    _logger.info("Built the plan.", extra={**_event("plan.created", False), **invocation.ids})
+    repeats = tuple(RepeatOption(key, attempt) for key, attempt in args.repeat or ())
+    run = ExperimentRun(plan, saved, changes, args.revision_reason, repeats)
+    state.run = run
+    approved = approve_experiment(
+        run, args.approve, stdin=invocation.stdin, stderr=invocation.stderr
+    )
+    _logger.info(
+        "Plan approved (%s).",
+        approved.approval.method,
+        extra={**_event("plan.approved", False), **invocation.ids},
+    )
+    client = _experiment_client(invocation, sends=approved.sends)
+    execution = ExperimentExecution(
+        plan,
+        approved.approval.plan_hash,
+        approved.approval.method,
+        store,
+        client,
+        command=ExperimentCommandRecord(
+            name="run",
+            # No path: one can name the user, and the manifest is in the output directory.
+            options={
+                "approve": args.approve,
+                "json": args.json,
+                "revision_reason": args.revision_reason is not None,
+                "repeat": bool(args.repeat),
+            },
+            started_at=started_at,
+        ),
+        clock=invocation.clock,
+        experiment=saved,
+        reason=args.revision_reason,
+        repeats=approved.repeats,
+    )
+    state.execution = execution
+    try:
+        error = execution.run(
+            content,
+            on_claimed=lambda: (
+                invocation.resuming(args.out) if state.resume else invocation.claimed(args.out)
+            ),
+        )
+    finally:
+        client.close()
+    if error is not None and error.code == "execution.partial":
+        return _with_repeat_options(error, plan, execution.repeat_attempts)
+    if error is None:
+        invocation.result = _experiment_result(args.out, plan, execution)
+    return error
+
+
+def _experiment_client(invocation: _Invocation, *, sends: bool) -> "ScreenBacktestClient":
+    """The session's client: Portfolio123's, with the credentials, when a case is due or to be
+    repeated, and otherwise one that sends nothing, so a run that sends nothing needs no
+    credentials (running an experiment, step 7)."""
+    if not sends:
+        return _NothingToSend()
+    credentials = _credentials(invocation.environ)
+
+    from trialfolio.provider import P123ScreenBacktestClient
+
+    timeout = {} if invocation.timeout is None else {"timeout": invocation.timeout}
+    return P123ScreenBacktestClient(credentials, endpoint=invocation.endpoint, **timeout)
+
+
+class _NothingToSend:
+    """The client of a session with no case due or to repeat, which sends nothing."""
+
+    @property
+    def authenticated(self) -> bool:
+        return False
+
+    @property
+    def exchanges(self) -> tuple[Exchange, ...]:
+        return ()
+
+    def authenticate(self) -> None:
+        raise RuntimeError("a session with nothing to send authenticated")
+
+    def screen_backtest(self, params: object) -> NoReturn:
+        raise RuntimeError("a session with nothing to send sent a request")
+
+    def close(self) -> None:
+        pass
+
+
+def _with_repeat_options(
+    error: TrialFolioError, plan: PlanV1_1, repeat_attempts: dict[str, uuid.UUID]
+) -> TrialFolioError:
+    """`execution.partial`, with the exact `--repeat` option for each case awaiting a repeat."""
+    awaiting = [case for case in plan.cases if case.case_id in repeat_attempts]
+    if not awaiting:
+        return error
+    options = "; ".join(
+        f"--repeat {case.case_key}:{repeat_attempts[case.case_id]}" for case in awaiting
+    )
+    each = "the case" if len(awaiting) == 1 else "each case"
+    return TrialFolioError(
+        error.code,
+        f"{error.message} To repeat {each} awaiting a repeat, which may be charged again, run the"
+        f" same command with its option: {options}.",
+        f"{error.log_message} {len(awaiting)} of the planned cases await a repeat.",
+    )
+
+
+def _experiment_result(out: str, plan: PlanV1_1, execution: "ExperimentExecution") -> list[str]:
+    report = execution.report
+    lines = [
+        f"Experiment completed: {out}",
+        f"Session {execution.session}: every one of the {len(plan.cases)} planned cases succeeded.",
+    ]
+    if report is not None:
+        lines.append(f"Report: {os.path.join(out, report.path)}")
+    lines += [
+        f"Plan hash: {plan.plan_hash}",
+        "Statistical validation and trading readiness: not assessed.",
+    ]
+    return lines
+
+
+def _session_file(session: int, name: str) -> str:
+    return f"sessions/{session}/{name}"
 
 
 def _demo(invocation: _Invocation) -> TrialFolioError | None:
