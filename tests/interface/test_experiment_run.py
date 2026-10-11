@@ -7,11 +7,11 @@ and without a terminal only the plan hash and the budget are), R03-AC03's (the f
 `experiment.json`), and to docs/contracts.md, running an experiment (the directory a resume takes
 the lock of, the installed versions, which a resume checks once it holds the lock and before it
 reads the records, a synthetic experiment, which `run` doesn't resume, and the credentials a
-resume needs only when it sends) and CLI behavior (the summary on stdout). Through the CLI's entry
-function in the test process, with the real client, `requests`, and `urllib3` over the fake
-server. The terminal is a real pseudo-terminal in the test process, except for R03-AC01's check
-that nothing is sent until `approve` is typed, which runs the command under the test launcher, in
-its own process.
+resume needs only when it sends) and CLI behavior (the summary on stdout, and where stderr says the
+records are, with the output directory escaped). Through the CLI's entry function in the test
+process, with the real client, `requests`, and `urllib3` over the fake server. The terminal is a
+real pseudo-terminal in the test process, except for R03-AC01's check that nothing is sent until
+`approve` is typed, which runs the command under the test launcher, in its own process.
 """
 
 import hashlib
@@ -288,6 +288,25 @@ def test_a_partial_experiment_prints_nothing_on_stdout_and_says_where_its_record
     assert outcome.stdout == ""
     assert "Error (execution.partial): 1 of the 5 planned cases didn't succeed" in outcome.stderr
     assert f"The experiment's records are in {out}." in outcome.stderr
+
+
+def test_where_the_experiments_records_are_escapes_the_output_directory(
+    cli: Cli, experiments: Builder
+) -> None:
+    # R03-T13's review: stderr named the output directory as given, so a control character in
+    # it could act on the terminal, though an error message escapes each path it names.
+    cli.ready()
+    out = cli.tmp / "experiment \x1b[2J"
+
+    outcome = experiments.run(
+        EXAMPLE, out, sends=[returns(), returns(), UNAVAILABLE, returns(), returns()]
+    )
+
+    assert error_code(outcome) == "execution.partial"
+    escaped = str(out).replace("\x1b", "\\u001b")
+    assert f"The experiment's records are in {escaped}." in outcome.stderr
+    assert "\x1b" not in outcome.stderr
+    assert outcome.summary["output_dir"] == str(out)
 
 
 # The output directory and the credentials

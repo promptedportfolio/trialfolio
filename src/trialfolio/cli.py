@@ -480,10 +480,13 @@ class _Invocation:
         try:
             if error is not None:
                 self.stderr.write(f"Error ({error.code}): {error.message}\n")
-                if self.experiment is not None and self._output_dir() is not None:
-                    self.stderr.write(f"The experiment's records are in {self._output_dir()}.\n")
+                # `--out` as given, escaped as an error message escapes a path, so it can't act
+                # on the terminal; the summary's `output_dir` keeps it as given.
+                output_dir = self._output_dir()
+                if self.experiment is not None and output_dir is not None:
+                    self.stderr.write(f"The experiment's records are in {_shown(output_dir)}.\n")
                 elif self.output_dir is not None and self.name in ("run", "demo"):
-                    self.stderr.write(f"The run's records are in {self.output_dir}.\n")
+                    self.stderr.write(f"The run's records are in {_shown(self.output_dir)}.\n")
                 self.stderr.flush()
             self.stdout.write(result)
             self.stdout.flush()
