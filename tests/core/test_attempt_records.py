@@ -468,6 +468,30 @@ def test_without_its_attempt_record_a_start_record_reads_as_running(
     )
 
 
+def test_an_attempt_record_published_before_a_storage_failure_counts_as_written(
+    server: FakePortfolio123,
+    client: P123ScreenBacktestClient,
+    store: StorageFaults,
+    attempt: Attempt,
+    out: Path,
+) -> None:
+    # R03-T13's review: the store can publish attempt.json and then fail a later step of its
+    # write, such as the directory's sync. The result read as unrecorded, so the command took the
+    # attempt for a running one, while its record, and every later reader, says it succeeded.
+    answers(server, Reply(200, json.dumps(PAYLOAD).encode()))
+    store.fail_after(
+        "attempt.json", TrialFolioError("storage.write_failed", "Couldn't sync the directory.")
+    )
+
+    result = attempt.run(client)
+
+    record = check_recorded(out, attempt, result)
+    assert record.outcome == "succeeded"
+    assert result.error is not None
+    assert result.error.code == "storage.write_failed"
+    assert [f.role for f in result.files].count("attempt_record") == 1
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows has no SIGKILL")
 def test_a_run_killed_while_the_response_is_awaited_leaves_a_start_record_read_as_running(
     server: FakePortfolio123, tmp_path: Path

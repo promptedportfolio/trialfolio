@@ -1040,6 +1040,80 @@ def test_a_metrics_table_written_without_its_settings_table_is_counted(
     assert counts["metrics_unavailable"] == unavailable_rows(out, summary) > 0
 
 
+def sync_failure() -> TrialFolioError:
+    """A storage failure after the store published the file, as when the directory's sync
+    fails."""
+    return TrialFolioError("storage.write_failed", "Couldn't sync the directory.")
+
+
+def test_an_attempt_record_published_before_its_write_failed_is_read_as_written(
+    cli: Cli, experiments: ExperimentBuilder[Outcome], faults: FaultyStores
+) -> None:
+    # R03-T13's review: the summary read the first case's attempt as running, so unknown,
+    # awaiting a repeat, and without its cost, though its published record says it succeeded,
+    # and the repeat the summary gave then failed with plan.approval_required.
+    cli.ready()
+    out = cli.tmp / "experiment"
+    faults.fail_after("attempt.json", sync_failure())
+
+    summary = experiment_summary_of(
+        experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
+    )
+
+    assert cast("dict[str, str]", summary["error"])["code"] == "storage.write_failed"
+    (path,) = out.glob("cases/*/attempts/*/attempt.json")
+    record = AttemptRecordV1_1.model_validate_json(path.read_bytes())
+    assert record.outcome == "succeeded"
+    first = cast("list[dict[str, str | None]]", summary["cases"])[0]
+    assert (first["case_id"], first["outcome"], first["repeat_attempt_id"]) == (
+        record.case_id,
+        "succeeded",
+        None,
+    )
+    counts = cast("dict[str, int | None]", summary["counts"])
+    assert (counts["cases_succeeded"], counts["cases_unknown"], counts["cost"]) == (
+        1,
+        0,
+        record.provider_metadata.cost,
+    )
+    # A resume reads the records the same way.
+    resumed = experiment_summary_of(experiments.run(EXAMPLE, out, approve=False))
+    assert resumed["cases"] == summary["cases"]
+    assert without_warnings(cast("dict[str, int | None]", resumed["counts"])) == without_warnings(
+        counts
+    )
+
+
+def test_an_attempt_record_a_resume_published_before_its_write_failed_is_counted(
+    cli: Cli,
+    experiments: ExperimentBuilder[Outcome],
+    faults: FaultyStores,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # R03-T13's review: the first run leaves the first case's attempt running, with its response
+    # saved. The resume's step 8 publishes its attempt record, and then the write fails. The
+    # summary left the record's cost out, though the records hold it.
+    cli.ready()
+    out = cli.tmp / "experiment"
+    faults.fail_os("attempt.json")
+    first = experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
+    assert first.exit_code == 4
+    resume = FaultyStores(monkeypatch)
+    resume.fail_after("attempt.json", sync_failure())
+
+    summary = experiment_summary_of(experiments.run(EXAMPLE, out, store_factory=resume))
+
+    assert cast("dict[str, str]", summary["error"])["code"] == "storage.write_failed"
+    assert [path for path in resume.published if path.endswith("/attempt.json")] != []
+    counts = cast("dict[str, int | None]", summary["counts"])
+    assert counts["cost"] is not None
+    records = experiment_summary_of(experiments.run(EXAMPLE, out, approve=False))
+    assert summary["cases"] == records["cases"]
+    assert without_warnings(counts) == without_warnings(
+        cast("dict[str, int | None]", records["counts"])
+    )
+
+
 class RefusingLock(LocalArtifactStore):
     """The output directory's store, whose experiment lock is refused with `code`: as another
     process's, at a new experiment's claim, or by the file system, at a resume's lock. An

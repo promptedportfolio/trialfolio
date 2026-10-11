@@ -80,6 +80,7 @@ from trialfolio.attempts import (
     request_detail,
     utc_now,
 )
+from trialfolio.canonical import sha256_hex
 from trialfolio.configuration import experiment_original_values, read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1
 from trialfolio.contracts.common import (
@@ -825,7 +826,17 @@ class ExperimentExecution:
                 continue
             plan = experiment.saved_plan(saved.plan).plan
             record = saved.completed_record(plan, _utc(self._clock()))
-            stored = self._store.write(f"{saved.directory}/{ATTEMPT_RECORD}", _model_json(record))
+            path, data = f"{saved.directory}/{ATTEMPT_RECORD}", _model_json(record)
+            try:
+                stored = self._store.write(path, data)
+            except BaseException:
+                # The store may publish the record and still fail its write, as when the
+                # directory's sync fails. The records then hold it, so the counts read it.
+                published = self._published(path, data)
+                if published is not None:
+                    files = (*saved.files, AttemptFile("attempt_record", published))
+                    self._attempts[place] = _recorded(record, files)
+                raise
             files = (*saved.files, AttemptFile("attempt_record", stored))
             self._attempts[place] = _recorded(record, files)
             _logger.warning(
@@ -1042,6 +1053,16 @@ class ExperimentExecution:
             self._metrics_alone[case_id] = read_metrics_csv(self._store.read(path), path)
         except (OSError, TrialFolioError):
             return  # Never published, or not readable: a resume's records check reads it.
+
+    def _published(self, path: str, data: bytes) -> StoredFile | None:
+        """The file `path`, if a write of `data` that failed published it whole."""
+        try:
+            published = self._store.read(path) == data
+        except OSError:
+            return None  # Never published, or not readable: a resume's records check reads it.
+        if not published:
+            return None
+        return StoredFile(path=path, artifact_id="sha256:" + sha256_hex(data), size=len(data))
 
     def _case_invalid(self, case_id: str, failure: TrialFolioError) -> None:
         self._invalid[case_id] = failure
