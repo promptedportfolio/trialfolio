@@ -452,8 +452,21 @@ def test_after_a_403_the_next_case_authenticates_again(experiments: Experiments)
             2,
             "provider.auth_failed",
         ),
+        (
+            [AUTHENTICATED, Reply(503)],
+            [complete(), Reply(403)],
+            (AUTH, SEND, SEND, AUTH),
+            2,
+            "provider.unavailable",
+        ),
     ],
-    ids=["authentication-401", "authentication-503", "quota-402", "authentication-after-403"],
+    ids=[
+        "authentication-401",
+        "authentication-503",
+        "quota-402",
+        "authentication-after-403",
+        "authentication-503-after-403",
+    ],
 )
 def test_after_a_failure_every_later_case_would_get_no_later_case_starts(
     experiments: Experiments,
@@ -1074,7 +1087,9 @@ def test_before_each_authentication_call_the_budget_counts_every_earlier_session
 
     error = third.error
     assert error is not None and error.code == "execution.partial"
-    assert "budget couldn't cover the next case" in error.message
+    # A corrected defect: the message gave the provider requests' stop, though 2 remain.
+    assert "The experiment's budget of authentication calls is spent" in error.message
+    assert "budget couldn't cover the next case" not in error.message
     assert third.received == ()
     counts = third.manifest_of(3).counts
     assert (counts.provider_requests, counts.authentication_calls) == (0, 2)

@@ -1,12 +1,17 @@
 """The built wheel installs in a new virtual environment, offline, and its `trialfolio demo` runs
 there under the network guard, and writes a run labeled synthetic. Its `trialfolio init` writes
-the starter files from the installed package (R01-AC33), and its `trialfolio review` compares two
-runs its `trialfolio demo` wrote.
+the starter files from the installed package (R01-AC33), its `trialfolio review` compares two
+runs its `trialfolio demo` wrote, and its `trialfolio run` of an experiment's configuration shows
+the plan and sends nothing without approval.
 
 Traces to R01-AC16 (clean install: the wheel installs, and `trialfolio demo --out <dir>` runs
 offline with `TRIALFOLIO_ACCEPT_LICENSE` set and exits 0, labeled synthetic), in the form release
-0.1.0's test pairing gives, and to the packaging part of R02-AC05 (the installed `trialfolio
-review` of two runs the installed `trialfolio demo` wrote exits 0 under the network guard). The
+0.1.0's test pairing gives; to the packaging part of R02-AC05 (the installed `trialfolio review`
+of two runs the installed `trialfolio demo` wrote exits 0 under the network guard); and to the
+packaging part of R03-AC01 (the installed `trialfolio run` of `example.yaml`, without
+`--approve`, gives the summary the interface check gives: `plan.approval_required`, exit 2, no
+output directory, and `ids.plan_hash` and `cases`, with every case's key and `case_id`, with the
+plan hash the test computes with the core). The
 locked runtime dependencies are exported with their hashes as `pylock.toml`, installed from uv's
 cache, which `uv sync` filled, and the wheel then without dependencies, so the versions come from
 `uv.lock` and nothing is downloaded. The environment is installed once for the module. The
@@ -27,8 +32,10 @@ import pytest
 from tests.packaging.conftest import ROOT, run_uv
 from tests.support.html_report import parse
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
+from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.contracts.review_manifest import ReviewManifest
+from trialfolio.planning import build_experiment_plan, installed_versions
 from trialfolio.userdirs import CONFIG_DIRECTORY_VARIABLE, LOG_DIRECTORY_VARIABLE
 
 pytestmark = pytest.mark.packaging
@@ -179,3 +186,47 @@ def test_the_installed_review_compares_two_demo_runs_offline(
     assert (out / "logs" / "trialfolio.log").is_file()
     assert not (tmp_path / "config").exists()
     assert not (tmp_path / "logs").exists()
+
+
+EXAMPLE = ROOT / "tests" / "fixtures" / "experiment-configs" / "example.yaml"
+
+
+def test_the_installed_run_of_an_experiment_without_approval_gives_its_plan_and_sends_nothing(
+    environment: Path, tmp_path: Path
+) -> None:
+    env = demo_environment(tmp_path)
+    out = tmp_path / "experiment"
+    plan = build_experiment_plan(
+        read_experiment_configuration(EXAMPLE.read_bytes(), str(EXAMPLE)), installed_versions()
+    )
+
+    result = run(
+        [command(environment, "trialfolio"), "run", EXAMPLE, "--out", out, "--json"], tmp_path, env
+    )
+
+    assert result.returncode == 2, result.stderr
+    summary = json.loads(result.stdout)
+    assert (summary["command"], summary["outcome"], summary["exit_code"]) == ("run", "failed", 2)
+    assert summary["error"]["code"] == "plan.approval_required"
+    assert summary["ids"] == {"experiment_id": "earnyield-sensitivity", "plan_hash": plan.plan_hash}
+    assert summary["cases"] == [
+        {
+            "case_key": case.case_key,
+            "case_id": case.case_id,
+            "outcome": "not_yet_run",
+            "repeat_attempt_id": None,
+        }
+        for case in plan.cases
+    ]
+    assert [case["case_key"] for case in summary["cases"]] == [
+        "baseline",
+        "liquidity-100m",
+        "holdings-50",
+        "rebalance-weeks-1",
+        "slippage-050",
+    ]
+    assert summary["output_dir"] is None
+    assert not out.exists()
+    # Without a terminal, the plan is shown by its hash and its budget.
+    assert f"Plan hash: {plan.plan_hash}" in result.stderr
+    assert "Budget: at most 6 provider requests" in result.stderr

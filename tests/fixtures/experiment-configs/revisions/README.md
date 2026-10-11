@@ -6,21 +6,21 @@ Synthetic experiment configurations, each [`example.yaml`](../example.yaml) with
 - **Schema version:** [experiment configuration](../../../../docs/contracts.md#experiment-configuration) 1.0.0.
 - **Redistribution:** synthetic, so they may be committed and shared.
 
-R03-T07 wrote these files, for `tests/core/test_experiment_plan.py`, which plans `example.yaml`, or `two-holdings.yaml`, and then each file as its revision, for R03-AC07's core check, and for R03-AC02's with `key-renamed.yaml` and `two-holdings-reordered.yaml`. The last column gives the criteria that the tests later tasks write use each one for. R03-T11 wrote one more, `default-only-budget-3.yaml`, [`default-only.yaml`](../default-only.yaml) with one change, for R03-AC10.
+R03-T07 wrote these files, for `tests/core/test_experiment_plan.py`, which plans `example.yaml`, or `two-holdings.yaml`, and then each file as its revision, for R03-AC07's core check, and for R03-AC02's with `key-renamed.yaml` and `two-holdings-reordered.yaml`. The last column gives the criteria that the later tasks' tests use each one for, R03-T13's and R03-T11's. R03-T11 wrote one more, `default-only-budget-3.yaml`, [`default-only.yaml`](../default-only.yaml) with one change, for R03-AC10.
 
 | File | The change | What it is to the plan before it | Later criteria |
 |---|---|---|---|
-| `holdings-40.yaml` | `holdings-50`'s value is 40, under its key | A revision that adds a case and retires one, both keyed `holdings-50` | R03-AC03, R03-AC07 |
+| `holdings-40.yaml` | `holdings-50`'s value is 40, under its key | A revision that adds a case and retires one, both keyed `holdings-50` | R03-AC03, R03-AC07, R03-AC08, R03-AC11, R03-AC16 |
 | `key-renamed.yaml` | `holdings-50` is keyed `max-holdings-50` | A revision of `case_keys`, which keeps every case's `case_id` | R03-AC02, R03-AC07 |
 | `description-changed.yaml` | `liquidity-100m`'s description changed | A revision of `case_descriptions` | R03-AC07 |
 | `purpose-changed.yaml` | The purpose changed | A revision of `purpose` | R03-AC03, R03-AC07 |
 | `prior-research-changed.yaml` | The prior-research declaration is `complete`, with another description | A revision of `prior_research` | R03-AC07 |
-| `budget-raised.yaml` | A budget of 8 | A revision of `budget` | R03-AC07 |
-| `budget-lowered.yaml` | A budget of 5 | A revision of `budget` | R03-AC10 |
-| `variant-removed.yaml` | `slippage-050` removed | A revision that retires its case | R03-AC03, R03-AC07 |
+| `budget-raised.yaml` | A budget of 8 | A revision of `budget` | R03-AC07, R03-AC11 |
+| `budget-lowered.yaml` | A budget of 5 | A revision of `budget` | R03-AC08, R03-AC10 |
+| `variant-removed.yaml` | `slippage-050` removed | A revision that retires its case | R03-AC03, R03-AC07, R03-AC08 |
 | `default-explicit.yaml` | A `rebalance_weeks` list that gives the default variant's value, 1, under its key | A revision of `case_variants`: the case is kept, and its `default` is false | R03-AC07 |
-| `other-experiment-id.yaml` | Another `experiment_id` | Another experiment, not a revision: `output.not_empty` | R03-AC07 |
-| `other-universe.yaml` | The universe `'Easy to Trade US'` | Another experiment, not a revision: `output.not_empty` | R03-AC07 |
+| `other-experiment-id.yaml` | Another `experiment_id` | Another experiment, not a revision: `output.not_empty` | R03-AC07, R03-AC16 |
+| `other-universe.yaml` | The universe `'Easy to Trade US'` | Another experiment, not a revision: `output.not_empty` | R03-AC07, R03-AC16 |
 | `two-holdings.yaml` | Two `max_holdings` variants, `holdings-40` and then `holdings-50` | A revision that adds `holdings-40` | R03-AC07 |
 | `two-holdings-reordered.yaml` | From `two-holdings.yaml`: its two variants in the other order | To `two-holdings.yaml`'s plan, a revision of `case_order` that keeps every case | R03-AC07 |
-| `default-only-budget-3.yaml` | From `default-only.yaml`: a budget of 3 | To `default-only.yaml`'s plan, a revision of `budget` | R03-AC10 |
+| `default-only-budget-3.yaml` | From `default-only.yaml`: a budget of 3 | To `default-only.yaml`'s plan, a revision of `budget` | R03-AC08, R03-AC10 |
