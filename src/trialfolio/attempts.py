@@ -32,6 +32,10 @@ same way.
 
 No file is written twice, and none is replaced. The outcome follows the request's exchange and
 whether the response was saved. An interrupt or a storage failure decides only the error code.
+A file before the attempt record that the store published before its write failed, whatever the
+failure, is among the attempt's files all the same, so a manifest written later lists every file
+the attempt wrote. The attempt record references a request or a response only when its write
+completed.
 
 - **`request.json`** is `json.dumps` of the `params` sent, indented. `requests` writes the body
   with the same function, unindented, so each number's text is the body's. Non-ASCII text is
@@ -42,6 +46,9 @@ whether the response was saved. An interrupt or a storage failure decides only t
   surrogate the decoder accepted is written back as it came. So are `NaN` and `Infinity`.
 - **`provider_metadata`** takes `cost` and `quotaRemaining` from the top level of a decoded
   response. Each is null when it's absent or isn't a non-negative integer.
+- **`ended_at`** is the clock's time when the attempt ends, or its start time when the clock
+  reads earlier, as after the wall clock moved backward during the attempt, so the attempt record
+  can still be written.
 - **Logs** name the plan hash, the case, and the attempt, and give the outcome, the error code,
   and the duration. For an unexpected exception they give its type and frames, never its message,
   which could hold a value.
@@ -575,13 +582,11 @@ class Attempt:
         ending: BaseException | None = None
         try:
             client.authenticate()
-            self._files.write_request(self._params)
+            self._files.write_request(self._params, list_published=True)
             # Exactly the authentication exchange; the model refuses anything else.
             exchanges = cast("tuple[Exchange]", client.exchanges)
-            start = StartRecord(**self._identity, exchanges=exchanges)
-            self._files.write(START_RECORD, _model_json(start), "start_record")
-            self._start = start
-            self._files.save(client.screen_backtest(self._params))
+            self._write_start(StartRecord(**self._identity, exchanges=exchanges))
+            self._files.save(client.screen_backtest(self._params), list_published=True)
         except KeyboardInterrupt as interrupt:
             ending = interrupt
         # Every ending is recorded. An unexpected one is classified, and logged by its frames.
@@ -606,9 +611,21 @@ class Attempt:
             raise RuntimeError("an attempt ends once")
         self._ended = True
 
+    def _write_start(self, start: StartRecord) -> None:
+        """Writes the start record. After a failure while it's written, whatever the failure, a
+        record the store published counts as written, as an `ExperimentAttempt`'s does."""
+        data = _model_json(start)
+        try:
+            self._files.write(START_RECORD, data, "start_record")
+        except BaseException:
+            if self._files.published(START_RECORD, data, "start_record"):
+                self._start = start
+            raise
+        self._start = start
+
     def _end(self, exchanges: tuple[Exchange, ...], ending: BaseException | None) -> AttemptResult:
         def record(end: _Ending, error: TrialFolioError | None) -> AttemptRecord:
-            fields = self._files.ending_fields(end, error, _utc(self._clock()))
+            fields = self._files.ending_fields(end, error, _ended(self._clock, self.started_at))
             return AttemptRecord(**self._identity, **fields, exchanges=exchanges)
 
         written, recorded, error = self._files.end(exchanges, ending, record)
@@ -838,7 +855,7 @@ class ExperimentAttempt:
         self, exchanges: tuple[Exchange, ...], ending: BaseException | None
     ) -> ExperimentAttemptResult:
         def record(end: _Ending, error: TrialFolioError | None) -> AttemptRecordV1_1:
-            fields = self._files.ending_fields(end, error, _utc(self._clock()))
+            fields = self._files.ending_fields(end, error, _ended(self._clock, self._started_at))
             return AttemptRecordV1_1(
                 **self._placed(),
                 authenticated_by=None if self._start is None else self._start.authenticated_by,
@@ -898,6 +915,13 @@ def _utc(moment: datetime) -> datetime:
     if moment.utcoffset() != timedelta(0):
         raise ValueError("the clock must give UTC times")
     return moment
+
+
+def _ended(clock: Clock, started_at: datetime) -> datetime:
+    """When the attempt ended, for its record: the clock's time, or `started_at` when the clock
+    reads earlier, as after the wall clock moved backward during the attempt. An attempt record
+    never ends before it starts, so it can still be written."""
+    return max(_utc(clock()), started_at)
 
 
 def _outcome(send: Exchange | None, *, saved: bool) -> Outcome:

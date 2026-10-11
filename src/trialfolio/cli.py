@@ -646,7 +646,8 @@ def _demo(invocation: _Invocation) -> TrialFolioError | None:
 def _report(invocation: _Invocation) -> TrialFolioError | None:
     args = invocation.args
     _require_acknowledgment(invocation)
-    if not os.path.exists(args.run_dir):
+    run_dir = _resolved(args.run_dir)
+    if run_dir is None:
         raise TrialFolioError(
             "input.not_found",
             f"The run directory {_shown(args.run_dir)} doesn't exist. Give the output directory of"
@@ -659,10 +660,10 @@ def _report(invocation: _Invocation) -> TrialFolioError | None:
         raise _cant_read_runs(failure) from None
 
     report = rerender_report(
-        LocalArtifactStore(args.run_dir),
+        LocalArtifactStore(run_dir),
         invocation.store_factory(args.out),
         HtmlReportRenderer(invocation.version),
-        run_path=_run_path(args.run_dir, args.out),
+        run_path=_run_path(run_dir, args.out),
     )
     invocation.report = report.path
     invocation.claimed(args.out)
@@ -875,11 +876,31 @@ def _cant_read_runs(failure: ImportError) -> TrialFolioError:
     )
 
 
+def _resolved(run_dir: str) -> str | None:
+    """The run directory at the one path the file system resolves, as a review finds its runs, or
+    None when nothing exists there. A `..` after a symbolic link leads to the parent of the
+    link's target, as opening the path does, not where the store's `abspath` would lead, by
+    removing it with the segment before it."""
+    try:
+        # Whether anything exists there, as opening the path finds it. realpath alone can't tell:
+        # Python 3.12's removes a `..` after a file, which the file system refuses.
+        os.stat(run_dir)
+        return os.path.realpath(run_dir, strict=True)
+    except (OSError, ValueError):
+        # A link leads to nothing, a part can't be read or is a file, or the path holds a NUL.
+        return None
+
+
 def _run_path(run_dir: str, out: str) -> str | None:
     """The run's directory relative to the report's, with `/` separators, or None when there's
-    no relative path, as between two Windows drives."""
+    no relative path, as between two Windows drives. Both are where the file system puts them:
+    `run_dir` is resolved already, and the report's directory is resolved here, so the path
+    reaches the run from where the report is, and a symbolic link above both, such as macOS's
+    `/tmp`, stays out of it."""
     try:
-        relative = os.path.relpath(os.path.abspath(run_dir), os.path.abspath(out))
+        # The store's `abspath` first, which removes the output directory's `..` as text.
+        report_dir = os.path.realpath(os.path.abspath(out))
+        relative = os.path.relpath(run_dir, report_dir)
     except ValueError:
         return None
     return Path(relative).as_posix()

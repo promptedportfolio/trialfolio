@@ -28,16 +28,17 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import override
 
 import pytest
 
 from tests.support import canaries
-from tests.support.clock import FixedClock
+from tests.support.clock import STARTED, BackwardClock, FixedClock
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.storage_faults import StorageFaults
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1, AuthenticationRecord, StartRecordV1_1
-from trialfolio.contracts.experiment_manifest import ExperimentManifest
+from trialfolio.contracts.experiment_manifest import ExperimentCommandRecord, ExperimentManifest
 from trialfolio.contracts.experiment_plan import PlanV1_1
 from trialfolio.contracts.experiment_record import ExperimentRecord, SessionRecord
 from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
@@ -52,7 +53,7 @@ from trialfolio.experiment_execution import (
 from trialfolio.experiment_records import open_experiment
 from trialfolio.planning import build_experiment_plan, installed_versions
 from trialfolio.provider import Credentials, P123ScreenBacktestClient
-from trialfolio.storage import ArtifactStore, LocalArtifactStore
+from trialfolio.storage import ArtifactStore, LocalArtifactStore, StoredFile
 from trialfolio.tables import read_metrics_csv, read_settings_csv
 
 CONFIGS = Path(__file__).resolve().parents[1] / "fixtures" / "experiment-configs"
@@ -271,9 +272,18 @@ def test_the_records_are_written_in_order_and_none_twice(
     experiments.server.reply("/auth", AUTHENTICATED)
     experiments.server.reply("/screen/backtest", complete(), complete())
     wrapped: list[StorageFaults] = []
+    received: dict[str, int] = {}
+    """How many requests the server had received when each file was published."""
+
+    class Observed(StorageFaults):
+        @override
+        def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
+            stored = super().write(path, data, logged_as=logged_as)
+            received[path] = len(experiments.server.received)
+            return stored
 
     def faults(store: LocalArtifactStore) -> StorageFaults:
-        wrapped.append(StorageFaults(store, monkeypatch))
+        wrapped.append(Observed(store, monkeypatch))
         return wrapped[0]
 
     executed = experiments.run("default-only.yaml", faults=faults)
@@ -308,6 +318,10 @@ def test_the_records_are_written_in_order_and_none_twice(
         "sessions/1/report.html",
         "sessions/1/manifest.json",
     ]
+    # The authentication record is durable before the call it records, so the budget counts a
+    # call even when the process is killed during it; and the start record before the send.
+    names = ("authenticating.json", "request.json", "started.json", "response.json")
+    assert [received[f"{baseline}/attempts/{first}/{name}"] for name in names] == [0, 1, 1, 2]
 
 
 def test_the_session_and_plan_records_and_the_manifest_account_for_every_file(
@@ -605,6 +619,44 @@ def test_the_demos_client_needs_no_approval_and_nothing_else_does(tmp_path: Path
     ):
         ExperimentExecution(plan, plan.plan_hash, "not_required", store, real, command=None)
     assert not (tmp_path / "out").exists()
+
+
+def test_no_trialfolio_command_writes_a_synthetic_experiment(tmp_path: Path) -> None:
+    # Refused before anything is written: the session's manifest would refuse the command record
+    # only at its end, once every case had run, and leave the session without one.
+    _, plan = plan_of("default-only.yaml")
+    synthetic = SyntheticScreenBacktestClient(response_bytes())
+    store = LocalArtifactStore(tmp_path / "out")
+    command = ExperimentCommandRecord(
+        name="run",
+        options={"approve": None, "json": False, "revision_reason": False, "repeat": False},
+        started_at=STARTED,
+    )
+    with pytest.raises(ValueError, match="no trialfolio command"):
+        ExperimentExecution(plan, plan.plan_hash, "not_required", store, synthetic, command=command)
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_clock_that_moves_backward_during_an_attempt_still_ends_it_with_its_record(
+    tmp_path: Path,
+) -> None:
+    # A corrected defect: an attempt's end, by the clock, came before its start, which the
+    # attempt record refuses, so the session ended without the attempt's record.
+    content, plan = plan_of("default-only.yaml")
+    client = SyntheticScreenBacktestClient(response_bytes())
+    out = tmp_path / "out"
+    with LocalArtifactStore(out) as store:
+        error = ExperimentExecution(
+            plan, plan.plan_hash, "not_required", store, client, command=None, clock=BackwardClock()
+        ).run(content)
+
+    assert error is None
+    for case_id in ids(plan):
+        (attempt,) = (out / "cases" / case_id / "attempts").iterdir()
+        record = AttemptRecordV1_1.model_validate_json((attempt / "attempt.json").read_bytes())
+        assert record.outcome == "succeeded"
+        assert record.ended_at == record.started_at
+    assert (out / "sessions/1/manifest.json").is_file()
 
 
 # Before anything is sent
@@ -948,6 +1000,23 @@ def test_an_interrupt_once_the_first_plan_is_published_leaves_it_to_resume(
     assert "running the same command again resumes it" in error.message
     assert "remove the directory" not in error.message
     assert executed.received == ()
+
+
+def test_a_failed_authentication_at_the_last_case_stops_nothing_else(
+    experiments: Experiments,
+) -> None:
+    # The baseline's 403 drops the token, so the default case, the last, authenticates again,
+    # and gets a 401. D-32's stop applies only when a later case remains.
+    experiments.server.reply("/auth", AUTHENTICATED, Reply(401))
+    experiments.server.reply("/screen/backtest", Reply(403))
+
+    executed = experiments.run("default-only.yaml")
+
+    assert executed.received == (AUTH, SEND, AUTH)
+    assert outcomes(executed) == ["failed", "failed"]
+    error = executed.error
+    assert error is not None and error.code == "execution.partial"
+    assert "no later case started" not in error.message
 
 
 def test_a_quota_refusal_of_the_last_case_stops_nothing_else(experiments: Experiments) -> None:

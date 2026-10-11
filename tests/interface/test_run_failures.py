@@ -8,9 +8,12 @@ rejected-request, and response-validation errors) and R01-AC06 (a simulated read
 release 0.1.0's failure table, through the CLI's entry function in the test process, with the real
 client, `requests`, and `urllib3` over the fake server. An unexpected exception after the attempt,
 injected by storage faults, says what the attempt's records say about the request (R01-T14), and
-one while `configuration.yaml` is saved leaves no manifest, which would have to list it.
+one while `configuration.yaml` is saved leaves no manifest, which would have to list it. One
+after the store published an attempt's file still leaves a manifest that lists the file
+(docs/contracts.md, execution outcomes and attempts; a corrected defect, 2026-10-10).
 """
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -326,6 +329,66 @@ def test_a_read_timeout_records_an_unknown_attempt_sent_once(cli: Cli) -> None:
     manifest = accounted_for(out, "provider.outcome_unknown")
     assert manifest.counts.attempts.unknown == 1
     assert manifest.counts.provider_requests == 1
+
+
+# A file published before an unexpected failure during the attempt
+
+
+@pytest.mark.parametrize(
+    ("name", "role", "code", "ended"),
+    [
+        ("request.json", "provider_request", "internal.unexpected", "failed"),
+        ("started.json", "start_record", "internal.unexpected", "failed"),
+        ("response.json", "provider_response", "provider.outcome_unknown", "unknown"),
+    ],
+)
+def test_a_file_published_before_an_unexpected_failure_is_in_the_manifest(
+    cli: Cli, faults: FaultyStores, name: str, role: str, code: str, ended: str
+) -> None:
+    # A corrected defect: the attempt left out a file its write published before the failure, so
+    # the run's manifest didn't list every file of the run.
+    cli.ready()
+    serve_success(cli.server)
+    faults.fail_after(name, RuntimeError("its own message"))
+    path = config("formula.yaml")
+    out = cli.tmp / "out"
+
+    outcome = cli(
+        "run",
+        path,
+        "--out",
+        out,
+        "--approve",
+        plan_hash_for(path),
+        "--json",
+        store_factory=faults,
+    )
+
+    assert error_of(outcome)["code"] == code
+    record = the_attempt(out)
+    assert record.outcome == ended
+    # Only a write that completed is referenced: a 200 whose response.json was published before
+    # the failure is unknown, as one whose save failed.
+    assert record.response is None
+    assert cli.server.requests() == ([AUTH, BACKTEST] if name == "response.json" else [AUTH])
+    manifest = accounted_for(out, code)
+    listed = {artifact.path: artifact for artifact in manifest.artifacts}
+    (published,) = (out / "cases").glob(f"*/attempts/*/{name}")
+    content = published.read_bytes()
+    entry = listed[published.relative_to(out).as_posix()]
+    assert (entry.role, entry.artifact_id, entry.size) == (
+        role,
+        "sha256:" + hashlib.sha256(content).hexdigest(),
+        len(content),
+    )
+    written = {
+        file.relative_to(out).as_posix()
+        for file in out.rglob("*")
+        if file.is_file() and file.relative_to(out).parts[0] != "logs"
+    }
+    assert set(listed) == written - {"manifest.json"}
+    # The run reads back as a complete one.
+    assert cli("report", out, "--out", cli.tmp / "report").exit_code == 0
 
 
 # An unexpected exception after the attempt
