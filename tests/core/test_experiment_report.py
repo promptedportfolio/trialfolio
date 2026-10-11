@@ -14,7 +14,9 @@ invented values), and to the report's part of R03-AC08 (the report shows each co
 the manifest's, and a case whose repeat's authentication failed as still `unknown`, by its latest
 possibly charged attempt). The rest trace to the experiment report's rules in docs/contracts.md:
 its status, the baseline's settings, the coverage, the sources and exclusions, the versions,
-section 7's statement of METH-03.2, and the limitations. R03-T11's
+section 7's statement of METH-03.2, and the limitations. The two tests of the singular in the
+missing values trace to R03-AC11's report wording, and to the owner's decision of 2026-10-11 to
+write one unavailable metric, and one case with normalized tables, in the singular. R03-T11's
 `tests/interface/test_experiment_report.py` checks the report through the command.
 
 Each experiment is written through the core during the test, over the fake server, as another
@@ -305,6 +307,20 @@ def _repeated(experiment: Experiment) -> list[Session]:
     return [first, refused, experiment.resume(content, repeats=[repeat], command=command)]
 
 
+def _one_missing(experiment: Experiment) -> list[Session]:
+    """`default-only.yaml`, both cases succeeded: the baseline with `complete.json`, and the
+    default variant with `complete.json` whose `stats.beta` is `null`, its one missing metric."""
+    complete = (RESPONSES / "complete.json").read_bytes()
+    assert b'"beta": 1.04,' in complete
+    experiment.server.reply("/auth", AUTHENTICATED)
+    experiment.server.reply(
+        "/screen/backtest",
+        Reply(200, complete),
+        Reply(200, complete.replace(b'"beta": 1.04,', b'"beta": null,')),
+    )
+    return [experiment.new((CONFIGS / "default-only.yaml").read_bytes())]
+
+
 def _synthetic(experiment: Experiment) -> list[Session]:
     return [experiment.new((CONFIGS / "default-only.yaml").read_bytes(), synthetic=True)]
 
@@ -346,6 +362,7 @@ SCENARIOS: dict[str, Callable[[Experiment, Path], list[Session]]] = {
     "troubled": _troubled,
     "stopped": lambda experiment, _: _stopped(experiment),
     "repeated": lambda experiment, _: _repeated(experiment),
+    "one-missing": lambda experiment, _: _one_missing(experiment),
     "synthetic": lambda experiment, _: _synthetic(experiment),
     "hostile": lambda experiment, _: _hostile(experiment),
 }
@@ -1151,6 +1168,37 @@ def test_the_missing_values_name_their_case_and_reason(sessions: Sessions) -> No
         "3 metrics are unavailable, across the 5 cases with normalized tables. None is shown as"
         " zero."
     ) in document.root.by_id("data").text
+
+
+def test_one_unavailable_metric_is_written_in_the_singular(sessions: Sessions) -> None:
+    # The owner's decision of 2026-10-11. Both cases have tables, so only the metric is singular.
+    document = sessions("one-missing")[0].document
+
+    assert table_after(document, "Missing values") == [
+        [
+            "rebalance-weeks-1",
+            "Beta, strategy (beta)",
+            "Unavailable (blank_in_source): The response gives no value for it.",
+        ]
+    ]
+    assert (
+        "1 metric is unavailable, across the 2 cases with normalized tables. None is shown as zero."
+    ) in document.root.by_id("data").text
+    assert "1 metric is unavailable, with its reason above." in items_after(document, "Limitations")
+
+
+def test_one_case_with_normalized_tables_is_written_in_the_singular(sessions: Sessions) -> None:
+    # The owner's decision of 2026-10-11. The baseline is `unknown`, so only the default variant
+    # has tables, and its response has no periods, so two of its metrics are unavailable.
+    document = sessions("repeated")[0].document
+
+    assert (
+        "2 metrics are unavailable, across the 1 case with normalized tables. None is shown as"
+        " zero."
+    ) in document.root.by_id("data").text
+    assert "2 metrics are unavailable, with their reasons above." in items_after(
+        document, "Limitations"
+    )
 
 
 def test_the_costs_and_assumptions_name_the_cases_that_change_them(sessions: Sessions) -> None:

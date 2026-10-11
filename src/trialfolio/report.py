@@ -3207,9 +3207,11 @@ class _ExperimentReport:
         ]
         if not rows:
             return ["<p>None: every metric of every case with normalized tables is available.</p>"]
+        metrics = "metric is" if len(rows) == 1 else "metrics are"
+        cases = "case" if len(tabled) == 1 else "cases"
         return [
             (
-                f"<p>{len(rows)} metrics are unavailable, across the {len(tabled)} cases with"
+                f"<p>{len(rows)} {metrics} unavailable, across the {len(tabled)} {cases} with"
                 " normalized tables. None is shown as zero.</p>"
             ),
             '<div class="wide"><table>',
@@ -3849,7 +3851,11 @@ class _ExperimentReport:
             )
         unavailable = sum(row.value is None for view in self._cases for row in view.metrics or ())
         if unavailable:
-            items.append(f"{unavailable} metrics are unavailable, with their reasons above.")
+            items.append(
+                "1 metric is unavailable, with its reason above."
+                if unavailable == 1
+                else f"{unavailable} metrics are unavailable, with their reasons above."
+            )
         without = [view.case.case_key for view in self._cases if view.metrics is None]
         if without:
             items.append(
