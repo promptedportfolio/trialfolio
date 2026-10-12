@@ -1,8 +1,9 @@
 """The check of the user manual's built site fails on what UM-AC04, UM-AC06, and UM-AC07 forbid.
 
 Traces to docs/user-manual.md: UM-AC07, a page or a stylesheet that loads a resource from another
-host; UM-AC04, a footer without the non-affiliation notice or the link to LICENSE; and UM-AC06, a
-link between pages whose page or anchor is missing. Each test writes a small site by hand, as the
+host, and a page whose markup turns on a feature for which the theme's script loads code from
+another host; UM-AC04, a footer without the non-affiliation notice or the link to LICENSE; and
+UM-AC06, a link between pages whose page or anchor is missing. Each test writes a small site by hand, as the
 theme lays one out, and runs `scripts/check_manual.py` on it. scripts/check runs the same script
 on the manual's real build.
 """
@@ -158,6 +159,73 @@ def test_an_import_by_url_from_another_host_fails(tmp_path: Path) -> None:
         "assets/extra.css: loads https://example.com/a.css from another host (UM-AC07)",
         "assets/extra.css: loads https://example.com/c.css from another host (UM-AC07)",
     ]
+
+
+def test_a_diagram_fails(tmp_path: Path) -> None:
+    # What a mermaid fence becomes, with the fences Zensical turns on by default.
+    body = '<pre class="mermaid"><code>graph LR\n  A --&gt; B</code></pre>'
+    site = _site(tmp_path, b=_page(body=body))
+
+    assert check_manual.check_site(site) == [
+        (
+            "b.html: has diagrams (pre.mermaid), for which the theme's script loads code from "
+            "another host (UM-AC07)"
+        )
+    ]
+    assert check_manual.main([str(site)]) == 1
+
+
+def test_an_image_lightbox_fails(tmp_path: Path) -> None:
+    # Zensical's lightbox extension wraps an image in a link. An image can carry the class itself,
+    # through attr_list. Either turns the feature on, and the page fails once.
+    body = (
+        '<a class="glightbox" data-type="image" href="assets/x.png"><img src="assets/x.png"></a>'
+        '<img alt="An image" class="figure glightbox" src="assets/x.png" />'
+    )
+    site = _site(tmp_path, b=_page(body=body))
+    _write(site, "assets/x.png", "")
+
+    assert check_manual.check_site(site) == [
+        (
+            "b.html: has image lightboxes (.glightbox), for which the theme's script loads code "
+            "from another host (UM-AC07)"
+        )
+    ]
+
+
+def test_a_runnable_python_block_fails(tmp_path: Path) -> None:
+    # The block holds the parts the theme's script looks for: an editor, run and clear buttons,
+    # and an output.
+    body = (
+        '<div class="pyodide" data-session="default">'
+        '<button id="py--run">Run</button><button id="py--clear">Clear</button>'
+        '<div class="pyodide-editor" id="py--editor">print(1)</div>'
+        '<pre class="pyodide-output"><code id="py--output"></code></pre>'
+        "</div>"
+    )
+    site = _site(tmp_path, b=_page(body=body))
+
+    assert check_manual.check_site(site) == [
+        (
+            "b.html: has runnable Python code blocks (.pyodide), for which the theme's script "
+            "loads code from another host (UM-AC07)"
+        )
+    ]
+
+
+def test_a_class_that_only_contains_a_features_name_passes(tmp_path: Path) -> None:
+    # The theme's script selects a whole class name, and a diagram only on a <pre>. A code block
+    # in the mermaid language is only code.
+    body = (
+        '<pre class="mermaid-source"><code class="language-mermaid">graph LR</code></pre>'
+        '<div class="mermaid">graph LR</div>'
+        '<img class="no-glightbox" src="assets/x.png">'
+        '<p class="pyodide-note">Runs in the browser.</p>'
+    )
+    site = _site(tmp_path, b=_page(body=body))
+    _write(site, "assets/x.png", "")
+
+    assert check_manual.check_site(site) == []
 
 
 def test_links_out_and_resources_from_the_sites_own_address_pass(tmp_path: Path) -> None:

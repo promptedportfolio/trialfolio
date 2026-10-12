@@ -8,13 +8,17 @@ It fails when:
 
 - a page loads a resource from another host, such as a script, stylesheet, font, or image, or a
   stylesheet the site serves does (UM-AC07);
+- a page's markup turns on a feature for which the theme's script loads code from another host:
+  diagrams, image lightboxes, or runnable Python code blocks (UM-AC07);
 - a page's footer lacks the non-affiliation notice or the link to LICENSE (UM-AC04);
 - a link between pages doesn't resolve: the page it names, or its anchor, is missing (UM-AC06).
 
 Zensical's strict build already fails on a broken link in a page's Markdown. This reads the built
 HTML, so it also covers what the theme writes, such as the footer, and it catches a theme update
-that starts loading something from elsewhere. It reads the theme's scripts only as files the pages
-load: what a script fetches when it runs isn't checked.
+that starts loading something from elsewhere. It doesn't run the theme's script: it reads it only
+as a file the pages load, and looks in the pages for the markup that turns on the features above.
+What else the script fetches when it runs, such as a polyfill for a browser without
+ResizeObserver, isn't checked.
 """
 
 import posixpath
@@ -69,6 +73,16 @@ LOADING_LINK_TYPES = {
 # The kinds of <link> that name another page of the site.
 PAGE_LINK_TYPES = {"prev", "next"}
 
+# The features for which the theme's script loads code from another host, such as unpkg.com, by
+# the selector that turns each one on. Zensical 0.0.69's script selects them in each page's
+# content: a class on a <pre> for a diagram, and a class on any element for the other two. This
+# looks for them anywhere on the page. Check them again when Zensical's version changes.
+THEME_FEATURES = (
+    ("pre.mermaid", "diagrams"),
+    (".glightbox", "image lightboxes"),
+    (".pyodide", "runnable Python code blocks"),
+)
+
 # What a stylesheet loads: a url(), quoted or not, and an @import, which names a string or a url().
 CSS_URL = re.compile(r"""(?:@import\s*(?:url\()?|url\()\s*(['"]?)\s*([^'")\s;]*)""", re.IGNORECASE)
 
@@ -81,6 +95,7 @@ class _Page(HTMLParser):
         self.ids: set[str] = set()
         self.links: list[str] = []
         self.resources: list[str] = []
+        self.features: set[str] = set()
         self.footer_text: list[str] = []
         self.footer_links: list[str] = []
         self._footer_depth = 0
@@ -97,6 +112,11 @@ class _Page(HTMLParser):
             self._in_style = True
         if "style" in values:
             self.resources.extend(_css_urls(values["style"]))
+        classes = _classes(values.get("class", ""))
+        for selector, _feature in THEME_FEATURES:
+            element, _, name = selector.partition(".")
+            if name in classes and element in ("", tag):
+                self.features.add(selector)
         for name in RESOURCE_ATTRIBUTES.get(tag, ()):
             if values.get(name):
                 self.resources.extend(
@@ -128,6 +148,11 @@ class _Page(HTMLParser):
             self.footer_text.append(data)
         if self._in_style:
             self.resources.extend(_css_urls(data))
+
+
+def _classes(value: str) -> set[str]:
+    # A class selector matches a whole name in the attribute, which HTML splits at ASCII spaces.
+    return set(re.findall(r"[^\t\n\f\r ]+", value))
 
 
 def _css_urls(css: str) -> list[str]:
@@ -193,6 +218,12 @@ def check_site(site: Path) -> list[str]:
         for resource in page.resources:
             if _from_another_host(resource):
                 problems.append(f"{url}: loads {resource} from another host (UM-AC07)")
+        for selector, feature in THEME_FEATURES:
+            if selector in page.features:
+                problems.append(
+                    f"{url}: has {feature} ({selector}), for which the theme's script loads code "
+                    "from another host (UM-AC07)"
+                )
         footer = " ".join(" ".join(page.footer_text).split())
         if NON_AFFILIATION_NOTICE not in footer:
             problems.append(f"{url}: the footer lacks the non-affiliation notice (UM-AC04)")
