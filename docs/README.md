@@ -5,7 +5,7 @@ These are the specifications for Trial Folio. The implementation tasks of releas
 ## Where to start
 
 - **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. [0.1.0 API execution](releases/0.1.0-api-execution.md) is Implemented: built, verified, and used privately, but not yet released. [0.2.0 Review](releases/0.2.0-review.md) is Implemented too: built, verified, and used privately, but not yet released. [0.2.1 License version 1.1](releases/0.2.1-license.md) changes only the license. The owner signed it off on 2026-10-07, and it's tagged, with every release requirement met. [0.3.0 Experiments](releases/0.3.0-experiments.md) is Ready: the owner signed off on 2026-10-08, and its implementation tasks were done on 2026-10-12, but it isn't in private use yet. [0.4.0 Ranking-weight variants](releases/0.4.0-ranking-weights.md) is a Draft (outline), planned by the owner on 2026-10-12 ([D-34](spec.md#decisions)): its first task verifies the provider route with live calls.
-- **Using Trial Folio:** read the [user guide](user-guide.md).
+- **Using Trial Folio:** read the [user guide](user-guide.md). A user manual, in `manual/` at the repository's root, replaces it once its first task builds it ([user-manual.md](user-manual.md)).
 - **Understanding the product:** read [spec.md](spec.md), then [roadmap.md](roadmap.md).
 - **Planning a release:** follow [Product direction (D-23)](spec.md#product-direction) and the [release planning requirements](roadmap.md#release-planning-requirements), then write or complete its release specification. Roadmap targets are not implementation assignments.
 - **Checking permissions or notices:** read [../LICENSE](../LICENSE), [licensing-policy.md](licensing-policy.md), and [disclaimers.md](disclaimers.md).
@@ -36,7 +36,9 @@ These are the specifications for Trial Folio. The implementation tasks of releas
 | [adrs/0006-observe-the-wrappers-http-exchanges.md](adrs/0006-observe-the-wrappers-http-exchanges.md) | Recording each HTTP exchange the `p123api` wrapper makes, so failures are classified by what was sent |
 | [adrs/0007-host-the-source-publicly-on-github.md](adrs/0007-host-the-source-publicly-on-github.md) | The public GitHub repository, its hosting exception, and where packages come from |
 | [adrs/0008-license-version-1-1.md](adrs/0008-license-version-1-1.md) | Version 1.1 of the license: Personal Vehicles, and the removed adoption sentence |
+| [adrs/0009-publish-a-user-manual-on-github-pages.md](adrs/0009-publish-a-user-manual-on-github-pages.md) | The user manual: Diátaxis's four sections in `manual/`, with `docs/` unchanged, built with Zensical and published on GitHub Pages; proposed |
 | [graphical-prototype.md](graphical-prototype.md) | The read-only graphical prototype, outside any release ([D-29](spec.md#decisions)): its scope, criteria, and tasks (GP), and what each build found |
+| [user-manual.md](user-manual.md) | The user manual, outside any release ([D-35](spec.md#decisions)): its layout, rules, tooling and hosting, criteria, and tasks (UM). The manual's pages are in `manual/`, and own no requirement. |
 | [written-permission-template.md](written-permission-template.md) | The form a written permission grant takes |
 | [user-guide.md](user-guide.md) | How to set up and use Trial Folio, workflow by workflow, with what to check at each step. It owns no requirement: where it disagrees with an owning document, the guide is fixed. |
 | [ai-development.md](ai-development.md) | How AI is used to build Trial Folio, in plain language |
