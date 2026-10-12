@@ -4,7 +4,7 @@ Trial Folio's own material is licensed under the [Nathan Slaughter Personal Rese
 
 ## Current status
 
-No Trial Folio package, archive, executable, or image has been distributed. This repository contains no third-party code. Since R01-T06, `pyproject.toml` declares the runtime dependencies, and `uv.lock` resolves them to exact versions. This file records them, the components still planned, the development tools, and the rules for keeping this record accurate.
+No Trial Folio package, archive, executable, or image has been distributed. This repository contains no third-party code. The user manual's site, which GitHub Pages publishes from `main`, serves third-party files: [the user manual's site](#the-user-manuals-site) records them. Since R01-T06, `pyproject.toml` declares the runtime dependencies, and `uv.lock` resolves them to exact versions. This file records them, the components still planned, the development tools, and the rules for keeping this record accurate.
 
 At each release, regenerate the component tables from the resolved dependency set, record the versions actually distributed, and reverify each license. Licenses and bundled contents can change between versions.
 
@@ -44,7 +44,7 @@ Linux numpy wheels also bundle OpenBLAS and LAPACK (BSD-3-Clause variants), libg
 
 ## Development tools
 
-These are never distributed. The `dev` dependency group in `pyproject.toml` installs them for development only, and a built wheel neither declares nor contains them. The build backend runs only while a wheel is built. Verified observation from each package's metadata, checked 2026-10-02, at the versions in `uv.lock`, and for hatchling at its pin:
+These are never distributed. The `dev` dependency group in `pyproject.toml` installs them for development only, and a built wheel neither declares nor contains them. The build backend runs only while a wheel is built. Zensical builds the user manual's site, which does serve its theme's files: [the user manual's site](#the-user-manuals-site) records those. Verified observation from each package's metadata, checked 2026-10-02, at the versions in `uv.lock`, and for hatchling at its pin. Zensical's row was checked the same way on 2026-10-12.
 
 | Component (version) | Role | License |
 |---|---|---|
@@ -53,6 +53,7 @@ These are never distributed. The `dev` dependency group in `pyproject.toml` inst
 | types-PyYAML 6.0.12.20260906 | Type stubs for PyYAML, for pyright | Apache-2.0 |
 | pyright 1.1.414, with nodeenv 1.11.0 | Type checker | pyright MIT; nodeenv BSD |
 | nodejs-wheel-binaries 24.19.0, through pyright's `nodejs` extra | The Node.js runtime pyright runs on, so pyright never downloads one | MIT, with Node.js's own license file in its `.dist-info/licenses` |
+| zensical 0.0.69, with click 8.5.0, deepmerge 3.0.1, Jinja2 3.1.6, Markdown 3.11, MarkupSafe 3.0.4, pathspec 1.1.1, pymdown-extensions 12.2, and tomli 2.5.0. It also uses Pygments and PyYAML, which other rows record. | Builds the user manual's site ([docs/user-manual.md](docs/user-manual.md)) | zensical, deepmerge, pymdown-extensions, and tomli MIT; click, Jinja2, Markdown, and MarkupSafe BSD-3-Clause; pathspec MPL-2.0 |
 | hatchling 1.32.4, pinned exactly in `[build-system]` | Build backend | MIT. Its build-time dependencies, resolved when a wheel is built, include pathspec (MPL-2.0), tomlkit (MIT), and trove-classifiers (Apache-2.0), checked at their current versions. |
 
 ## What each distribution form carries
@@ -62,6 +63,27 @@ These are never distributed. The `dev` dependency group in `pyproject.toml` inst
 - **A desktop bundle** is a frozen executable. The bundling rules apply to everything packaged, including the Python interpreter and any GUI toolkit. JavaScript dependencies shipped with a web interface also need notices.
 
 Publishing any of these forms is also a reserved distribution of Trial Folio's own code. See [the licensing policy](docs/licensing-policy.md).
+
+## The user manual's site
+
+The user manual's site ([docs/user-manual.md](docs/user-manual.md)) is a distribution form: GitHub Pages serves it publicly, at `https://promptedportfolio.github.io/trialfolio/`. It carries the manual's pages, which are Trial Folio's own documentation, and the files of Zensical's theme. It carries no Trial Folio code and no Python package.
+
+Verified observation, checked 2026-10-12 from the site built with Zensical 0.0.69 and from that version's wheel. The theme's files, and what they include:
+
+| Component (version) | Where the site serves it | License |
+|---|---|---|
+| Zensical's theme (0.0.69) | The page templates' markup, the scripts in `assets/javascripts/`, the stylesheets in `assets/stylesheets/`, and the favicon | MIT |
+| clipboard 2.0.11, and escape-html 1.0.3 | In the theme's scripts, as the theme's list of them, `assets/javascripts/LICENSE`, gives | MIT |
+| focus-visible 5.2.1 | In the theme's scripts | W3C Software and Document License, 2015 version |
+| rxjs 7.8.2 | In the theme's scripts | Apache-2.0. Its repository has no NOTICE file at that version. |
+| Lucide icons | In the pages, and in the stylesheets | ISC. The icons derived from Feather are MIT. |
+| Material Design Icons, by Pictogrammers | In the stylesheets | Apache-2.0, under the Pictogrammers Free License |
+| Octicons, by GitHub | In the stylesheet of the theme's classic variant | MIT |
+| Font Awesome Free 7.3.1 | One icon in the stylesheets, with its attribution in a comment | CC BY 4.0 |
+
+The site's [third-party notices](https://promptedportfolio.github.io/trialfolio/third-party-notices/) page, which every page's footer links to, carries each license's text, or Font Awesome's attribution, with its source, [manual/third-party-notices.md](manual/third-party-notices.md). The site loads nothing from another host, so it serves every file it uses itself ([UM-AC07](docs/user-manual.md#acceptance-criteria)).
+
+When a pull request changes Zensical's version in `uv.lock`, check the files the built site serves again, and update this table and that page.
 
 ## Container images
 
