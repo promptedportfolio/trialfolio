@@ -163,7 +163,7 @@ def read_ranking(value: object) -> Ranking:
     if "nodes" in keys or "xml" in keys:
         raise ValueError(
             f"can't be given as nodes or XML, which would change the account's "
-            f"APIRankingSystem. {RANKING_FORMS_MESSAGE}"
+            f"ApiRankingSystem. {RANKING_FORMS_MESSAGE}"
         )
     forms = [form for form in RANKING_FORMS if form in keys]
     if len(forms) != 1:

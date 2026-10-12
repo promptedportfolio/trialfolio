@@ -119,6 +119,16 @@ def test_invalid_configuration_is_rejected_naming_its_key(path: Path) -> None:
         assert f"`{key.group(1)}`" in message
 
 
+def test_a_ranking_given_as_xml_names_the_system_it_would_change() -> None:
+    """The message spells `ApiRankingSystem` as Portfolio123 does, which R04-T01 found; it had
+    said `APIRankingSystem` (a corrected defect, release 0.4.0's R04-T02)."""
+    path = INVALID / "ranking-nodes.yaml"
+
+    message = rejection(path.read_bytes(), path.name)
+
+    assert "would change the account's ApiRankingSystem." in message
+
+
 def test_every_invalid_case_is_in_its_readme() -> None:
     readme = (INVALID / "README.md").read_text(encoding="utf-8")
     listed = set(re.findall(r"^\| `([a-z0-9-]+)\.yaml` \|", readme, re.MULTILINE))
