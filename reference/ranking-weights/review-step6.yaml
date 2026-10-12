@@ -1,0 +1,10 @@
+kind: review
+schema_version: 1.0.0
+title: R04-T01 step 6, a weight moved within a composite
+purpose: Moving weight between two children of one composite should change at least one metric (D-20).
+baseline: step3
+results:
+  - label: step3
+    run: payloads/runs/step3-api
+  - label: step6
+    run: payloads/runs/step6
