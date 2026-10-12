@@ -505,12 +505,41 @@ def test_the_commands_dont_depend_on_the_terminal_or_the_language(
     regions = manual_reference.cli_regions(manual_reference.default_sources().parser)
 
     assert regions == plain
-    assert "trialfolio run [-h] --out DIR [--approve PLAN_HASH] [--revision-reason TEXT]\n" in (
-        manual_reference.render(regions["cli-command-run"])
-    )
+    assert (
+        "trialfolio run [-h] --out DIR [--approve PLAN_HASH]\n               [--revision-reason TEXT]\n"
+    ) in manual_reference.render(regions["cli-command-run"])
     assert "| `-h`, `--help` | No | None | Show this help message and exit |" in (
         manual_reference.render(regions["cli-common-options"])
     )
+
+
+def test_each_usage_line_is_wrapped_as_an_80_column_terminal_wraps_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    regions = manual_reference.cli_regions(manual_reference.default_sources().parser)
+    commands = {
+        region_id: [region_id.removeprefix("cli-command-"), "--help"]
+        for region_id in regions
+        if region_id.startswith("cli-command-")
+    }
+    monkeypatch.setenv("COLUMNS", "80")
+    monkeypatch.setenv("LANGUAGE", "C")
+    monkeypatch.setenv("NO_COLOR", "1")
+    for name in ("FORCE_COLOR", "PYTHON_COLORS"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert commands
+    for region_id, argv in {"cli-usage": ["--help"], **commands}.items():
+        stdout = io.StringIO()
+        monkeypatch.setattr(sys, "stdout", stdout)
+        assert trialfolio(argv) == 0
+        # The help starts with the usage, then a blank line. The page leaves out `usage: `, and
+        # the seven columns it takes from each line.
+        first, *rest = stdout.getvalue().split("\n\n")[0].split("\n")
+        assert first.startswith("usage: ")
+        assert all(line.startswith(" " * 7) for line in rest)
+        shown = "\n".join([first.removeprefix("usage: "), *(line[7:] for line in rest)])
+        assert f"```text\n{shown}\n```" in manual_reference.render(regions[region_id]), region_id
 
 
 # The real pages

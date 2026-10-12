@@ -281,8 +281,10 @@ def _empty_cells(region: Region, text: str) -> list[str]:
 # The CLI's parser
 
 # argparse wraps a usage line at the terminal's width. The pages show it as an 80-column terminal
-# does: argparse leaves two columns spare.
+# does: argparse leaves two columns spare. It's wrapped after `usage: `, as the terminal shows it,
+# then the pages leave that out, and the columns it takes from each line.
 USAGE_WIDTH: Final = 78
+USAGE_PREFIX: Final = "usage: "
 ARGUMENT_HEADER: Final = ("Argument or option", "Required", "Default", "What it is")
 
 # argparse has no public way to list a parser's arguments and commands, so this reads its
@@ -307,9 +309,15 @@ def _usage(parser: argparse.ArgumentParser) -> str:
         parser.usage,
         parser._actions,
         parser._mutually_exclusive_groups,
-        prefix="",
+        prefix=USAGE_PREFIX,
     )
-    usage = formatter.format_help().rstrip("\n")
+    first, *rest = formatter.format_help().rstrip("\n").split("\n")
+    margin = " " * len(USAGE_PREFIX)
+    if not first.startswith(USAGE_PREFIX) or not all(line.startswith(margin) for line in rest):
+        raise GenerationError(f"{parser.prog}'s usage line isn't wrapped after its prefix")
+    usage = "\n".join(
+        [first.removeprefix(USAGE_PREFIX), *(line.removeprefix(margin) for line in rest)]
+    )
     if "\x1b" in usage or "```" in usage:
         raise GenerationError(f"{parser.prog}'s usage line can't go in a code block")
     return f"```text\n{usage}\n```"

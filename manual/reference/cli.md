@@ -96,7 +96,8 @@ It writes three files:
 <!-- generated: cli-command-run -->
 
 ```text
-trialfolio run [-h] --out DIR [--approve PLAN_HASH] [--revision-reason TEXT]
+trialfolio run [-h] --out DIR [--approve PLAN_HASH]
+               [--revision-reason TEXT]
                [--repeat CASE_KEY[:ATTEMPT_ID]] [--json]
                config
 ```
