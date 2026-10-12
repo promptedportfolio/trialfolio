@@ -1,0 +1,54 @@
+# Builds the user manual, manual/, into a site (docs/user-manual.md, tooling and hosting).
+# `uv run zensical build --clean` writes it to site/, which Git ignores. scripts/check builds it
+# and checks the built site, and .github/workflows/docs.yml publishes it from main.
+[project]
+site_name = "Trial Folio"
+site_description = "How to use Trial Folio, a command-line tool for researching strategies with the Portfolio123 API."
+site_url = "https://promptedportfolio.github.io/trialfolio/"
+docs_dir = "manual"
+site_dir = "site"
+# A broken link or anchor between pages fails the build.
+strict = true
+# There's no repo_url. With one, the theme's script would ask GitHub's API for the repository's
+# facts from each reader's browser, and the site loads nothing from another host (UM-AC07).
+nav = [
+  { "Home" = "index.md" },
+  { "Tutorials" = [
+    "tutorials/first-backtest.md",
+    "tutorials/first-experiment.md",
+  ] },
+  { "How-to guides" = [
+    "how-to/store-credentials.md",
+    "how-to/re-render-a-report.md",
+    "how-to/compare-runs.md",
+    "how-to/recover-from-an-interrupt.md",
+    "how-to/repeat-a-case.md",
+    "how-to/revise-an-experiment.md",
+    "how-to/use-from-a-script.md",
+  ] },
+  { "Reference" = [
+    "reference/cli.md",
+    "reference/screen-configuration.md",
+    "reference/review-configuration.md",
+    "reference/experiment-configuration.md",
+    "reference/outputs.md",
+    "reference/errors.md",
+    "reference/json-summary.md",
+  ] },
+  { "Explanation" = [
+    "explanation/plans-and-approval.md",
+    "explanation/credits-and-uncertain-charges.md",
+    "explanation/reproducibility.md",
+    "explanation/what-a-backtest-can-support.md",
+  ] },
+  { "Third-party notices" = "third-party-notices.md" },
+]
+
+[project.theme]
+# No web fonts: the theme would load them from Google's servers (UM-AC07). Pages use the
+# reader's system fonts.
+font = false
+# overrides/partials/copyright.html replaces the theme's footer text with the notices every page
+# carries (docs/user-manual.md, rule 3).
+custom_dir = "overrides"
+features = ["navigation.sections", "content.code.copy"]

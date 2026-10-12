@@ -22,3 +22,6 @@ __pycache__/
 /runs/
 /reports/
 /demo/
+
+# The user manual's built site (docs/user-manual.md)
+/site/
