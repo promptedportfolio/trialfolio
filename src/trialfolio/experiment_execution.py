@@ -1243,36 +1243,32 @@ class ExperimentExecution:
             if any(self._awaiting_repeat(case.case_id) for case in missed)
             else ""
         )
-        # Portfolio123's own text can repeat configuration values, so logs never hold it.
+        # Portfolio123's own text can repeat configuration values, so logs never hold it. The
+        # loggable message leaves out the revision's sentence too (D-38).
         said = "".join(
             f' Portfolio123\'s message for `{case.case_key}`: "{text}".'
             for case in missed
             if (text := self._provider_said(case.case_id)) is not None
         )
         rejected = [
-            case
+            f"`{case.case_key}`"
             for case in missed
             if case.case_id not in self._invalid
             and (giving := self._giving(case.case_id)) is not None
             and giving.error_code == "provider.unsupported_capability"
         ]
-
-        def revise(named: Callable[[ExperimentPlanCase], str]) -> str:
-            if not rejected:
-                return ""
-            return (
-                f" Portfolio123 rejected a setting of {_and([named(c) for c in rejected])}: a"
-                " repeat sends the same request again, so change the setting instead, and revise"
-                " the plan with --revision-reason."
-            )
-
+        revise = (
+            f" Portfolio123 rejected a setting of {_and(rejected)}: a repeat sends the same"
+            " request again, so change the setting instead, and revise the plan with"
+            " --revision-reason."
+            if rejected
+            else ""
+        )
         tail = " Every planned case is accounted for in the session's manifest."
         return TrialFolioError(
             "execution.partial",
-            f"{lead} {listing(lambda c: f'`{c.case_key}`')}.{said}{why}{charged}"
-            f"{revise(lambda c: f'`{c.case_key}`')}{tail}",
-            f"{lead} {listing(lambda c: c.case_id)}.{why}{charged}"
-            f"{revise(lambda c: c.case_id)}{tail}",
+            f"{lead} {listing(lambda c: f'`{c.case_key}`')}.{said}{why}{charged}{revise}{tail}",
+            f"{lead} {listing(lambda c: c.case_id)}.{why}{charged}{tail}",
         )
 
     def _build_manifest(

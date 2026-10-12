@@ -229,13 +229,14 @@ def test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_r
     assert message.endswith(
         f"Session 1's report gives each case's attempts: {out / 'sessions/1/report.html'}."
     )
-    # The log names the case by its `case_id`, and holds neither Portfolio123's message nor
-    # the report's path.
+    # The log names the case by its `case_id`, and holds none of Portfolio123's message, the
+    # revision's sentence, and the report's path.
     log = (out / "logs/trialfolio.log").read_text(encoding="utf-8")
+    assert f"{holdings}, failed ({code})" in log
     assert text not in log
     assert "holdings-50" not in log
+    assert "Portfolio123 rejected a setting of" not in log
     assert "report gives each case's attempts" not in log
-    assert (f"Portfolio123 rejected a setting of {holdings}:" in log) is revise
 
     # A resume reads Portfolio123's message from the attempt record.
     resumed = experiments.run(EXAMPLE, out)
