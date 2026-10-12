@@ -49,7 +49,7 @@ The tool was checked too, on 2026-10-12:
 ## Consequences
 
 - **Two places for documentation.** `docs/` holds the specifications, for agents and reviewers. `manual/` holds the user documentation. [docs/README.md](../README.md) maps both.
-- **A development dependency and a workflow.** `uv.lock` pins Zensical, and the workflow's actions are pinned by commit. The built site publishes the theme's own files, which [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) records with their licenses.
+- **A development dependency and a workflow.** `uv.lock` pins Zensical, and the workflow's actions are pinned by commit. Zensical itself is never distributed, but the built site publishes the theme's own files, so [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) records the site as a distribution form, with those files and their licenses, and the site carries their notices.
 - **The brand appears in the site's address** (D-10, as amended).
 - **The site is public once it deploys,** and publishing it isn't a release ([D-08](../spec.md#decisions)). It describes `main` until the first release is distributed, as the owner decided on 2026-10-12 ([user-manual.md's open questions](../user-manual.md#open-questions)).
 - **Two copies for a while.** Until 0.4.0's documentation task, the user guide and the manual describe the same workflows.
