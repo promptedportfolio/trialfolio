@@ -9,7 +9,8 @@ This run record, the script, and the configurations beside it are committed. The
 - **The budget.**
   - The owner approved 25 credits on 2026-10-12, and raised the budget to 37 the same day, to check a weight change within a composite and a factor removal too ([D-34](../../docs/spec.md#decisions)).
   - During the checks, the first two saved systems turned out to have no composite. The owner then approved up to 100 credits, "but only use as many as needed".
-  - The checks used 39.
+  - Steps 1 to 7 used 39.
+  - After the first review of the checks' pull request, the owner approved 2 more credits for step 8, which used them: 41 in all.
   - The owner was present throughout.
 - **The ranking systems.** Three of the owner's saved systems, whose names and IDs stay in `payloads/`, because they're account information:
   - **A:** 8 top-level factors, no composite.
@@ -43,17 +44,23 @@ Date: 2026-10-12, 12:25:23 to 12:37:15 UTC, on macOS 26.6.2 with Python 3.14.8, 
 | 6 | From C's XML, move 10 points between the two factors of one composite, keeping their sum; `rank_update`; backtest | The same 10 strategy metrics changed against step 3's run | 1 + 5 |
 | 7 | From C's XML, remove one of a composite's two factors; the one left gets 100, its weight scaled in proportion; `rank_update`; backtest | Portfolio123 accepted a composite with one factor. The same 10 strategy metrics changed against step 3's run. After the checks, offline and with no credits, a review against step 6's run found no setting different, and the same 10 metrics changed, the other 10 equal. So step 7's backtest didn't use step 6's definition, which `ApiRankingSystem` held before step 7's `rank_update`: the removal took effect. | 1 + 5 |
 
-**Credits:** 39, each as Portfolio123 reported it in the call's response: 1 for each `rank_get` and `rank_update`, and 5 for each backtest, as documented. Authentication's cost wasn't measured.
+**Step 8** ran after the first review of the checks' pull request, which found that steps 1 to 7 don't show that `rank_update` stores the ranking method it's sent. The owner decided to check it, approved 2 credits, and was present. It ran on 2026-10-12, 13:52:54 to 13:52:58 UTC, with `route.py` as changed after the checks, at 55dd62a ([the script after the checks](#the-script-after-the-checks)).
 
-**After the checks,** `ApiRankingSystem` holds step 7's definition, the last one written. After the checks, the owner compared the account's ranking systems with the list from before: only `ApiRankingSystem` had changed, so `rank_update` touched no other ranking system.
+| Step | Calls | Outcome | Credits, as Portfolio123 reported |
+|---|---|---|---|
+| 8 | `rank_update` with C's XML, `rankingMethod` 4 (Percentile NAs Neutral), and currency `USD`, into `ApiRankingSystem`, which held ranking method 2; then `rank_get` of `ApiRankingSystem` | Each call made one exchange after authenticating: `POST /auth 200`, then `POST /rank 200` for the update and `GET /rank 200` for the read. The update's response held only `cost` and `quotaRemaining`. `rank_get`'s held `cost`, `currency`, `groupUid`, `id`, `name`, `quotaRemaining`, `rankingMethod`, `resolveGroupUid`, `type`, and `xml`: the name asked for, ranking method 4, currency USD, type Stock, and the XML sent, byte for byte. So `rank_update` stores the ranking method it's sent: the existing system's changed from 2 to 4. | 1 + 1 |
 
-**A scan of every file the checks wrote,** 156 files, found the API key in none. The API ID matched once, inside a longer number in step 4's saved response: digits that happen to coincide.
+**Credits:** 41, 39 for steps 1 to 7 and 2 for step 8, each as Portfolio123 reported it in the call's response: 1 for each `rank_get` and `rank_update`, and 5 for each backtest, as documented. Authentication's cost wasn't measured.
+
+**After steps 1 to 7,** the owner compared the account's ranking systems with the list from before: only `ApiRankingSystem` had changed, so `rank_update` touched no other ranking system. It then held step 7's definition. Step 8 wrote C's definition into it with ranking method 4, which it holds now.
+
+**A scan of every file steps 1 to 7 wrote,** 156 files, found the API key in none. The API ID matched once, inside a longer number in step 4's saved response: digits that happen to coincide.
 
 ## The script after the checks
 
-The review of R04-T01's pull request found the following in [`route.py`](route.py) as it ran, and changed the script after the checks. The changed script was exercised offline, against a local fake server, and hasn't made a live call.
+The review of R04-T01's pull request found the following in [`route.py`](route.py) as it ran, and changed the script after the checks. The changed script was exercised offline, against a local fake server, before it made step 8's calls.
 
-- **One HTTP attempt per call.** As run, the script set the wrapper's retries to 1. That stops its retries after a connection error or a 5xx, but not its re-authentication: after a 401 or a 403, `p123api` 3.1.0 authenticates again and sends the call again. So the script as run didn't ensure one attempt per call, and it recorded no exchanges. Every `rank_get` and `rank_update` succeeded, and Portfolio123 reported 1 credit for each. The script now authenticates in a call of its own, and sends each call through Trial Folio's `ExchangeRecordingAdapter` ([ADR 0006](../../docs/adrs/0006-observe-the-wrappers-http-exchanges.md)), which refuses a second exchange in a call before it's sent. It saves each call's exchanges.
+- **One HTTP attempt per call.** As run, the script set the wrapper's retries to 1. That stops its retries after a connection error or a 5xx, but not its re-authentication: after a 401 or a 403, `p123api` 3.1.0 authenticates again and sends the call again. So the script as run in steps 1 to 7 didn't ensure one attempt per call, and it recorded no exchanges. Every `rank_get` and `rank_update` in them succeeded, and Portfolio123 reported 1 credit for each. The script now authenticates in a call of its own, and sends each call through Trial Folio's `ExchangeRecordingAdapter` ([ADR 0006](../../docs/adrs/0006-observe-the-wrappers-http-exchanges.md)), which refuses a second exchange in a call before it's sent. It saves each call's exchanges.
 - **The credits of the four reads.** As run, the script saved `rank_get`'s fields as `p123api` returns them, which leaves out `cost` and `quotaRemaining`. The credits it printed came from the same response, through the wrapper's `cost`, but the saved responses of the four `rank_get` calls, step 1's three and step 2's, don't hold them. The script now saves each response's body as Portfolio123 sent it.
 - **A failure's message.** As run, the script would have printed Portfolio123's message on a failed call, unless the message named part of the definition sent, and saved it as it was. No call failed. The script now prints only the exception's type and the exchanges, and saves the message with the credentials and the token redacted.
 - **Line endings.** As run, the script read the XML files with `read_text`, which makes a carriage return a line feed. Counted offline after the checks, step 1's saved XML of C and step 2's read-back each hold no carriage return. So the script's reading changed nothing: step 2 sent C's XML unchanged, and the byte-for-byte comparison holds for the website's own XML. The script now reads and writes files with their line endings unchanged. On XML without a carriage return, its variants are byte for byte the ones it wrote before.
@@ -64,7 +71,8 @@ The review of R04-T01's pull request found the following in [`route.py`](route.p
 - **The route works.** `rank_update` writes the definition into `ApiRankingSystem`, and a backtest ranked by that name uses it at once. No `rank_touch` was needed between them, within about a minute (step 5).
 - **The name is `ApiRankingSystem`,** the Rank API documentation's spelling. The first `rank_update` creates it: it wasn't in the account before step 2, and was after.
 - **`rank_get` returns the XML `rank_update` sent, byte for byte,** so a case can record the definition it sent, and needn't read the XML back.
-- **`rank_update` accepts `rankingMethod` and `currency`,** and the values read back equal those sent. But step 2 sent ranking method 2 and USD, the values of all three saved systems, to a system the call created, so this doesn't show that the call stores them: a new system may get them by default. Only a check that sends other values would show it.
+- **`rank_update` stores the ranking method it's sent.** Step 8 sent method 4 to the existing `ApiRankingSystem`, which held 2, and read back 4. Steps 1 to 7 couldn't show it: step 2 sent method 2, the three saved systems' method, to a system the call created.
+- **`rank_update` accepts `currency`,** but every step sent USD, the saved systems' currency, so whether the call stores another currency isn't shown. That's left to R04-T02.
 - **`rank_update`'s response** holds only `cost` and `quotaRemaining`: no ID, and no echo of the definition.
 - **Weights:**
   - The XML writes them as plain numbers.
