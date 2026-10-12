@@ -1483,10 +1483,16 @@ class ExperimentExecution:
         )
 
     def _incomplete(self, failure: TrialFolioError) -> TrialFolioError:
-        """The error of a session that stopped without its manifest, with what its records say."""
+        """The error of a session that stopped without its manifest, with what its records say.
+        An attempt's own error already says what happened to its request, and so does its
+        attempt record once it's written, so the error of an attempt that wrote it gets only what
+        the records say of the manifest."""
         detail = self.ending_detail()
         if failure.message.endswith(detail):
             return failure
+        last = self._results[-1] if self._results else None
+        if last is not None and last.recorded and failure is last.error:
+            detail = self._manifest_detail()
         return TrialFolioError(
             failure.code, f"{failure.message} {detail}", f"{failure.log_message} {detail}"
         )

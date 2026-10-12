@@ -3,10 +3,11 @@ exits with `storage.write_failed` and 4, or `command.interrupted` and 130, leave
 without a manifest, writes no file twice, and replaces no record. Before the first plan's
 `experiment.json` is written, nothing was sent, and the message says the directory can't be
 resumed, and to remove it: the same command then fails with `output.not_empty`, and says so too.
-After it, the message says the output is incomplete until the same command resumes the
-experiment, which it then does, sending only the cases that are due. A 200 whose response couldn't
-be saved leaves its case `unknown`, and possibly charged. On Linux and macOS, a file system
-without hard links fails at `sessions/1/session.json`, before any request.
+After it, the message says what the latest attempt's records say about its request, and that the
+output is incomplete until the same command resumes the experiment, which it then does, sending
+only the cases that are due. A 200 whose response couldn't be saved leaves its case `unknown`,
+and possibly charged. On Linux and macOS, a file system without hard links fails at
+`sessions/1/session.json`, before any request.
 
 Traces to R03-AC19, and to docs/contracts.md: running an experiment (an ending without a
 manifest, and step 4's directory without `plans/1/experiment.json`), experiment output (a session
@@ -18,6 +19,7 @@ failure after the store published the manifest stands for its directory's sync f
 session discards it, as a run does (CLI behavior, what a run writes after its attempt).
 """
 
+import re
 import sys
 from pathlib import Path
 from typing import Final, cast
@@ -79,6 +81,33 @@ resume doesn't send, so it ends with `execution.partial`. One after its response
 it complete, and one at the session's report or manifest leaves both cases complete, so the
 resume sends nothing."""
 
+SUCCEEDED: Final = "The screen backtest request succeeded, and its response was saved."
+REQUEST: Final = {
+    "authentication-record": "The screen backtest request wasn't sent.",
+    "start-record": "The screen backtest request wasn't sent.",
+    "response": (
+        "The screen backtest request may have been charged, and its outcome is unknown: no"
+        " response was saved."
+    ),
+    "attempt-record": SUCCEEDED,
+    "metrics": f"Of the last attempt: {SUCCEEDED}",
+    "report": f"Of the last attempt: {SUCCEEDED}",
+    "manifest": f"Of the last attempt: {SUCCEEDED}",
+    "published-manifest": f"Of the last attempt: {SUCCEEDED}",
+}
+"""For each fault after the first plan is recorded, what the message says about the latest
+attempt's request, as written by hand. A fault during `baseline`'s attempt is the attempt's own
+error, which says it: one before its send, that the request wasn't sent; one at its response,
+after the 200, that its outcome is unknown; and one at its attempt record, that it succeeded. A
+fault after the attempt is the session's, which adds what the attempt record says, after "Of the
+last attempt:"."""
+RUNNING: Final = (
+    "The screen backtest request of the last attempt may have been sent, and may have been"
+    " charged: its start record reads as running."
+)
+"""What the message adds when a storage failure leaves the attempt without its attempt record:
+what its start record says."""
+
 INCOMPLETE: Final = (
     "The session has no manifest, so the experiment's output reads as incomplete until running"
     " the same command again resumes it."
@@ -117,6 +146,13 @@ def failed(outcome: Outcome, code: str, exit_code: int) -> str:
     message = error["message"]
     assert f"Error ({code}): {message}" in outcome.stderr
     return message
+
+
+def repeated(message: str) -> list[str]:
+    """Each sentence or clause, ending with a period or a colon, that `message` says more than
+    once."""
+    parts = [part for part in re.split(r"(?<=[.:])\s+", message) if part]
+    return sorted({part for part in parts if parts.count(part) > 1})
 
 
 def attempts(out: Path) -> dict[str, int]:
@@ -159,6 +195,11 @@ def stops_and_runs_again(
     )
 
     message = failed(stopped, code, exit_code)
+    # The attempt's error says what happened to its request, and the session adds what its
+    # records say: a fault during the attempt doesn't say the same thing twice. A defect found
+    # by R03-T12's walk-through of the user guide (PR #73): after an attempt record was written,
+    # the session repeated its request's sentence, after "Of the last attempt:".
+    assert repeated(message) == []
     assert not (out / "sessions/1/manifest.json").exists()
     assert "manifest" not in cast("dict[str, str]", stopped.summary["outputs"])
     # Each file was written once, and nothing after the fault.
@@ -186,6 +227,11 @@ def stops_and_runs_again(
         assert snapshot(out) == left
         return
     assert INCOMPLETE in message
+    # It says what the latest attempt's records say about its request (docs/contracts.md, an
+    # ending without a manifest).
+    assert REQUEST[at] in message
+    if at == "attempt-record" and code == "storage.write_failed":
+        assert RUNNING in message
     sent, resumed_exit_code = RESUMED[at]
     assert again.exit_code == resumed_exit_code, again.stderr
     assert cast("dict[str, int]", again.summary["ids"])["session"] == 2
