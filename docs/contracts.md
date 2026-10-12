@@ -81,7 +81,7 @@ Every Portfolio123 result Trial Folio holds comes from a request it planned, sen
 
 Configuration files are YAML documents owned by the user. The rules apply to every kind:
 
-- Each file declares `kind` (`screen` from 0.1.0, `review` from 0.2.0, `experiment` from 0.3.0) and `schema_version`.
+- Each file declares `kind` (`screen` from 0.1.0, `review` from 0.2.0, `experiment` from 0.3.0, `ranking-snapshot` from 0.4.0) and `schema_version`.
 - Unknown keys are rejected, so misspellings fail instead of being ignored.
 - YAML is loaded with a safe loader. Values are not coerced: a percentage is written as a number with a declared unit, not as `"5%"`; dates use `YYYY-MM-DD`; booleans are `true` or `false` only.
 - Configuration never contains credentials. A credential-like key is rejected, at any depth. A key is credential-like when its name, ignoring case and reading `-` as `_`, contains `password`, `passwd`, `secret`, `token`, `credential`, `authorization`, `bearer`, `api_key`, `apikey`, `api_id`, or `apiid`.
@@ -89,18 +89,20 @@ Configuration files are YAML documents owned by the user. The rules apply to eve
 - Duplicate keys are rejected; a YAML loader must not silently keep the last one.
 - Non-empty text, wherever a configuration requires it, has a character that isn't whitespace: one of Unicode's White_Space characters.
 - A file is UTF-8 text, with or without a byte-order mark, and holds one YAML document: a mapping whose keys are text, with no value nested more than 16 levels deep. Null values, anchors, aliases, and explicit tags are rejected. To omit an optional key, leave it out; don't write it empty. An optional text value, when present, must not be empty or all whitespace.
-- Error messages name each offending key, and never include its value, so they're safe to log. A key's control and formatting characters, its line and paragraph separators, and its lone surrogates are written as escapes, such as `\u001b`, as the [plan display](#approval) writes text from the configuration, so a key can't act on a terminal, and the [JSON summary](#json-summary) can hold the message.
+- Error messages name each offending key, and never include its value, so they're safe to log. A key's control and formatting characters, its line and paragraph separators, and its lone surrogates are written as escapes, such as `\u001b`, as the [plan display](#approval) writes text from the configuration, so a key can't act on a terminal, and the [JSON summary](#json-summary) can hold the message. From experiment configuration 1.1.0, the keys of a ranking variant's `set` are node paths, which hold the user's strategy definition, so messages name them by their place in the file instead ([node paths](#node-paths)).
 
 ### Screen configuration
 
 Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration describes one long-only stock screen backtest, run through `p123api`'s `screen_backtest`. It covers only the settings in [0.1.0's scope](releases/0.1.0-api-execution.md#included-scope), as documented on Portfolio123's [API: Screen](https://portfolio123.customerly.help/en/articles/43324-api-screen) page, checked 2026-10-01.
+
+Version 1.1.0, from 0.4.0 (R04-T02), adds two [ranking forms](#ranking-forms), a ranking system's definition and a ranking snapshot, and nothing else. A 1.0.0 file reads as it did, and only a 1.1.0 file may use them, so a Trial Folio that can't read them refuses the file by its version, not by a key it doesn't know.
 
 **Keys:**
 
 | Key | Type | Required | Rules | Sent as |
 |---|---|---|---|---|
 | `kind` | string | Yes | `screen` | Not sent |
-| `schema_version` | string | Yes | A supported version (`1.0.0`). Any other value fails with `config.invalid`, and the message names the supported versions. | Not sent |
+| `schema_version` | string | Yes | A supported version (`1.0.0`, or `1.1.0` from 0.4.0). Any other value fails with `config.invalid`, and the message names the supported versions. | Not sent |
 | `title` | string | Yes | 1–200 characters. Used as the report heading. | Not sent |
 | `purpose` | string | No | 1–2,000 characters, not all whitespace. If it's absent, the report says no purpose was declared. | Not sent |
 | `universe` | string | Yes | A non-empty Portfolio123 universe name, written in quotes or as a block scalar ([text sent](#screen-configuration)), for example `'SP500'` | `screen.universe` |
@@ -136,14 +138,16 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 | A single formula (recommended) | `formula`, a non-empty string, written in quotes or as a block scalar; `lower_is_better`, a boolean, required | `{"formula": "…", "lowerIsBetter": …}` |
 | An existing ranking system, by name | `name`, a non-empty string, written in quotes or as a block scalar | The name, as a string |
 | An existing ranking system, by ID | `id`, a positive integer | The ID, as an integer |
+| A ranking system's definition, from 1.1.0 | `definition`, the path of a file that holds the definition's XML; `ranking_method`, required: `percentile_nas_negative` or `percentile_nas_neutral` ([ranking definitions](#ranking-definitions)) | Written into `ApiRankingSystem`, which the backtest then ranks by, as R04-T03 specifies |
+| A ranking snapshot, from 1.1.0 | `snapshot`, the path of a [ranking snapshot](#ranking-snapshot-output)'s directory | As a definition, with the snapshot's definition and ranking method |
 
-- **One form only.** `ranking` holds exactly one of `formula`, `name`, and `id`. `lower_is_better` is allowed only with `formula`.
-- **Account objects.** A ranking system named by name or ID is a mutable object in the provider account. Release 0.1.0 doesn't retrieve its definition, so it is recorded as an external reference that is not snapshotted, and reproducibility is labeled incomplete.
+- **One form only.** `ranking` holds exactly one of `formula`, `name`, `id`, `definition`, and `snapshot`. `lower_is_better` is allowed only with `formula`, and `ranking_method` only with `definition`, which requires it. A snapshot records its system's ranking method, so `ranking_method` with `snapshot` fails too.
+- **Account objects.** A ranking system named by name or ID is a mutable object in the provider account. Release 0.1.0 doesn't retrieve its definition, so it is recorded as an external reference that is not snapshotted, and reproducibility is labeled incomplete. A definition, given in a file or read by a snapshot, is captured in full, so it isn't flagged `not_snapshotted`.
 - **Not supported:**
   - a ranking method override, which Portfolio123 writes as `{"method": …, "id": …}` or `{"method": …, "name": …}`
-  - ranking definitions given as nodes or XML
+  - ranking definitions given as nodes or XML in the configuration itself
 
-Either one fails with `config.invalid`, and the message names the supported forms.
+Either one fails with `config.invalid`, and the message names the supported forms. So does `definition` or `snapshot` in a 1.0.0 file, and the message says they need `schema_version` 1.1.0.
 
 **Rules that span keys and values:**
 
@@ -173,6 +177,52 @@ Either one fails with `config.invalid`, and the message names the supported form
 
 Trial Folio sends nothing else. The documented parameters it leaves out are `riskStatsPeriod`, `maxPosPct`, `rankTolerance`, `carryCost`, `longWeight`, and `shortWeight`. The settings below record each one.
 
+#### Ranking definitions
+
+Introduced in 0.4.0 (R04-T02, [D-34](spec.md#decisions)). A ranking system's definition is the XML that Portfolio123's website shows in the Text Editor, under Ranking System → Factors, which the [Rank API](https://portfolio123.customerly.help/en/articles/43323-api-rank)'s `rank_update` takes as `nodes` (checked 2026-10-12). A screen configuration 1.1.0 gives one with `ranking.definition`, and an experiment configuration 1.1.0 gives its baseline's the same way ([ranking variants](#ranking-variants)). A [ranking snapshot](#ranking-snapshot-output) holds one too, read from a system saved in the account. Portfolio123 documents no schema for the XML, and its [ranking-definition article](https://portfolio123.customerly.help/en/articles/13793-dataminer-ranking-definition) says only to use the format the website shows (checked 2026-10-12). So the form below is the one [R04-T01](releases/0.4.0-ranking-weights.md#what-r04-t01-verified) read in three saved systems, and sent in one of them, with its variants: a definition in another form fails with `config.invalid` until a live check verifies it ([D-20](spec.md#decisions)).
+
+**The file.**
+
+- **Where it is.** `definition` is a path, resolved relative to the configuration file, as [every configuration's file paths](#configuration-files) are, and read at the one path the file system resolves, as a review reads its runs ([review output](#review-output)). When nothing exists there, it's `input.not_found`; when something other than a file does, `config.invalid`.
+- **Its text.** The file is UTF-8 text, without a byte-order mark. A byte-order mark fails with `config.invalid`, and the message says to save the file without one, since the definition sent would hold it. Each carriage return and line feed, and each carriage return alone, is read as a line feed, as XML 1.0 reads line ends ([section 2.11](https://www.w3.org/TR/xml/#sec-line-ends)). The definition is the file's text after that, and nothing else in it changes: its indentation, and any white space or line break after its last element, are kept. So a definition sent never holds a carriage return, as none of R04-T01's did, and a file checked out with Windows line endings gives the same definition, and the same case, as one checked out without them. The alternative was to send the file's text exactly, with any carriage returns, so that the definition sent would be the file byte for byte, but would identify another case on another checkout.
+- **Its copy.** The file is copied, byte for byte, beside each plan's `configuration.yaml`, as `definition.xml`: in a screen run's output directory, and in each experiment plan's `plans/<n>/` ([experiment output](#experiment-output)). Each command reads the file once, when it validates the configuration, in step 2, and writes the copy from the bytes it read then, as it writes `configuration.yaml` ([order of steps](#approval), step 7), never by reading the file again. So the copy is the definition the approved plan holds, even when the file changes while the plan awaits approval. Since each command reads the file, a changed definition changes the plan: in an experiment, it's a [revision](#experiment-plans-and-revisions), as a changed setting is.
+
+**Its form.**
+
+- **One `RankingSystem` element.** The definition is well-formed XML 1.0 whose root element is `RankingSystem`, with only white space before or after it. An XML declaration, a document type declaration, a comment, or a processing instruction, anywhere, fails with `config.invalid`. None of R04-T01's definitions held one, and a document type declaration could define entities that change the text Trial Folio reads. Text the definition holds may use XML's character and entity references, such as `&lt;` in a formula.
+- **Nodes.** A node is an element that `RankingSystem` or a `Composite` holds. It's one of the three types R04-T01 read:
+  - **`Composite`,** which holds nodes of its own, at least one;
+  - **`StockFormula`,** a factor with a formula, which it holds in a `Formula` element;
+  - **`StockFactor`,** a factor chosen from Portfolio123's list, which it names in a `Factor` element. Portfolio123's ranking-definition article doesn't list it, but one of the owner's saved systems had three.
+
+  `RankingSystem` holds at least one node. Between nodes, `RankingSystem` and a `Composite` hold only white space. Any other element where a node goes, such as a conditional node, or `IndFormula` or `SecFormula`, which the ranking-definition article lists for another layout than this XML, fails with `config.invalid`. In a factor, Trial Folio checks only the elements: a `StockFormula` holds no element but `Formula`, a `StockFactor` none but `Factor`, and a `Formula` or a `Factor` holds no element. Any other element in a factor fails with `config.invalid`. It doesn't read a factor's text, or count its `Formula` or `Factor` elements, just as it doesn't read formulas, and it reads no attribute but `Weight` and `Name`: the others, such as `RankType` and `Scope`, are sent as they're written.
+- **Weights.** Every node has a `Weight` attribute, and its value is a decimal in the [decimals rules](#screen-configuration)' form and limits, greater than 0. So a weight of 0, which Portfolio123 reads as equal weighting ([ranking definitions](https://portfolio123.customerly.help/en/articles/13793-dataminer-ranking-definition)), fails with `config.invalid`, and so do a percent sign, white space, a sign, and an exponent. The value is written as the decimal itself, without a character reference such as `&#48;`, so a variant can rewrite its text ([ranking variants](#ranking-variants)). Weights are compared and summed as normalized decimals, and a definition's text keeps each weight as it's written. Siblings' weights needn't sum to 100: R04-T01 read a saved system whose top-level weights didn't.
+- **Names.** A node's name is its `Name` attribute, as XML reads it, with its references replaced. A node without one, or with an empty one, has no name: none of R04-T01's `StockFactor` nodes had one. Names needn't be unique; a [node path](#node-paths) that names more than one node fails.
+- **Messages.** A definition that breaks any of these rules fails with `config.invalid`. The message names the configuration's key, such as `ranking.definition` or `baseline.ranking.snapshot`, the rule, and the line of the element at fault, and never quotes the definition, which is the user's strategy definition, kept out of logs as formulas are ([REQ-06](spec.md#enduring-requirements)).
+
+**The ranking method, currency, and type.**
+
+- **`ranking_method`** is `percentile_nas_negative`, sent as `rankingMethod` 2, or `percentile_nas_neutral`, sent as 4: Percentile NAs Negative and Percentile NAs Neutral, the two values the Rank API documents for `rank_update`. R04-T01 sent both, and `rank_get` read back what was sent ([what R04-T01 verified](releases/0.4.0-ranking-weights.md#what-r04-t01-verified)). It's required, so the method is always explicit, as the price convention is. `p123api` also knows Normal Distribution (1), which the Rank API doesn't document for `rank_update`; it isn't accepted.
+- **Currency and type** are fixed: each `rank_update` sends `USD` and `stock`, as every backtest sends `screen.currency` `USD` and `screen.type` `stock` ([sent on every request](#screen-configuration)), and no key changes them. R04-T01 sent only USD, so whether `rank_update` stores another currency isn't shown, and a ranking system in another currency would rank a USD backtest's stocks in a way no check has seen. So a [snapshot](#ranking-snapshot-output) whose system's currency isn't USD, or whose type isn't Stock, can't be a ranking: it fails with `config.invalid`. The alternative was to send the snapshot's currency, which no check has verified. R04-T03 places them in the request.
+
+**A case's definition, and its identity.**
+
+- **The definition** a case sends is the baseline's, or its [ranking variant](#ranking-variants)'s, which is the baseline's with the variant's change. The plan holds each case's whole definition, in the request that writes it into `ApiRankingSystem` ([R04-T03](releases/0.4.0-ranking-weights.md#implementation-tasks-and-dependencies)), so the plan hash covers it.
+- **Its hash** is `sha256:` and the hex SHA-256 of its UTF-8 text: the form of an `artifact_id`.
+- **The `ranking` setting.** The case's resolved `ranking` is `{"definition": "sha256:…", "ranking_method": "percentile_nas_negative"}`, with the definition's hash, in place of the configuration's keys ([screen settings](#screen-settings)). So the [`case_id`](#plan-hashing) covers the definition, byte for byte, and its ranking method, and nothing about where it came from: a definition given in a file, and the same definition read by a snapshot, give the same case, as the same settings written two ways do. The file's path isn't recorded there, since a plan holds no file paths ([plan hashing](#plan-hashing)). R04-T03 adds the rows that give each node's weight, which the `case_id` covers as it covers every setting.
+- **Its source** is the plan's, not the case's: the plan records where the baseline's definition came from, so the plan hash covers it, and the `case_id` doesn't. A file is recorded by the definition's hash, which its case's `ranking` setting holds too, not by the file's `artifact_id`, the hash of its bytes, which its line endings change. So a file checked out with Windows line endings gives the same plan, and the same plan hash, as [plan hashing](#plan-hashing) requires on any machine. A snapshot is recorded by its system's name and the `artifact_id`s of its `snapshot.json` and `definition.xml`. R04-T03 gives the field.
+
+#### Node paths
+
+A variant names a node by its path: the nodes from the top level down to it, each given by a segment, separated by `/`. In the [example](#ranking-example), `Value` is the top-level composite named Value, and `Value/Sales Yield` the node named Sales Yield in it.
+
+- **A segment** is a node's name, character for character, as the definition's [names](#ranking-definitions) are read, with no change of case or white space. It names the node with that name among its parent's nodes.
+- **A position.** A segment that's `#` and a whole number written without a leading zero, such as `#2`, names its parent's node at that position, counting from 1, in the definition's order, whether or not the node has a name. So it names a node that has no name, such as a `StockFactor`, and one of two nodes that share a name. `Value/#2` is the second node in the composite named Value. A segment that starts with `#` is always read as a position, so one that isn't a valid position, such as `#01` or `#a`, fails, rather than being read as a name. A name that starts with `#` is written with `\#`.
+- **Escapes.** In a segment, `\/` stands for a `/`, `\\` for a `\`, and `\#` at its start for a `#`, so a name such as `P/E` is written `P\/E`. Any other `\` fails. Trial Folio reads them in the path as YAML has read it. YAML processes no escape inside single quotes, so `'Value/P\/E'` holds them as written. Inside double quotes, YAML reads its own escapes first, so each `\` of a path is written `\\` there: `"Value/P\\/E"` is the same path as `'Value/P\/E'`.
+- **Quoted.** A path is written in single or double quotes, as text Portfolio123 receives is (R01-T18), whether it's a key or a value: node names can hold a space followed by `#`, which YAML would read without quotes as the start of a comment.
+- **Paths as keys.** A `set`'s paths are mapping keys, so the rules of [every configuration](#configuration-files) apply to them, as to any key: a path written twice fails, and so does a path that holds a credential-like word, such as one naming a composite called Secret Sauce. Such a node is named by its position instead, and the message says so. Every message about one of a `set`'s entries, from those rules or any other, names the entry by its place in the file, as below, never by its path's text.
+- **One node.** A path whose segment names no node, or more than one, fails with `config.invalid`, as does an empty segment, or a position of 0 or past its parent's last node. The message names the path by its place in the file, such as `variants.ranking[0].set[1]` for the second path in a variant's `set`, counted from 0, or `variants.ranking[2].remove`, and the position of its segment at fault, never the path's text, which holds node names, part of the user's strategy definition.
+
 #### Screen settings
 
 `settings.csv` has these rows for a screen run, in this order. Every category here except `other` is critical. A review configuration's `intended_changes` accepts only the 12 settings marked declarable: the ones whose value comes from a screen configuration key and is sent in the request. The other settings are fixed, inferred, or not sent, so no configuration changes them. Three declarable settings, `transaction_price`, `pit_method`, and `precision`, take only one value in screen configuration 1.0.0, so a change declared to one of them can't be observed yet: it's `same`, flagged `intended_change_not_observed`. They stay declarable so that a release that verifies more of their values doesn't have to change the review configuration.
@@ -182,7 +232,7 @@ Trial Folio sends nothing else. The documented parameters it leaves out are `ris
 | 1 | `universe` | `universe` | Yes | | From `universe`; `verified`. Flagged `not_snapshotted`. |
 | 2 | `screen_type` | `universe` | No | | `stock`; `verified` |
 | 3 | `rules` | `strategy` | Yes | | From `rules`, as a JSON array of strings; `verified` |
-| 4 | `ranking` | `strategy` | Yes | | From `ranking`, as a JSON object with the configuration's keys, for example `{"formula": "EarnYield", "lower_is_better": false}`; `verified`. A ranking by name or ID is flagged `not_snapshotted`. |
+| 4 | `ranking` | `strategy` | Yes | | From `ranking`, as a JSON object with the configuration's keys, for example `{"formula": "EarnYield", "lower_is_better": false}`; `verified`. A ranking by name or ID is flagged `not_snapshotted`. A definition's or a snapshot's is the object [ranking definitions](#ranking-definitions) gives, with the definition's hash in place of the path, and isn't flagged; R04-T03 adds the rows of its nodes' weights. |
 | 5 | `max_holdings` | `strategy` | Yes | `count` | From `max_holdings`; `verified` |
 | 6 | `position_method` | `strategy` | No | | `long`; `verified` |
 | 7 | `benchmark` | `benchmark` | Yes | | From `benchmark`; `verified` |
@@ -299,12 +349,14 @@ results:
 
 Schema version 1.0.0, introduced in 0.3.0 (task R03-T02). An experiment configuration describes a finite experiment: one baseline screen, and a small set of variants, each changing one setting of the baseline. `trialfolio run` compiles it into cases before any request ([D-24](spec.md#decisions)): the baseline's case, then one case for each variant. Each case is a fully resolved screen, sent just as a screen configuration with its settings would be.
 
+Version 1.1.0, from 0.4.0 (R04-T02), adds a baseline ranking given as a [definition](#ranking-definitions) or a [snapshot](#ranking-snapshot-output), and [ranking variants](#ranking-variants). A 1.0.0 file reads as it did, and only a 1.1.0 file may use them.
+
 **Top-level keys:**
 
 | Key | Type | Required | Rules |
 |---|---|---|---|
 | `kind` | string | Yes | `experiment` |
-| `schema_version` | string | Yes | A supported version (`1.0.0`). Any other value fails with `config.invalid`, and the message names the supported versions. |
+| `schema_version` | string | Yes | A supported version (`1.0.0`, or `1.1.0` from 0.4.0). Any other value fails with `config.invalid`, and the message names the supported versions. |
 | `experiment_id` | string | Yes | The experiment's [identity](#identity): the same pattern as a review's `label`, with the same reserved names |
 | `title` | string | Yes | 1–200 characters. Used as the report heading. |
 | `purpose` | string | Yes | 1–2,000 characters, not all whitespace: the question the experiment addresses. Unlike a screen's, it's required, because it's part of the research history ([METH-03](methodology.md#meth-03-research-history-and-multiple-testing)). |
@@ -330,20 +382,21 @@ Prior research is earlier work on the same idea whose outcomes the user saw, suc
 
 #### The baseline
 
-`baseline` holds a screen's settings: the keys of a [screen configuration](#screen-configuration) from `universe` to `data_vendor`, with the same types, rules, and [verified values](#screen-configuration). The text Portfolio123 receives is written in quotes or as a block scalar, as in a screen configuration (R01-T18). It has no `kind`, `schema_version`, `title`, or `purpose`, which are the experiment's. Its case's key is `baseline`. The universe is the baseline's, and every case uses it ([D-19](spec.md#decisions)). Another universe is another experiment, not a plan revision ([experiment plans and revisions](#experiment-plans-and-revisions)).
+`baseline` holds a screen's settings: the keys of a [screen configuration](#screen-configuration) from `universe` to `data_vendor`, with the same types, rules, and [verified values](#screen-configuration). In a 1.1.0 file, its `ranking` may be a [definition](#ranking-definitions) or a [snapshot](#ranking-snapshot-output), as a screen configuration 1.1.0's may, and its paths are resolved relative to the experiment's configuration file. The text Portfolio123 receives is written in quotes or as a block scalar, as in a screen configuration (R01-T18). It has no `kind`, `schema_version`, `title`, or `purpose`, which are the experiment's. Its case's key is `baseline`. The universe is the baseline's, and every case uses it ([D-19](spec.md#decisions)). Another universe is another experiment, not a plan revision ([experiment plans and revisions](#experiment-plans-and-revisions)).
 
 #### Variants
 
-`variants` maps a setting to a list of variants of it. Each variant changes that one setting of the baseline, and nothing else. A variant may change only these settings, the types [R03-T01 verified](releases/0.3.0-experiments.md#what-r03-t01-verified):
+`variants` maps a setting to a list of variants of it. Each variant changes that one setting of the baseline, and nothing else. A variant may change only these settings, the types [R03-T01 verified](releases/0.3.0-experiments.md#what-r03-t01-verified), and, from experiment configuration 1.1.0, the ranking, the types [R04-T01 verified](releases/0.4.0-ranking-weights.md#what-r04-t01-verified):
 
 | Key in `variants` | Variant type | Each entry's change |
 |---|---|---|
 | `rules` | A changed rule, such as a liquidity rule's threshold; or an added rule, such as a microcap cutoff | `replace` and `with`, or `add` |
+| `ranking` | The weights of one composite's nodes, or of the top-level nodes; or a factor's removal ([ranking variants](#ranking-variants)) | `set`, or `remove` and `set` |
 | `max_holdings` | Maximum holdings | `value`: an integer, 1 or more |
 | `rebalance_weeks` | Rebalance frequency | `value`: 1 or 4 |
 | `slippage_percent` | Slippage | `value`: a decimal, 0 or more, in percent |
 
-Any other key in `variants`, such as `universe`, `ranking`, `benchmark`, or a date, fails with `config.invalid`, and the message names the settings a variant may change.
+Any other key in `variants`, such as `universe`, `benchmark`, or a date, fails with `config.invalid`, and the message names the settings a variant may change. So does `ranking` in a 1.0.0 file, or with a baseline whose ranking isn't a definition or a snapshot.
 
 **Each entry:**
 
@@ -355,15 +408,131 @@ Any other key in `variants`, such as `universe`, `ranking`, `benchmark`, or a da
 | `add` | string | In `rules`, unless `replace` is given | A screening formula, added after the baseline's rules |
 | `replace` | string | In `rules`, unless `add` is given | One of the baseline's rules. The case puts `with` in its place, so the rules keep their order. |
 | `with` | string | With `replace`, and only with it | The formula that replaces it |
+| `set` | mapping | In `ranking`, and only there | [Node paths](#node-paths) and the weight each node gets ([ranking variants](#ranking-variants)) |
+| `remove` | string | In `ranking`, with `set`, when the variant removes a factor | The path of the factor it removes |
 
 **Rules that span keys:**
 
-- **One change per variant.** An entry in `rules` holds `add`, or `replace` and `with`, never both. A variant that changes two settings isn't offered: each case differs from the baseline in one setting, as each of [R03-T01's checks](releases/0.3.0-experiments.md#what-r03-t01-verified) did.
+- **One change per variant.** An entry in `rules` holds `add`, or `replace` and `with`, never both. A variant that changes two settings isn't offered: each case differs from the baseline in one setting, as each of [R03-T01's checks](releases/0.3.0-experiments.md#what-r03-t01-verified) did. A ranking variant changes only the ranking.
 - **Rule text.** `add`, `replace`, and `with` are written in quotes or as block scalars, as rules are. `replace` must be the same text as exactly one of the baseline's rules, character for character, once YAML has read both. Trial Folio doesn't read formulas, so it can't check that a replacement changes only a threshold: any replacement is a changed rule, and a formula is verified by its form, as every formula is.
-- **A variant changes something.** A `value` must differ from the baseline's, after normalization: `0.250` is the baseline's `0.25`. `add` and `with` must not be the same text as any of the baseline's rules. More generally, every case resolves to settings of its own, so no two cases share a `case_id`. A variant that breaks this fails with `config.invalid`, and the message names it by its place in the file, such as `variants.max_holdings[0]`, never by its key, which is the user's text.
+- **A variant changes something.** A `value` must differ from the baseline's, after normalization: `0.250` is the baseline's `0.25`. `add` and `with` must not be the same text as any of the baseline's rules. A ranking variant changes at least one weight, or removes a factor ([ranking variants](#ranking-variants)). More generally, every case resolves to settings of its own, so no two cases share a `case_id`. A variant that breaks this fails with `config.invalid`, and the message names it by its place in the file, such as `variants.max_holdings[0]`, never by its key, which is the user's text.
 - **Lists.** Each list holds at least one entry, except `rebalance_weeks`'s, where an empty list turns the [default](#default-variants) off. `variants`, when it's given, holds at least one key.
 - **At least one variant.** An experiment has at least two cases: the baseline, and at least one variant, its own or the default. An experiment whose only case is its baseline fails with `config.invalid`; a screen configuration runs one screen.
 - **Not offered:** a variant that removes one of the baseline's rules. R03-T01 verified changed and added rules only. A baseline without the rule, and a variant that adds it, make the same comparison.
+
+#### Ranking variants
+
+Introduced in experiment configuration 1.1.0 (R04-T02). A ranking variant changes the baseline's [ranking definition](#ranking-definitions), given in a file or read by a snapshot, in one of the ways [R04-T01 verified](releases/0.4.0-ranking-weights.md#what-r04-t01-verified): the weights of the nodes of one parent, which is the top level or one composite, or the removal of one factor, with the weights of the nodes left beside it. Its case's definition is the baseline's with that change, and nothing else.
+
+**A weight variant** gives `set`: a mapping from each [node path](#node-paths) to its node's weight.
+
+- **Every node of one parent, each once.** The paths name every node of one parent, and no other node: all the top-level nodes, or all the nodes one composite holds. No two of them name the same node: two that do, such as `Value` and `#1` in the [example](#ranking-example), fail with `config.invalid`, since the node would get two weights, and the sum below would count it twice. So a variant states each sibling's weight once, and none is left for Portfolio123 to rescale.
+- **Each weight** is a number, an integer or a decimal, in the [decimals rules](#screen-configuration)' form and limits, and greater than 0. A weight of 0 would be equal weighting. A number written as a string fails, as it does wherever a decimal goes.
+- **The same sum.** The weights sum to what the same nodes' weights sum to in the baseline, compared as decimals, exactly. Where the baseline's sum to 100, as every composite's did in R04-T01's saved systems, the variant's sum to 100. A saved system's top-level weights needn't sum to 100, and R04-T01's step 4 kept their sum when it moved weight between two top-level composites. So a variant moves weight between siblings and changes nothing else, and no result depends on how Portfolio123 treats a different total, which no check has seen. The alternative, that every variant's weights sum to 100, would refuse step 4's variant, whose baseline's top-level weights don't.
+- **It changes something.** At least one weight differs from the baseline's, as normalized decimals.
+- **The case's definition.** For each node whose weight differs from the baseline's, the text between the quotes of its `Weight` attribute is replaced by the new weight's normalized form, such as `60` or `12.5`. Nothing else in the text changes. So a weight that a variant gives unchanged keeps its text, even one written `50.0`.
+
+**A removal variant** gives `remove`, the path of the factor it removes, and `set`, with the weights of the nodes left beside it.
+
+- **A factor.** `remove` names a `StockFormula` or a `StockFactor` node, at the top level or in a composite. A `Composite` fails: removing one removes every factor it holds, and [D-34](spec.md#decisions) offers the removal of one factor. R04-T01 verified the removal of a factor from a composite, with the factor left scaled to 100.
+- **Something left.** The parent keeps at least one node. A removal that would leave a composite, or the top level, without a node fails ([R04-AC02](releases/0.4.0-ranking-weights.md#acceptance-criteria)).
+- **`set`** names every node the parent keeps, and no other, each once, and follows a weight variant's rules for each weight. They sum to what the parent's nodes, the removed one included, sum to in the baseline. So the removed factor's weight goes to the factors left, as the user gives it: in R04-T01's step 7, to the one factor left, which got 100. The removed factor's weight is greater than 0, so at least one weight left changes.
+- **The case's definition.** The removed node's element is taken out of the text: from the `<` of its start tag through the `>` that ends its end tag, or its empty-element tag. When only spaces and tabs come before it on its line, they go too, with the line break before them, so no blank line is left. Then each weight that differs is rewritten, as in a weight variant.
+
+**Rules for both.**
+
+- **Paths are checked against the baseline's definition,** and a path that names no node, or more than one, fails with `config.invalid` ([node paths](#node-paths)). Every [rule of a definition](#ranking-definitions) still holds for the case's definition.
+- **Distinct cases.** Two variants that give the same definition, byte for byte, would share a `case_id`, so the second fails, as two variants with the same settings do.
+- **Messages** name the variant by its place in the file, such as `variants.ranking[0]`, and the rule it breaks, and never quote a path, a name, or the definition.
+- **Checked against R04-T01's evidence.** On 2026-10-12, offline, R04-T02 applied these rules to the definition of R04-T01's saved system C, with the weights its steps 4, 6, and 7 sent. Each gave the definition Portfolio123 accepted and used in that step, byte for byte: a weight change at the top level, whose sum isn't 100; a weight change within a composite; and the removal of a factor from a composite. The check printed only its verdicts, so the definitions stay in R04-T01's `payloads/`, which are git-ignored.
+
+#### Ranking example
+
+A definition with three composites of two factors each, in a file `ranking/value-momentum.xml` beside the configuration. Its element and attribute names are those R04-T01 read. Its names and weights are invented, and its formulas are left out, as `…`:
+
+```xml
+<RankingSystem RankType="Higher">
+	<Composite Name="Value" Weight="40" RankType="Summation">
+		<StockFormula Name="Earnings Yield" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+		<StockFormula Name="Sales Yield" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+	</Composite>
+	<Composite Name="Momentum" Weight="30" RankType="Summation">
+		<StockFormula Name="Six-Month Return" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+		<StockFormula Name="Year Return" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+	</Composite>
+	<Composite Name="Quality" Weight="30" RankType="Summation">
+		<StockFormula Name="Return on Equity" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+		<StockFormula Name="Gross Margin" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+	</Composite>
+</RankingSystem>
+```
+
+An experiment on it, with the [experiment example](#experiment-example)'s screen:
+
+```yaml
+kind: experiment
+schema_version: 1.1.0
+experiment_id: value-momentum-weights
+title: Value, momentum, and quality weights
+purpose: Does the screen's result depend on how its ranking weighs value, or on the sales-yield factor?
+prior_research:
+  status: unknown
+baseline:
+  universe: 'SP500'
+  rules:
+    - 'AvgDailyTot(30) > 1000000'
+  ranking:
+    definition: 'ranking/value-momentum.xml'
+    ranking_method: percentile_nas_negative
+  max_holdings: 25
+  benchmark: 'SPY'
+  start_date: 2016-01-01
+  end_date: 2025-12-31
+  rebalance_weeks: 4
+  transaction_price: open
+  slippage_percent: 0.25
+  pit_method: complete
+  precision: 4
+variants:
+  ranking:
+    - key: value-heavy
+      description: More weight on value, taken equally from momentum and quality.
+      set: {'Value': 60, 'Momentum': 20, 'Quality': 20}
+    - key: tilt-earnings-yield
+      set: {'Value/Earnings Yield': 70, 'Value/Sales Yield': 30}
+    - key: no-sales-yield
+      remove: 'Value/Sales Yield'
+      set: {'Value/Earnings Yield': 100}
+  rebalance_weeks: []
+budget:
+  provider_requests: 8
+```
+
+It compiles to four cases, in this order: `baseline`; `value-heavy`, whose definition has the top-level weights 60, 20, and 20; `tilt-earnings-yield`, whose Value composite weighs its factors 70 and 30; and `no-sales-yield`, whose Value composite holds only Earnings Yield, at 100. Each case's definition differs from the baseline's only in those weights, and in the removed element and its line. The empty `rebalance_weeks` list turns the [default variant](#default-variants) off. The budget allows two provider requests a case, a `rank_update` and a backtest, as R04-T03's [open question](releases/0.4.0-ranking-weights.md#open-questions) proposes to count them.
+
+A baseline that names a [snapshot](#ranking-snapshot-output) instead gives its directory, and no `ranking_method`, which the snapshot records:
+
+```yaml
+  ranking:
+    snapshot: 'ranking/value-momentum/'
+```
+
+These examples are validated in two ways:
+
+- **Against Portfolio123,** in part. The definition's form is the one R04-T01 sent, and its variants' changes are those R04-T01 verified, made by the rules R04-T02 checked against its steps 4, 6, and 7, above. The definition itself wasn't sent: its names, weights, and formulas are invented. R04-T04's live check sends a definition of this form ([R04-AC07](releases/0.4.0-ranking-weights.md#acceptance-criteria)).
+- **Against this format.** On 2026-10-12, R04-T02 read the experiment's file with Trial Folio 0.3.0's YAML reader, whose record of unquoted text holds only the fixed words, the title, the purpose, the description, the experiment's ID, and the case keys, so the definition's path, the `remove` path, and every text Portfolio123 receives are quoted. That reader doesn't record how a mapping's key is written, and the `set` paths are written in quotes. R04-T02 then applied the rules above to the definition with a prototype of them. Each variant gave the case definition described above, and the four definitions were distinct. The same rules, run on altered copies, failed on each of these: a path that names no node; a path that names two nodes; a weight of 0, and one with a percent sign, in the definition; a `set` that leaves out a node of its parent, names nodes of two parents, or names one node twice, by its name and by its position; weights whose sum differs from the baseline's; weights that change nothing; the removal of a composite, and of a composite's only factor; an XML declaration, a document type declaration, and a comment; an element of another type where a node goes, `Conditional`; another root element; a definition that isn't well-formed; a byte-order mark; and an empty composite. A path with an escaped `\/` named the node whose name holds the `/`, and the project's YAML reader, PyYAML 6.0.3, read `"Value/P\\/E"`, in double quotes, as the same path as `'Value/P\/E'`.
 
 #### Default variants
 
@@ -375,7 +544,7 @@ Any other key in `variants`, such as `universe`, `ranking`, `benchmark`, or a da
 #### Cases and their order
 
 - **How a case resolves.** A case's settings are the baseline's with its one change. Its request follows the screen configuration's "Sent as" mapping, and its `case_id` is computed as a screen run's is ([plan hashing](#plan-hashing)). So a case has the same `case_id` as a screen run with the same settings, whatever its key.
-- **Order.** The baseline comes first. Then come the variants of `rules`, `max_holdings`, `rebalance_weeks`, and `slippage_percent`, in that order, the [screen settings](#screen-settings)' order, and within each setting in its list's order. The default comes in `rebalance_weeks`'s place. The order of the keys in `variants` doesn't matter, so it leaves no trace in the plan.
+- **Order.** The baseline comes first. Then come the variants of `rules`, `ranking`, `max_holdings`, `rebalance_weeks`, and `slippage_percent`, in that order, the [screen settings](#screen-settings)' order, and within each setting in its list's order. The default comes in `rebalance_weeks`'s place. The order of the keys in `variants` doesn't matter, so it leaves no trace in the plan.
 
 #### The experiment's budget
 
@@ -454,6 +623,27 @@ These examples are validated in two ways:
   - `rebalance-weeks-1` to R01-T05's [`request-weekly.json`](../reference/p123api-screen-backtest-values/request-weekly.json)
   - the second example's two cases to those of R03-T01's [`easy-to-trade.yaml`](../reference/variant-capabilities/easy-to-trade.yaml) and [`no-microcaps.yaml`](../reference/variant-capabilities/no-microcaps.yaml)
 - **Against this format.** On 2026-10-07, R03-T02 read each example, the second as a whole file with those settings, with Trial Folio 0.2.1's YAML reader, which found every text Portfolio123 receives quoted. It then checked each rule above, compiled the cases, and validated each case as a screen configuration with 0.2.1's model. Each case's `case_id` and request equal those of its screen configuration, read by 0.2.1, or its committed request. The same check, run on altered copies, failed on each of these: a wrong reference, an unquoted rule, a `value` equal to the baseline's, a budget smaller than the number of cases, a key that's the default's, a `replace` that isn't one of the baseline's rules, and an empty `max_holdings` list.
+
+### Ranking snapshot configuration
+
+Schema version 1.0.0, introduced in 0.4.0 (R04-T02, [D-36](spec.md#decisions)). A ranking snapshot configuration names a ranking system saved in the user's Portfolio123 account. `trialfolio run` reads the system with one `rank_get`, under a plan and approval of its own, into a [ranking snapshot](#ranking-snapshot-output), which a screen's or an experiment's `ranking` can then name. It writes nothing to the account.
+
+| Key | Type | Required | Rules | Sent as |
+|---|---|---|---|---|
+| `kind` | string | Yes | `ranking-snapshot` | Not sent |
+| `schema_version` | string | Yes | A supported version (`1.0.0`). Any other value fails with `config.invalid`, and the message names the supported versions. | Not sent |
+| `system` | string | Yes | The name of a ranking system saved in the account: non-empty, and written in quotes or as a block scalar, as text Portfolio123 receives is (R01-T18) | `rank_get`'s `name` |
+
+- **By name.** `rank_get` takes a name or an ID. The website shows the name, and [D-36](spec.md#decisions) names the system by it. An ID isn't offered.
+- **Nothing else.** The file has no title or purpose: the snapshot records what Portfolio123 returns, and the configuration that uses it declares the research. The rules of [every configuration](#configuration-files) apply.
+
+Example:
+
+```yaml
+kind: ranking-snapshot
+schema_version: 1.0.0
+system: 'Value and momentum'
+```
 
 ## Source artifacts
 
@@ -866,7 +1056,7 @@ The core builds plans and checks approvals, and never prompts. The CLI shows the
 
 ### Plan contents
 
-Schema version 1.0.0, introduced in 0.1.0 (task R01-T04). A 1.0.0 plan has exactly one case; release 0.3.0's plan 1.1.0 adds several cases and revisions ([experiment plans and revisions](#experiment-plans-and-revisions)). `plan.json` holds:
+Schema version 1.0.0, introduced in 0.1.0 (task R01-T04). A 1.0.0 plan has exactly one case; release 0.3.0's plan 1.1.0 adds several cases and revisions ([experiment plans and revisions](#experiment-plans-and-revisions)). A ranking snapshot's plan, from 0.4.0, is a schema of its own, with no case ([ranking snapshot output](#ranking-snapshot-output)). `plan.json` holds:
 
 | Field | Contents |
 |---|---|
@@ -1393,7 +1583,7 @@ Only one process runs an experiment at a time ([release 0.3.0's included scope](
 
 **The command (R03-T13).** `trialfolio run`, in `src/trialfolio/cli.py`, takes the steps above for an experiment's configuration, and `src/trialfolio/experiment_approval.py` shows its plan, checks the reason and each `--repeat`, obtains the approval, and confirms the repeats; the core checks the approval and the repeats again. It settles these details:
 
-- **Choosing by `kind`.** `run` reads the configuration's `kind` first, with `read_run_configuration` in `src/trialfolio/configuration.py`, and then reads it as a screen's or an experiment's. A file whose `kind` is missing, or is neither, such as `review`, fails with `config.invalid`, and the message names both kinds `run` takes. The alternative was to read anything but `experiment` as a screen's, whose message, "`kind` must be screen", would mislead someone whose experiment's `kind` is misspelled.
+- **Choosing by `kind`.** `run` reads the configuration's `kind` first, with `read_run_configuration` in `src/trialfolio/configuration.py`, and then reads it as a screen's or an experiment's. A file whose `kind` is missing, or is neither, such as `review`, fails with `config.invalid`, and the message names both kinds `run` takes. The alternative was to read anything but `experiment` as a screen's, whose message, "`kind` must be screen", would mislead someone whose experiment's `kind` is misspelled. From 0.4.0, `run` also takes `ranking-snapshot` ([ranking snapshot output](#ranking-snapshot-output)), and the message names the three kinds.
 - **Which directory is resumed.** A directory that isn't empty is resumed only when it holds `experiment.lock`, and the store takes its lock before anything is read. Otherwise the command fails as for a screen, with the screen's `output.not_empty` message, and so does an output path that's a file: the store reads a root that isn't a directory as holding no lock file.
 - **The versions, in a resume, once it holds the lock.** Reading the records loads the modules that import `p123api`, `requests`, and `urllib3`, which the CLI loads only once `installed_versions` has checked them ([CLI behavior](#cli-behavior), imports). So a resume checks the installed versions at the end of step 3, once it holds the lock and before it reads the records, rather than in step 5, as R03-T03 had them: an unsupported environment fails with `environment.unsupported` before the records are checked. The alternatives were to check them before taking the lock, which would report `environment.unsupported` for a directory that isn't an experiment's, or after reading the records, which would load the packages unchecked.
 - **The plan display.** On a terminal, the full display gives:
@@ -1497,6 +1687,75 @@ Two don't fail. The case isn't repeated, the command says so, and it resumes the
 **The report,** `sessions/<s>/report.html`, comes before the manifest, and is rendered from the records and what the manifest will record, as a run's is. The release's [required behavior](releases/0.3.0-experiments.md#required-behavior), 6 and 7, and [reports](#reports) set what it holds: every case and its outcome, the retired cases, every revision and its reason, every repeat, and the declared prior research, which Trial Folio can't verify. R03-T10 settled its details, as R02-T07 did a review's, in [the experiment report](#reports). R03-T08 had written a first version, so a session ended with its report as specified, which pointed to each case's tables rather than showing their values; R03-T10 replaced it.
 
 **Logs** name the experiment's plans by number and hash, and its cases by `case_id`. They never hold the `experiment_id`, a case key, a description, or a revision's reason, which are the user's text ([logging](#logging-and-local-diagnostics)).
+
+### Ranking snapshot output
+
+Introduced in 0.4.0 (R04-T02, [D-36](spec.md#decisions)). `trialfolio run <config> --out <dir> [--approve <plan-hash>]`, given a [ranking snapshot configuration](#ranking-snapshot-configuration), reads the ranking system it names with one `rank_get`, and saves its definition, byte for byte, with a record of where it came from. It writes nothing to the account: `rank_get` only reads, and the snapshot makes no other call but Trial Folio's authentication. So the system the user selected is only ever read ([R04-AC09](releases/0.4.0-ranking-weights.md#acceptance-criteria)). A screen's or an experiment's `ranking` names the snapshot's directory, and its plan is then built from the snapshot, offline, without credentials ([reading a snapshot](#ranking-snapshot-output), below).
+
+**Its steps** are those of [`trialfolio run` for a screen](#approval), with these differences:
+
+- **Step 2** validates the [snapshot configuration](#ranking-snapshot-configuration).
+- **Step 3.** The output directory must be absent or empty, as for a screen. A snapshot is never resumed or added to: a later snapshot of the same system goes into a directory of its own.
+- **Step 4** builds the snapshot's plan, below, and shows it: the system's name, the request exactly as it will be sent, the budget, that nothing is written to the account, the data sent, and the plan hash and how to approve it.
+- **Step 7** claims the directory with `plan.json`, then writes `configuration.yaml`.
+- **Steps 8 and 9** authenticate, write the start record, send `rank_get`, and write the attempt record, as a run's attempt does ([execution outcomes and attempts](#execution-outcomes-and-attempts)).
+- **Then,** after a 200 whose response has the structure below, it writes `definition.xml` and then `snapshot.json`; after any other ending, neither. Last, it writes `manifest.json`. A snapshot has no report: it holds no metric to show.
+
+**The plan.** `plan.json` is a snapshot plan, schema version 1.0.0, a schema of its own. It holds these fields, and no other: it has no `title`, `purpose`, or `cases`. A field it shares with a [screen's plan](#plan-contents) follows that field's rules there, except where this list says otherwise:
+
+- `schema_version`, `trialfolio_version`, `canonicalization_version`, `provider_wrapper`, and `transport`, as in plan 1.0.0. Trial Folio plans with the verified versions only, as for a screen.
+- `system`: the configuration's `system`, which is sent.
+- `requests`: one, with the `operation` `rank_get` and the `params` `{"name": "<system>"}`, which `p123api`'s `rank_get` sends as the query of `GET /rank`.
+- `budget`: one provider request, at 1 credit, `rank_get`'s documented cost, with its source, the [Rank API](https://portfolio123.customerly.help/en/articles/43323-api-rank) page, checked 2026-10-12; so 1 credit, and one authentication call.
+- `retry_policy`, as in plan 1.0.0.
+- `data_sent`: two entries, `credentials` and `strategy_definition`, in that order. A snapshot sends no backtest settings, so it has no `backtest_settings`, which a screen's plan always has ([data sent](#data-sent)). `strategy_definition` carries `system`, as it carries a ranking system's name in a screen's plan.
+- `plan_hash`, computed as [plan hashing](#plan-hashing) says. The plan holds nothing that varies between invocations, so a snapshot's plan can be reviewed in one command and approved in the next.
+
+R04-T03 gives its field shapes, with those of the plans of a case that writes a definition.
+
+**The layout:**
+
+```text
+<out>/
+  manifest.json                                     written last
+  plan.json                                         the snapshot plan; claims the directory
+  configuration.yaml                                byte-for-byte copy of the snapshot configuration
+  attempts/<attempt_id>/                            the attempt, as a run's: its start and attempt records, request.json, and the response
+  definition.xml                                    the system's XML, byte for byte as rank_get returned it
+  snapshot.json                                     the snapshot record
+  logs/                                             diagnostics; excluded from hashes and from the manifest's evidence
+```
+
+The attempt has no `case_id`: a snapshot reads a system, and plans no case. R04-T03 gives the version of the start and attempt records that name the request's operation, with those of a case's `rank_update`, and of the snapshot's manifest, which lists every file but itself and the logs, with its path, `artifact_id`, size, and role, as a run's does.
+
+**The response.** A 200 is saved as a run's is ([writing the files](#execution-outcomes-and-attempts)). It has the structure a snapshot needs when its top level is an object with `name`, `xml`, `currency`, and `type` as strings, and `id` and `rankingMethod` as integers, the fields the Rank API documents for `rank_get`'s result and R04-T01's step 8 read. A response without that structure, or one the wrapper couldn't decode, is `provider.response_invalid`, as a screen's is, and the snapshot has no `definition.xml` or `snapshot.json`. The response stays in the attempt's directory, as a screen run's does: it holds `quotaRemaining`, which is account information ([`p123api-screen-backtest` version 1](#p123api-screen-backtest-version-1)).
+
+**`definition.xml`** is the response's `xml`, encoded as UTF-8, with nothing added or changed: the definition as Portfolio123 holds it. It's written whether or not it's a [definition](#ranking-definitions) Trial Folio can send, since it's the evidence of what the system held. A `xml` that UTF-8 can't encode, such as one holding a lone surrogate, is `provider.response_invalid`.
+
+**`snapshot.json`,** the snapshot record, schema version 1.0.0, holds:
+
+- `schema_version` and `trialfolio_version`, as every artifact does;
+- `requested`: the configuration's `system`;
+- the system as `rank_get` returned it, with `verified` provenance: its `name`, `id`, `ranking_method`, as the integer Portfolio123 gave, `currency`, and `type`. A `name` other than the one requested is recorded as it is;
+- `taken_at`: when the response arrived, the attempt's `ended_at`;
+- the `attempt_id` and `plan_hash` it was read under;
+- `definition` and `response`: the `artifact_id`s of `definition.xml` and of the saved response.
+
+It doesn't say whether the definition can be a ranking: that's checked each time a configuration names the snapshot, by the rules of the Trial Folio that reads it. R04-T03 gives its field shapes.
+
+The system's ID is in `snapshot.json`, which records it as [D-36](spec.md#decisions) decided, and so in each copy of `snapshot.json` beside a plan's `configuration.yaml` ([reading a snapshot](#ranking-snapshot-output), below). A plan built from the snapshot doesn't hold the ID: it records `snapshot.json` by its `artifact_id`.
+
+**The result.** On success, stdout says where the snapshot is, the name of the system read, and whether its definition, ranking method, currency, and type can be a ranking, and if not, which [rule](#ranking-definitions) each breaks. It never shows the definition. A failure follows [0.1.0's failure table](releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior), as a run's does, with the [error codes](#errors) a status gives. No check has seen what Portfolio123 answers for a name no ranking system has, so its status gets whichever code that table gives it. The manifest's `outcome` is `completed` once `snapshot.json` is written, and `failed` otherwise, as a screen run's is.
+
+**Logs** name the snapshot by its plan hash and attempt ID, never by the system's name, which is configuration text, or its ID, which comes from the provider's response ([logging](#logging-and-local-diagnostics)).
+
+**Reading a snapshot.** A configuration's `ranking.snapshot` is a path, resolved relative to the configuration file, and read at the one path the file system resolves, as a [definition](#ranking-definitions)'s is. Reading it is part of validating the configuration, in step 2, before the output directory is checked, so a plan is built from it offline:
+
+1. **It exists:** otherwise `input.not_found`.
+2. **It's a complete snapshot:** its manifest is valid, with the `outcome` `completed`; each file it lists has the size and `artifact_id` it records, as [`trialfolio report`](#cli-behavior) checks a run's; it lists `definition.xml` and `snapshot.json`; and `snapshot.json` is valid, and its `definition` is `definition.xml`'s `artifact_id`. Otherwise `input.not_a_run`, and the message says the directory isn't a complete ranking snapshot, and what's wrong. A manifest or record of a schema version Trial Folio can't read is `artifact.unknown_schema_version`.
+3. **It can be a ranking:** `definition.xml` follows the rules of a [definition](#ranking-definitions) file; the record's `ranking_method` is 2 or 4, which give `percentile_nas_negative` or `percentile_nas_neutral`; its `currency` is `USD`; and its `type` is `Stock`. Otherwise `config.invalid`, naming the configuration's key and the rule, as a definition's messages do.
+
+Its `definition.xml` and `snapshot.json` are then copied, byte for byte, beside each plan's `configuration.yaml`, as a definition file is: from the bytes read and checked in step 2, never by reading them again, so the copies are the files the approved plan was built from. The plan records the snapshot as the definition's [source](#ranking-definitions).
 
 ## Canonical hashing
 
@@ -1624,6 +1883,7 @@ The command is `trialfolio`. Commands are introduced by release:
 | `trialfolio demo --out <dir>` | 0.1.0 | Write a synthetic example run, labeled synthetic, and render its report offline |
 | `trialfolio review <config> --out <dir>` | 0.2.0 | Compare saved runs offline |
 | `trialfolio run <config> --out <dir> [--approve <plan-hash>] [--revision-reason <text>] [--repeat <case-key>[:<attempt-id>]]...`, for a `kind: experiment` configuration | 0.3.0 | Plan, execute, resume, and revise a finite experiment, and repeat a case on purpose ([D-24](spec.md#decisions), [running an experiment](#running-an-experiment), [repeating a case](#repeating-a-case)) |
+| `trialfolio run <config> --out <dir> [--approve <plan-hash>]`, for a `kind: ranking-snapshot` configuration | 0.4.0 | Read a ranking system saved in the account, with one `rank_get`, into a [ranking snapshot](#ranking-snapshot-output), once its plan is approved ([D-36](spec.md#decisions)) |
 | `trialfolio --version` | 0.1.0 | Print the application version |
 | `trialfolio license [--accept]` | 0.1.0 | Print the license, the full notice, and the acknowledgment status; `--accept` records the acknowledgment |
 
@@ -1760,7 +2020,7 @@ The core raises typed errors with stable dotted codes and actionable messages. O
 |---|---|---|
 | `config.invalid` | 3 | Configuration fails validation, including unknown keys and cross-field rules |
 | `input.not_found` | 3 | A referenced file does not exist |
-| `input.not_a_run` | 3 | An input directory is not a complete Trial Folio run: its manifest is missing, or its files don't match their hashes. The message names the problem. |
+| `input.not_a_run` | 3 | An input directory is not a complete Trial Folio run: its manifest is missing, or its files don't match their hashes. The message names the problem. From 0.4.0, also a configuration's ranking snapshot that isn't a complete snapshot ([reading a snapshot](#ranking-snapshot-output)). |
 | `artifact.unknown_schema_version` | 3 | An artifact's schema version has no reader |
 | `environment.unsupported` | 3 | The installed `p123api`, `requests`, or `urllib3` isn't a verified version, or `requests` would write request bodies with `simplejson` ([plan contents](#plan-contents)). It's found before the plan is shown, so nothing is sent and no output is created. The message names the verified versions and how to restore them. Exit 3, like an unsupported input, because the fix is local. |
 | `license.not_acknowledged` | 2 | A data-processing command ran without an acknowledgment of the current license and notice versions |
