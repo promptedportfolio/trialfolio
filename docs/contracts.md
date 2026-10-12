@@ -1701,14 +1701,14 @@ Introduced in 0.4.0 (R04-T02, [D-36](spec.md#decisions)). `trialfolio run <confi
 - **Steps 8 and 9** authenticate, write the start record, send `rank_get`, and write the attempt record, as a run's attempt does ([execution outcomes and attempts](#execution-outcomes-and-attempts)).
 - **Then,** after a 200 whose response has the structure below, it writes `definition.xml` and then `snapshot.json`; after any other ending, neither. Last, it writes `manifest.json`. A snapshot has no report: it holds no metric to show.
 
-**The plan.** `plan.json` is a snapshot plan, schema version 1.0.0, a schema of its own. It holds what a [screen's plan](#plan-contents) holds, with the same rules, except its cases:
+**The plan.** `plan.json` is a snapshot plan, schema version 1.0.0, a schema of its own. It holds these fields, and no other: it has no `title`, `purpose`, or `cases`. A field it shares with a [screen's plan](#plan-contents) follows that field's rules there, except where this list says otherwise:
 
 - `schema_version`, `trialfolio_version`, `canonicalization_version`, `provider_wrapper`, and `transport`, as in plan 1.0.0. Trial Folio plans with the verified versions only, as for a screen.
 - `system`: the configuration's `system`, which is sent.
 - `requests`: one, with the `operation` `rank_get` and the `params` `{"name": "<system>"}`, which `p123api`'s `rank_get` sends as the query of `GET /rank`.
 - `budget`: one provider request, at 1 credit, `rank_get`'s documented cost, with its source, the [Rank API](https://portfolio123.customerly.help/en/articles/43323-api-rank) page, checked 2026-10-12; so 1 credit, and one authentication call.
 - `retry_policy`, as in plan 1.0.0.
-- `data_sent`: `credentials`, and `strategy_definition`, which carries `system`, as it carries a ranking system's name in a screen's plan ([data sent](#data-sent)).
+- `data_sent`: two entries, `credentials` and `strategy_definition`, in that order. A snapshot sends no backtest settings, so it has no `backtest_settings`, which a screen's plan always has ([data sent](#data-sent)). `strategy_definition` carries `system`, as it carries a ranking system's name in a screen's plan.
 - `plan_hash`, computed as [plan hashing](#plan-hashing) says. The plan holds nothing that varies between invocations, so a snapshot's plan can be reviewed in one command and approved in the next.
 
 R04-T03 gives its field shapes, with those of the plans of a case that writes a definition.
@@ -1728,7 +1728,7 @@ R04-T03 gives its field shapes, with those of the plans of a case that writes a 
 
 The attempt has no `case_id`: a snapshot reads a system, and plans no case. R04-T03 gives the version of the start and attempt records that name the request's operation, with those of a case's `rank_update`, and of the snapshot's manifest, which lists every file but itself and the logs, with its path, `artifact_id`, size, and role, as a run's does.
 
-**The response.** A 200 is saved as a run's is ([writing the files](#execution-outcomes-and-attempts)). It has the structure a snapshot needs when its top level is an object with `name`, `xml`, `currency`, and `type` as strings, and `id` and `rankingMethod` as integers, the fields the Rank API documents for `rank_get`'s result and R04-T01's step 8 read. A response without that structure, or one the wrapper couldn't decode, is `provider.response_invalid`, as a screen's is, and the snapshot has no `definition.xml` or `snapshot.json`. The response holds the system's ID and `quotaRemaining`, which are account information, so it stays in the attempt's directory, as a screen run's response does.
+**The response.** A 200 is saved as a run's is ([writing the files](#execution-outcomes-and-attempts)). It has the structure a snapshot needs when its top level is an object with `name`, `xml`, `currency`, and `type` as strings, and `id` and `rankingMethod` as integers, the fields the Rank API documents for `rank_get`'s result and R04-T01's step 8 read. A response without that structure, or one the wrapper couldn't decode, is `provider.response_invalid`, as a screen's is, and the snapshot has no `definition.xml` or `snapshot.json`. The response stays in the attempt's directory, as a screen run's does: it holds `quotaRemaining`, which is account information ([`p123api-screen-backtest` version 1](#p123api-screen-backtest-version-1)).
 
 **`definition.xml`** is the response's `xml`, encoded as UTF-8, with nothing added or changed: the definition as Portfolio123 holds it. It's written whether or not it's a [definition](#ranking-definitions) Trial Folio can send, since it's the evidence of what the system held. A `xml` that UTF-8 can't encode, such as one holding a lone surrogate, is `provider.response_invalid`.
 
@@ -1743,9 +1743,11 @@ The attempt has no `case_id`: a snapshot reads a system, and plans no case. R04-
 
 It doesn't say whether the definition can be a ranking: that's checked each time a configuration names the snapshot, by the rules of the Trial Folio that reads it. R04-T03 gives its field shapes.
 
+The system's ID is in `snapshot.json`, which records it as [D-36](spec.md#decisions) decided, and so in each copy of `snapshot.json` beside a plan's `configuration.yaml` ([reading a snapshot](#ranking-snapshot-output), below). A plan built from the snapshot doesn't hold the ID: it records `snapshot.json` by its `artifact_id`.
+
 **The result.** On success, stdout says where the snapshot is, the name of the system read, and whether its definition, ranking method, currency, and type can be a ranking, and if not, which [rule](#ranking-definitions) each breaks. It never shows the definition. A failure follows [0.1.0's failure table](releases/0.1.0-api-execution.md#failure-and-incomplete-data-behavior), as a run's does, with the [error codes](#errors) a status gives. No check has seen what Portfolio123 answers for a name no ranking system has, so its status gets whichever code that table gives it. The manifest's `outcome` is `completed` once `snapshot.json` is written, and `failed` otherwise, as a screen run's is.
 
-**Logs** name the snapshot by its plan hash and attempt ID, never by the system's name, which is configuration text, or its ID, which is account information ([logging](#logging-and-local-diagnostics)).
+**Logs** name the snapshot by its plan hash and attempt ID, never by the system's name, which is configuration text, or its ID, which comes from the provider's response ([logging](#logging-and-local-diagnostics)).
 
 **Reading a snapshot.** A configuration's `ranking.snapshot` is a path, resolved relative to the configuration file, and read at the one path the file system resolves, as a [definition](#ranking-definitions)'s is. Reading it is part of validating the configuration, in step 2, before the output directory is checked, so a plan is built from it offline:
 
