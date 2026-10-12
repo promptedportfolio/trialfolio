@@ -52,7 +52,7 @@ Date: 2026-10-12, 12:25:23 to 12:37:15 UTC, on macOS 26.6.2 with Python 3.14.8, 
 
 **Credits:** 41, 39 for steps 1 to 7 and 2 for step 8, each as Portfolio123 reported it in the call's response: 1 for each `rank_get` and `rank_update`, and 5 for each backtest, as documented. Authentication's cost wasn't measured.
 
-**After steps 1 to 7,** the owner compared the account's ranking systems with the list from before: only `ApiRankingSystem` had changed, so `rank_update` touched no other ranking system. It then held step 7's definition. Step 8 wrote C's definition into it with ranking method 4, which it holds now.
+**After steps 1 to 7,** the owner compared the account's ranking systems with the list from before: only `ApiRankingSystem` had changed, so `rank_update` touched no other ranking system. It then held step 7's definition. Step 8 wrote C's definition into it with ranking method 4, which it holds now. After step 8, the owner looked at C in the website: its ranking method was still 2, so step 8 too wrote only `ApiRankingSystem`, and no saved system was written by any step.
 
 **A scan of every file steps 1 to 7 wrote,** 156 files, found the API key in none. The API ID matched once, inside a longer number in step 4's saved response: digits that happen to coincide.
 
