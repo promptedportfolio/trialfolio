@@ -177,7 +177,7 @@ An experiment's directory grows with each run of its command. `runs/study/` hold
 - `plans/<n>/`, one for each plan you approved, numbered from 1: `configuration.yaml`, your configuration byte for byte; `plan.json`; and `experiment.json`, the experiment's research record as of that plan, with every plan before it and the reason for each revision
 - `cases/<case_id>/attempts/<attempt_id>/`, each attempt's records, as a run's are. The attempt that authenticated also has `authenticating.json`.
 - `cases/<case_id>/normalized/`, the case's `metrics.csv` and `settings.csv`, as a run's, once its attempt succeeds
-- `sessions/<s>/`, one for each time the command ran the experiment, numbered from 1: `session.json`, `report.html`, and `manifest.json`, which is written last
+- `sessions/<s>/`, one for each run of the command that passed its checks and its approval, numbered from 1: `session.json`, `report.html`, and `manifest.json`, which is written last
 - `logs/trialfolio.log`, the log of every session
 
 [Outputs](../reference/outputs.md) describes each file. Keep in mind:

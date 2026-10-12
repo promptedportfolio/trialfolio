@@ -94,7 +94,7 @@ trialfolio demo --out demo/
 
 ## 4. Write a screen configuration
 
-A screen configuration is a YAML file describing one long-only stock screen backtest. Start from your workspace's `screen.yaml`. It has the settings of this example, which Portfolio123 accepted in a live call, with a comment on each key:
+A screen configuration is a YAML file describing one long-only stock screen backtest. Start from your workspace's `screen.yaml`. It has the settings of this example, which Portfolio123 accepted in a live call, with a comment on each key, and its `purpose` line commented out:
 
 ```yaml
 kind: screen
@@ -213,7 +213,7 @@ export TRIALFOLIO_P123_API_ID TRIALFOLIO_P123_API_KEY
 
 They last until you close the terminal. `unset TRIALFOLIO_P123_API_ID TRIALFOLIO_P123_API_KEY` removes them sooner.
 
-Trial Folio sends them only to Portfolio123's API, directly. It ignores proxy settings and `.netrc`, and if `SSLKEYLOGFILE` is set, it warns and ignores it.
+Trial Folio sends them only to Portfolio123's API, directly. It ignores proxy settings and `.netrc`, and if `SSLKEYLOGFILE` is set, `trialfolio run` warns and ignores it.
 
 **Check:**
 
@@ -468,7 +468,7 @@ An experiment's directory holds:
 | `plans/<n>/` | One for each plan you approved, numbered from 1: `configuration.yaml`, your configuration byte for byte; `plan.json`; and `experiment.json`, the experiment's research record as of that plan, with every plan before it and the reason for each revision |
 | `cases/<case_id>/attempts/<attempt_id>/` | Each attempt's records, as a run's are. The attempt that authenticated also has `authenticating.json`. |
 | `cases/<case_id>/normalized/` | The case's `metrics.csv` and `settings.csv`, as a run's, once its attempt succeeds |
-| `sessions/<s>/` | One for each time the command ran the experiment, numbered from 1: `session.json`, `report.html`, and `manifest.json`, which is written last |
+| `sessions/<s>/` | One for each run of the command that passed its checks and its approval, numbered from 1: `session.json`, `report.html`, and `manifest.json`, which is written last |
 | `logs/trialfolio.log` | The log of every session |
 
 - **A case's folder is named by its `case_id`,** never its key. The plan display and the report give each case's key beside its `case_id`.
@@ -558,7 +558,7 @@ In a terminal, it shows the revision, with what changed and your reason, and ask
 
 ## 13. Use it from a script
 
-Add `--json` to any command. stdout then holds exactly one JSON object, on success and on failure, and everything else goes to stderr. The object gives the outcome, the exit code, the IDs, such as the plan hash, the output files, the counts, such as `provider_requests` and the credit `cost`, and the error, if any. For a review, `ids` holds the review ID, and `counts` the results, the flagged setting rows, the unavailable metric rows, and the warnings.
+Add `--json` to any command. stdout then holds exactly one JSON object, on success and on failure, and everything else goes to stderr. A usage error is the one failure without an object: an argument the parser rejects, such as a missing or blank `--out`, exits 2, reported on stderr, with stdout empty. The object gives the outcome, the exit code, the IDs, such as the plan hash, the output files, the counts, such as `provider_requests` and the credit `cost`, and the error, if any. For a review, `ids` holds the review ID, and `counts` the results, the flagged setting rows, the unavailable metric rows, and the warnings.
 
 For an experiment:
 
@@ -603,10 +603,12 @@ Every error message says what failed, why, and what to do next. These are the on
 | `plan.changed` | An experiment's configuration, or the installed versions, changed since its current plan, and the revision wasn't approved with a reason | Give `--revision-reason`, and approve the revision's hash, which the message gives. Nothing was sent. |
 | `experiment.locked` | Another process is running the experiment, or waiting for its approval | Wait for it to end, and run the command again. Nothing was sent. |
 | `execution.partial` | An experiment ended with a planned case that didn't succeed; the message lists each one | Run the same command again to send the cases that are due, and repeat each case awaiting a repeat with the option the message gives |
+| `artifact.unknown_schema_version` | A saved file's schema version is one this version of Trial Folio has no reader for | Read the run, or resume the experiment, with a version of Trial Folio that has one. Nothing was written, and a resumed experiment sends nothing. |
 | `input.not_found`, `input.not_a_run` | `trialfolio report`'s run directory, or a review's `run` path, doesn't exist, or isn't a complete run. A review's message names the result. | Give the output directory of a run that finished. Nothing was written. |
-| `environment.unsupported` | The installed `p123api`, `requests`, or `urllib3` isn't the verified version | Run `uv sync` in the repository to restore the locked versions |
+| `environment.unsupported` | The installed `p123api`, `requests`, or `urllib3` isn't the verified version, or `simplejson` is importable | Run `uv sync` in the repository to restore the locked versions. For `simplejson`, uninstall it from the environment, or run Trial Folio in its own virtual environment. |
 | `provider.auth_failed` | The credentials are missing, or Portfolio123 refused them | Check the API ID and key |
 | `provider.unavailable` | Portfolio123 couldn't be reached; the request wasn't sent | Try again later |
+| `provider.request_rejected` | Portfolio123 answered the authentication call or the request with a status that no other code covers, such as a redirect, 404, or 429. The message gives the status. | After the authentication call, the request wasn't sent: try again later, and report it if it persists. After the request, it may have been charged: wait before running the command again, which is a new attempt. In an experiment, only a [repeat](#12-resume-repeat-or-revise-an-experiment) sends it again. |
 | `provider.quota_exceeded` | Portfolio123 refused the request for quota or credits | Check your API credits. The request may have been charged. |
 | `provider.unsupported_capability` | Portfolio123 rejected a setting; its own message follows | Change the setting. The request may have been charged. |
 | `provider.outcome_unknown` | The request may have been sent and charged, but no response was saved, for example after a timeout | Trial Folio never resends it on its own. Running a screen's command again is a new attempt, and may be charged again. In an experiment, only a [repeat](#12-resume-repeat-or-revise-an-experiment) sends it again. |

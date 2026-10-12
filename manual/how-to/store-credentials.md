@@ -14,7 +14,7 @@ The demo, a plan's review, `trialfolio report`, and `trialfolio review` need no 
     | `TRIALFOLIO_P123_API_ID` | Your Portfolio123 API ID |
     | `TRIALFOLIO_P123_API_KEY` | Your Portfolio123 API key |
 
-- **Where it sends them.** Only to Portfolio123's API, directly. It ignores proxy settings and `.netrc`, and if `SSLKEYLOGFILE` is set, it warns and ignores it. [Credentials](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#credentials) gives the rules.
+- **Where it sends them.** Only to Portfolio123's API, directly. It ignores proxy settings and `.netrc`, and if `SSLKEYLOGFILE` is set, `trialfolio run` warns and ignores it. [Credentials](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#credentials) gives the rules.
 
 !!! warning "Keep the key out of files and history"
     Keep the key out of your shell's history, and out of any plain-text file. Don't put it in a `.env` file in your workspace: Trial Folio doesn't read one, and the file would sit beside the runs and reports you might copy, zip, or share.
