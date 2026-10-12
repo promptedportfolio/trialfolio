@@ -32,6 +32,7 @@ nav = [
     "reference/review-configuration.md",
     "reference/experiment-configuration.md",
     "reference/outputs.md",
+    "reference/output-fields.md",
     "reference/errors.md",
     "reference/json-summary.md",
   ] },

@@ -6,27 +6,56 @@ Until Trial Folio is released as a package, you run it from a copy of its reposi
 
 ## Usage
 
+The usage lines and the tables of arguments and options on this page are generated from the command's own help.
+
+<!-- generated: cli-usage -->
+
 ```text
 trialfolio [-h] [--version] <command> ...
 ```
 
-| Command | What it does | Needs the license's acknowledgment | Sends to Portfolio123 |
+| Argument or option | Required | Default | What it is |
 |---|---|---|---|
-| [`init`](#trialfolio-init) | Sets up a workspace: a folder with a starter screen configuration, a README, and a `.gitignore` | No | Nothing |
-| [`run`](#trialfolio-run) | Plans and executes a screen backtest, or an experiment, once its plan is approved. Run an experiment's configuration again into its output directory to resume or revise it. | Yes | Each request of the plan you approve |
-| [`report`](#trialfolio-report) | Re-renders a saved run's report offline | Yes | Nothing |
-| [`demo`](#trialfolio-demo) | Writes a synthetic example run offline, labeled synthetic, with its report | Yes | Nothing |
-| [`review`](#trialfolio-review) | Compares saved runs with a baseline offline | Yes | Nothing |
-| [`license`](#trialfolio-license) | Prints the license, the full notice, and whether you've acknowledged them | No | Nothing |
+| `-h`, `--help` | No | None | Show this help message and exit |
+| `--version` | No | None | Show program's version number and exit |
 
-`trialfolio --help` lists these six.
+<!-- end generated: cli-usage -->
+
+**The commands:**
+
+<!-- generated: cli-commands -->
+
+| Command | What it does |
+|---|---|
+| [`init`](#trialfolio-init) | Set up a workspace: a folder with a starter screen configuration, a README, and a .gitignore. |
+| [`run`](#trialfolio-run) | Plan and execute a screen backtest, or an experiment, once its plan is approved. Run an experiment's configuration again into its output directory to resume or revise it. |
+| [`report`](#trialfolio-report) | Re-render a saved run's report offline. |
+| [`demo`](#trialfolio-demo) | Write a synthetic example run offline, labeled synthetic, with its report. |
+| [`review`](#trialfolio-review) | Compare saved runs with a baseline offline. |
+| [`license`](#trialfolio-license) | Print the license, the full notice, and whether you've acknowledged them. |
+
+<!-- end generated: cli-commands -->
+
+`trialfolio --help` lists these commands.
+
+- **The license's acknowledgment:** `run`, `report`, `demo`, and `review` need it, and `init` and `license` don't ([the license acknowledgment](#the-license-acknowledgment)).
+- **What each sends to Portfolio123:** `run` sends each request of the plan you approve. The other commands send nothing.
 
 **Options of every command:**
 
-| Option | What it does |
-|---|---|
-| `-h`, `--help` | Shows the command's help, and exits. Needs no acknowledgment. |
-| `--json` | Writes the result to stdout as one [JSON summary](json-summary.md). Each of the six commands takes it. |
+<!-- generated: cli-common-options -->
+
+| Argument or option | Required | Default | What it is |
+|---|---|---|---|
+| `-h`, `--help` | No | None | Show this help message and exit |
+| `--json` | No | Off | Write the result to stdout as one JSON summary |
+
+<!-- end generated: cli-common-options -->
+
+Each command's own table, below, lists its other arguments and options.
+
+- **`-h` and `--help`** need no acknowledgment.
+- **With `--json`,** the command writes the [JSON summary](json-summary.md).
 
 ## `trialfolio --version`
 
@@ -37,13 +66,17 @@ Prints `trialfolio` and its version, and exits. It needs no acknowledgment.
 
 ## `trialfolio init`
 
+<!-- generated: cli-command-init -->
+
 ```text
 trialfolio init [-h] [--json] [dir]
 ```
 
-| Argument | What it is |
-|---|---|
-| `dir` | The workspace: absent, or an empty directory. The current directory by default. |
+| Argument or option | Required | Default | What it is |
+|---|---|---|---|
+| `dir` | No | `.` | The workspace: absent, or an empty directory; the current directory by default |
+
+<!-- end generated: cli-command-init -->
 
 It writes three files:
 
@@ -60,21 +93,25 @@ It writes three files:
 
 ## `trialfolio run`
 
+<!-- generated: cli-command-run -->
+
 ```text
 trialfolio run [-h] --out DIR [--approve PLAN_HASH] [--revision-reason TEXT]
-               [--repeat CASE_KEY[:ATTEMPT_ID]] [--json] config
+               [--repeat CASE_KEY[:ATTEMPT_ID]] [--json]
+               config
 ```
 
-| Argument or option | What it is |
-|---|---|
-| `config` | The [screen](screen-configuration.md) or [experiment](experiment-configuration.md) configuration, a YAML file. Its `kind` says which. |
-| `--out DIR` | Required. The output directory: absent, or an empty directory, or, for an experiment, its own output directory, to resume or revise it |
-| `--approve PLAN_HASH` | Approves the plan with its full hash, as shown, without asking |
-| `--revision-reason TEXT` | Why the experiment's plan changed: needed, with the revision's approval, when the configuration or the installed versions no longer give the current plan |
-| `--repeat CASE_KEY[:ATTEMPT_ID]` | Sends again the request of an experiment's case that may already have been charged, which may be charged again: once for each case, with the attempt ID the plan shows to confirm it, or asked to confirm in a terminal |
-| `--json` | Writes the result to stdout as one [JSON summary](json-summary.md) |
+| Argument or option | Required | Default | What it is |
+|---|---|---|---|
+| `config` | Yes | None | The screen or experiment configuration, a YAML file |
+| `--out DIR` | Yes | None | The output directory: absent, or an empty directory, or, for an experiment, its own output directory, to resume or revise it |
+| `--approve PLAN_HASH` | No | None | Approve the plan with its full hash, as shown, without asking |
+| `--revision-reason TEXT` | No | None | Why the experiment's plan changed: needed, with the revision's approval, when the configuration or the installed versions no longer give the current plan |
+| `--repeat CASE_KEY[:ATTEMPT_ID]` | No | None | Send again the request of an experiment's case that may already have been charged, which may be charged again: once for each case, with the attempt ID the plan shows to confirm it, or asked to confirm in a terminal |
 
-A screen's run sends one request, which costs 5 API credits. An experiment sends one request for each case, at 5 credits each, within its [budget](experiment-configuration.md#the-budget).
+<!-- end generated: cli-command-run -->
+
+`config` is a [screen](screen-configuration.md) or an [experiment](experiment-configuration.md) configuration: its `kind` says which. A screen's run sends one request, which costs 5 API credits. An experiment sends one request for each case, at 5 credits each, within its [budget](experiment-configuration.md#the-budget).
 
 ### The plan and its approval
 
@@ -122,15 +159,18 @@ A screen's run sends one request, which costs 5 API credits. An experiment sends
 
 ## `trialfolio report`
 
+<!-- generated: cli-command-report -->
+
 ```text
 trialfolio report [-h] --out DIR [--json] run-dir
 ```
 
-| Argument or option | What it is |
-|---|---|
-| `run-dir` | The saved run's output directory |
-| `--out DIR` | Required. The new output directory for the report: absent, or an empty directory |
-| `--json` | Writes the result to stdout as one [JSON summary](json-summary.md) |
+| Argument or option | Required | Default | What it is |
+|---|---|---|---|
+| `run-dir` | Yes | None | The saved run's output directory |
+| `--out DIR` | Yes | None | The new output directory for the report: absent, or an empty directory |
+
+<!-- end generated: cli-command-report -->
 
 - **It rebuilds the run's report offline,** from its saved files. It sends nothing, and needs no credentials.
 - **It writes only `report.html` and its log** into `--out`. The run's directory isn't changed ([a re-rendered report's directory](outputs.md#a-re-rendered-reports-directory)).
@@ -140,29 +180,37 @@ trialfolio report [-h] --out DIR [--json] run-dir
 
 ## `trialfolio demo`
 
+<!-- generated: cli-command-demo -->
+
 ```text
 trialfolio demo [-h] --out DIR [--json]
 ```
 
-| Option | What it is |
-|---|---|
-| `--out DIR` | Required. The new output directory for the synthetic run: absent, or an empty directory |
-| `--json` | Writes the result to stdout as one [JSON summary](json-summary.md) |
+| Argument or option | Required | Default | What it is |
+|---|---|---|---|
+| `--out DIR` | Yes | None | The new output directory for the synthetic run: absent, or an empty directory |
+
+<!-- end generated: cli-command-demo -->
 
 - **It writes a complete example run** from invented values, with every file [a run holds](outputs.md#a-runs-directory), labeled synthetic.
 - **It needs no Portfolio123 subscription or credentials,** and sends nothing.
 
 ## `trialfolio review`
 
+<!-- generated: cli-command-review -->
+
 ```text
 trialfolio review [-h] --out DIR [--json] config
 ```
 
-| Argument or option | What it is |
-|---|---|
-| `config` | The [review configuration](review-configuration.md), a YAML file naming the runs and the baseline |
-| `--out DIR` | Required. The new output directory for the review: absent, or an empty directory |
-| `--json` | Writes the result to stdout as one [JSON summary](json-summary.md) |
+| Argument or option | Required | Default | What it is |
+|---|---|---|---|
+| `config` | Yes | None | The review configuration, a YAML file naming the runs and the baseline |
+| `--out DIR` | Yes | None | The new output directory for the review: absent, or an empty directory |
+
+<!-- end generated: cli-command-review -->
+
+`config` is a [review configuration](review-configuration.md).
 
 - **It compares saved runs with a baseline you choose,** offline: runs that `trialfolio run` or `trialfolio demo` wrote. It sends nothing, and needs no credentials, and it doesn't change the runs' directories.
 - **It doesn't rank the runs,** or say which strategy is better.
@@ -172,14 +220,17 @@ trialfolio review [-h] --out DIR [--json] config
 
 ## `trialfolio license`
 
+<!-- generated: cli-command-license -->
+
 ```text
 trialfolio license [-h] [--accept] [--json]
 ```
 
-| Option | What it is |
-|---|---|
-| `--accept` | Records your acknowledgment of `LicenseRef-NSPRL-1.1` and notice version 1.0 |
-| `--json` | Writes the result to stdout as one [JSON summary](json-summary.md) |
+| Argument or option | Required | Default | What it is |
+|---|---|---|---|
+| `--accept` | No | Off | Record your acknowledgment of LicenseRef-NSPRL-1.1 and notice version 1.0 |
+
+<!-- end generated: cli-command-license -->
 
 - **Without `--accept`,** it prints the license, the full research notice, and, on its last line, whether you've acknowledged them.
 - **It needs no acknowledgment,** and sends nothing.

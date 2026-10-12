@@ -32,27 +32,33 @@ precision: 4                                           # 4 only
 
 ## Keys
 
-Every key but `purpose` and `data_vendor` is required. There's no default end date, and no default slippage of zero.
+The Key, Required, and Value columns of each table on this page are generated from the configuration's schema, [`schemas/screen-configuration-1.0.0.schema.json`](https://github.com/promptedportfolio/trialfolio/blob/main/schemas/screen-configuration-1.0.0.schema.json), and What it's for is written here.
 
-| Key | Required | Value | Sent to Portfolio123 |
+<!-- generated: screen-configuration -->
+
+| Key | Required | Value | What it's for |
 |---|---|---|---|
-| `kind` | Yes | `screen` | No |
-| `schema_version` | Yes | `1.0.0` | No |
-| `title` | Yes | Your title, which heads the report: 1 to 200 characters | No |
-| `purpose` | No | Why you're running the backtest: 1 to 2,000 characters, not all whitespace. Without one, the report says no purpose was declared. | No |
-| `universe` | Yes | A Portfolio123 universe, by name, [in quotes](#quoting-the-text-portfolio123-receives), such as `'SP500'` | Yes |
-| `rules` | Yes | A list of at least one screening formula, each in quotes. Their order is kept. | Yes |
-| `ranking` | Yes | One of the [three forms of ranking](#ranking) | Yes |
-| `max_holdings` | Yes | The most stocks held: an integer, 1 or more | Yes |
-| `benchmark` | Yes | A Portfolio123 benchmark symbol, in quotes, such as `'SPY'` | Yes |
-| `start_date` | Yes | The backtest's first day, `YYYY-MM-DD` | Yes |
-| `end_date` | Yes | `YYYY-MM-DD`, later than `start_date`. There's no default of today. | Yes |
-| `rebalance_weeks` | Yes | The weeks between rebalances: `1` or `4` | Yes |
-| `transaction_price` | Yes | The price trades use: `open` | Yes |
-| `slippage_percent` | Yes | A decimal, 0 or more, in percent: `0.25` means 0.25%. There's no default of zero. | Yes |
-| `pit_method` | Yes | Portfolio123's point-in-time method: `complete` | Yes |
-| `precision` | Yes | The decimal places in results: `4` | Yes |
-| `data_vendor` | No | `FactSet`, the [only value accepted](#data_vendor) | No |
+| `kind` | Yes | `screen` | Marks the file as a screen configuration |
+| `schema_version` | Yes | `1.0.0` | The version of the configuration's format |
+| `title` | Yes | Text, 1 to 200 characters, not all whitespace | Your title, which heads the report |
+| `purpose` | No | Text, 1 to 2,000 characters, not all whitespace | Why you're running the backtest. Without one, the report says no purpose was declared. |
+| `universe` | Yes | Text, not all whitespace | A Portfolio123 universe, by name, [in quotes](#quoting-the-text-portfolio123-receives), such as `'SP500'` |
+| `rules` | Yes | A list of at least one item, each text, not all whitespace | The screening formulas, each in quotes. Their order is kept. |
+| `ranking` | Yes | One of these objects: [`ranking` with `formula`](#screen-configuration-ranking-formula), [`ranking` with `name`](#screen-configuration-ranking-name), or [`ranking` with `id`](#screen-configuration-ranking-id) | How the screen ranks stocks: one of the [three forms of ranking](#ranking) |
+| `max_holdings` | Yes | An integer, from 1 to 9,007,199,254,740,991 | The most stocks held |
+| `benchmark` | Yes | Text, not all whitespace | A Portfolio123 benchmark symbol, in quotes, such as `'SPY'` |
+| `start_date` | Yes | A date, `YYYY-MM-DD` | The backtest's first day |
+| `end_date` | Yes | A date, `YYYY-MM-DD` | The backtest's last day, later than `start_date`. There's no default of today. |
+| `rebalance_weeks` | Yes | `1` or `4` | The weeks between rebalances |
+| `transaction_price` | Yes | `open` | The price trades use |
+| `slippage_percent` | Yes | A number, 0 or more, and less than 10,000,000,000,000,000. Plain notation, with at most 4 digits after the decimal point and 15 significant digits. Never a string. | The slippage, a decimal in percent: `0.25` means 0.25%. There's no default of zero. |
+| `pit_method` | Yes | `complete` | Portfolio123's point-in-time method |
+| `precision` | Yes | `4` | The decimal places in results |
+| `data_vendor` | No | `FactSet` | The data vendor: `FactSet`, the [only value accepted](#data_vendor) |
+
+<!-- end generated: screen-configuration -->
+
+**Sent to Portfolio123:** `universe`, `rules`, `ranking`, `max_holdings`, `benchmark`, `start_date`, `end_date`, `rebalance_weeks`, `transaction_price`, `slippage_percent`, `pit_method`, and `precision`. Trial Folio never sends `kind`, `schema_version`, `title`, `purpose`, or `data_vendor`.
 
 Trial Folio also sends three fixed values with every request, which no key changes: a stock screen, long positions, and the currency USD.
 
@@ -73,13 +79,46 @@ Trial Folio also sends three fixed values with every request, which no key chang
 
 ## Ranking
 
-`ranking` holds exactly one of three forms:
+`ranking` holds exactly one of three forms: one formula, an existing ranking system in your account by name, or one by ID. Each form has its own keys.
 
-| Form | Keys | Example |
-|---|---|---|
-| One formula | `formula`, in quotes, and `lower_is_better`, `true` or `false`, which is required with it | `formula: 'EarnYield'` and `lower_is_better: false` |
-| An existing ranking system in your account, by name | `name`, in quotes | `name: 'My ranking system'` |
-| An existing ranking system in your account, by ID | `id`, a positive integer | `id: 12345` |
+<!-- generated: screen-configuration-ranking-formula -->
+
+### `ranking` with `formula` { #screen-configuration-ranking-formula }
+
+A ranking by a single formula, the recommended form.
+
+| Key | Required | Value | What it's for |
+|---|---|---|---|
+| `formula` | Yes | Text, not all whitespace | The formula, in quotes, such as `'EarnYield'` |
+| `lower_is_better` | Yes | `true` or `false` | Whether the formula's lower values rank higher, such as `false` |
+
+<!-- end generated: screen-configuration-ranking-formula -->
+
+<!-- generated: screen-configuration-ranking-name -->
+
+### `ranking` with `name` { #screen-configuration-ranking-name }
+
+An existing ranking system in the account, by name. It's recorded as not snapshotted.
+
+| Key | Required | Value | What it's for |
+|---|---|---|---|
+| `name` | Yes | Text, not all whitespace | The name of an existing ranking system in your account, in quotes, such as `'My ranking system'` |
+
+<!-- end generated: screen-configuration-ranking-name -->
+
+<!-- generated: screen-configuration-ranking-id -->
+
+### `ranking` with `id` { #screen-configuration-ranking-id }
+
+An existing ranking system in the account, by ID. It's recorded as not snapshotted.
+
+| Key | Required | Value | What it's for |
+|---|---|---|---|
+| `id` | Yes | An integer, from 1 to 9,007,199,254,740,991 | The ID of an existing ranking system in your account, such as `12345` |
+
+<!-- end generated: screen-configuration-ranking-id -->
+
+The forms by name and by ID look like this:
 
 ```yaml
 ranking:
