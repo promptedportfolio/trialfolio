@@ -105,7 +105,7 @@ budget:
   provider_requests: 2
 ```
 
-With it, the steps below are the same, except that the plan has two cases, `baseline` and `rebalance-weeks-1`, and its budget is 2 provider requests, 10 credits.
+With it, the steps below are the same, except that the plan has two cases, `baseline` and `rebalance-weeks-1`, its budget is 2 provider requests, 10 credits, and step 2's check of the budget lowers it from 2 to 1, then restores 2.
 
 ## Step 2: Review the plan
 
@@ -130,19 +130,19 @@ Write the experiment under `runs/`, which the workspace's `.gitignore` keeps out
 
 2. Type anything but `approve`, such as `stop`, to stop. It fails with `plan.approval_required`, exit code 2, and `runs/study/` doesn't exist.
 
-3. See what a script would see:
+3. See what a script would see. As in [your first backtest](first-backtest.md#step-6-review-the-plan), the pipe through `cat` makes the error output not a terminal, and the parentheses print the command's exit code:
 
     ```sh
-    trialfolio run experiment.yaml --out runs/study/ 2>&1 | cat
+    (trialfolio run experiment.yaml --out runs/study/ 2>&1; echo "Exit code: $?") | cat
     ```
 
     Without approval, from a script, it fails with `plan.approval_required`, exit code 2, and shows only the plan hash and the budget: 6 provider requests, 30 credits. `runs/study/` doesn't exist.
 
-4. See how Trial Folio checks the budget. In `experiment.yaml`, change `provider_requests: 6` to `provider_requests: 4`, and run step 3's command again.
+4. See how Trial Folio checks the budget. In `experiment.yaml`, change `provider_requests: 6` to `provider_requests: 4`, below the five cases, and run step 3's command again. For the smallest experiment, change `provider_requests: 2` to `provider_requests: 1`.
 
     A budget below the number of cases fails with `config.invalid`, exit code 3, and the message gives the number of cases. So does a variant of `universe`, and the message names the settings a variant may change.
 
-5. Change `provider_requests` back to `6`.
+5. Change `provider_requests` back to `6`, or to `2` for the smallest experiment.
 
 ## Step 3: Run the experiment
 

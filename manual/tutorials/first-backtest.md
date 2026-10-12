@@ -227,17 +227,17 @@ Before anything is sent, Trial Folio builds a plan from the configuration and sh
 
     It fails with `plan.approval_required`, exit code 2. `runs/first/` doesn't exist, and the message says nothing was sent.
 
-3. See what a script would see. Pipe the command's output through `cat`, so its error output isn't a terminal:
+3. See what a script would see. Pipe the command's output through `cat`, so its error output isn't a terminal. After a pipe, `echo $?` gives `cat`'s exit code, so the parentheses print the command's own:
 
     ```sh
-    trialfolio run screen.yaml --out runs/first/ 2>&1 | cat
+    (trialfolio run screen.yaml --out runs/first/ 2>&1; echo "Exit code: $?") | cat
     ```
 
-    When its error output isn't a terminal, as in a script, it shows only the plan hash and the budget, never the formulas. When its input isn't a terminal, it doesn't ask. Either way, it fails the same way, with the exact `--approve` option in the message.
+    When its error output isn't a terminal, as in a script, it shows only the plan hash and the budget, never the formulas. When its input isn't a terminal, it doesn't ask. Either way, it fails the same way, with `plan.approval_required`, exit code 2, and the exact `--approve` option in the message.
 
 4. Change a comment in `screen.yaml`, such as the one after `max_holdings`. Run step 3's command again, with `--out runs/other/` in place of `--out runs/first/`.
 
-    The plan hash is the same. The same configuration gives the same plan hash every time, in any output directory, and adding or changing a comment doesn't change it.
+    The plan hash is the same. The same configuration, with the same versions of Trial Folio, `p123api`, `requests`, and `urllib3`, gives the same plan hash every time, in any output directory, and adding or changing a comment doesn't change it. After you upgrade any of them, the same configuration needs approving again.
 
 5. Give the backtest a purpose. Remove the `#` and the space at the start of the `purpose` line, and write why you're running this backtest after `purpose:`. Run step 3's command again.
 
