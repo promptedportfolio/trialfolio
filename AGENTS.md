@@ -37,7 +37,7 @@ When proposing or completing a release specification, follow [Product direction 
 - **Live calls cost credits.** A screen backtest costs 5 API credits. Make live calls only with the owner's approval and a declared budget, and only through opt-in live tests or tasks. The owner is present for each one, and grants its network access.
 - **Keep reference data local.** Reference exports and payloads go in `exports/` or `payloads/` folders under `reference/`. Those folders are git-ignored and never committed ([REQ-11](docs/spec.md#enduring-requirements)). The configurations and run records beside them are committed. Committed fixtures are synthetic.
 - **Ask the owner for account-side steps.** Steps in the Portfolio123 website are the owner's; list exactly what you need. Trial Folio doesn't use DataMiner ([ADR 0005](docs/adrs/0005-build-on-the-portfolio123-api-only.md)).
-- **Leave shared account objects alone.** Do not create or overwrite shared objects in the Portfolio123 account, such as `APIRankingSystem`, without the owner's approval.
+- **Leave shared account objects alone.** Do not create or overwrite shared objects in the Portfolio123 account, such as `ApiRankingSystem`, without the owner's approval.
 
 ## Development commands
 
