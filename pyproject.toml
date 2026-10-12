@@ -77,6 +77,6 @@ extend-exclude = ["*.md"]
 "src/trialfolio/contracts/*.py" = ["TRY004"]
 
 [tool.pyright]
-include = ["src", "tests", "conftest.py"]
+include = ["src", "tests", "scripts", "conftest.py"]
 strict = ["src/trialfolio"]
 extraPaths = ["src", "tests/support/network_guard"]
