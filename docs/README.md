@@ -36,7 +36,7 @@ These are the specifications for Trial Folio. The implementation tasks of releas
 | [adrs/0006-observe-the-wrappers-http-exchanges.md](adrs/0006-observe-the-wrappers-http-exchanges.md) | Recording each HTTP exchange the `p123api` wrapper makes, so failures are classified by what was sent |
 | [adrs/0007-host-the-source-publicly-on-github.md](adrs/0007-host-the-source-publicly-on-github.md) | The public GitHub repository, its hosting exception, and where packages come from |
 | [adrs/0008-license-version-1-1.md](adrs/0008-license-version-1-1.md) | Version 1.1 of the license: Personal Vehicles, and the removed adoption sentence |
-| [adrs/0009-publish-a-user-manual-on-github-pages.md](adrs/0009-publish-a-user-manual-on-github-pages.md) | The user manual: Diátaxis's four sections in `manual/`, with `docs/` unchanged, built with Zensical and published on GitHub Pages; proposed |
+| [adrs/0009-publish-a-user-manual-on-github-pages.md](adrs/0009-publish-a-user-manual-on-github-pages.md) | The user manual: Diátaxis's four sections in `manual/`, with `docs/` unchanged, built with Zensical and published on GitHub Pages |
 | [graphical-prototype.md](graphical-prototype.md) | The read-only graphical prototype, outside any release ([D-29](spec.md#decisions)): its scope, criteria, and tasks (GP), and what each build found |
 | [user-manual.md](user-manual.md) | The user manual, outside any release ([D-35](spec.md#decisions)): its layout, rules, tooling and hosting, criteria, and tasks (UM). The manual's pages are in `manual/`, and own no requirement. |
 | [written-permission-template.md](written-permission-template.md) | The form a written permission grant takes |

@@ -1,6 +1,6 @@
 # User manual
 
-**Status:** Draft. **Don't build from it yet.** The owner decides its [open questions](#open-questions) and [ADR 0009](adrs/0009-publish-a-user-manual-on-github-pages.md), and then sets it to Ready.
+**Status:** Ready. The owner decided its [open questions](#open-questions), accepted [ADR 0009](adrs/0009-publish-a-user-manual-on-github-pages.md), and set it to Ready on 2026-10-12. UM-T01 is its first task.
 **Decided by:** [D-35](spec.md#decisions), on 2026-10-12
 **Depends on:** the [user guide](user-guide.md), as release [0.3.0](releases/0.3.0-experiments.md) left it. It runs alongside 0.4.0's specification work, R04-T02 to R04-T04, and finishes before 0.4.0's implementation starts.
 
@@ -12,7 +12,7 @@ The manual replaces the user guide, one page of 14 workflows that mixes a first 
 
 ## Completing this specification
 
-This file is complete except for its open questions. It's Ready when the owner has decided each [open question](#open-questions), or confirmed its default, and decided ADR 0009.
+Done (2026-10-12). The owner decided each [open question](#open-questions), confirmed the rules, criteria, and tasks below as written, and accepted ADR 0009. The owner removed one proposed rule, that the site names no brand: branding may be added to the manual later.
 
 ## User outcome
 
@@ -55,12 +55,11 @@ UM-T01 moves each section's content to these pages, or updates this table where 
 
 1. **The manual owns no requirement.** It describes Trial Folio's behavior; the documents in `docs/` define it. Where a page and an owning document disagree, the owning document wins, and the page is the one to fix, as for the user guide.
 2. **The specifications stay off the site.** `docs/` isn't built into the site. An explanation page links to the specification behind it on GitHub. The site holds no hand-written copy of a requirement: the reference pages that list commands, fields, and errors are generated from their sources (UM-T02).
-3. **The site carries the README's notices.** The README carries the Portfolio123 subscription notice, the research notice, and the non-affiliation notice ([DSC-03](disclaimers.md#dsc-03-where-notices-appear), [DSC-06](disclaimers.md#dsc-06-portfolio123-notices)). The site carries them too, as the open question on [where the notices go](#open-questions) settles.
+3. **The site carries the README's notices** ([DSC-03](disclaimers.md#dsc-03-where-notices-appear), [DSC-06](disclaimers.md#dsc-06-portfolio123-notices)). The home page carries all three: the Portfolio123 subscription notice before any installation step, the research notice with links to [disclaimers.md](disclaimers.md) and [LICENSE](../LICENSE), and the non-affiliation notice at its end. Every page's footer carries the non-affiliation notice and a copyright line that links to LICENSE, for a reader who arrives from search on an inner page.
 4. **Every example is synthetic.** Each output a page shows, such as a report, a table, a log line, or a JSON summary, comes from the demo or the fake Portfolio123 server, and is labeled synthetic ([DSC-04](disclaimers.md#dsc-04-actual-simulated-and-hypothetical-results)). No page shows Portfolio123 data, a ranking system's name from a real account, or a credential ([REQ-11](spec.md#enduring-requirements)).
 5. **A tutorial says what it needs first.** Before its first step, a tutorial says what it needs, such as a Portfolio123 subscription or credentials, and the most credits it can use. The first tutorial starts with the demo, so its first part works without a subscription.
 6. **Tutorials are walked through.** From UM-T01 on, each release's verification record includes a walk-through of every tutorial under that release, against the fake Portfolio123 server, as R03-T12 walked through the user guide's experiment workflow ([0.3.0's verification record](releases/0.3.0-verification.md#the-user-guides-experiment-workflow)).
 7. **A change to behavior updates the manual.** From UM-T01 on, a change to behavior a page describes updates that page in the same pull request, as AGENTS.md's [rules](../AGENTS.md#rules) ask of the documents.
-8. **No brand on the site.** The site names no publication, brand, or series. Its address, and its links to the repository, contain the brand's name, which [D-10](spec.md#decisions) allows.
 
 ## Tooling and hosting
 
@@ -75,13 +74,13 @@ UM-T01 moves each section's content to these pages, or updates this table where 
 
 | ID | Criterion |
 |---|---|
-| UM-AC01 | `uv run zensical build --clean` builds the site from `manual/`, after a fresh `uv sync`, with no error |
+| UM-AC01 | `uv run zensical build --clean` builds the site from `manual/`, after a fresh `uv sync`, with no error. `scripts/check` builds it too, and fails when it doesn't build. |
 | UM-AC02 | The docs workflow publishes the site from `main` at its address, and a page changed on `main` appears there once the workflow ends |
 | UM-AC03 | Each of the user guide's 14 sections has a home in the manual, as [where the user guide's sections go](#where-the-user-guides-sections-go) gives, and no step, check, or warning the guide gives is lost |
-| UM-AC04 | The site carries the README's three notices, where the open question on [where the notices go](#open-questions) puts them |
+| UM-AC04 | The home page carries the README's three notices, and every page's footer the non-affiliation notice and a copyright line that links to LICENSE, as [rule 3](#rules) gives |
 | UM-AC05 | Every output a page shows is synthetic and labeled so. No page holds Portfolio123 data, a real account's ranking system name, or a credential. |
 | UM-AC06 | Every link between pages resolves, and every link to a specification goes to its file on GitHub |
-| UM-AC07 | The site names no publication, brand, or series, beyond its own address and the repository's URL |
+| UM-AC07 | Opening any page of the built site loads nothing from another host |
 | UM-AC08 | The generated reference pages match the CLI's help, the committed schemas, and [contracts.md](contracts.md)'s errors, and `scripts/check` fails when they don't |
 
 ## Tasks
@@ -90,16 +89,18 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
 
 | ID | Task | Depends on |
 |---|---|---|
-| UM-T01 | **Build the site, and move the user guide's content into it.** Add Zensical, `zensical.toml`, the git-ignore entry, and `.github/workflows/docs.yml`, and record Zensical and the theme's files in THIRD_PARTY_NOTICES.md. Write the home page and the four sections' pages from the user guide's content, as [where the user guide's sections go](#where-the-user-guides-sections-go) gives, with the explanation pages, and list the pages written in this file. Add the site's row to [DSC-03](disclaimers.md#dsc-03-where-notices-appear). Once the site is published, link to it from the README's documentation section, [docs/README.md](README.md), and AGENTS.md's reading order. In AGENTS.md, have a change to behavior update the manual. Ask the owner to set the Pages source to GitHub Actions, and record the first deployment in this file. | Status Ready |
+| UM-T01 | **Build the site, and move the user guide's content into it.** Add Zensical, `zensical.toml`, the git-ignore entry, and `.github/workflows/docs.yml`, and record Zensical and the theme's files in THIRD_PARTY_NOTICES.md. Have `scripts/check` build the site. Turn off anything the theme loads from another host by default, such as web fonts. Write the home page and the four sections' pages from the user guide's content, as [where the user guide's sections go](#where-the-user-guides-sections-go) gives, with the explanation pages, and list the pages written in this file. Add a line at the top of the user guide that points to the manual. Add the site's row to [DSC-03](disclaimers.md#dsc-03-where-notices-appear). Once the site is published, link to it from the README's documentation section, [docs/README.md](README.md), and AGENTS.md's reading order. In AGENTS.md, have a change to behavior update the manual. Ask the owner to set the Pages source to GitHub Actions, and record the first deployment in this file. | Status Ready |
 | UM-T02 | **Generate the reference pages:** the commands and their options from the CLI's help, each configuration's and output's fields from the committed schemas, and the errors from [contracts.md](contracts.md)'s table, with a drift check that `scripts/check` runs, as it runs `scripts/schemas --check` | UM-T01 |
 
 ## Open questions
 
+The owner decided each question on 2026-10-12. The first five confirmed their defaults, which are now requirements. The last one's default holds for UM-T01, but the owner decided it isn't a requirement. Each alternative is kept for the record.
+
 | Question | Impact | Recommended default | Resolve by |
 |---|---|---|---|
-| Which version of Trial Folio does the site describe? | A reader running a tagged version could read about behavior on `main` that their version lacks | `main`, until the first release is distributed from the brand's site ([D-22](spec.md#decisions)). The home page says so, and names the latest tag. Whether Zensical builds a site with several versions is unverified: check it before that release. | The first distributed release |
-| What happens to the user guide between UM-T01 and 0.4.0's documentation task? | Two copies of the same instructions could drift apart | UM-T01 leaves it as it is, except for a line at its top that points to the manual. A change to behavior both describe updates both. 0.4.0's documentation task turns the guide into a page that points to the manual. | UM-T01 |
-| Where do the notices go on the site? | A reader who arrives from search lands on an inner page, not the home page | The home page carries the README's three notices: the subscription notice before any installation step, the research notice with links to [disclaimers.md](disclaimers.md) and [LICENSE](../LICENSE), and the non-affiliation notice at its end. Every page's footer carries the non-affiliation notice and a copyright line that links to LICENSE. | UM-T01 |
-| Does the site load anything from another host? | Readers' privacy, and whether a page loads when that host doesn't | No. UM-T01 checks whether Zensical's theme loads fonts or scripts from other hosts by default, and turns that off. | UM-T01 |
-| Is the site's build checked before a merge? | A page that doesn't build would otherwise fail only the deployment, after the merge | Yes: `scripts/check` builds the site, so the required `check` jobs fail on a manual that doesn't build. If the build slows `scripts/check` noticeably, the docs workflow builds the site on each pull request instead. | UM-T01 |
-| Does the site carry the brand's credit line? | D-10 allows the credit line in the README only | No. The site's address is the only place the brand appears. | UM-T01 |
+| Which version of Trial Folio does the site describe? | A reader running a tagged version could read about behavior on `main` that their version lacks | `main`, until the first release is distributed from the brand's site ([D-22](spec.md#decisions)). The home page says so, and names the latest tag. Whether Zensical builds a site with several versions is unverified: check it before that release. | Confirmed by the owner (2026-10-12). Revisit before the first distributed release. |
+| What happens to the user guide between UM-T01 and 0.4.0's documentation task? | Two copies of the same instructions could drift apart | UM-T01 leaves it as it is, except for a line at its top that points to the manual. A change to behavior both describe updates both. 0.4.0's documentation task turns the guide into a page that points to the manual. | Confirmed by the owner (2026-10-12) |
+| Where do the notices go on the site? | A reader who arrives from search lands on an inner page, not the home page | The home page carries the README's three notices: the subscription notice before any installation step, the research notice with links to [disclaimers.md](disclaimers.md) and [LICENSE](../LICENSE), and the non-affiliation notice at its end. Every page's footer carries the non-affiliation notice and a copyright line that links to LICENSE. | Confirmed by the owner (2026-10-12) |
+| Does the site load anything from another host? | Readers' privacy, and whether a page loads when that host doesn't | No. UM-T01 checks whether Zensical's theme loads fonts or scripts from other hosts by default, and turns that off. | Confirmed by the owner (2026-10-12) |
+| Is the site's build checked before a merge? | A page that doesn't build would otherwise fail only the deployment, after the merge | Yes: `scripts/check` builds the site, so the required `check` jobs fail on a manual that doesn't build. If the build slows `scripts/check` noticeably, the docs workflow builds the site on each pull request instead. | Confirmed by the owner (2026-10-12) |
+| Does the site carry the brand's credit line? | D-10 allows the credit line in the README only | No. The site's address is the only place the brand appears. | Decided by the owner (2026-10-12): UM-T01 adds no credit line or other branding. That isn't a requirement: the owner may add branding to the manual later, amending [D-10](spec.md#decisions) to allow it. |

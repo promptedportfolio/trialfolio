@@ -1,6 +1,6 @@
 # ADR 0009: Publish a user manual on GitHub Pages
 
-**Status:** Proposed. The owner decides it.
+**Status:** Accepted, by the owner, on 2026-10-12.
 **Date:** 2026-10-12
 **Decision owner:** Nathan Slaughter
 **Owner decisions:** D-10 and D-35 in the [product specification](../spec.md#decisions)
@@ -51,7 +51,7 @@ The tool was checked too, on 2026-10-12:
 - **Two places for documentation.** `docs/` holds the specifications, for agents and reviewers. `manual/` holds the user documentation. [docs/README.md](../README.md) maps both.
 - **A development dependency and a workflow.** `uv.lock` pins Zensical, and the workflow's actions are pinned by commit. The built site publishes the theme's own files, which [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) records with their licenses.
 - **The brand appears in the site's address** (D-10, as amended).
-- **The site is public once it deploys,** and publishing it isn't a release ([D-08](../spec.md#decisions)). It describes `main` until the first release is distributed, unless the owner decides otherwise ([user-manual.md's open questions](../user-manual.md#open-questions)).
+- **The site is public once it deploys,** and publishing it isn't a release ([D-08](../spec.md#decisions)). It describes `main` until the first release is distributed, as the owner decided on 2026-10-12 ([user-manual.md's open questions](../user-manual.md#open-questions)).
 - **Two copies for a while.** Until 0.4.0's documentation task, the user guide and the manual describe the same workflows.
 - **An account-side step.** The owner sets the repository's Pages source to GitHub Actions.
 
