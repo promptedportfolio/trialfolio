@@ -14,6 +14,8 @@ The manual replaces the user guide, one page of 14 workflows that mixes a first 
 
 Done (2026-10-12). The owner decided each [open question](#open-questions), confirmed the rules, criteria, and tasks below as written, and accepted ADR 0009. The owner removed one proposed rule, that the site names no brand: branding may be added to the manual later.
 
+After the iterative review, the owner confirmed three of its changes the same day: [rule 2](#rules) starts at UM-T02, [doing the next item](../AGENTS.md#doing-the-next-item) holds 0.4.0's implementation tasks until this file's tasks are done, and the site's theme files are recorded as distributed. The owner also decided that the pull request that records a new tag updates the home page (rule 8), that UM-T01 adds a check of the built site to `scripts/check` (UM-AC04, UM-AC06, and UM-AC07), and that UM-T02 checks the published site and records its first deployment.
+
 ## User outcome
 
 Someone who has never run Trial Folio follows the first tutorial from setting up to reading the demo's report. Afterward, they find the steps for a task, a setting, an output, or an error from the site's navigation and search, without reading a specification. Someone who wants to know why Trial Folio works as it does reads an explanation page, which links to the specification behind it.
