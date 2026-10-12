@@ -18,6 +18,7 @@ failure after the store published the manifest stands for its directory's sync f
 session discards it, as a run does (CLI behavior, what a run writes after its attempt).
 """
 
+import re
 import sys
 from pathlib import Path
 from typing import Final, cast
@@ -119,6 +120,13 @@ def failed(outcome: Outcome, code: str, exit_code: int) -> str:
     return message
 
 
+def repeated(message: str) -> list[str]:
+    """Each sentence or clause, ending with a period or a colon, that `message` says more than
+    once."""
+    parts = [part for part in re.split(r"(?<=[.:])\s+", message) if part]
+    return sorted({part for part in parts if parts.count(part) > 1})
+
+
 def attempts(out: Path) -> dict[str, int]:
     """How many attempts each of `default-only.yaml`'s cases has, by its key."""
     counts: dict[str, int] = {}
@@ -159,6 +167,11 @@ def stops_and_runs_again(
     )
 
     message = failed(stopped, code, exit_code)
+    # The attempt's error says what happened to its request, and the session adds what its
+    # records say: a fault during the attempt doesn't say the same thing twice. A defect found
+    # by R03-T12's walk-through of the user guide (PR #73): after an attempt record was written,
+    # the session repeated its request's sentence, after "Of the last attempt:".
+    assert repeated(message) == []
     assert not (out / "sessions/1/manifest.json").exists()
     assert "manifest" not in cast("dict[str, str]", stopped.summary["outputs"])
     # Each file was written once, and nothing after the fault.
