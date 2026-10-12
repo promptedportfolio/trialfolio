@@ -7,12 +7,13 @@ Traces to R03-AC05's interface part (D-32), and to docs/contracts.md, the budget
 failure that every later case would get stops the run, and the message names the error and says
 that a resume runs the cases not started), HTTP exchanges (when Trial Folio authenticates),
 experiment attempts (`authenticated_by`), running an experiment (the cases that are due, and
-`execution.partial`'s message, with the option that repeats a case), and the experiment manifest
-(`outcome`). Each test writes `example.yaml`'s experiment with the experiment builder, through
-the CLI's entry function in the test process, over the fake server, which answers a case's
-request with a 400, a 404, a 503, a 403, or a 402, or Trial Folio's authentication call with a
-401 or a 503. Each case's request is told apart by its body, which is the case's request as the
-plan gives it.
+`execution.partial`'s message, with the option that repeats a case), the experiment manifest
+(`outcome`), and logging (which attempt endings the terminal shows, D-38). Each test writes
+`example.yaml`'s experiment with the experiment builder, through the CLI's entry function in the
+test process, over the fake server, which answers a case's request with a 400, a 404, a 503, a
+403, or a 402, or Trial Folio's authentication call with a 401 or a 503; one test also fails the
+write of an attempt record with the storage faults. Each case's request is told apart by its
+body, which is the case's request as the plan gives it.
 """
 
 import functools
@@ -22,7 +23,7 @@ from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome
+from tests.interface.conftest import Cli, FaultyStores, Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     REFUSED,
@@ -265,6 +266,26 @@ def test_an_attempt_interrupted_during_its_send_leaves_its_ending_to_the_command
     assert f"Case 1 of 5 this session: {plan().cases[0].case_id}." in interrupted.stderr
     assert "Attempt for " not in interrupted.stderr
     assert "Error (command.interrupted): " in interrupted.stderr
+
+
+def test_an_attempt_whose_record_isnt_written_leaves_its_ending_to_the_command(
+    cli: Cli, experiments: Builder, faults: FaultyStores
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    # The first case's request gets a 503, so its outcome is unknown, and the write of its
+    # attempt record fails unexpectedly, so the record isn't written, and the session ends.
+    faults.fail_before("attempt.json", RuntimeError())
+
+    ran = experiments.run(EXAMPLE, out, sends=[UNAVAILABLE], store_factory=faults)
+
+    assert ran.exit_code == 5, ran.stderr
+    first = plan().cases[0].case_id
+    assert not list((out / "cases" / first / "attempts").glob("*/attempt.json"))
+    assert f"Case 1 of 5 this session: {first}." in ran.stderr
+    # The command's error follows, so the terminal doesn't show the attempt's ending too.
+    assert "Attempt for " not in ran.stderr
+    assert "Error (provider.outcome_unknown): " in ran.stderr
 
 
 # A failure every later case would get: no later case starts (D-32)
