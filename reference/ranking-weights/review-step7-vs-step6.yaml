@@ -1,0 +1,10 @@
+kind: review
+schema_version: 1.0.0
+title: R04-T01 step 7 against step 6, the definition written just before it
+purpose: Step 7's backtest should differ from step 6's in at least one metric; otherwise it may have used step 6's definition, still in ApiRankingSystem (D-20).
+baseline: step6
+results:
+  - label: step6
+    run: payloads/runs/step6
+  - label: step7
+    run: payloads/runs/step7
