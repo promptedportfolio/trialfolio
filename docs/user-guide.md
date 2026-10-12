@@ -454,7 +454,7 @@ Each case is a screen backtest, sent just as a screen configuration with its set
 
 3. Type `approve`, or give the hash with `--approve sha256:<the plan hash>`. Trial Folio runs the cases one at a time, in order. It authenticates before the first request, and again only before a request that follows a 401 or 403, which drops its token. A case that fails is recorded, and the next one runs. Progress goes to the terminal.
 
-When every case succeeds, it exits 0. When one doesn't, it exits 6, with `execution.partial`. The message lists each case that didn't succeed, with its outcome and error code, and gives the option that repeats each one whose request may have reached Portfolio123 ([repeating a case](#12-resume-repeat-or-revise-an-experiment)). Either way, the run writes its report and manifest.
+When every case succeeds, it exits 0. When one doesn't, it exits 6, with `execution.partial`. The message lists each case that didn't succeed, with its outcome and error code, and gives the option that repeats each one awaiting a repeat: one whose request may have reached Portfolio123, and none of whose attempts succeeded ([repeating a case](#12-resume-repeat-or-revise-an-experiment)). A case whose response was saved but failed validation, `failed` with `provider.response_invalid`, has no tables and gets no option: its attempt succeeded, so the case is complete, and is never sent again. Its response stays in its attempt's folder, for you to [report](#14-when-something-goes-wrong). Either way, the run writes its report and manifest.
 
 Two failures stop the run before its later cases, since each of those would fail the same way: Trial Folio's own authentication call failing, as with wrong credentials, and `provider.quota_exceeded`. The run ends with exit 6, and once you've fixed the cause, running the same command again runs the cases it didn't start.
 
@@ -501,9 +501,9 @@ To go on with an experiment, run the same command again, into the same directory
 
 | State | What a resume does with it |
 |---|---|
-| **Complete:** one of its attempts succeeded | Skips it. It's never sent again. |
+| **Complete:** one of its attempts succeeded, so its response was saved, even one that then failed validation | Skips it. It's never sent again. |
 | **Due:** it has no attempt, or each failed before its request could reach Portfolio123, as after a failed authentication | Sends it |
-| **Awaiting a repeat:** its request may have reached Portfolio123, and may have been charged, but it didn't succeed. It's `unknown`, as after a timeout or an interrupt while waiting for Portfolio123, or `failed`, as after Portfolio123 rejected it. | Never sends it on its own. Only a repeat, below, sends it again. |
+| **Awaiting a repeat:** its request may have reached Portfolio123, and may have been charged, but none of its attempts succeeded. It's `unknown`, as after a timeout or an interrupt while waiting for Portfolio123, or `failed`, as after Portfolio123 rejected it. | Never sends it on its own. Only a repeat, below, sends it again. |
 
 - **After an interrupt,** such as Ctrl-C, a storage failure, or a crash, the attempts recorded so far are kept. Run the same command again: it records what the stopped run left, such as an attempt interrupted while it waited for Portfolio123, which becomes `unknown`, writes the tables the stopped run didn't, and sends the cases that are due. If the first run was interrupted before its plan was recorded, nothing was sent, and the message says to remove the directory and run the command again.
 - **A resume that sends nothing needs no credentials.** When no case is due and no repeat is to be made, it writes a new session's report and manifest, and sends nothing.
