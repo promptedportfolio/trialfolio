@@ -1,6 +1,6 @@
 # User manual
 
-**Status:** Ready. The owner decided its [open questions](#open-questions), accepted [ADR 0009](adrs/0009-publish-a-user-manual-on-github-pages.md), and set it to Ready on 2026-10-12. UM-T01 is its first task.
+**Status:** Ready. The owner decided its [open questions](#open-questions), accepted [ADR 0009](adrs/0009-publish-a-user-manual-on-github-pages.md), and set it to Ready on 2026-10-12. UM-T01 (2026-10-12) built the site, and moved the user guide's content into it. UM-T02 is next.
 **Decided by:** [D-35](spec.md#decisions), on 2026-10-12
 **Depends on:** the [user guide](user-guide.md), as release [0.3.0](releases/0.3.0-experiments.md) left it. It runs alongside [0.4.0](releases/0.4.0-ranking-weights.md)'s specification work, R04-T02 to R04-T04, and finishes before 0.4.0's implementation starts: [doing the next item](../AGENTS.md#doing-the-next-item) holds 0.4.0's implementation tasks until this file's status line says each task below is done.
 
@@ -22,35 +22,36 @@ Someone who has never run Trial Folio follows the first tutorial from setting up
 
 ## Layout
 
-A home page and four sections. These are the proposed pages: UM-T01 may rename, merge, or add pages, and lists the pages it wrote in this file.
+A home page and four sections. UM-T01 wrote these pages (2026-10-12). A later task that renames, merges, or adds a page updates this table.
 
-| Section | What it's for | Proposed pages |
+| Section | What it's for | Pages |
 |---|---|---|
 | Home, `manual/index.md` | What Trial Folio is, the notices, and where to start | `index.md` |
 | Tutorials, `manual/tutorials/` | Learning by doing: a guided first run that works | `first-backtest.md`, `first-experiment.md` |
-| How-to guides, `manual/how-to/` | The steps for one task the reader already has | `store-credentials.md`, `re-render-a-report.md`, `compare-runs.md`, `repeat-a-case.md`, `revise-an-experiment.md`, `recover-from-an-interrupt.md`, `use-from-a-script.md`, and others UM-T01 finds |
+| How-to guides, `manual/how-to/` | The steps for one task the reader already has | `store-credentials.md`, `re-render-a-report.md`, `compare-runs.md`, `recover-from-an-interrupt.md`, `repeat-a-case.md`, `revise-an-experiment.md`, `use-from-a-script.md` |
 | Reference, `manual/reference/` | Exact descriptions to look up | `cli.md`, `screen-configuration.md`, `review-configuration.md`, `experiment-configuration.md`, `outputs.md`, `errors.md`, `json-summary.md` |
-| Explanation, `manual/explanation/` | Understanding: why Trial Folio works as it does | `plans-and-approval.md`, `credits-and-uncertain-charges.md`, `reproducibility.md`, `what-a-backtest-can-support.md`, and others UM-T01 finds |
+| Explanation, `manual/explanation/` | Understanding: why Trial Folio works as it does | `plans-and-approval.md`, `credits-and-uncertain-charges.md`, `reproducibility.md`, `what-a-backtest-can-support.md` |
+| Third-party notices, `manual/third-party-notices.md` | The licenses of the theme's files the site serves ([tooling and hosting](#tooling-and-hosting)), linked from every page's footer | `third-party-notices.md` |
 
 ### Where the user guide's sections go
 
-UM-T01 moves each section's content to these pages, or updates this table where it places it differently.
+UM-T01 moved each section's content to these pages (2026-10-12). A page that holds only part of a section links to the page that holds the rest.
 
 | User guide section | Manual pages |
 |---|---|
-| [1. Set up](user-guide.md#1-set-up) | `tutorials/first-backtest.md` |
-| [2. Acknowledge the license](user-guide.md#2-acknowledge-the-license) | `tutorials/first-backtest.md`, and `reference/cli.md` for the acknowledgment's options |
+| [1. Set up](user-guide.md#1-set-up) | `tutorials/first-backtest.md`, and `reference/cli.md` for `trialfolio init` |
+| [2. Acknowledge the license](user-guide.md#2-acknowledge-the-license) | `tutorials/first-backtest.md`, `reference/cli.md` for the acknowledgment's options, and `how-to/use-from-a-script.md` |
 | [3. Try the demo](user-guide.md#3-try-the-demo) | `tutorials/first-backtest.md` |
-| [4. Write a screen configuration](user-guide.md#4-write-a-screen-configuration) | `tutorials/first-backtest.md`, and `reference/screen-configuration.md` |
-| [5. Review the plan](user-guide.md#5-review-the-plan) | `tutorials/first-backtest.md`, and `explanation/plans-and-approval.md` |
-| [6. Set your credentials](user-guide.md#6-set-your-credentials) | `how-to/store-credentials.md` |
+| [4. Write a screen configuration](user-guide.md#4-write-a-screen-configuration) | `tutorials/first-backtest.md`, `reference/screen-configuration.md`, and `explanation/reproducibility.md` |
+| [5. Review the plan](user-guide.md#5-review-the-plan) | `tutorials/first-backtest.md`, `explanation/plans-and-approval.md`, and `how-to/use-from-a-script.md` |
+| [6. Set your credentials](user-guide.md#6-set-your-credentials) | `how-to/store-credentials.md`, and `tutorials/first-backtest.md` for the prompt |
 | [7. Run a backtest](user-guide.md#7-run-a-backtest) | `tutorials/first-backtest.md`, and `explanation/credits-and-uncertain-charges.md` |
 | [8. Read the results](user-guide.md#8-read-the-results) | `tutorials/first-backtest.md`, `reference/outputs.md`, and `explanation/what-a-backtest-can-support.md` |
-| [9. Re-render a report](user-guide.md#9-re-render-a-report) | `how-to/re-render-a-report.md` |
-| [10. Compare runs with a review](user-guide.md#10-compare-runs-with-a-review) | `how-to/compare-runs.md`, and `reference/review-configuration.md` |
-| [11. Run an experiment](user-guide.md#11-run-an-experiment) | `tutorials/first-experiment.md`, and `reference/experiment-configuration.md` |
-| [12. Resume, repeat, or revise an experiment](user-guide.md#12-resume-repeat-or-revise-an-experiment) | `how-to/recover-from-an-interrupt.md`, `how-to/repeat-a-case.md`, and `how-to/revise-an-experiment.md` |
-| [13. Use it from a script](user-guide.md#13-use-it-from-a-script) | `how-to/use-from-a-script.md`, and `reference/json-summary.md` |
+| [9. Re-render a report](user-guide.md#9-re-render-a-report) | `how-to/re-render-a-report.md`, and `reference/outputs.md` |
+| [10. Compare runs with a review](user-guide.md#10-compare-runs-with-a-review) | `how-to/compare-runs.md`, `reference/review-configuration.md`, and `reference/outputs.md` |
+| [11. Run an experiment](user-guide.md#11-run-an-experiment) | `tutorials/first-experiment.md`, `reference/experiment-configuration.md`, `reference/outputs.md`, and `how-to/recover-from-an-interrupt.md` |
+| [12. Resume, repeat, or revise an experiment](user-guide.md#12-resume-repeat-or-revise-an-experiment) | `how-to/recover-from-an-interrupt.md`, `how-to/repeat-a-case.md`, `how-to/revise-an-experiment.md`, and `explanation/credits-and-uncertain-charges.md` |
+| [13. Use it from a script](user-guide.md#13-use-it-from-a-script) | `how-to/use-from-a-script.md`, `reference/json-summary.md`, and `reference/errors.md` for the exit codes |
 | [14. When something goes wrong](user-guide.md#14-when-something-goes-wrong) | `reference/errors.md`, and `how-to/recover-from-an-interrupt.md` |
 
 ## Rules
@@ -96,6 +97,39 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
 |---|---|---|
 | UM-T01 | **Build the site, and move the user guide's content into it.** Add Zensical, `zensical.toml`, the git-ignore entry, and `.github/workflows/docs.yml`. Record Zensical in THIRD_PARTY_NOTICES.md's development tools, and the site there as a distribution form, with the theme's files it serves and their licenses, and have the site carry those files' notices ([tooling and hosting](#tooling-and-hosting)). Have `scripts/check` build the site, and check the built site: it fails when a page loads a resource from another host, such as a script, stylesheet, font, or image (UM-AC07), when a page's footer lacks the non-affiliation notice or the link to LICENSE (UM-AC04), or when a link between pages doesn't resolve (UM-AC06). Turn off anything the theme loads from another host by default, such as web fonts. Write the home page and the four sections' pages from the user guide's content, as [where the user guide's sections go](#where-the-user-guides-sections-go) gives, with the explanation pages, and list the pages written in this file. The reference pages it writes are hand-written until UM-T02 generates them ([rule 2](#rules)). Add a line at the top of the user guide that points to the manual. Add the site's row to [DSC-03](disclaimers.md#dsc-03-where-notices-appear). Link to the site's address, `https://promptedportfolio.github.io/trialfolio/`, from the README's documentation section, [docs/README.md](README.md), and AGENTS.md's reading order: the links resolve once the site first deploys. In AGENTS.md, have a change to behavior update the manual, and the user guide too until 0.4.0's documentation task ([rule 7](#rules)). Ask the owner to set the Pages source to GitHub Actions while its pull request is open, so the deployment after its merge succeeds. It's done when its pull request merges. | Status Ready |
 | UM-T02 | **Generate the reference pages:** the commands and their options from the CLI's help, each configuration's and output's fields from the committed schemas, and the errors from [contracts.md](contracts.md)'s table, with a drift check that `scripts/check` runs, as it runs `scripts/schemas --check`. contracts.md's table gives no remedy, so the user guide's "What to do" for each error stays in the manual, beside the generated codes or on a how-to page, and none is lost (UM-AC03). A remedy is advice, not a requirement, so rule 2 allows it by hand. Check UM-AC02 against the published site, which UM-T01's merge first deploys, and record the first deployment in this file: its date and the docs workflow's run. | UM-T01 |
+
+## What UM-T01 settled
+
+**Details from UM-T01 (2026-10-12), awaiting the owner's confirmation.** Each is a detail the specification left open:
+
+1. **The footer.** `overrides/partials/copyright.html`, in the theme's `custom_dir`, replaces the theme's footer text on every page. It holds:
+   - the copyright line, "Copyright © 2026 Nathan Slaughter", naming the license with a link to LICENSE on `main`;
+   - a link to the site's third-party notices;
+   - the non-affiliation notice, as the README gives it.
+
+   It leaves out the theme's "Made with Zensical" link. The alternative is to keep that link.
+2. **The theme files' notices.** The theme's scripts and stylesheets carry no license headers. So the notices are on a page of their own, `third-party-notices.md`, in the navigation and linked from every footer. It holds each license's full text, or Font Awesome's attribution. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#the-user-manuals-site) records the site as a distribution form, and asks a pull request that changes Zensical's version to check the files the site serves again.
+3. **The configuration** in `zensical.toml`:
+   - `strict = true`, so a broken link or anchor fails the build;
+   - `font = false`, so pages use the reader's system fonts;
+   - no `repo_url`, so the header has no link to the repository. With one, the theme's script would ask GitHub's API for the repository's facts from each reader's browser.
+   - the features `navigation.sections` and `content.code.copy`.
+4. **The check of the built site** is `scripts/check_manual.py`, with its tests in `tests/manual/`.
+   - pyright now checks `scripts/` too.
+   - `scripts/check` removes `site/` before it builds, so a removed page can't linger and pass.
+   - The check reads the built HTML and the stylesheets. It doesn't run the theme's script, which can fetch from other hosts for features the site doesn't use: diagrams, a repository's facts, and a polyfill for a browser without `ResizeObserver`.
+5. **The docs workflow:**
+   - It builds on Python 3.12, with the `check` workflow's version of `uv`.
+   - It runs the check of the built site again before publishing, because a pull request can merge without being up to date with `main`.
+   - It runs `actions/configure-pages`, as Zensical's own workflow does.
+6. **The home page** names `v0.2.1` as the latest tag. It sends the reader of a tagged copy to the user guide at that tag.
+7. **Where the user guide was wrong, or incomplete,** the manual follows the owning documents:
+   - `--json` gives no summary on a usage error, which exits 2 ([contracts.md](contracts.md#cli-behavior)).
+   - The workspace's `screen.yaml` has its `purpose` line commented out.
+   - An experiment's `sessions/<s>/` is written only for a run that passed its checks and its approval.
+   - Only `trialfolio run` warns about `SSLKEYLOGFILE`.
+   - `environment.unsupported` also covers an importable `simplejson`, whose remedy isn't `uv sync`.
+   - The errors reference lists all 21 codes, including the three the guide's table leaves out: `license.not_acknowledged`, `artifact.unknown_schema_version`, and `provider.request_rejected`.
 
 ## Open questions
 
