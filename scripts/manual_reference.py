@@ -1145,8 +1145,7 @@ def check(manual: Path, generated: Mapping[str, Region]) -> list[str]:
                 f"{_name(manual, region.page)}:{region.start + 1}: region {region.region_id}"
                 " differs from what its source generates"
             )
-        else:
-            problems += _empty(manual, generated, region, existing)
+        problems += _empty(manual, generated, region, existing)
     return problems
 
 
