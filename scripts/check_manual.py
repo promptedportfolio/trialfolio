@@ -69,7 +69,8 @@ LOADING_LINK_TYPES = {
 # The kinds of <link> that name another page of the site.
 PAGE_LINK_TYPES = {"prev", "next"}
 
-CSS_URL = re.compile(r"""(?:url\(|@import)\s*(['"]?)\s*([^'")\s;]*)""", re.IGNORECASE)
+# What a stylesheet loads: a url(), quoted or not, and an @import, which names a string or a url().
+CSS_URL = re.compile(r"""(?:@import\s*(?:url\()?|url\()\s*(['"]?)\s*([^'")\s;]*)""", re.IGNORECASE)
 
 
 class _Page(HTMLParser):

@@ -141,6 +141,25 @@ def test_a_stylesheet_that_loads_from_another_host_fails(tmp_path: Path) -> None
     ]
 
 
+def test_an_import_by_url_from_another_host_fails(tmp_path: Path) -> None:
+    # @import takes a url() as well as a string, quoted or not, in a stylesheet or a page.
+    site = _site(
+        tmp_path,
+        b=_page(body="<style>@import url(https://example.com/b.css);</style>"),
+    )
+    _write(
+        site,
+        "assets/extra.css",
+        '@import url("https://example.com/a.css");@IMPORT URL( https://example.com/c.css );',
+    )
+
+    assert check_manual.check_site(site) == [
+        "b.html: loads https://example.com/b.css from another host (UM-AC07)",
+        "assets/extra.css: loads https://example.com/a.css from another host (UM-AC07)",
+        "assets/extra.css: loads https://example.com/c.css from another host (UM-AC07)",
+    ]
+
+
 def test_links_out_and_resources_from_the_sites_own_address_pass(tmp_path: Path) -> None:
     body = (
         '<a href="https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md">Spec</a>'
