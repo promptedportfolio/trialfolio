@@ -60,6 +60,7 @@ UM-T01 moves each section's content to these pages, or updates this table where 
 5. **A tutorial says what it needs first.** Before its first step, a tutorial says what it needs, such as a Portfolio123 subscription or credentials, and the most credits it can use. The first tutorial starts with the demo, so its first part works without a subscription.
 6. **Tutorials are walked through.** From UM-T01 on, each release's verification record includes a walk-through of every tutorial under that release, against the fake Portfolio123 server, as R03-T12 walked through the user guide's experiment workflow ([0.3.0's verification record](releases/0.3.0-verification.md#the-user-guides-experiment-workflow)).
 7. **A change to behavior updates the manual.** From UM-T01 on, a change to behavior a page describes updates that page in the same pull request, as AGENTS.md's [rules](../AGENTS.md#rules) ask of the documents. Until 0.4.0's documentation task turns the user guide into a page that points to the manual, the same pull request updates the guide too, where it describes that behavior.
+8. **A new tag updates the home page.** The home page names the latest tag ([open questions](#open-questions)). From UM-T01 on, the pull request that records a new tag, in its release's status line, also updates the home page to name it.
 
 ## Tooling and hosting
 
