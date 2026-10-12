@@ -117,7 +117,7 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
 4. **The check of the built site** is `scripts/check_manual.py`, with its tests in `tests/manual/`.
    - pyright now checks `scripts/` too.
    - `scripts/check` removes `site/` before it builds, so a removed page can't linger and pass.
-   - The check reads the built HTML and the stylesheets. It doesn't run the theme's script, which can fetch from other hosts for features the site doesn't use: diagrams, a repository's facts, and a polyfill for a browser without `ResizeObserver`.
+   - The check reads the built HTML and the stylesheets. It doesn't run the theme's script, which can fetch from other hosts for features the site doesn't use: diagrams, image lightboxes, runnable Python code blocks, a repository's facts, and a polyfill for a browser without `ResizeObserver`.
 5. **The docs workflow:**
    - It builds on Python 3.12, with the `check` workflow's version of `uv`.
    - It runs the check of the built site again before publishing, because a pull request can merge without being up to date with `main`.
