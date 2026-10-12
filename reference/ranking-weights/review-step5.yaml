@@ -1,0 +1,10 @@
+kind: review
+schema_version: 1.0.0
+title: R04-T01 step 5, both weights restored
+purpose: Restoring the saved definition should give step 3's metrics again, unless ranks are cached.
+baseline: step3
+results:
+  - label: step3
+    run: payloads/runs/step3-api
+  - label: step5
+    run: payloads/runs/step5
