@@ -91,7 +91,7 @@ The prior-research declaration: earlier work on the same idea whose outcomes the
 
 | Key | Required | Value | What it's for |
 |---|---|---|---|
-| `status` | Yes | `complete`, `partial`, or `unknown`. `complete`: the description accounts for all of it, or says there was none. `partial`: for some of it. `unknown`: the user can't say what earlier work there was. | How much of the earlier work the description accounts for: `complete`, when it accounts for all of it, or says there was none; `partial`, when there was more than it describes; or `unknown` |
+| `status` | Yes | `complete`, `partial`, or `unknown`. `complete`: the description accounts for all of it, or says there was none. `partial`: for some of it. `unknown`: the user can't say what earlier work there was. | How much of the earlier work the description accounts for |
 | `description` | No | Text, 1 to 5,000 characters, not all whitespace. Required with `complete` or `partial`: 1 to 5,000 characters. | The earlier work. It may also be given with `unknown`. |
 
 <!-- end generated: experiment-configuration-prior-research -->

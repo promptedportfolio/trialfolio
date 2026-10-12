@@ -28,8 +28,8 @@ The keys of the summary and of the objects in it are generated from its schema, 
 | `outputs` | Yes | An [object](#json-summary-outputs) | | The output files, relative to `output_dir`, as [`outputs`](#json-summary-outputs) lists |
 | `cases` | No | A list of at least 2 [objects](#json-summary-cases) | For an experiment only, once its plan is built: each case of the plan this run builds, in its order, the baseline and at least one variant. Left out for every other command and configuration. | For an experiment only: each case of its plan, as [`cases`](#json-summary-cases) lists |
 | `counts` | Yes | One of these objects: [`counts` with `attempts`](#json-summary-counts-attempts), [`counts` with `results`](#json-summary-counts-results), or [`counts` with `cases_planned`](#json-summary-counts-cases-planned); or an empty object, `{}` | `{}` for `init`, `report`, and `license`, and for an experiment until its counts are known. | The counts, such as `provider_requests` and the credit `cost`, as [`counts`](#counts) lists |
-| `statistical_validation` | Yes | `not_assessed` | | Whether the results' statistical validity was assessed: `not_assessed` |
-| `trading_readiness` | Yes | `not_assessed` | | Whether the strategy's readiness to trade was assessed: `not_assessed` |
+| `statistical_validation` | Yes | `not_assessed` | | Whether the results' statistical validity was assessed |
+| `trading_readiness` | Yes | `not_assessed` | | Whether the strategy's readiness to trade was assessed |
 | `error` | Yes | An [object](#json-summary-error) or `null` | | The error, with its `code` and its `message`, or `null` |
 
 <!-- end generated: json-summary -->
