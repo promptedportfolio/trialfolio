@@ -138,8 +138,7 @@ def _srcset_urls(srcset: str) -> list[str]:
 
 
 def _from_another_host(url: str) -> bool:
-    if url.lower().startswith("data:"):
-        return False
+    # A data: URL, such as an icon inlined in a stylesheet, has no host.
     return bool(urlsplit(url).netloc) and not url.startswith(SITE_URL)
 
 

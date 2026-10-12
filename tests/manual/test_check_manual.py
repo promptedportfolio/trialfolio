@@ -186,6 +186,8 @@ def test_a_page_without_a_footer_fails(tmp_path: Path) -> None:
 def test_a_link_to_a_missing_page_fails(tmp_path: Path) -> None:
     body = '<a href="how-to/missing/">Gone</a><a href="../outside/">Out</a>'
     site = _site(tmp_path, b=_page(body=body))
+    # A page beside the site, which the link reaches, isn't one of its pages.
+    _write(tmp_path, "outside/index.html", _page())
 
     assert check_manual.check_site(site) == [
         "b.html: the link how-to/missing/ names no page of the site (UM-AC06)",
