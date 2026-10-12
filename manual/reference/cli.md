@@ -33,7 +33,7 @@ trialfolio [-h] [--version] <command> ...
 Prints `trialfolio` and its version, and exits. It needs no acknowledgment.
 
 - **A copy of a tag** prints that tag's version, such as `trialfolio 0.2.1` from `v0.2.1`.
-- **A copy of `main`** prints the next release's version, such as `0.3.0` before `v0.3.0` is tagged. The package takes a release's version once that release's specification is complete ([D-26](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#decisions)).
+- **A copy of `main`** prints the version of the latest release whose specification is complete, which may not be tagged yet, such as `0.3.0` before `v0.3.0` is tagged. The package takes a release's version once that release's specification is complete ([D-26](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#decisions)).
 
 ## `trialfolio init`
 

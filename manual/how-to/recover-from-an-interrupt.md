@@ -57,7 +57,7 @@ If the first run was interrupted before its plan was recorded, nothing was sent,
 
 ### After a run that ends with `execution.partial`
 
-An experiment that ends with a planned case that didn't succeed exits 6, with `execution.partial`, and its message lists each such case. Run the same command again to send the cases that are due, and repeat each case awaiting a repeat with the option the message gives.
+An experiment that ends with a planned case that didn't succeed exits 6, with `execution.partial`, and its message lists each such case, with Portfolio123's own message for each it gave one, and where the session's report is. Run the same command again to send the cases that are due, and repeat each case awaiting a repeat with the option the message gives.
 
 Two failures stop the run before its later cases: Trial Folio's own authentication call failing, as with wrong credentials, and `provider.quota_exceeded`. Once you've fixed the cause, running the same command again runs the cases it didn't start.
 

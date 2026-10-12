@@ -40,7 +40,7 @@ With the attempt ID, the option is the confirmation, and Trial Folio doesn't ask
 
 ## How a repeat counts
 
-A repeat is a new attempt of the same case, and counts against the budget. When the budget can't cover it, it doesn't start, and neither do the cases after it. A [revision](revise-an-experiment.md) that raises the budget lets the same option repeat it.
+A repeat is a new attempt of the same case, and counts against the budget. When the budget can't cover it, it doesn't start, and neither do the cases after it. A run that starts nothing for that reason needs no credentials. A [revision](revise-an-experiment.md) that raises the budget lets the same option repeat it.
 
 ## Running the command again
 

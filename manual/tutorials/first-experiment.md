@@ -157,11 +157,11 @@ Write the experiment under `runs/`, which the workspace's `.gitignore` keeps out
 
     Approved without credentials, it fails with `provider.auth_failed`, exit code 5. Nothing was sent, and `runs/study/` doesn't exist.
 
-2. Wait. Trial Folio runs the cases one at a time, in order. It authenticates before the first request, and again only before a request that follows a 401 or 403, which drops its token. A case that fails is recorded, and the next one runs. Progress goes to the terminal.
+2. Wait. Trial Folio runs the cases one at a time, in order. It authenticates before the first request, and again only before a request that follows a 401 or 403, which drops its token. A case that fails is recorded, and the next one runs. Progress goes to the terminal: before each case, its place among the cases this run sends, as in "Case 2 of 5 this session", and its `case_id`, which the plan display gives beside its key; then its attempt's requests, and how the attempt ended, a failure included.
 
     When every case succeeds, it exits 0. stdout says "Experiment completed", the session, where its report is, the plan hash, and that statistical validation and trading readiness are not assessed.
 
-When a case doesn't succeed, the run exits 6, with `execution.partial`. stdout is empty, and the message on stderr lists each case that didn't succeed, with its outcome and error code.
+When a case doesn't succeed, the run exits 6, with `execution.partial`. stdout is empty, and the message on stderr lists each case that didn't succeed, with its outcome and error code, and Portfolio123's own message for each case it gave one. It ends with where the session's report is, which gives each case's attempts. A case Portfolio123 rejected for a setting, `provider.unsupported_capability`, such as a rule whose factor is misspelled, would get the same request rejected again if you repeated it: change the setting, and [revise the plan](../how-to/revise-an-experiment.md), as the message says.
 
 - **A case awaiting a repeat** is one whose request may have reached Portfolio123, and none of whose attempts succeeded. The message gives the option that repeats each one. [Repeat a case](../how-to/repeat-a-case.md) shows how.
 - **A case whose response was saved but failed validation,** `failed` with `provider.response_invalid`, has no tables and gets no option: its attempt succeeded, so the case is complete, and is never sent again. Its response stays in its attempt's folder, for you to report, as [the errors reference](../reference/errors.md) says.
