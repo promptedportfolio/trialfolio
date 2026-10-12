@@ -118,6 +118,7 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
    - pyright now checks `scripts/` too.
    - `scripts/check` removes `site/` before it builds, so a removed page can't linger and pass.
    - The check reads the built HTML and the stylesheets. It doesn't run the theme's script, which can fetch from other hosts for features the site doesn't use: diagrams, image lightboxes, runnable Python code blocks, a repository's facts, and a polyfill for a browser without `ResizeObserver`.
+   - The check also fails on a page whose markup turns on diagrams, image lightboxes, or runnable Python code blocks, since the theme's script would then fetch from another host. The owner decided this on 2026-10-12, after the review of UM-T01's pull request. The other two features have no such markup: a repository's facts need a `repo_url`, which the configuration doesn't set, and the polyfill depends on the reader's browser.
 5. **The docs workflow:**
    - It builds on Python 3.12, with the `check` workflow's version of `uv`.
    - It runs the check of the built site again before publishing, because a pull request can merge without being up to date with `main`.
@@ -130,6 +131,14 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
    - Only `trialfolio run` warns about `SSLKEYLOGFILE`.
    - `environment.unsupported` also covers an importable `simplejson`, whose remedy isn't `uv sync`.
    - The errors reference lists all 21 codes, including the three the guide's table leaves out: `license.not_acknowledged`, `artifact.unknown_schema_version`, and `provider.request_rejected`. The guide's table now has the last two. Section 2 covers the first.
+
+   The review of UM-T01's pull request found four more places, which the manual and the guide now both correct. The owner confirmed them on 2026-10-12:
+   - The same plan hash also needs the same versions of Trial Folio, `p123api`, `requests`, and `urllib3`, so upgrading any of them changes it.
+   - A repeat's confirmation is used only once the repeat may have reached Portfolio123. A repeat that sent nothing, such as one whose authentication failed, leaves it unused.
+   - Exit 3 also covers `plan.changed`: an experiment's changed plan whose revision wasn't approved with a reason.
+   - `input.not_found` also covers a configuration file that `trialfolio run` or `trialfolio review` couldn't read.
+
+**contracts.md's exit codes,** corrected by the owner's decision on 2026-10-12. The exit-code table in [CLI behavior](contracts.md#cli-behavior) now names `plan.changed` under exit 3, as the [errors](contracts.md#errors) table and the code already did.
 
 **UM-T01's scope,** decided by the owner on 2026-10-12. UM-T01 moves the user guide's content, checked against the owning documents and the code, and corrects the guide where it's wrong. It doesn't audit all present behavior for pages the guide lacks: UM-T02's generated reference pages cover every command, field, and error.
 
