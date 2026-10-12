@@ -165,7 +165,8 @@ class ExperimentApproval:
     """Those whose confirmation an earlier repeat used included, which the execution reports and
     doesn't make."""
     sends: bool
-    """Whether a case is due or to be repeated, so the run needs credentials."""
+    """Whether a case is due or to be repeated, and the remaining budget covers the first of
+    them, so the run needs credentials."""
 
 
 # The display
@@ -456,8 +457,11 @@ def approve_experiment(
     if checked.notes:
         write_shown(stderr, "".join(f"{note}\n" for note in checked.notes))
     due = any(saved.state == "due" for saved in run.cases)
+    # A run whose remaining budget covers none of its sends starts none, so it needs no
+    # credentials (the 0.3.0 walk-through).
+    covered = len(run.sends()) > len(run.uncovered())
     return ExperimentApproval(
-        approval, (*checked.confirmed, *asked), due or bool(asked) or checked.made
+        approval, (*checked.confirmed, *asked), (due or bool(asked) or checked.made) and covered
     )
 
 
@@ -605,17 +609,14 @@ def _check_repeats(run: ExperimentRun, *, asks: bool) -> _CheckedRepeats:
                 continue
             assert latest is not None  # a case awaiting a repeat has one
             if not asks:
+                # The options `_not_repeated` adds give this case's, with its attempt ID.
                 problem = (
                     "Case {} awaits a repeat, but --repeat names it without an attempt ID, and"
                     " Trial Folio asks to confirm a repeat only when stdin and stderr are both"
-                    " terminals and there's no --approve. The attempt ID confirms the possible"
-                    " repeat charge: --repeat {}."
+                    " terminals and there's no --approve. An option with the attempt ID confirms"
+                    " the possible repeat charge."
                 )
-                raise _not_repeated(
-                    run,
-                    problem.format(key, f"{key}:{latest.attempt_id}"),
-                    problem.format(case_id, f"<case-key>:{latest.attempt_id}"),
-                )
+                raise _not_repeated(run, problem.format(key), problem.format(case_id))
             to_ask.append((saved, latest))
             continue
         named = [a for a in saved.attempts if a.attempt_id == option.attempt_id]

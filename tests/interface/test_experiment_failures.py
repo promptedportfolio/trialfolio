@@ -33,6 +33,7 @@ from tests.support.experiment_builder import (
     returns,
 )
 from tests.support.fake_portfolio123 import Reply
+from tests.support.socket_faults import SocketFaults
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1, StartRecordV1_1
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
@@ -169,6 +170,100 @@ def test_after_a_403_the_next_case_authenticates_again_and_its_request_is_sent(
     assert [(e.request, e.status) for e in start.exchanges] == [(AUTH, 200)]
     assert only_record(out, HOLDINGS).outcome == "succeeded"
     assert manifest(out, 1).counts.authentication_calls == 2
+
+
+# What a failed case shows: its ending, Portfolio123's message, and what to do (D-38)
+
+MISSPELLED = Reply(
+    409, b"ERROR: Invalid criteria in Rule 2. Error near 'MktCapp': Invalid command 'MktCapp'"
+)
+"""A 409 to a case's request, as Portfolio123 answered a rule that names no factor in 0.3.0's
+live walk-through: `failed`, possibly charged, with `provider.unsupported_capability`."""
+
+
+@pytest.mark.parametrize(
+    ("reply", "code", "revise"),
+    [
+        pytest.param(REJECTED, "provider.unsupported_capability", True, id="400"),
+        pytest.param(MISSPELLED, "provider.unsupported_capability", True, id="409"),
+        pytest.param(
+            Reply(429, b"Too many requests"), "provider.request_rejected", False, id="429"
+        ),
+    ],
+)
+def test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_report(
+    cli: Cli, experiments: Builder, reply: Reply, code: str, revise: bool
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+
+    ran = experiments.run(EXAMPLE, out, sends=[returns(), returns(), reply, returns(), returns()])
+
+    assert ran.exit_code == 6, ran.stderr
+    record = only_record(out, HOLDINGS)
+    assert record.error is not None and record.error.code == code
+    holdings = plan().cases[HOLDINGS].case_id
+    lines = ran.stderr.splitlines()
+    # Each case's place among the cases the session sends, and each attempt's ending, the failed
+    # one's included, by the case's `case_id`.
+    assert [line for line in lines if line.startswith("Case ")] == [
+        f"Case {place} of 5 this session: {case.case_id}."
+        for place, case in enumerate(plan().cases, 1)
+    ]
+    endings = [line for line in lines if line.startswith("Attempt for ")]
+    assert [line.split(" ended ")[0] for line in endings] == [
+        f"Attempt for {case.case_id}" for case in plan().cases
+    ]
+    assert endings[HOLDINGS].startswith(f"Attempt for {holdings} ended failed after ")
+    assert endings[HOLDINGS].endswith(
+        f": {code}; possibly charged: yes; attempt record written: yes."
+    )
+    text = reply.body.decode()
+    rejected = (
+        "Portfolio123 rejected a setting of `holdings-50`: a repeat sends the same request"
+        " again, so change the setting instead, and revise the plan with --revision-reason."
+    )
+    message = error_of(ran)["message"]
+    assert f'Portfolio123\'s message for `holdings-50`: "{text}".' in message
+    assert (rejected in message) is revise
+    assert message.endswith(
+        f"Session 1's report gives each case's attempts: {out / 'sessions/1/report.html'}."
+    )
+    # The log names the case by its `case_id`, and holds neither Portfolio123's message nor
+    # the report's path.
+    log = (out / "logs/trialfolio.log").read_text(encoding="utf-8")
+    assert text not in log
+    assert "holdings-50" not in log
+    assert "report gives each case's attempts" not in log
+    assert (f"Portfolio123 rejected a setting of {holdings}:" in log) is revise
+
+    # A resume reads Portfolio123's message from the attempt record.
+    resumed = experiments.run(EXAMPLE, out)
+
+    assert resumed.exit_code == 6, resumed.stderr
+    message = error_of(resumed)["message"]
+    assert f'Portfolio123\'s message for `holdings-50`: "{text}".' in message
+    assert (rejected in message) is revise
+    assert message.endswith(
+        f"Session 2's report gives each case's attempts: {out / 'sessions/2/report.html'}."
+    )
+    assert not [line for line in resumed.stderr.splitlines() if line.startswith("Case ")]
+
+
+def test_an_attempt_interrupted_during_its_send_leaves_its_ending_to_the_command(
+    cli: Cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    cli.server.reply("/auth", AUTHENTICATED)
+    with monkeypatch.context() as patch:
+        SocketFaults(patch).interrupt_send(b"POST /screen/backtest")
+        interrupted = cli("run", EXAMPLE, "--out", out, "--approve", plan().plan_hash)
+
+    assert interrupted.exit_code == 130, interrupted.stderr
+    assert f"Case 1 of 5 this session: {plan().cases[0].case_id}." in interrupted.stderr
+    assert "Attempt for " not in interrupted.stderr
+    assert "Error (command.interrupted): " in interrupted.stderr
 
 
 # A failure every later case would get: no later case starts (D-32)

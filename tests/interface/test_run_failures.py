@@ -203,6 +203,12 @@ def test_a_403_on_authentication_carries_portfolio123s_message(cli: Cli) -> None
             id="400",
         ),
         pytest.param(
+            Reply(409, b"ERROR: Invalid criteria in Rule 1. Error near 'MktCapp'"),
+            "provider.unsupported_capability",
+            "Check the configuration",
+            id="409",
+        ),
+        pytest.param(
             Reply(402, b"Quota exhausted"),
             "provider.quota_exceeded",
             "Check the account's API credits",
@@ -231,6 +237,8 @@ def test_a_rejected_request_gives_its_code_and_is_possibly_charged(
     assert error["code"] == code
     assert advice in error["message"]
     assert "may have been charged" in error["message"]
+    # The command shows the error, so a screen run's terminal doesn't show the attempt's ending.
+    assert "Attempt ended failed" not in outcome.stderr
     assert cli.server.requests() == [AUTH, BACKTEST]
     record = the_attempt(out)
     assert record.outcome == "failed"

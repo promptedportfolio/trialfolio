@@ -214,6 +214,8 @@ def test_the_attempt_id_confirms_a_repeat_without_asking_and_is_used_once(
         f"Case {HOLDINGS} isn't repeated: the repeat confirmed for its attempt {attempt} was made"
         " already" in again.stderr
     )
+    # Said once: the core's log event of it isn't shown on the terminal too (D-38).
+    assert again.stderr.count("isn't repeated") == 1
     assert f"--repeat {HOLDINGS}:{repeat.attempt_id}." in again.stderr
     assert len(attempts_of(out, case_id)) == 2
     assert manifest(out, 3).counts.attempts.repeats == 1
@@ -357,6 +359,8 @@ def test_a_repeat_that_cant_apply_fails_and_gives_the_option_that_repeats_the_ca
         f"The case awaiting a repeat, with the option that repeats it: --repeat {HOLDINGS}:{attempt}."
         in message
     )
+    # Given once (D-38).
+    assert message.count(f"--repeat {HOLDINGS}:{attempt}") == 1
     assert len(cli.server.received) == received
 
 
@@ -520,6 +524,34 @@ def test_the_display_gives_each_cases_progress_and_the_cases_the_budget_cant_cov
     assert outcome.exit_code == 6, shown
     assert cli.server.requests()[received:] == ["POST /auth", "POST /screen/backtest"]
     assert cases_of(outcome)["slippage-050"]["repeat_attempt_id"] == slippage
+
+
+def test_a_repeat_the_remaining_budget_cant_cover_needs_no_credentials(
+    cli: Cli, experiments: Builder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out, case_id, attempt = unknown_case(cli, experiments)
+    # The repeat, also `unknown`, counts the budget's sixth and last provider request.
+    repeated = experiments.run(
+        EXAMPLE, out, "--repeat", f"{HOLDINGS}:{attempt}", sends=[UNAVAILABLE]
+    )
+    assert repeated.exit_code == 6, repeated.stderr
+    assert manifest(out, 2).counts.provider_requests == 6
+    latest = cast("str", cases_of(repeated)[HOLDINGS]["repeat_attempt_id"])
+    monkeypatch.delenv("TRIALFOLIO_P123_API_ID")
+    monkeypatch.delenv("TRIALFOLIO_P123_API_KEY")
+    received = len(cli.server.received)
+
+    outcome = experiments.run(EXAMPLE, out, "--repeat", f"{HOLDINGS}:{latest}")
+
+    # It starts nothing, so it needs no credentials, and says the budget can't cover the case
+    # (D-38).
+    assert outcome.exit_code == 6, outcome.stderr
+    assert len(cli.server.received) == received
+    error = error_of(outcome)
+    assert error["code"] == "execution.partial"
+    assert "The experiment's budget couldn't cover the next case" in error["message"]
+    assert len(attempts_of(out, case_id)) == 2
+    assert manifest(out, 3).outcome == "partial"
 
 
 # What the run sends: the cases that are due, and each repeat it makes (R03-T13's review)

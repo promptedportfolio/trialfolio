@@ -15,7 +15,9 @@ length of one command, `CommandLogs` gives the `trialfolio` logger two handlers:
   workspace, it writes no log file.
 - **The terminal,** stderr, showing progress at INFO and warnings, in human-readable form, from the
   same events. Errors are the command's to show: it writes its error with the full message, which
-  can hold Portfolio123's own text, while its log event holds only the loggable message.
+  can hold Portfolio123's own text, while its log event holds only the loggable message. An event
+  whose `terminal` is true shows whatever its level, as an experiment's attempt that ended with a
+  provider error does, since its session goes on; one whose `terminal` is false never shows.
 
 Logs never hold credentials, strategy definitions, formulas, configuration values, provider
 payloads, results, or input file contents. That's up to what each module logs; nothing here adds
@@ -101,7 +103,8 @@ class _FileSink(logging.Handler):
 
 
 class _Terminal(logging.Handler):
-    """Shows progress and warnings on stderr, and counts the warnings."""
+    """Shows progress and warnings on stderr, and the errors marked `terminal`, and counts the
+    warnings."""
 
     def __init__(self, stream: TextIO) -> None:
         super().__init__(logging.INFO)
@@ -111,7 +114,7 @@ class _Terminal(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         if record.levelno == logging.WARNING:
             self.warnings += 1
-        if record.levelno > logging.WARNING or not getattr(record, "terminal", True):
+        if not getattr(record, "terminal", record.levelno <= logging.WARNING):
             return
         prefix = "Warning: " if record.levelno == logging.WARNING else ""
         try:

@@ -144,7 +144,7 @@ from trialfolio.planning import (
     retired_cases,
     revised_experiment_record,
 )
-from trialfolio.provider import DecodedResponse, ScreenBacktestClient
+from trialfolio.provider import DecodedResponse, ScreenBacktestClient, provider_message_of
 from trialfolio.report import (
     CaseView,
     ExperimentEvidence,
@@ -911,7 +911,11 @@ class ExperimentExecution:
                 "The case isn't repeated: the repeat confirmed for its attempt %s was made"
                 " already.",
                 repeat.attempt_id,
-                extra=self._log_fields("experiment.repeat.used", repeat.case_id),
+                # The CLI says so on stderr itself, by the case's key, before the session starts.
+                extra={
+                    **self._log_fields("experiment.repeat.used", repeat.case_id),
+                    "terminal": False,
+                },
             )
         sends: list[tuple[ExperimentPlanCase, uuid.UUID | None]] = []
         for saved in experiment.cases(self._plan):
@@ -935,6 +939,13 @@ class ExperimentExecution:
             if stop is not None:
                 self._stop(stop, None)
                 break
+            _logger.info(
+                "Case %d of %d this session: %s.",
+                place,
+                len(sends),
+                case.case_id,
+                extra=self._log_fields("experiment.case.started", case.case_id),
+            )
             if repeat_of is not None:
                 _logger.info(
                     "Repeating the case's request, as confirmed for its attempt %s.",
@@ -1097,10 +1108,24 @@ class ExperimentExecution:
         invalid = self._invalid.get(case_id)
         if invalid is not None:
             return f"failed ({invalid.code})"
+        giving = self._giving(case_id)
+        code = None if giving is None else giving.error_code
+        return outcome if code is None else f"{outcome} ({code})"
+
+    def _giving(self, case_id: str) -> _Attempt | None:
+        """The attempt whose error a case that didn't succeed is described by: its latest
+        possibly charged attempt, or else its latest attempt."""
         attempts = [attempt for attempt in self._of(case_id) if attempt.outcome is not None]
         charged = [attempt for attempt in attempts if attempt.possibly_charged]
-        code = (charged or attempts)[-1].error_code
-        return outcome if code is None else f"{outcome} ({code})"
+        return (charged or attempts)[-1] if attempts else None
+
+    def _provider_said(self, case_id: str) -> str | None:
+        """Portfolio123's own message in the error a case that didn't succeed is described by,
+        when it has one."""
+        giving = self._giving(case_id)
+        if giving is None or giving.record is None or giving.record.error is None:
+            return None
+        return provider_message_of(giving.record.error.message)
 
     def _awaiting_repeat(self, case_id: str) -> bool:
         """Whether the case awaits a repeat: one of its attempts may have reached Portfolio123,
@@ -1218,11 +1243,36 @@ class ExperimentExecution:
             if any(self._awaiting_repeat(case.case_id) for case in missed)
             else ""
         )
-        tail = f"{why}{charged} Every planned case is accounted for in the session's manifest."
+        # Portfolio123's own text can repeat configuration values, so logs never hold it.
+        said = "".join(
+            f' Portfolio123\'s message for `{case.case_key}`: "{text}".'
+            for case in missed
+            if (text := self._provider_said(case.case_id)) is not None
+        )
+        rejected = [
+            case
+            for case in missed
+            if case.case_id not in self._invalid
+            and (giving := self._giving(case.case_id)) is not None
+            and giving.error_code == "provider.unsupported_capability"
+        ]
+
+        def revise(named: Callable[[ExperimentPlanCase], str]) -> str:
+            if not rejected:
+                return ""
+            return (
+                f" Portfolio123 rejected a setting of {_and([named(c) for c in rejected])}: a"
+                " repeat sends the same request again, so change the setting instead, and revise"
+                " the plan with --revision-reason."
+            )
+
+        tail = " Every planned case is accounted for in the session's manifest."
         return TrialFolioError(
             "execution.partial",
-            f"{lead} {listing(lambda c: f'`{c.case_key}`')}.{tail}",
-            f"{lead} {listing(lambda c: c.case_id)}.{tail}",
+            f"{lead} {listing(lambda c: f'`{c.case_key}`')}.{said}{why}{charged}"
+            f"{revise(lambda c: f'`{c.case_key}`')}{tail}",
+            f"{lead} {listing(lambda c: c.case_id)}.{why}{charged}"
+            f"{revise(lambda c: c.case_id)}{tail}",
         )
 
     def _build_manifest(
@@ -1666,3 +1716,10 @@ def _utc(moment: datetime) -> datetime:
     if moment.utcoffset() != timedelta(0):
         raise ValueError("the clock must give UTC times")
     return moment
+
+
+def _and(items: Sequence[str]) -> str:
+    """`a`, `a and b`, or `a, b, and c`."""
+    if len(items) <= 2:
+        return " and ".join(items)
+    return f"{', '.join(items[:-1])}, and {items[-1]}"

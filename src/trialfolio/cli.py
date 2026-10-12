@@ -1040,7 +1040,8 @@ def _run_experiment(
     finally:
         client.close()
     if error is not None and error.code == "execution.partial":
-        return _with_repeat_options(error, plan, execution.repeat_attempts)
+        error = _with_repeat_options(error, plan, execution.repeat_attempts)
+        return _with_report(error, args.out, execution)
     if error is None:
         invocation.result = _experiment_result(args.out, plan, execution)
     return error
@@ -1097,6 +1098,23 @@ def _with_repeat_options(
         f"{error.message} To repeat {each} awaiting a repeat, which may be charged again, run the"
         f" same command with its option: {options}.",
         f"{error.log_message} {len(awaiting)} of the planned cases await a repeat.",
+    )
+
+
+def _with_report(
+    error: TrialFolioError, out: str, execution: "ExperimentExecution"
+) -> TrialFolioError:
+    """`execution.partial`, with where the session's report is, which gives each case's
+    attempts. Its loggable message leaves the path out, as a log event's message does."""
+    report = execution.report
+    if report is None:
+        return error
+    where = _shown(os.path.join(out, report.path))
+    return TrialFolioError(
+        error.code,
+        f"{error.message} Session {execution.session}'s report gives each case's attempts:"
+        f" {where}.",
+        error.log_message,
     )
 
 
