@@ -523,7 +523,7 @@ trialfolio run experiment.yaml --out runs/study/ --approve sha256:<the plan hash
 - **In a terminal, without `--approve`, the key alone** asks you to type `repeat`, once you've approved the plan. The prompt lists each case to repeat, with its latest attempt whose request may have been charged, and the budget that would remain.
 - **With the attempt ID,** the option is the confirmation, and Trial Folio doesn't ask. With `--approve`, or from a script, a repeat needs it.
 - **Give `--repeat` once for each case** you repeat.
-- **A repeat is a new attempt of the same case,** and counts against the budget. When the budget can't cover it, it doesn't start, needing no credentials, and a revision that raises the budget lets the same option repeat it.
+- **A repeat is a new attempt of the same case,** and counts against the budget. When the budget can't cover it, it doesn't start. A run that starts nothing for that reason needs no credentials, and a revision that raises the budget lets the same option repeat it.
 - **One confirmation, one repeat.** Once the repeat may have reached Portfolio123, running the same command again never repeats the case on the same confirmation:
   - **With the attempt ID,** it says the case was repeated already, and resumes the rest. A repeat that didn't succeed needs a new confirmation, which names the repeat's own attempt.
   - **With the key alone,** when the repeat succeeded, it says the case is complete, and resumes the rest. When the repeat didn't succeed, the case awaits a repeat again, and in a terminal the command asks you to type `repeat` again, for the repeat's own attempt: that's a new confirmation, and typing it repeats the case again.
