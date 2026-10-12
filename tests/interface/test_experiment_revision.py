@@ -5,13 +5,18 @@ others; a reason with no revision fails, unless it's the current plan's own; and
 experiment isn't a revision.
 
 Traces to R03-AC07's interface part, R03-AC03's revision part (each plan's `experiment.json`
-records the plans before it unchanged, and the revision's reason and changes), and to
-docs/contracts.md, experiment plans and revisions (approving a revision, the plan display of a
-revision, and a change of versions). Each test writes `example.yaml`'s experiment, or
-`two-holdings.yaml`'s, with the experiment builder, then runs a revision of it, from
-`experiment-configs/revisions/`, through the CLI's entry function in the test process, over the
-fake server; the package versions double reports another version of Trial Folio for a first run,
-and the terminal is a real pseudo-terminal in the test process.
+records the plans before it unchanged, and the revision's reason and changes: `purpose` for
+`purpose-changed.yaml`, the added and retired cases for `holdings-40.yaml`, the retired case, as
+the plan before it held it, for `variant-removed.yaml`, and both versions for a change of
+versions alone), and to docs/contracts.md, experiment plans and revisions (approving a revision,
+the plan display of a revision, and a change of versions). R03-T13 wrote them. R03-T11 added
+R03-AC03's checks of the earlier entries and the reason to the revisions that keep every case,
+to `variant-removed.yaml`'s, with its retired case, and to a change of versions; and R03-AC07's
+check that a new order of one setting's variants keeps every case. Each test writes
+`example.yaml`'s experiment, or `two-holdings.yaml`'s, with the experiment builder, then runs a
+revision of it, from `experiment-configs/revisions/`, through the CLI's entry function in the
+test process, over the fake server; the package versions double reports another version of Trial
+Folio for a first run, and the terminal is a real pseudo-terminal in the test process.
 """
 
 import sys
@@ -202,9 +207,18 @@ def test_a_revision_that_keeps_every_case_sends_nothing(
     assert [case.case_id for case in second.planned_cases] == [
         case.case_id for case in first.planned_cases
     ]
+    # The entries before the last are the first plan's, unchanged, and the last has the reason
+    # as given, and the part changed alone (R03-AC03).
+    assert second.plans[:-1] == first.plans
+    assert second.plans[-1].reason == f"Changes {name}."
     changes = second.plans[-1].changes
     assert changes is not None
-    assert (changes.parts, changes.cases_added, changes.cases_retired) == (parts, (), ())
+    assert (changes.versions, changes.parts, changes.cases_added, changes.cases_retired) == (
+        (),
+        parts,
+        (),
+        (),
+    )
     assert manifest(out, 2).counts.cases.succeeded == 5
 
 
@@ -220,9 +234,19 @@ def test_reordering_one_settings_variants_is_a_revision_that_keeps_every_case(
 
     assert outcome.exit_code == 0, outcome.stderr
     assert len(cli.server.received) == received
-    changes = record(out, 2).plans[-1].changes
+    first, second = record(out, 1), record(out, 2)
+    changes = second.plans[-1].changes
     assert changes is not None
     assert changes.parts == ("case_order",)
+    # Every case is kept, in another order (R03-AC07).
+    assert (changes.cases_added, changes.cases_retired) == ((), ())
+    assert [case.case_id for case in second.planned_cases] != [
+        case.case_id for case in first.planned_cases
+    ]
+    assert sorted(case.case_id for case in second.planned_cases) == sorted(
+        case.case_id for case in first.planned_cases
+    )
+    assert manifest(out, 2).counts.cases.succeeded == 6
 
 
 def test_a_removed_variant_is_retired_and_planning_it_again_brings_it_back_unsent(
@@ -241,9 +265,31 @@ def test_a_removed_variant_is_retired_and_planning_it_again_brings_it_back_unsen
 
     assert (removed.exit_code, again.exit_code) == (0, 0), again.stderr
     assert len(cli.server.received) == received
-    assert [case.case_id for case in record(out, 2).retired_cases] == [slippage.case_id]
+    # Each revision's entries before the last are the previous plan's, unchanged, and the last
+    # has the reason as given, and the case retired, which the retired cases list as the first
+    # plan held it (R03-AC03).
+    second = record(out, 2)
+    assert second.plans[:-1] == record(out, 1).plans
+    entry = second.plans[-1]
+    assert entry.reason == "Drops slippage."
+    assert entry.changes is not None
+    assert [(c.case_id, c.case_key) for c in entry.changes.cases_retired] == [
+        (slippage.case_id, "slippage-050")
+    ]
+    assert (entry.changes.versions, entry.changes.cases_added, entry.changes.parts) == ((), (), ())
+    (retired,) = second.retired_cases
+    assert (retired.case_id, retired.case_key, retired.plan) == (
+        slippage.case_id,
+        "slippage-050",
+        1,
+    )
+    assert (retired.description, retired.variant) == (slippage.description, slippage.variant)
+    assert retired.variant is not None
+    assert (retired.variant.setting, retired.variant.value) == ("slippage_percent", "0.5")
     assert manifest(out, 2).counts.retired_cases == 1
     third = record(out, 3)
+    assert third.plans[:-1] == second.plans
+    assert third.plans[-1].reason == "Brings slippage back."
     assert third.retired_cases == ()
     changes = third.plans[-1].changes
     assert changes is not None
@@ -371,7 +417,12 @@ def test_a_new_trialfolio_version_alone_is_a_revision_of_versions(
     assert error_of(unrevised)["code"] == "plan.changed"
     assert revised.exit_code == 0, revised.stderr
     assert len(cli.server.received) == received
-    changes = record(out, 2).plans[-1].changes
+    # The entries before the last are the first plan's, unchanged, and the last has the reason
+    # as given, and both versions (R03-AC03).
+    second = record(out, 2)
+    assert second.plans[:-1] == record(out, 1).plans
+    assert second.plans[-1].reason == "Upgraded Trial Folio."
+    changes = second.plans[-1].changes
     assert changes is not None
     assert changes.versions == (
         VersionChange(package="trialfolio", previous="0.2.9", current=installed),

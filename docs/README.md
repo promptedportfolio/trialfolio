@@ -26,6 +26,7 @@ These are the specifications for Trial Folio. The implementation tasks of releas
 | [releases/0.2.0-verification.md](releases/0.2.0-verification.md) | Release 0.2.0's verification record: each command's date, versions, and outcome, and the evidence for each acceptance criterion |
 | [releases/0.2.1-license.md](releases/0.2.1-license.md) | Version 1.1 of the license, its identifier, and the package's version |
 | [releases/0.3.0-experiments.md](releases/0.3.0-experiments.md) | Finite experiments with resume (R03) |
+| [releases/0.3.0-verification.md](releases/0.3.0-verification.md) | Release 0.3.0's verification record: each command's date, versions, and outcome, and the evidence for each acceptance criterion |
 | [adrs/0001-python-and-portfolio123-integration.md](adrs/0001-python-and-portfolio123-integration.md) | Python, `p123api`, and the third-party code boundary, with verification notes |
 | [adrs/0002-pydantic-contracts-and-protocols.md](adrs/0002-pydantic-contracts-and-protocols.md) | Pydantic models, generated schemas, and narrow protocols |
 | [adrs/0003-versioned-research-artifacts.md](adrs/0003-versioned-research-artifacts.md) | File-based, immutable, versioned artifacts |

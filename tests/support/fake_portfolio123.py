@@ -2,9 +2,10 @@
 below `urllib3` (release 0.1.0, test pairing).
 
 Each request to a path takes the next reply scripted for it: a status, a body, and any headers,
-such as `Location`. A reply can also wait first, reset the connection, or break its body off. A
-request with no reply left gets a 404 with an empty body. The server records every complete
-request it receives, so a test can show how many times each one arrived.
+such as `Location`. A reply can also wait first, for a time or until the test releases it, reset
+the connection, or break its body off. A request with no reply left gets a 404 with an empty body.
+The server records every complete request it receives, so a test can show how many times each one
+arrived.
 
 It answers with HTTP/1.0, so each connection carries one exchange, and the client opens a new one
 for the next.
@@ -33,6 +34,9 @@ class Reply:
     action: Literal["send", "reset", "break_off"] = "send"
     """`reset` closes the connection with a TCP reset instead of answering. `break_off` sends the
     status, the headers, a `Content-Length` for the whole body, and only half the body."""
+    release: threading.Event | None = None
+    """An event to wait for, after any delay, before doing anything else: the test sets it to let
+    the reply go."""
 
 
 @dataclass(frozen=True)
@@ -92,6 +96,10 @@ class FakePortfolio123:
             return replies.popleft() if replies else Reply(status=404)
 
 
+_POLL_SECONDS = 0.01
+"""How often a reply waiting for its release checks whether the server is closing."""
+
+
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -130,8 +138,13 @@ class _Handler(BaseHTTPRequestHandler):
         reply = fake._take(  # pyright: ignore[reportPrivateUsage]
             Received(self.command, self.path, MappingProxyType(headers), body)
         )
-        if reply.delay and fake._stopping.wait(reply.delay):  # pyright: ignore[reportPrivateUsage]
+        stopping = fake._stopping  # pyright: ignore[reportPrivateUsage]
+        if reply.delay and stopping.wait(reply.delay):
             return
+        if reply.release is not None:
+            while not reply.release.wait(_POLL_SECONDS):
+                if stopping.is_set():
+                    return
         if reply.action == "reset":
             # SO_LINGER with a zero timeout makes close send a reset instead of a FIN.
             self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))

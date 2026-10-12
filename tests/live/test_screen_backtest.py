@@ -3,12 +3,15 @@ its output is archived locally and re-rendered offline.
 
 Traces to R01-AC24, and to release 0.1.0's verification commands:
 `TRIALFOLIO_LIVE_BUDGET_CREDITS=5 uv run pytest -m live`, with the credentials injected as
-AGENTS.md describes. The marker keeps it out of the default suite and of `scripts/check`. It runs
-only with the owner present, who grants its network access for this one command.
+AGENTS.md describes. Since R03-T11 the marker also selects 0.3.0's live check, so the command
+names this test's path: `TRIALFOLIO_LIVE_BUDGET_CREDITS=5 uv run pytest -m live
+tests/live/test_screen_backtest.py`. The marker keeps it out of the default suite and of
+`scripts/check`. It runs only with the owner present, who grants its network access for this one
+command.
 
-The test refuses to start, with a failure that says why, without both credentials, or with a
-budget that's missing or below the plan's `credits`. A skip would let `pytest -m live` pass
-without checking anything.
+The test refuses to start, with a failure that says why, when the command selects another live
+check, without both credentials, or with a budget that's missing or below the plan's `credits`.
+A skip would let `pytest -m live` pass without checking anything.
 
 It runs the installed `trialfolio`, never the test launcher, with `formula.yaml`'s settings,
 approved with `--approve` and the plan's hash, and with the default endpoint and timeout. The
@@ -61,6 +64,22 @@ every connection attempt and every socket read, not to the whole exchange."""
 
 def refuse(reason: str) -> NoReturn:
     pytest.fail(f"The live check refuses to start: {reason}", pytrace=False)
+
+
+def refuse_beside_another(request: pytest.FixtureRequest) -> None:
+    """Refuses to start when the command selects another live check. Each reads the whole of
+    `BUDGET_VARIABLE`, the credits approved for one check, so two in one command could spend more
+    than was approved."""
+    others = [
+        item.nodeid
+        for item in request.session.items
+        if item is not request.node and item.get_closest_marker("live") is not None
+    ]
+    if others:
+        refuse(
+            f"the command also selects {', '.join(others)}, and {BUDGET_VARIABLE} approves the"
+            " credits of one check: name its path, to run it alone."
+        )
 
 
 def portfolio123_host() -> str:
@@ -124,8 +143,11 @@ def error_code(summary: dict[str, Any]) -> object:
     return error["code"] if isinstance(error, dict) else None
 
 
-def test_a_real_screen_backtest_succeeds_within_its_budget_and_rerenders_offline() -> None:
+def test_a_real_screen_backtest_succeeds_within_its_budget_and_rerenders_offline(
+    request: pytest.FixtureRequest,
+) -> None:
     # Before anything else, the test refuses to start without what it needs.
+    refuse_beside_another(request)
     missing = [name for name in (API_ID_VARIABLE, API_KEY_VARIABLE) if not os.environ.get(name)]
     if missing:
         refuse(f"set {' and '.join(missing)}, as AGENTS.md says, for this command only.")

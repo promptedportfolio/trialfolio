@@ -9,11 +9,15 @@ looks for them, and the scans that look.
   `experiment-configs/canaries.yaml`, belong in some outputs, such as
   `configuration.yaml`, `settings.csv`, the report, and the plan display. `logged` scans only log
   files for them, and stderr where a criterion says so.
+- **A revision's reason and Portfolio123's message,** which a test gives as `--revision-reason`
+  and in a 400's body, belong in some records, such as the revision's `experiment.json` and the
+  attempt record, and never in a log file, which `logged` scans for them too (release 0.3.0,
+  test pairing, canaries).
 
 R01-T09 created the credential and token values; R01-T15 added the fixtures' values and the
-scans, R02-T09 the review configuration's, and R03-T13 the experiment configuration's. Each value
-is ASCII without characters JSON escapes, so a scan of the bytes finds it however a file encodes
-it.
+scans, R02-T09 the review configuration's, R03-T13 the experiment configuration's, and R03-T11
+the revision's reason and Portfolio123's message. Each value is ASCII without characters JSON
+escapes, so a scan of the bytes finds it however a file encodes it.
 """
 
 from collections.abc import Iterable
@@ -91,6 +95,14 @@ the title, the purpose, and the prior-research description; the universe, the ba
 the formula a variant puts in its place, the ranking formula, and the benchmark; and each
 variant's key, also a canary-like slug, and its description."""
 
+REVISION_REASON: Final = "canary-revision-reason-5f024a69"
+"""A revision's reason, given with `--revision-reason`: the user's text, which logs never hold
+(docs/contracts.md, the experiment manifest)."""
+
+PROVIDER_MESSAGE: Final = "canary-provider-message-6b7f758e"
+"""Portfolio123's message in the body of a 400, which the attempt record's error message gives,
+and a loggable message never does."""
+
 LOG_FILE: Final = "trialfolio.log"
 """A log file's name, and with a number after it, a rotated one's."""
 
@@ -117,9 +129,18 @@ def log_files(roots: Iterable[Path]) -> list[Path]:
 def logged(
     roots: Iterable[Path], *, stderr: str | None = None, more: Iterable[str] = ()
 ) -> list[str]:
-    """Where a canary fixture's value, or one of `more`, appears in a log file under `roots`,
-    and in `stderr` when it's given. Each finding names the file or stream and the canary."""
-    canaries = (*CONFIGURATION, *RESPONSE, *REVIEW, *EXPERIMENT, *more)
+    """Where a canary fixture's value, a revision's reason, Portfolio123's message, or one of
+    `more`, appears in a log file under `roots`, and in `stderr` when it's given. Each finding
+    names the file or stream and the canary."""
+    canaries = (
+        *CONFIGURATION,
+        *RESPONSE,
+        *REVIEW,
+        *EXPERIMENT,
+        REVISION_REASON,
+        PROVIDER_MESSAGE,
+        *more,
+    )
     found = [
         f"{path}: {canary}"
         for path in log_files(roots)

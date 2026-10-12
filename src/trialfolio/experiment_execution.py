@@ -176,7 +176,7 @@ configuration, which gives its own."""
 
 _REASON: Final = TypeAdapter[str](RevisionReason)
 
-type StopReason = Literal["budget", "authentication", "quota", "cancelled"]
+type StopReason = Literal["budget", "authentication_budget", "authentication", "quota", "cancelled"]
 
 
 # Progress events (docs/contracts.md, progress and cancellation)
@@ -571,7 +571,8 @@ class ExperimentExecution:
 
     @property
     def session(self) -> int | None:
-        """The session's number, once its session record is written."""
+        """The session's number, once its session record is written, or published whole before
+        its write failed."""
         return None if self._session_record is None else self._session
 
     @property
@@ -749,9 +750,14 @@ class ExperimentExecution:
             session=self._session,
             started_at=_utc(self._clock()),
         )
-        self._session_record = self._store.write(
-            session_path(self._session, "session.json"), _model_json(record)
-        )
+        path, data = session_path(self._session, "session.json"), _model_json(record)
+        try:
+            self._session_record = self._store.write(path, data)
+        except BaseException:
+            # A record the store published before its write failed reserves the session, as an
+            # attempt record published so counts as written (R03-T11).
+            self._session_record = self._published(path, data)
+            raise
 
     def _write_plan(self, configuration: bytes) -> None:
         number = self._plan_number
@@ -993,7 +999,7 @@ class ExperimentExecution:
         if self._provider_requests() + 1 > budget.provider_requests:
             return "budget"
         if authenticates and self._authentication_calls() + 1 > budget.authentication_calls:
-            return "budget"
+            return "authentication_budget"
         return None
 
     def _stop(self, reason: StopReason, error: TrialFolioError | None) -> None:
@@ -1468,8 +1474,9 @@ class ExperimentExecution:
     def _unrecorded(self, failure: TrialFolioError) -> TrialFolioError:
         """The error of a session that stopped before its first plan was recorded."""
         detail = (
-            "Nothing was sent. The experiment's first plan wasn't recorded, so its output"
-            " directory can't be resumed: remove the directory, and run the command again."
+            "Nothing was sent. The experiment's first plan wasn't recorded, so its output is"
+            " incomplete, and the directory can't be resumed: remove the directory, and run the"
+            " command again."
         )
         return TrialFolioError(
             failure.code, f"{failure.message} {detail}", f"{failure.log_message} {detail}"
@@ -1609,6 +1616,7 @@ def _another_kind(*, synthetic: bool) -> TrialFolioError:
 
 _STOPS: Final[dict[StopReason, str]] = {
     "budget": "the budget can't cover the next case",
+    "authentication_budget": "the budget's authentication calls are spent",
     "authentication": "Trial Folio's own authentication call failed",
     "quota": "a request got provider.quota_exceeded",
     "cancelled": "the run was cancelled",
@@ -1619,6 +1627,12 @@ _STOP_MESSAGES: Final[dict[StopReason, str]] = {
     "budget": (
         "The experiment's budget couldn't cover the next case, so it and the cases after it"
         " weren't started. A revision that raises budget.provider_requests lets them run."
+    ),
+    "authentication_budget": (
+        "The experiment's budget of authentication calls is spent, so the next case, which"
+        " would authenticate before its request, and the cases after it weren't started. A"
+        " revision that raises budget.provider_requests, which sets the authentication calls"
+        " too, lets them run."
     ),
     "authentication": (
         "Trial Folio's own authentication call failed, so no later case started: each would"

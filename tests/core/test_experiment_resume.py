@@ -18,7 +18,9 @@ nothing), and R03-AC18 (a resume writes the tables a stopped run didn't). The re
 fixed.
 
 Each experiment is built during the test, through the core, and stopped where the test needs it:
-by a cancellation, by storage faults, or by an interrupt, as a stopped process leaves it.
+by a cancellation, by storage faults, or by an interrupt, as a stopped process leaves it. One, for
+the demo's client given an experiment that isn't synthetic, is `trialfolio run`'s, written by the
+experiment builder through the CLI's entry function (R03-AC17's pairing).
 """
 
 import json
@@ -32,8 +34,10 @@ from typing import Any
 
 import pytest
 
+from tests.interface.conftest import Cli
 from tests.support import canaries
 from tests.support.clock import FixedClock
+from tests.support.experiment_builder import ExperimentBuilder
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.storage_faults import StorageFaults
 from trialfolio.canonical import sha256_hex
@@ -1229,6 +1233,27 @@ def test_the_demos_client_cant_resume_an_experiment_that_isnt_synthetic(lab: Lab
     assert ran.published == () and not (lab.out / "sessions/2").exists()
 
 
+def test_the_demos_client_cant_resume_an_experiment_the_builder_wrote(
+    lab: Lab, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The experiment is trialfolio run's, as the experiment builder writes it, with its command
+    # record and its logs; another interface then gives the core the demo's client for it.
+    cli = Cli(monkeypatch, tmp_path, lab.server)
+    cli.ready()
+    built = ExperimentBuilder(lab.server, cli).run(
+        CONFIGS / "default-only.yaml", lab.out, sends=[complete(), complete()]
+    )
+    assert built.exit_code == 0, built.stderr
+    assert lab.manifest(1).command is not None and (lab.out / "logs").is_dir()
+    before = _files(lab.out)
+
+    ran = lab.resume("default-only.yaml", synthetic=True)
+
+    assert "attempts are real" in refused(ran, "output.not_empty").message
+    assert ran.received == () and ran.published == ()
+    assert _files(lab.out) == before
+
+
 def test_opening_an_experiment_takes_its_lock(lab: Lab, tmp_path: Path) -> None:
     lab.server.reply("/auth", AUTHENTICATED)
     lab.server.reply("/screen/backtest", complete(), complete())
@@ -1437,6 +1462,14 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
             out,
             "plans/2/experiment.json",
             lambda d: d["plans"][-1].update(configuration_artifact_id="sha256:" + "0" * 64),
+        ),
+        "has another artifact_id than it records",
+    ),
+    "experiment.json's last entry, by plan.json's artifact_id": (
+        lambda out: _edit(
+            out,
+            "plans/2/experiment.json",
+            lambda d: d["plans"][-1].update(plan_artifact_id="sha256:" + "0" * 64),
         ),
         "has another artifact_id than it records",
     ),

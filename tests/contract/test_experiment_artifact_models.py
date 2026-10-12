@@ -7,7 +7,11 @@ and the authentication record), the experiment manifest, and the JSON summary's 
 Also to R03-AC03's model checks, that `experiment.json`'s entries are numbered from 1, that each
 revises the one before it, and that every plan records the approval `not_required` or none does;
 and to R03-AC08's, that the manifest's case counts add up. Each document below is synthetic, and
-read as a reader reads it: from JSON text, with `model_validate_json`. R03-T06 wrote them.
+read as a reader reads it: from JSON text, with `model_validate_json`. R03-T06 wrote them, and
+R03-T11 added the cases of those checks that no case covered: an entry numbered below the one
+before it, an entry that revises an earlier plan than the one before it, the approval
+`not_required` for a revision and not the first plan, and counts that a skipped case makes too
+many.
 """
 
 import json
@@ -852,8 +856,19 @@ def only_versions(document: Document) -> None:
     document["planned_cases"][1].update(case_id=HOLDINGS_ID, variant=variant("max_holdings", 50))
 
 
+def later_revision(number: int, revises: str) -> Change:
+    """Adds a revision after revised_record's plan 3, numbered `number` and revising the plan
+    whose hash is `revises`, that changes only Trial Folio's version."""
+    return lambda d: entries(d).append(
+        entries(d)[1]
+        | {"plan": number, "plan_hash": digest(f"a{number}"), "revises": revises}
+        | {"changes": VERSIONS_ONLY}
+    )
+
+
 EXPERIMENT_RECORD_ACCEPTS: dict[str, Change] = {
     "plans numbered with a gap": lambda d: None,  # revised_record's 1 and 3
+    "a third plan that revises the one before it": later_revision(4, digest("a3")),
     "a revision whose only change is of versions": only_versions,
     "a synthetic experiment": lambda d: [
         entry.update(approval="not_required") for entry in entries(d)
@@ -869,16 +884,22 @@ def test_experiment_record_accepts(change: Change) -> None:
 
 
 EXPERIMENT_RECORD_REJECTS: dict[str, Change] = {
-    # R03-AC03's three model checks.
+    # R03-AC03's three model checks: the entries are numbered from 1 and increase, each revises
+    # the one before it, and every plan records the approval not_required, or none does.
     "entries not numbered from 1": lambda d: (
         entries(d)[0].update(plan=2),
         d["retired_cases"][0].update(plan=2),
     ),
     "entries out of order": lambda d: entries(d)[1].update(plan=1),
+    "an entry numbered below the one before it": later_revision(2, digest("a3")),
     "an entry that doesn't revise the one before it": lambda d: entries(d)[1].update(
         revises=EARLIER_PLAN
     ),
+    "an entry that revises an earlier plan than the one before it": later_revision(4, PLAN_HASH),
     "not_required for some plans and not others": lambda d: entries(d)[0].update(
+        approval="not_required"
+    ),
+    "not_required for a revision and not the first plan": lambda d: entries(d)[1].update(
         approval="not_required"
     ),
     "a first plan that revises one": lambda d: entries(d)[0].update(
@@ -1187,6 +1208,7 @@ MANIFEST_REJECTS: dict[str, Change] = {
     # R03-AC08: the case counts add up.
     "case counts that add up to less": lambda d: case_counts(d).update(planned=4),
     "case counts that add up to more": lambda d: case_counts(d).update(not_yet_run=1),
+    "case counts that a skipped case makes too many": lambda d: case_counts(d).update(skipped=1),
     "one planned case": lambda d: case_counts(d).update(planned=1, failed=0, unknown=0),
     "completed with a case that didn't succeed": lambda d: d.update(
         outcome="completed", error=None

@@ -11,36 +11,49 @@ valid), R02-AC14 (a schema version without a reader), and R02-AC19 (a storage fa
 interrupt after the claim): a failure before the claim has no `review_id` and a `null`
 `output_dir`, and one after it has both; and to docs/contracts.md, JSON summary: `ids` and
 `outputs` leave out a key that has no value, `counts` is `{}` for `init`, `report`, and `license`,
-and `outcome`, `exit_code`, and
-`error` agree; to R03-AC16, for `run` with an experiment's configuration, over the scenarios of
-R03-AC01 (no approval), R03-AC05 (a case that fails, and missing credentials), R03-AC07 (a
-revision that isn't approved, and another experiment), R03-AC09 (the lock another process holds),
-R03-AC14 (a case awaiting a repeat), R03-AC17 (records that aren't complete), and R03-AC19 (a
-storage failure and an interrupt after the claim), and an invalid configuration: its `ids`,
-`cases`, and `counts` agree with the records and the session's manifest, and its `output_dir` is
-given from a new experiment's claim; and to R01-T14's rules that a blank `--out`, or one that isn't valid UTF-8 text,
-which `output_dir` can't hold, is a usage error, and that an error message escapes a path it
-names, so the summary can hold it. Each summary is checked against the `JsonSummaryV1_2` model and
-the keys of the generated schema, `schemas/json-summary-1.2.0.schema.json`, and holds no `cases`,
-which only an experiment's does. Through the CLI's entry function in the test process, with the
-real client, `requests`, and `urllib3` over the fake server.
+and `outcome`, `exit_code`, and `error` agree; to R03-AC16, for `run` with an experiment's
+configuration, over the scenarios of R03-AC01 (no approval), R03-AC05 (a case that fails, each
+provider failure that leaves the run partial or stops it, and missing credentials), R03-AC07 (a
+revision without its reason and its hash, an approved one, a reason with no revision, and another
+experiment), R03-AC09 (the lock another holder holds, in this process or in a resume waiting at
+its approval prompt in another, and a new experiment's claim), R03-AC14 (a case awaiting a repeat,
+a confirmed repeat, its used confirmation, and a key alone for a complete case, a repeat whose
+authentication fails or that's interrupted during its send, and each repeat that fails before
+anything is sent), R03-AC17 (records that aren't complete), and R03-AC19 (a storage failure and
+an interrupt, in a new experiment and in a resume, before and after the session record, and a
+manifest whose write fails once it's published), and an invalid configuration: its `ids` name
+the plan the core builds, its `cases` are that plan's, in order, with the outcomes and the
+repeats' attempts the records give, its `counts` agree with the records and the session's
+manifest, and its `output_dir` is given from a new experiment's claim, or a resume's session
+record, and is `null` before; and to R01-T14's rules that a blank `--out`, or one that isn't
+valid UTF-8 text, which `output_dir` can't hold, is a usage error, and that an error message
+escapes a path it names, so the summary can hold it. Each summary is checked against the
+`JsonSummaryV1_2` model and the keys of the generated schema,
+`schemas/json-summary-1.2.0.schema.json`, and holds no `cases`, but an experiment's. Through the
+CLI's entry function in the test process, with the real client, `requests`, and `urllib3` over
+the fake server; the terminal is a real pseudo-terminal, in the test process or, for the resume
+that holds the lock, in another process under the test launcher, and the socket faults interrupt
+a repeat during its send, as Ctrl-C does.
 
 The summary's version moved from 1.0.0 to 1.1.0 with release 0.2.0, for every command, as its open
 question on the summary's version settled (owner's sign-off, 2026-10-05; D-25): the committed 1.0.0
 schema can't hold a review's summary, and keys are added only in a minor version. It moved to 1.2.0
 with release 0.3.0, for every command, as that release's open question settled (owner's sign-off,
 2026-10-08; D-33): the committed 1.1.0 schema can't hold an experiment's. Each earlier key keeps its
-meaning, so these checks are otherwise 0.1.0's and 0.2.0's. R03-T06 moved them, and R03-T13 added
-an experiment's.
+meaning, so these checks are otherwise 0.1.0's and 0.2.0's. R03-T06 moved them, R03-T13 added
+an experiment's, and R03-T11 the rest of R03-AC16's scenarios, and the check of the cases against
+the records.
 """
 
 import csv
 import io
 import json
 import shutil
+import sys
+import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import NamedTuple, cast
 
 import pytest
 
@@ -52,8 +65,11 @@ from tests.interface.conftest import (
     occupied,
     plan_hash_for,
     serve_success,
+    snapshot,
 )
 from tests.support.experiment_builder import (
+    AUTHENTICATED,
+    REFUSED,
     REJECTED,
     UNAVAILABLE,
     ExperimentBuilder,
@@ -63,11 +79,17 @@ from tests.support.experiment_builder import (
 )
 from tests.support.fake_portfolio123 import Reply
 from tests.support.run_builder import REVIEW_CONFIGS, SYNTHETIC_RUN
+from tests.support.socket_faults import SocketFaults
+from tests.support.terminal import PseudoTerminal
 from trialfolio.cli import API_KEY_VARIABLE
-from trialfolio.contracts.attempt import AttemptRecordV1_1
+from trialfolio.configuration import read_experiment_configuration
+from trialfolio.contracts.attempt import AttemptRecordV1_1, AuthenticationRecord, StartRecordV1_1
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
+from trialfolio.contracts.experiment_plan import PlanV1_1
 from trialfolio.contracts.summary import JsonSummaryV1_2
 from trialfolio.errors import EXIT_CODES, ErrorCode, TrialFolioError
+from trialfolio.experiment_records import read_experiment
+from trialfolio.planning import build_experiment_plan, installed_versions, plan_revision
 from trialfolio.storage import LocalArtifactStore, StoredFile
 
 SCHEMA = Path(__file__).resolve().parents[2] / "schemas" / "json-summary-1.2.0.schema.json"
@@ -680,6 +702,8 @@ def test_a_run_directory_path_that_isnt_utf8_text_is_escaped_in_the_error(cli: C
 
 EXAMPLE = experiment_config("example.yaml")
 
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows has no pseudo-terminals")
+
 
 def experiment_summary_of(outcome: Outcome) -> dict[str, object]:
     """The one JSON summary of `run` with an experiment's configuration, checked as `summary_of`
@@ -777,6 +801,122 @@ def case_outcomes(summary: dict[str, object]) -> list[tuple[str, str]]:
     ]
 
 
+def built_plan(config: Path, out: Path) -> PlanV1_1:
+    """The plan `trialfolio run` builds from `config` into `out`, with the installed versions,
+    as the core builds it: a new experiment's, until `out` holds the first plan's
+    `experiment.json`, and then the current plan, or its revision."""
+    configuration = read_experiment_configuration(config.read_bytes(), str(config))
+    versions = installed_versions()
+    if not (out / "plans/1/experiment.json").is_file():
+        return build_experiment_plan(configuration, versions)
+    saved = read_experiment(LocalArtifactStore(out))
+    revision = plan_revision(configuration, versions, saved.plan)
+    return saved.plan if revision is None else revision.plan
+
+
+class Attempt(NamedTuple):
+    """An attempt as its records give it, ordered by session and then sequence."""
+
+    session: int
+    sequence: int
+    outcome: str
+    possibly_charged: bool
+    attempt_id: str
+    repeat_of: str | None
+
+
+def recorded_attempts(out: Path, case_id: str) -> list[Attempt]:
+    """The case's attempts, by session and then sequence: each attempt record's; an attempt with
+    a start record and no attempt record is running, so `unknown` and possibly charged; and one
+    with only an authentication record sent nothing, so it's `failed`."""
+    attempts: list[Attempt] = []
+    for attempt in sorted(out.glob(f"cases/{case_id}/attempts/*")):
+        if (attempt / "attempt.json").is_file():
+            record = AttemptRecordV1_1.model_validate_json((attempt / "attempt.json").read_bytes())
+            outcome, charged = record.outcome, record.possibly_charged
+        elif (attempt / "started.json").is_file():
+            record = StartRecordV1_1.model_validate_json((attempt / "started.json").read_bytes())
+            outcome, charged = "unknown", True
+        else:
+            record = AuthenticationRecord.model_validate_json(
+                (attempt / "authenticating.json").read_bytes()
+            )
+            outcome, charged = "failed", False
+        repeat_of = None if record.repeat_of is None else str(record.repeat_of)
+        attempts.append(
+            Attempt(record.session, record.sequence, outcome, charged, attempt.name, repeat_of)
+        )
+    return sorted(attempts)
+
+
+def recorded_cases(plan: PlanV1_1, out: Path) -> list[dict[str, str | None]]:
+    """Each case of `plan`, in its order, with its outcome as the experiment manifest counts it
+    from the records in `out`, and the attempt that confirms its repeat (docs/contracts.md, the
+    experiment manifest, and repeating a case): `succeeded` once an attempt succeeded; otherwise
+    the outcome of its latest possibly charged attempt, whose `attempt_id` confirms the repeat;
+    `failed` when it has attempts and none is possibly charged, since it's due; and `not_yet_run`
+    without one. No response these tests send fails validation."""
+    cases: list[dict[str, str | None]] = []
+    for case in plan.cases:
+        attempts = recorded_attempts(out, case.case_id)
+        charged = [attempt for attempt in attempts if attempt.possibly_charged]
+        outcome, repeat = "not_yet_run", None
+        if any(attempt.outcome == "succeeded" for attempt in attempts):
+            outcome = "succeeded"
+        elif charged:
+            outcome, repeat = charged[-1].outcome, charged[-1].attempt_id
+        elif attempts:
+            outcome = "failed"
+        cases.append(
+            {
+                "case_key": case.case_key,
+                "case_id": case.case_id,
+                "outcome": outcome,
+                "repeat_attempt_id": repeat,
+            }
+        )
+    return cases
+
+
+def assert_recorded(summary: dict[str, object], config: Path, out: Path) -> None:
+    """The summary's `ids` name the experiment and the plan the run built, from `config` into
+    `out`; its `cases` are that plan's, in order, with the outcomes and the repeats' attempts the
+    records give; and its counts, when it gives them, tally those outcomes, and every attempt of
+    the experiment, and its repeats, in the records."""
+    plan = built_plan(config, out)
+    ids = cast("dict[str, object]", summary["ids"])
+    assert (ids["experiment_id"], ids["plan_hash"]) == (plan.experiment_id, plan.plan_hash)
+    cases = recorded_cases(plan, out)
+    assert summary["cases"] == cases
+    counts = cast("dict[str, int | None]", summary["counts"])
+    if counts == {}:
+        return
+    outcomes = [case["outcome"] for case in cases]
+    assert {name: counts[name] for name in CASE_COUNTS} == {
+        "cases_planned": len(outcomes),
+        "cases_succeeded": outcomes.count("succeeded"),
+        "cases_failed": outcomes.count("failed"),
+        "cases_skipped": 0,
+        "cases_unknown": outcomes.count("unknown"),
+        "cases_not_yet_run": outcomes.count("not_yet_run"),
+    }
+    attempts = [
+        attempt for case in out.glob("cases/*") for attempt in recorded_attempts(out, case.name)
+    ]
+    repeats = [attempt for attempt in attempts if attempt.repeat_of is not None]
+    assert (counts["attempts"], counts["repeats"]) == (len(attempts), len(repeats))
+
+
+CASE_COUNTS = (
+    "cases_planned",
+    "cases_succeeded",
+    "cases_failed",
+    "cases_skipped",
+    "cases_unknown",
+    "cases_not_yet_run",
+)
+
+
 def test_an_experiment_that_completes(cli: Cli, experiments: ExperimentBuilder[Outcome]) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
@@ -788,6 +928,7 @@ def test_an_experiment_that_completes(cli: Cli, experiments: ExperimentBuilder[O
     assert summary["outcome"] == "completed"
     assert summary["output_dir"] == str(out)
     assert all(outcome == "succeeded" for _, outcome in case_outcomes(summary))
+    assert_recorded(summary, EXAMPLE, out)
     counts = cast("dict[str, int]", summary["counts"])
     assert (counts["cases_succeeded"], counts["attempts"], counts["provider_requests"]) == (5, 5, 5)
     assert counts["authentication_calls"] == 1
@@ -813,6 +954,7 @@ def test_an_experiment_with_a_failed_case_ends_partial_and_gives_its_repeat(
     assert record.possibly_charged
     assert failed["repeat_attempt_id"] == str(record.attempt_id)
     assert all(case["repeat_attempt_id"] is None for case in cases if case is not failed)
+    assert_recorded(summary, EXAMPLE, out)
 
 
 def test_an_experiment_without_approval_or_credentials(
@@ -834,6 +976,8 @@ def test_an_experiment_without_approval_or_credentials(
         assert set(cast("dict[str, str]", summary["ids"])) == {"experiment_id", "plan_hash"}
         assert summary["output_dir"] is None
         assert all(outcome == "not_yet_run" for _, outcome in case_outcomes(summary))
+        # Every case of the plan the core builds, in its order, with its case_id.
+        assert_recorded(summary, EXAMPLE, out)
         counts = cast("dict[str, int]", summary["counts"])
         assert (counts["cases_planned"], counts["cases_not_yet_run"], counts["attempts"]) == (
             5,
@@ -901,19 +1045,46 @@ def test_a_resume_that_stops_before_its_session_gives_the_records_counts_and_rep
     assert [case["repeat_attempt_id"] for case in cases] == [None, None, repeat, None, None]
 
 
+REVISION_REASON = "Tries 40 holdings instead of 50."
+
+
+@pytest.mark.parametrize(
+    "given",
+    [
+        pytest.param("neither", id="no-reason-or-approve"),
+        pytest.param("reason", id="reason-alone"),
+        pytest.param("approve", id="approve-alone"),
+        pytest.param("current-hash", id="reason-and-the-current-plans-hash"),
+    ],
+)
 def test_an_experiment_whose_revision_isnt_approved_gives_the_revisions_cases(
-    cli: Cli, experiments: ExperimentBuilder[Outcome]
+    cli: Cli, experiments: ExperimentBuilder[Outcome], given: str
 ) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
     assert experiments.run(EXAMPLE, out, sends=[returns()] * 5).exit_code == 0
     changed = experiment_config("revisions/holdings-40.yaml")
+    options = {
+        "neither": [],
+        "reason": ["--revision-reason", REVISION_REASON],
+        "approve": ["--approve", plan_hash(changed, out)],
+        "current-hash": [
+            "--revision-reason",
+            REVISION_REASON,
+            "--approve",
+            plan_hash(EXAMPLE, out),
+        ],
+    }[given]
+    before = snapshot(out)
 
-    summary = experiment_summary_of(experiments.run(changed, out, approve=False))
+    summary = experiment_summary_of(experiments.run(changed, out, *options, approve=False))
 
     assert cast("dict[str, str]", summary["error"])["code"] == "plan.changed"
     assert cast("dict[str, str]", summary["ids"])["plan_hash"] == plan_hash(changed, out)
     assert summary["output_dir"] is None
+    assert snapshot(out) == before
+    # The revision's cases: its kept cases with their outcomes, and its new one not yet run.
+    assert_recorded(summary, changed, out)
     assert ("holdings-50", "not_yet_run") in case_outcomes(summary)
     counts = cast("dict[str, int]", summary["counts"])
     assert (counts["cases_retired"], counts["cases_succeeded"], counts["attempts"]) == (1, 4, 5)
@@ -1172,3 +1343,465 @@ def test_a_resume_whose_lock_the_file_system_refuses_has_no_counts(
     assert summary["ids"] == {"experiment_id": "earnyield-sensitivity"}
     assert (summary["counts"], summary["output_dir"]) == ({}, None)
     assert len(cli.server.received) == received
+
+
+def test_a_new_experiment_whose_claim_fails_gives_no_output_directory_and_its_counts(
+    cli: Cli, experiments: ExperimentBuilder[Outcome]
+) -> None:
+    # Only experiment.locked gives {}: a new experiment's counts are known once its configuration
+    # is valid, each case not yet run.
+    cli.ready()
+    out = cli.tmp / "experiment"
+
+    summary = experiment_summary_of(
+        experiments.run(
+            EXAMPLE, out, store_factory=lambda root: RefusingLock(root, "storage.write_failed")
+        )
+    )
+
+    assert cast("dict[str, str]", summary["error"])["code"] == "storage.write_failed"
+    assert summary["output_dir"] is None
+    assert_recorded(summary, EXAMPLE, out)
+    counts = cast("dict[str, int | None]", summary["counts"])
+    assert (counts["attempts"], counts["provider_requests"], counts["cost"]) == (0, 0, None)
+    assert cli.server.requests() == []
+
+
+# A provider failure: a partial run, and a stop (R03-AC05)
+
+FAILURES: dict[str, tuple[list[Reply], list[Reply], list[str]]] = {
+    "a-404": (
+        [returns(), returns(), Reply(404, b"Not found"), returns(), returns()],
+        [AUTHENTICATED],
+        ["succeeded", "succeeded", "failed", "succeeded", "succeeded"],
+    ),
+    "a-403": (
+        [returns(), Reply(403, b"Forbidden"), returns(), returns(), returns()],
+        [AUTHENTICATED, AUTHENTICATED],
+        ["succeeded", "failed", "succeeded", "succeeded", "succeeded"],
+    ),
+    "a-402": (
+        [returns(), Reply(402, b"Quota exceeded")],
+        [AUTHENTICATED],
+        ["succeeded", "failed", "not_yet_run", "not_yet_run", "not_yet_run"],
+    ),
+    "an-authentication-401": ([], [REFUSED], ["failed", *["not_yet_run"] * 4]),
+    "an-authentication-503": ([], [Reply(503, b"")], ["failed", *["not_yet_run"] * 4]),
+}
+"""Each failure of R03-AC05 but the 400 and the 503 above: the replies to the cases' requests and
+to Trial Folio's authentication calls, and each case's outcome. After a 402, or an
+authentication call's 401 or 503, no later case starts (D-32)."""
+
+
+@pytest.mark.parametrize(("sends", "authenticates", "outcomes"), FAILURES.values(), ids=FAILURES)
+def test_an_experiment_that_a_provider_failure_leaves_partial_or_stops(
+    cli: Cli,
+    experiments: ExperimentBuilder[Outcome],
+    sends: list[Reply],
+    authenticates: list[Reply],
+    outcomes: list[str],
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+
+    summary = experiment_summary_of(
+        experiments.run(EXAMPLE, out, sends=sends, authenticates=authenticates)
+    )
+
+    assert (summary["outcome"], summary["exit_code"]) == ("partial", 6)
+    assert cast("dict[str, str]", summary["error"])["code"] == "execution.partial"
+    assert summary["output_dir"] == str(out)
+    assert cast("dict[str, int]", summary["ids"])["session"] == 1
+    assert [outcome for _, outcome in case_outcomes(summary)] == outcomes
+    assert_recorded(summary, EXAMPLE, out)
+
+
+# A revision (R03-AC07)
+
+
+def test_an_approved_revision_gives_its_plan_hash_and_its_cases(
+    cli: Cli, experiments: ExperimentBuilder[Outcome]
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    assert experiments.run(EXAMPLE, out, sends=[returns()] * 5).exit_code == 0
+    changed = experiment_config("revisions/holdings-40.yaml")
+    revised = plan_hash(changed, out)
+
+    summary = experiment_summary_of(
+        experiments.run(changed, out, "--revision-reason", REVISION_REASON, sends=[returns()])
+    )
+
+    assert summary["outcome"] == "completed"
+    ids = cast("dict[str, object]", summary["ids"])
+    assert (ids["plan_hash"], ids["session"]) == (revised, 2)
+    assert_recorded(summary, changed, out)
+    counts = cast("dict[str, int]", summary["counts"])
+    assert (counts["cases_retired"], counts["attempts"]) == (1, 6)
+
+
+# A resume refused before its session (R03-AC07 and R03-AC14)
+
+
+def attempt_of(out: Path, summary: dict[str, object], key: str) -> str:
+    """The `attempt_id` of the case's only attempt."""
+    (case_id,) = (
+        case["case_id"]
+        for case in cast("list[dict[str, str]]", summary["cases"])
+        if case["case_key"] == key
+    )
+    (attempt,) = (out / "cases" / case_id / "attempts").iterdir()
+    return attempt.name
+
+
+REFUSALS: dict[str, tuple[str, Callable[[Path, dict[str, object]], list[str]]]] = {
+    "a-reason-with-no-revision": (
+        "unknown",
+        lambda out, first: ["--revision-reason", "Nothing changed."],
+    ),
+    "a-key-alone-without-a-terminal": ("unknown", lambda out, first: ["--repeat", "holdings-50"]),
+    "no-such-attempt": ("unknown", lambda out, first: ["--repeat", f"holdings-50:{uuid.uuid4()}"]),
+    "another-cases-attempt": (
+        "unknown",
+        lambda out, first: ["--repeat", f"holdings-50:{attempt_of(out, first, 'baseline')}"],
+    ),
+    "a-succeeded-attempt": (
+        "unknown",
+        lambda out, first: ["--repeat", f"baseline:{attempt_of(out, first, 'baseline')}"],
+    ),
+    "no-case-of-the-plan": ("unknown", lambda out, first: ["--repeat", "nothing-of-the-plan"]),
+    "a-due-cases-key": ("refused", lambda out, first: ["--repeat", "liquidity-100m"]),
+    "an-attempt-not-possibly-charged": (
+        "refused",
+        lambda out, first: ["--repeat", f"baseline:{attempt_of(out, first, 'baseline')}"],
+    ),
+}
+"""Each refusal before the session: the experiment it follows, `unknown`, whose `holdings-50`
+got a 503, or `refused`, whose authentication call got a 401, so every case is due; and the
+options, from its directory and its summary."""
+
+
+def first_run(
+    cli: Cli, experiments: ExperimentBuilder[Outcome], kind: str
+) -> tuple[Path, dict[str, object]]:
+    """Writes `example.yaml`'s experiment as `kind` says, and returns its directory and its
+    summary."""
+    cli.ready()
+    out = cli.tmp / "experiment"
+    if kind == "unknown":
+        sends = [returns(), returns(), UNAVAILABLE, returns(), returns()]
+        outcome = experiments.run(EXAMPLE, out, sends=sends)
+    else:
+        outcome = experiments.run(EXAMPLE, out, authenticates=[REFUSED])
+    assert outcome.exit_code == 6, outcome.stderr
+    return out, experiment_summary_of(outcome)
+
+
+def assert_refused_before_the_session(
+    summary: dict[str, object], out: Path, before: dict[str, bytes | None]
+) -> None:
+    """`plan.approval_required`, with the current plan's hash and cases, and the records' counts,
+    which are the first session's manifest's; nothing written."""
+    assert cast("dict[str, str]", summary["error"])["code"] == "plan.approval_required"
+    assert summary["output_dir"] is None
+    assert set(cast("dict[str, object]", summary["ids"])) == {"experiment_id", "plan_hash"}
+    assert_recorded(summary, EXAMPLE, out)
+    recorded = ExperimentManifest.model_validate_json(
+        (out / "sessions/1/manifest.json").read_bytes()
+    )
+    counts = cast("dict[str, int | None]", summary["counts"])
+    assert without_warnings(counts) == recorded_counts(recorded, out, summary)
+    assert snapshot(out) == before
+
+
+@pytest.mark.parametrize(("kind", "options"), REFUSALS.values(), ids=REFUSALS)
+def test_a_resume_refused_before_its_session_gives_the_records_cases_and_counts(
+    cli: Cli,
+    experiments: ExperimentBuilder[Outcome],
+    kind: str,
+    options: Callable[[Path, dict[str, object]], list[str]],
+) -> None:
+    out, first = first_run(cli, experiments, kind)
+    before = snapshot(out)
+    received = len(cli.server.received)
+
+    summary = experiment_summary_of(experiments.run(EXAMPLE, out, *options(out, first)))
+
+    assert_refused_before_the_session(summary, out, before)
+    assert len(cli.server.received) == received
+
+
+@posix_only
+def test_another_answer_at_the_repeat_prompt_gives_the_records_cases_and_counts(
+    cli: Cli, experiments: ExperimentBuilder[Outcome]
+) -> None:
+    out, _ = first_run(cli, experiments, "unknown")
+    before = snapshot(out)
+
+    with PseudoTerminal() as terminal:
+        terminal.press("approve\nno\n")
+        ran = cli(
+            "run",
+            EXAMPLE,
+            "--out",
+            out,
+            "--repeat",
+            "holdings-50",
+            "--json",
+            stdin=terminal.stdin,
+            stderr=terminal.stderr,
+        )
+    summary = experiment_summary_of(Outcome(ran.exit_code, ran.stdout, terminal.shown()))
+
+    assert_refused_before_the_session(summary, out, before)
+
+
+def test_a_repeat_with_a_new_experiment_or_a_screen_gives_its_summary(cli: Cli) -> None:
+    cli.ready()
+    new = cli.tmp / "experiment"
+    screen = cli.tmp / "run"
+
+    experiment = experiment_summary_of(
+        cli(
+            "run",
+            EXAMPLE,
+            "--out",
+            new,
+            "--approve",
+            plan_hash(EXAMPLE, new),
+            "--repeat",
+            "holdings-50",
+            "--json",
+        )
+    )
+    run = summary_of(
+        cli("run", config("formula.yaml"), "--out", screen, "--repeat", "holdings-50", "--json"),
+        "run",
+    )
+
+    for summary in (experiment, run):
+        assert cast("dict[str, str]", summary["error"])["code"] == "plan.approval_required"
+        assert summary["output_dir"] is None
+    assert_recorded(experiment, EXAMPLE, new)
+    assert cast("dict[str, int]", experiment["counts"])["attempts"] == 0
+    assert set(cast("dict[str, str]", run["ids"])) == {"plan_hash", "case_id"}
+    assert not new.exists()
+    assert not screen.exists()
+
+
+# A repeat that runs (R03-AC14)
+
+
+def test_a_confirmed_repeat_and_then_its_used_confirmation_give_the_records_cases(
+    cli: Cli, experiments: ExperimentBuilder[Outcome]
+) -> None:
+    out, first = first_run(cli, experiments, "unknown")
+    option = f"holdings-50:{attempt_of(out, first, 'holdings-50')}"
+
+    repeated = experiment_summary_of(
+        experiments.run(EXAMPLE, out, "--repeat", option, sends=[returns()])
+    )
+    received = len(cli.server.received)
+    again = experiment_summary_of(experiments.run(EXAMPLE, out, "--repeat", option))
+    # A key alone for a complete case resumes the rest.
+    alone = experiment_summary_of(experiments.run(EXAMPLE, out, "--repeat", "baseline"))
+
+    assert len(cli.server.received) == received
+    for summary, session in ((repeated, 2), (again, 3), (alone, 4)):
+        assert summary["outcome"] == "completed"
+        assert cast("dict[str, int]", summary["ids"])["session"] == session
+        assert_recorded(summary, EXAMPLE, out)
+        assert cast("dict[str, int]", summary["counts"])["repeats"] == 1
+
+
+def test_a_repeat_whose_authentication_fails_keeps_its_confirmation_in_the_summary(
+    cli: Cli, experiments: ExperimentBuilder[Outcome]
+) -> None:
+    out, first = first_run(cli, experiments, "unknown")
+    attempt = attempt_of(out, first, "holdings-50")
+
+    summary = experiment_summary_of(
+        experiments.run(EXAMPLE, out, "--repeat", f"holdings-50:{attempt}", authenticates=[REFUSED])
+    )
+
+    assert (summary["outcome"], summary["exit_code"]) == ("partial", 6)
+    assert cast("dict[str, int]", summary["ids"])["session"] == 2
+    assert_recorded(summary, EXAMPLE, out)
+    # The repeat sent nothing, so the same attempt still confirms it.
+    holdings = cast("list[dict[str, str | None]]", summary["cases"])[2]
+    assert (holdings["outcome"], holdings["repeat_attempt_id"]) == ("unknown", attempt)
+
+
+def test_a_repeat_interrupted_during_its_send_gives_its_own_attempt_to_confirm(
+    cli: Cli, experiments: ExperimentBuilder[Outcome], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out, first = first_run(cli, experiments, "unknown")
+    attempt = attempt_of(out, first, "holdings-50")
+    cli.server.reply("/auth", AUTHENTICATED)
+    with monkeypatch.context() as patch:
+        SocketFaults(patch).interrupt_send(b"POST /screen/backtest")
+        interrupted = cli(
+            "run",
+            EXAMPLE,
+            "--out",
+            out,
+            "--repeat",
+            f"holdings-50:{attempt}",
+            "--approve",
+            plan_hash(EXAMPLE, out),
+            "--json",
+        )
+
+    summary = experiment_summary_of(interrupted)
+
+    assert cast("dict[str, str]", summary["error"])["code"] == "command.interrupted"
+    # From the resume's session record.
+    assert summary["output_dir"] == str(out)
+    assert cast("dict[str, int]", summary["ids"])["session"] == 2
+    assert summary["outputs"] == {}
+    assert_recorded(summary, EXAMPLE, out)
+    holdings = cast("list[dict[str, str | None]]", summary["cases"])[2]
+    assert holdings["outcome"] == "unknown"
+    assert holdings["repeat_attempt_id"] not in (None, attempt)
+
+
+# The lock another process holds (R03-AC09)
+
+
+@posix_only
+def test_a_resume_while_another_process_holds_the_lock_has_no_cases_or_counts(
+    cli: Cli, experiments: ExperimentBuilder[Outcome]
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    assert experiments.run(EXAMPLE, out, sends=[returns()] * 5).exit_code == 0
+    received = len(cli.server.received)
+
+    # A resume waits at its approval prompt, in another process, holding the lock.
+    with cli.on_terminal("run", EXAMPLE, "--out", out, "--json") as holder:
+        holder.wait_for("Type approve")
+        summary = experiment_summary_of(experiments.run(EXAMPLE, out))
+        holder.press("no\n")
+        holder.wait()
+
+    assert cast("dict[str, str]", summary["error"])["code"] == "experiment.locked"
+    assert summary["ids"] == {"experiment_id": "earnyield-sensitivity"}
+    assert "cases" not in summary
+    assert (summary["counts"], summary["output_dir"]) == ({}, None)
+    assert len(cli.server.received) == received
+
+
+# A storage failure and an interrupt, before and after the session record (R03-AC19)
+
+STOPS: dict[str, tuple[str, str, bool]] = {
+    "a-new-experiments-session-record": ("new", "/sessions/1/session.json", False),
+    "a-new-experiments-plan": ("new", "/plans/1/plan.json", True),
+    "a-new-experiments-manifest": ("new", "/sessions/1/manifest.json", True),
+    "a-resumes-session-record": ("resume", "/sessions/2/session.json", False),
+    "a-resumes-attempt-record": ("resume", "attempt.json", True),
+}
+"""Where each session stops: in a new experiment, or a resume of one whose authentication call
+got a 401, so every case is due; the file whose write fails; and whether the session record was
+written by then."""
+
+FAULTS: dict[str, tuple[Callable[[FaultyStores, str], None], str]] = {
+    "storage": (lambda faults, name: faults.fail_os(name), "storage.write_failed"),
+    "interrupt": (
+        lambda faults, name: faults.fail_before(name, KeyboardInterrupt()),
+        "command.interrupted",
+    ),
+}
+
+
+@pytest.mark.parametrize(("fail", "code"), FAULTS.values(), ids=FAULTS)
+@pytest.mark.parametrize(("kind", "name", "session"), STOPS.values(), ids=STOPS)
+def test_an_experiment_that_stops_gives_its_output_directory_once_it_writes_there(
+    cli: Cli,
+    experiments: ExperimentBuilder[Outcome],
+    faults: FaultyStores,
+    fail: Callable[[FaultyStores, str], None],
+    code: str,
+    kind: str,
+    name: str,
+    session: bool,
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    if kind == "resume":
+        assert experiments.run(EXAMPLE, out, authenticates=[REFUSED]).exit_code == 6
+    fail(faults, name)
+
+    summary = experiment_summary_of(
+        experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
+    )
+
+    assert cast("dict[str, str]", summary["error"])["code"] == code
+    outputs = cast("dict[str, str]", summary["outputs"])
+    assert "manifest" not in outputs
+    ids = cast("dict[str, int]", summary["ids"])
+    # A new experiment's, from its claim; a resume's, from its session record.
+    if kind == "new" or session:
+        assert summary["output_dir"] == str(out)
+    else:
+        assert summary["output_dir"] is None
+    assert ("session" in ids) == session
+    if session:
+        assert ids["session"] == (1 if kind == "new" else 2)
+    assert_recorded(summary, EXAMPLE, out)
+
+
+PUBLISHED_FAULTS: dict[str, tuple[Callable[[], BaseException], str]] = {
+    "storage": (sync_failure, "storage.write_failed"),
+    "interrupt": (KeyboardInterrupt, "command.interrupted"),
+}
+
+
+@pytest.mark.parametrize(("failure", "code"), PUBLISHED_FAULTS.values(), ids=PUBLISHED_FAULTS)
+@pytest.mark.parametrize("kind", ["new", "resume"])
+def test_a_session_record_published_before_its_write_failed_reserves_its_session(
+    cli: Cli,
+    experiments: ExperimentBuilder[Outcome],
+    faults: FaultyStores,
+    failure: Callable[[], BaseException],
+    code: str,
+    kind: str,
+) -> None:
+    # A corrected defect: the summary gave no session, and for a resume no output directory,
+    # though the store had published the session record, as every later run reads it.
+    cli.ready()
+    out = cli.tmp / "experiment"
+    if kind == "resume":
+        assert experiments.run(EXAMPLE, out, authenticates=[REFUSED]).exit_code == 6
+    session = 1 if kind == "new" else 2
+    faults.fail_after(f"/sessions/{session}/session.json", failure())
+
+    summary = experiment_summary_of(
+        experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
+    )
+
+    assert cast("dict[str, str]", summary["error"])["code"] == code
+    assert (out / f"sessions/{session}/session.json").is_file()
+    assert cast("dict[str, int]", summary["ids"])["session"] == session
+    assert summary["output_dir"] == str(out)
+    assert "manifest" not in cast("dict[str, str]", summary["outputs"])
+    assert_recorded(summary, EXAMPLE, out)
+
+
+def test_a_manifest_whose_write_fails_once_published_isnt_among_the_outputs(
+    cli: Cli, experiments: ExperimentBuilder[Outcome], faults: FaultyStores
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    faults.fail_after("/sessions/1/manifest.json", sync_failure())
+
+    summary = experiment_summary_of(
+        experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
+    )
+
+    assert cast("dict[str, str]", summary["error"])["code"] == "storage.write_failed"
+    assert summary["output_dir"] == str(out)
+    assert cast("dict[str, int]", summary["ids"])["session"] == 1
+    # The store discarded the manifest it had published, and the report stays.
+    assert summary["outputs"] == {"report": "sessions/1/report.html"}
+    assert not (out / "sessions/1/manifest.json").exists()
+    assert_recorded(summary, EXAMPLE, out)
