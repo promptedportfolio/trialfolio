@@ -498,6 +498,8 @@ KEYWORDS: Final = frozenset(
     }
 )
 ROOT_KEYWORDS: Final = KEYWORDS | {"$schema", "$comment", "$defs"}
+# The keywords a mapping's `propertyNames` may use: those that describe text.
+NAME_KEYWORDS: Final = frozenset({"format", "maxLength", "minLength", "not", "pattern"})
 NULL: Final = {"type": "null"}
 
 
@@ -583,7 +585,7 @@ class _Walk:
             self.by_ref[node["$ref"]] = found
         else:
             self.by_node[id(node)] = found
-        if schema.get("additionalProperties", False) is not False:
+        if schema.get("additionalProperties", True) is not False:
             raise GenerationError(f"{self.page.schema}: {path} allows any key")
         for name, value in schema["properties"].items():
             self.visit(value, f"{path}.{name}")
@@ -611,9 +613,16 @@ class _Walk:
                 if item is not None:
                     self.visit(item, f"{path}[]")
         elif "patternProperties" in node:
+            unknown = sorted(node.get("propertyNames", {}).keys() - NAME_KEYWORDS)
+            if unknown:
+                raise GenerationError(
+                    f"{self.page.schema}: {path}'s keys use {', '.join(unknown)}, which the"
+                    " generator can't put in plain words"
+                )
             for value in node["patternProperties"].values():
                 if self.is_object(value) or value.get("type") in ("array", "object"):
                     raise GenerationError(f"{self.page.schema}: {path} maps names to objects")
+                self.visit(value, f"{path}.*")
 
     def title(self, path: str) -> str:
         if path.endswith("[]"):
@@ -796,6 +805,8 @@ class _Walk:
                 raise GenerationError(
                     f"{self.page.schema}: {path} is an object the generator can't"
                 )
+            if node.get("additionalProperties", True) is not False:
+                raise GenerationError(f"{self.page.schema}: {path} allows any key")
             return "an empty object, `{}`"
         if len(patterns) != 1 or node.get("additionalProperties", True) is not True:
             raise GenerationError(f"{self.page.schema}: {path} is a mapping the generator can't")
@@ -838,7 +849,7 @@ class _Walk:
         self.check_keywords(self.root, "the top level", top=True)
         if self.root.get("type") != "object" or not self.root.get("properties"):
             raise GenerationError(f"{self.page.schema}: the top level isn't an object with keys")
-        if self.root.get("additionalProperties", False) is not False:
+        if self.root.get("additionalProperties", True) is not False:
             raise GenerationError(f"{self.page.schema}: the top level allows any key")
         description = _markdown(self.root.get("description", ""))
         top = _Object("", self.page.prefix, self.root, description, top=True)

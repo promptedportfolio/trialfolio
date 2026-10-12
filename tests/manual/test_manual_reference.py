@@ -406,38 +406,92 @@ def _schemas(tmp_path: Path, name: str, change: Any) -> Path:
     return schemas
 
 
+SCREEN = "screen-configuration-1.0.0.schema.json"
+RUN_MANIFEST = "run-manifest-1.0.0.schema.json"
+
+
+def _options(schema: Any) -> Any:
+    """The run manifest's `command.options`: a mapping of names to values."""
+    return schema["$defs"]["CommandRecord"]["properties"]["options"]
+
+
 @pytest.mark.parametrize(
-    ("change", "problem"),
+    ("name", "change", "problem"),
     [
         pytest.param(
+            SCREEN,
             lambda schema: schema["properties"]["rules"].update(uniqueItems=True),
             "rules uses uniqueItems, which the generator can't put in plain words",
             id="a keyword",
         ),
         pytest.param(
+            SCREEN,
             lambda schema: schema["properties"]["universe"].update(pattern="^[A-Z]+$"),
             "universe has the pattern '^[A-Z]+$', which the generator can't put in plain words",
             id="a pattern",
         ),
         pytest.param(
+            SCREEN,
             lambda schema: schema["properties"]["start_date"].update(format="time"),
             "start_date has the format time",
             id="a format",
         ),
+        pytest.param(
+            RUN_MANIFEST,
+            lambda schema: next(iter(_options(schema)["patternProperties"].values()))["anyOf"][
+                0
+            ].update(allOf=[{"minLength": 1}]),
+            "command.options.* uses allOf, which the generator can't put in plain words",
+            id="a keyword in a mapping's values",
+        ),
+        pytest.param(
+            RUN_MANIFEST,
+            lambda schema: _options(schema)["propertyNames"].update(enum=["out"]),
+            "command.options's keys use enum, which the generator can't put in plain words",
+            id="a keyword in a mapping's keys",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["properties"].update(
+                universe={"type": "object", "additionalProperties": {"type": "number"}}
+            ),
+            "universe allows any key",
+            id="an object of any keys, each a number",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["properties"].update(
+                universe={"type": "object", "additionalProperties": True}
+            ),
+            "universe allows any key",
+            id="an object of any keys and values",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["$defs"]["NameRanking"].pop("additionalProperties"),
+            "ranking-name allows any key",
+            id="an object that doesn't say it's closed",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema.pop("additionalProperties"),
+            "the top level allows any key",
+            id="a top level that doesn't say it's closed",
+        ),
     ],
 )
 def test_a_schema_the_generator_cant_put_in_plain_words_fails(
-    tmp_path: Path, change: Any, problem: str
+    tmp_path: Path, name: str, change: Any, problem: str
 ) -> None:
     sources = manual_reference.default_sources()
-    schemas = _schemas(tmp_path, "screen-configuration-1.0.0.schema.json", change)
+    schemas = _schemas(tmp_path, name, change)
 
     with pytest.raises(manual_reference.GenerationError) as raised:
         manual_reference.generate(
             manual_reference.Sources(sources.parser, schemas, sources.contracts, EXIT_CODES)
         )
 
-    assert str(raised.value) == f"screen-configuration-1.0.0.schema.json: {problem}"
+    assert str(raised.value) == f"{name}: {problem}"
 
 
 def test_the_commands_dont_depend_on_the_terminal_or_the_language(
