@@ -1,0 +1,10 @@
+kind: review
+schema_version: 1.0.0
+title: R04-T01 step 4, a weight moved between two top-level nodes
+purpose: Moving weight between top-level nodes should change at least one metric (D-20).
+baseline: step3
+results:
+  - label: step3
+    run: payloads/runs/step3-api
+  - label: step4
+    run: payloads/runs/step4

@@ -18,7 +18,7 @@ These are **verified observations** from the guide's 2026-10-01 check; the [veri
 - `p123api` is MIT-licensed. It handles endpoint calls, authentication, and retries, and it can convert results in ways that reshape them and drop metadata. [Wrapper documentation](https://portfolio123.customerly.help/en/articles/13765-the-api-wrapper-p123api), [source](https://github.com/portfolio-123/p123api-py/blob/master/p123api/client.py)
 - DataMiner is licensed under GPL-3.0. [License](https://github.com/portfolio-123/dataminer/blob/master/LICENSE)
 - FactorMiner's repository declares no license.
-- DataMiner's inline ranking definitions reuse a shared `APIRankingSystem` in the account, so concurrent operations can interfere with each other. [Ranking definitions](https://portfolio123.customerly.help/en/articles/13793-dataminer-ranking-definition)
+- DataMiner's inline ranking definitions reuse a shared `ApiRankingSystem` in the account, so concurrent operations can interfere with each other. [Ranking definitions](https://portfolio123.customerly.help/en/articles/13793-dataminer-ranking-definition)
 
 ## Decision
 
@@ -87,6 +87,6 @@ Recorded on 2026-10-01 from public sources, without account access. These are do
 - It prompts for the API ID and key. It can save them in plaintext in a local `config.ini`.
 - The [ScreenBacktest operation](https://portfolio123.customerly.help/en/articles/14056-dataminer-operation-screen-backtest) documents its configuration keys and defaults. The defaults include End Date = today, Slippage = 0, Benchmark = SPY, and Precision = 2.
 - The output file format is not documented. The pinned source suggests a multi-section CSV with `Stats`, `Results`, and `Time Series` sections and no configuration, version, cost, or timestamp. This is unverified until a real export is inspected.
-- Ranking definitions given as nodes or XML create or overwrite `APIRankingSystem` in the account.
+- Ranking definitions given as nodes or XML create or overwrite `ApiRankingSystem` in the account. The ranking-definition article writes the name `APIRankingSystem`; R04-T01 found that it's `ApiRankingSystem`, the Rank API documentation's spelling ([run record](../../reference/ranking-weights/README.md)).
 
 **Licenses:** DataMiner GPL-3.0; FactorMiner has no license, at commit `d814c5df5000dc536de65a578da6ce42c05b17bf`; `p123api` MIT.

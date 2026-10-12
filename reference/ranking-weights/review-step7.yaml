@@ -1,0 +1,10 @@
+kind: review
+schema_version: 1.0.0
+title: R04-T01 step 7, a factor removed from a composite
+purpose: Removing one factor node from a composite should change at least one metric (D-20).
+baseline: step3
+results:
+  - label: step3
+    run: payloads/runs/step3-api
+  - label: step7
+    run: payloads/runs/step7

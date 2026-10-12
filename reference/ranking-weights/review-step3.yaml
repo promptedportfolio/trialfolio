@@ -1,0 +1,13 @@
+kind: review
+schema_version: 1.0.0
+title: R04-T01 step 3, ApiRankingSystem against the saved system
+purpose: The same definition, backtested by the saved system's name and by ApiRankingSystem, should give the same metrics.
+baseline: saved
+results:
+  - label: saved
+    run: payloads/runs/step3-saved
+  - label: api-ranking-system
+    run: payloads/runs/step3-api
+    intended_changes:
+      - setting: ranking
+        reason: The saved system's definition, written into ApiRankingSystem by rank_update.
