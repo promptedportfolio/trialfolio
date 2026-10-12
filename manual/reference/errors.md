@@ -9,8 +9,8 @@ Every error message says what failed, why, and what to do next. It names its cod
 | Code | Exit code | What happened | What to do |
 |---|---|---|---|
 | `config.invalid` | 3 | The configuration has a problem; the message lists each one | Fix them. Nothing was sent. |
-| `input.not_found` | 3 | `trialfolio report`'s run directory, or a review's `run` path, doesn't exist. A review's message names the result. | Give the output directory of a run that finished. Nothing was written. |
-| `input.not_a_run` | 3 | `trialfolio report`'s run directory, or a review's `run` path, isn't a complete run, or is an experiment's directory. A review's message names the result. In a resumed experiment, a record is missing or changed, as after an incomplete copy. | Give the output directory of a run that finished. Nothing was written. A resumed experiment sends nothing. |
+| `input.not_found` | 3 | The configuration file given to `trialfolio run` or `trialfolio review` couldn't be read, as when it doesn't exist. Or `trialfolio report`'s run directory, or a review's `run` path, doesn't exist, and a review's message names the result. | For the configuration file, check its path: nothing was sent or created. For a run, give the output directory of a run that finished: nothing was written. |
+| `input.not_a_run` | 3 | `trialfolio report`'s run directory, or a review's `run` path, isn't a complete run, or is an experiment's directory. A review's message names the result. In a resumed experiment, a record is missing or changed, as after an incomplete copy. | For `report` or a review, give the output directory of a run that finished: nothing was written. For a resumed experiment, restore its records from a complete copy, or run the configuration into a new output directory: nothing was sent or written. |
 | `artifact.unknown_schema_version` | 3 | A saved file's schema version is one this version of Trial Folio has no reader for | Read the run, or resume the experiment, with a version of Trial Folio that has one. Nothing was written, and a resumed experiment sends nothing. |
 | `environment.unsupported` | 3 | The installed `p123api`, `requests`, or `urllib3` isn't the verified version, or `simplejson` is importable | Run `uv sync` in the repository to restore the locked versions. For `simplejson`, uninstall it from the environment, or run Trial Folio in its own virtual environment. |
 | `license.not_acknowledged` | 2 | `run`, `report`, `demo`, or `review` ran without an acknowledgment of the current license and notice versions | Acknowledge them in one of the [three ways](cli.md#three-ways-to-acknowledge). Nothing was written. |
@@ -51,7 +51,7 @@ Every error message says what failed, why, and what to do next. It names its cod
 | 0 | The command completed. It says nothing about the strategy. |
 | 1 | An unexpected internal error |
 | 2 | A usage error, a plan not approved, or the license not acknowledged |
-| 3 | An invalid configuration, input, artifact, or environment |
+| 3 | An invalid configuration, input, artifact, or environment, or an experiment's changed plan whose revision wasn't approved with a reason |
 | 4 | An output problem: the directory isn't empty, a write failed, or another process is running the experiment |
 | 5 | A Portfolio123 error: authentication, Portfolio123 unavailable, quota, an unsupported setting, a rejected request, an uncertain outcome, or an invalid response |
 | 6 | An experiment ended with a planned case that didn't succeed. Every case is accounted for. |

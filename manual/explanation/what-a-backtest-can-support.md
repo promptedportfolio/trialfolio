@@ -23,7 +23,7 @@ For a single screen run, the sections hold this:
 
 A run without normalized tables, because its attempt didn't succeed or its response was invalid, says which, and shows the plan's settings instead.
 
-Each value appears exactly as the run's normalized tables hold it, with its unit, so the report's values match `normalized/metrics.csv`. A value never has more decimal places than Portfolio123's response gave it. The response holds summary statistics, and summary statistics alone don't justify reconstructing a return series, a confidence interval, or a drawdown history, so the report shows none ([METH-05.10](https://github.com/promptedportfolio/trialfolio/blob/main/docs/methodology.md#meth-05-data-integrity-appropriate-to-the-claim)).
+Each value appears exactly as the run's normalized tables hold it, with its unit, so the report's values match `normalized/metrics.csv`. A value never has more decimal places than Portfolio123's response gave it. The report's metrics are the response's summary statistics. A response can also hold per-period returns and daily values: the run preserves them in the saved response, and its manifest's `return_series` then reads `source_only`, but Trial Folio doesn't interpret them. Summary statistics alone don't justify reconstructing a return series, a confidence interval, or a drawdown history, so the report shows none ([METH-05.10](https://github.com/promptedportfolio/trialfolio/blob/main/docs/methodology.md#meth-05-data-integrity-appropriate-to-the-claim)).
 
 ## "Not assessed"
 

@@ -55,4 +55,4 @@ One confirmation, one repeat. Once the repeat may have reached Portfolio123, run
 
 - An `unknown` or rejected case isn't sent again without `--repeat`, and the plan display gives its option, `--repeat <case-key>:<attempt-id>`.
 - `--repeat <case-key>` alone, with `--approve` or from a script, fails with `plan.approval_required`, exit code 2, and the message gives the option with the attempt ID. Nothing was sent.
-- After a repeat confirmed by its attempt ID, the same command again says the case isn't repeated, because its confirmation was used, and sends nothing for it.
+- After a repeat confirmed by its attempt ID may have reached Portfolio123, the same command again says the case isn't repeated, because its confirmation was used, and sends nothing for it. A repeat that sent nothing, such as one whose authentication failed, leaves its confirmation unused, and the same command tries it again.

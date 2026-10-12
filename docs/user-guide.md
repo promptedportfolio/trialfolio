@@ -168,7 +168,7 @@ The plan shows:
 
 - After you stop, it fails with `plan.approval_required`, exit code 2. `runs/first/` doesn't exist, and the message says nothing was sent.
 - When its error output isn't a terminal, as in a script, it shows only the plan hash and the budget, never the formulas. When its input isn't a terminal, it doesn't ask. Either way, it fails the same way, with the exact `--approve` option in the message.
-- The same configuration gives the same plan hash every time, in any output directory. Changing a setting, the title, or the purpose changes it.
+- The same configuration, with the same versions of Trial Folio, `p123api`, `requests`, and `urllib3`, gives the same plan hash every time, in any output directory. Changing a setting, the title, or the purpose changes it, and so does upgrading any of them.
 
 ## 6. Set your credentials
 
@@ -551,7 +551,7 @@ In a terminal, it shows the revision, with what changed and your reason, and ask
 - A resume with no case due and no repeat to make sends nothing, needs no credentials, and writes its session's report and manifest.
 - An `unknown` or rejected case isn't sent again without `--repeat`, and the plan display gives its option, `--repeat <case-key>:<attempt-id>`.
 - `--repeat <case-key>` alone, with `--approve` or from a script, fails with `plan.approval_required`, exit code 2, and the message gives the option with the attempt ID. Nothing was sent.
-- After a repeat confirmed by its attempt ID, the same command again says the case isn't repeated, because its confirmation was used, and sends nothing for it.
+- After a repeat confirmed by its attempt ID may have reached Portfolio123, the same command again says the case isn't repeated, because its confirmation was used, and sends nothing for it. A repeat that sent nothing, such as one whose authentication failed, leaves its confirmation unused, and the same command tries it again.
 - A changed configuration fails with `plan.changed`, exit code 3, names the current plan, and gives the revision's hash. Nothing was sent or written.
 - After a revision that changes a case's settings, the plan display and the report list the old case as retired, with its attempts.
 - While a command waits for approval, the same command in another terminal fails with `experiment.locked`, exit code 4.
@@ -578,7 +578,7 @@ Exit codes:
 | 0 | The command completed. It says nothing about the strategy. |
 | 1 | An unexpected internal error |
 | 2 | A usage error, a plan not approved, or the license not acknowledged |
-| 3 | An invalid configuration, input, artifact, or environment |
+| 3 | An invalid configuration, input, artifact, or environment, or an experiment's changed plan whose revision wasn't approved with a reason |
 | 4 | An output problem: the directory isn't empty, a write failed, or another process is running the experiment |
 | 5 | A Portfolio123 error |
 | 6 | An experiment ended with a planned case that didn't succeed. Every case is accounted for. |
@@ -604,7 +604,7 @@ Every error message says what failed, why, and what to do next. These are the on
 | `experiment.locked` | Another process is running the experiment, or waiting for its approval | Wait for it to end, and run the command again. Nothing was sent. |
 | `execution.partial` | An experiment ended with a planned case that didn't succeed; the message lists each one | Run the same command again to send the cases that are due, and repeat each case awaiting a repeat with the option the message gives |
 | `artifact.unknown_schema_version` | A saved file's schema version is one this version of Trial Folio has no reader for | Read the run, or resume the experiment, with a version of Trial Folio that has one. Nothing was written, and a resumed experiment sends nothing. |
-| `input.not_found`, `input.not_a_run` | `trialfolio report`'s run directory, or a review's `run` path, doesn't exist, or isn't a complete run. A review's message names the result. | Give the output directory of a run that finished. Nothing was written. |
+| `input.not_found`, `input.not_a_run` | `trialfolio report`'s run directory, or a review's `run` path, doesn't exist, or isn't a complete run. A review's message names the result. With `input.not_found`, it's also the configuration file given to `trialfolio run` or `trialfolio review`, which couldn't be read, as when it doesn't exist. | Give the output directory of a run that finished. Nothing was written. For the configuration file, check its path: nothing was sent or created. |
 | `environment.unsupported` | The installed `p123api`, `requests`, or `urllib3` isn't the verified version, or `simplejson` is importable | Run `uv sync` in the repository to restore the locked versions. For `simplejson`, uninstall it from the environment, or run Trial Folio in its own virtual environment. |
 | `provider.auth_failed` | The credentials are missing, or Portfolio123 refused them | Check the API ID and key |
 | `provider.unavailable` | Portfolio123 couldn't be reached; the request wasn't sent | Try again later |

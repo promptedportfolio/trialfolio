@@ -68,7 +68,7 @@ You approve a plan in one of two ways ([approval](https://github.com/promptedpor
 
 Either way, the approval is checked against the plan itself. Trial Folio computes the plan's hash from its contents, and runs the plan only when it's given a hash equal to that one. It never trusts a hash stored in a file. That's why `--approve` takes only the full hash, exactly as shown: an abbreviated, malformed, or different hash isn't equal to the plan's, so it doesn't match. And since any change to the plan changes its hash, an approval of one plan never covers another.
 
-Without a match, the command fails with `plan.approval_required`, exit code 2. It creates no output directory, and sends nothing, and the message says nothing was sent. The run's manifest records how its plan was approved, `interactive` or `option`.
+Without a match, the command fails with `plan.approval_required`, exit code 2, or, for a revision of an experiment's plan, with `plan.changed`, exit code 3 ([below](#one-approval-for-a-whole-experiment)). It creates no output directory, and sends nothing, and the message says nothing was sent. The run's manifest records how its plan was approved, `interactive` or `option`.
 
 ## What a script sees
 
@@ -76,7 +76,7 @@ The full plan holds your configuration's values and formulas, which Trial Folio 
 
 When the error output isn't a terminal, as in a script or a CI job whose output may be kept, Trial Folio shows only the plan hash and the budget, never the formulas, and says that running the command in a terminal shows the full plan. For an experiment it also gives, when you go on with one, whether the plan is the current plan or a revision of it, and the counts so far: nothing from the configuration. With a matching `--approve`, the plan is already approved, so Trial Folio shows only the hash and the budget there too.
 
-When the input isn't a terminal, Trial Folio doesn't ask. Without `--approve`, the command fails with `plan.approval_required`, and the message gives the exact `--approve` option for this plan. With `--json`, the summary's `ids` hold the plan hash ([JSON summary](../reference/json-summary.md)). So a script can get a plan's hash without sending anything ([using Trial Folio from a script](../how-to/use-from-a-script.md)).
+When the input isn't a terminal, Trial Folio doesn't ask. Without `--approve`, the command fails with `plan.approval_required`, or `plan.changed` for a revision, and the message gives the exact `--approve` option for this plan, with `--revision-reason` for a revision. With `--json`, the summary's `ids` hold the plan hash ([JSON summary](../reference/json-summary.md)). So a script can get a plan's hash without sending anything ([using Trial Folio from a script](../how-to/use-from-a-script.md)).
 
 ## Approve only a plan you've reviewed
 

@@ -47,7 +47,7 @@ After a storage failure, the command ends with `storage.write_failed`, even if t
 
 ## `unknown` outcomes
 
-An attempt is `unknown` when its request may have been sent, and charged, but no response was durably recorded. That happens after a read timeout or a reset, after a 5xx server error, after an interrupt while Trial Folio waits for Portfolio123, and when a 200 arrives but its response couldn't be saved. Outside an interrupt or a storage failure, the command ends with `provider.outcome_unknown`, exit code 5. After Ctrl-C, it ends with `command.interrupted`, exit code 130, and the message says whether a request may have been sent.
+An attempt is `unknown` when its request may have been sent, and charged, but no response was durably recorded. That happens after a read timeout or a reset, after a 5xx server error, after an interrupt while Trial Folio waits for Portfolio123, and when a 200 arrives but its response couldn't be saved. Outside an interrupt or a storage failure, a screen's command ends with `provider.outcome_unknown`, exit code 5. In an experiment, the case is `unknown`, the next case runs, and the command ends with `execution.partial`, exit code 6. After Ctrl-C, it ends with `command.interrupted`, exit code 130, and the message says whether a request may have been sent.
 
 `unknown` always means that no response was saved. A response that arrived and was saved is `succeeded`, even when it then fails validation.
 

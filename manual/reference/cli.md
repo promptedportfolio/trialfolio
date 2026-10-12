@@ -81,8 +81,9 @@ A screen's run sends one request, which costs 5 API credits. An experiment sends
 - **Before anything is sent,** `run` builds a plan from the configuration, and shows it. Reviewing it needs no credentials, and creates nothing.
 - **In a terminal,** it shows the full plan, and asks you to type `approve`. Any other answer stops it, with `plan.approval_required`, exit code 2, and nothing is sent or created.
 - **When its error output isn't a terminal,** as in a script, it shows only the plan hash and the budget, never the formulas. **When its input isn't a terminal,** it doesn't ask. Without `--approve`, either way fails with `plan.approval_required`, and the message gives the exact `--approve` option.
-- **The plan hash** is `sha256:` and 64 hex digits. The same configuration gives the same plan hash every time, in any output directory.
+- **The plan hash** is `sha256:` and 64 hex digits. The same configuration, with the same versions of Trial Folio, `p123api`, `requests`, and `urllib3`, gives the same plan hash every time, in any output directory. After an upgrade of any of them, the plan needs approving again. An experiment's later plans also depend on the plan they revise ([the plan hash](../explanation/plans-and-approval.md#the-plan-hash)).
 - **`--approve` with the full hash,** exactly as shown, runs without asking. An abbreviated or different hash fails with `plan.approval_required`, and sends nothing.
+- **For a revision of an experiment's plan,** each of these failures is `plan.changed`, exit code 3, instead: a refused answer, no `--approve` when Trial Folio doesn't ask, and a hash that isn't the revision's. A revision also needs [`--revision-reason`](#-revision-reason), and fails with `plan.changed` without it. [Revise an experiment](../how-to/revise-an-experiment.md) gives the steps.
 
 [Plans and approval](../explanation/plans-and-approval.md) explains what the plan shows, and why.
 
