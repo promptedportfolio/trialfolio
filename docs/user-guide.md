@@ -521,7 +521,9 @@ trialfolio run experiment.yaml --out runs/study/ --approve sha256:<the plan hash
 - **With the attempt ID,** the option is the confirmation, and Trial Folio doesn't ask. With `--approve`, or from a script, a repeat needs it.
 - **Give `--repeat` once for each case** you repeat.
 - **A repeat is a new attempt of the same case,** and counts against the budget. When the budget can't cover it, it doesn't start, and a revision that raises the budget lets the same option repeat it.
-- **One confirmation, one repeat.** Once the repeat may have reached Portfolio123, running the same command again doesn't repeat the case again: it says the case was repeated already, and resumes the rest. A repeat that didn't succeed needs a new confirmation, with its own attempt ID.
+- **One confirmation, one repeat.** Once the repeat may have reached Portfolio123, running the same command again never repeats the case on the same confirmation:
+  - **With the attempt ID,** it says the case was repeated already, and resumes the rest. A repeat that didn't succeed needs a new confirmation, which names the repeat's own attempt.
+  - **With the key alone,** when the repeat succeeded, it says the case is complete, and resumes the rest. When the repeat didn't succeed, the case awaits a repeat again, and in a terminal the command asks you to type `repeat` again, for the repeat's own attempt: that's a new confirmation, and typing it repeats the case again.
 
 Whether Portfolio123 charges for a request that fails is unknown, and an `unknown` request may have gone through. Before you repeat one, you can check your API credits on Portfolio123's website, as an interrupt's message suggests.
 
@@ -547,7 +549,7 @@ In a terminal, it shows the revision, with what changed and your reason, and ask
 - A resume with no case due and no repeat to make sends nothing, needs no credentials, and writes its session's report and manifest.
 - An `unknown` or rejected case isn't sent again without `--repeat`, and the plan display gives its option, `--repeat <case-key>:<attempt-id>`.
 - `--repeat <case-key>` alone, with `--approve` or from a script, fails with `plan.approval_required`, exit code 2, and the message gives the option with the attempt ID. Nothing was sent.
-- After a repeat, the same command again says the case isn't repeated, because its confirmation was used, and sends nothing for it.
+- After a repeat confirmed by its attempt ID, the same command again says the case isn't repeated, because its confirmation was used, and sends nothing for it.
 - A changed configuration fails with `plan.changed`, exit code 3, names the current plan, and gives the revision's hash. Nothing was sent or written.
 - After a revision that changes a case's settings, the plan display and the report list the old case as retired, with its attempts.
 - While a command waits for approval, the same command in another terminal fails with `experiment.locked`, exit code 4.
