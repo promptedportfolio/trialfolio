@@ -6,7 +6,8 @@ reference pages that list commands, fields, and errors are generated; and UM-T02
 column kept by each row's key, and the error codes cross-checked with `EXIT_CODES`. Most tests
 write a small manual by hand, with regions the test registers, and run `scripts/manual_reference.py`
 on it. The last ones run it on the real pages and sources, as scripts/check does, and check that
-each JSON file the page of output fields names is at the version Trial Folio writes.
+each JSON file the page of output fields names is at the version Trial Folio writes, by the schema
+whose region is in the file's section.
 """
 
 import fnmatch
@@ -566,23 +567,24 @@ def test_regenerating_the_committed_pages_changes_nothing(tmp_path: Path) -> Non
     assert {path: path.read_bytes() for path in manual.rglob("*.md")} == before
 
 
-# Where each JSON file a command writes is, by the region of output-fields.md that lists its fields.
+# Where each JSON file a command writes is, by the heading of the section of output-fields.md that
+# lists its fields.
 RUN_FILES = {
-    "manifest.json": "output-fields-run-manifest",
-    "plan.json": "output-fields-run-plan",
-    "cases/*/attempts/*/started.json": "output-fields-run-start-record",
-    "cases/*/attempts/*/attempt.json": "output-fields-run-attempt-record",
+    "manifest.json": "A run's `manifest.json`",
+    "plan.json": "A run's `plan.json`",
+    "cases/*/attempts/*/started.json": "A run's `started.json`",
+    "cases/*/attempts/*/attempt.json": "A run's `attempt.json`",
 }
 EXPERIMENT_FILES = {
-    "plans/*/plan.json": "output-fields-experiment-plan",
-    "plans/*/experiment.json": "output-fields-experiment-record",
-    "sessions/*/session.json": "output-fields-session-record",
-    "sessions/*/manifest.json": "output-fields-session-manifest",
-    "cases/*/attempts/*/started.json": "output-fields-experiment-start-record",
-    "cases/*/attempts/*/attempt.json": "output-fields-experiment-attempt-record",
-    "cases/*/attempts/*/authenticating.json": "output-fields-authentication-record",
+    "plans/*/plan.json": "An experiment's `plans/<n>/plan.json`",
+    "plans/*/experiment.json": "`plans/<n>/experiment.json`",
+    "sessions/*/session.json": "`sessions/<s>/session.json`",
+    "sessions/*/manifest.json": "`sessions/<s>/manifest.json`",
+    "cases/*/attempts/*/started.json": "An experiment's `started.json`",
+    "cases/*/attempts/*/attempt.json": "An experiment's `attempt.json`",
+    "cases/*/attempts/*/authenticating.json": "`authenticating.json`",
 }
-REVIEW_FILES = {"manifest.json": "output-fields-review-manifest"}
+REVIEW_FILES = {"manifest.json": "A review's `manifest.json`"}
 # The files that have no schema: the request without credentials, and Portfolio123's response.
 UNSCHEMED = {"request.json", "response.json"}
 
@@ -605,20 +607,38 @@ def _cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *argv: str | Path) -> 
     assert code == 0, stderr.getvalue()
 
 
+def _section_regions() -> dict[str, str]:
+    """The region in each section of output-fields.md, by the section's heading."""
+    page = manual_reference.MANUAL / "reference" / "output-fields.md"
+    regions: dict[str, str] = {}
+    heading = ""
+    for line in page.read_text(encoding="utf-8").split("\n"):
+        start = manual_reference.START.fullmatch(line)
+        if line.startswith("## "):
+            heading = line.removeprefix("## ")
+        elif start is not None:
+            assert heading not in regions, f"two regions in the section {heading}"
+            regions[heading] = start.group(1)
+    return regions
+
+
 def _schema_versions(out: Path, files: Mapping[str, str]) -> dict[str, tuple[str, str]]:
     """For each JSON file in `out`, its path, the version it holds, and the version of the schema
-    whose region lists its fields. Each file is valid against that schema's model."""
+    whose region the file's section of output-fields.md holds. Each file is valid against that
+    schema's model."""
     pages = {page.prefix: page.schema for page in manual_reference.SCHEMA_PAGES}
     models = {schema_file.name: schema_file.model for schema_file in SCHEMA_FILES}
+    sections = _section_regions()
     found: dict[str, tuple[str, str]] = {}
     for path in sorted(out.rglob("*.json")):
         relative = path.relative_to(out).as_posix()
         # A review's copies of its runs' files are listed with the runs' files.
         if path.name in UNSCHEMED or relative.startswith("inputs/"):
             continue
-        (region,) = [
-            region for pattern, region in files.items() if fnmatch.fnmatch(relative, pattern)
+        (section,) = [
+            section for pattern, section in files.items() if fnmatch.fnmatch(relative, pattern)
         ]
+        region = sections[section]
         schema = json.loads((manual_reference.SCHEMAS / pages[region]).read_text(encoding="utf-8"))
         models[pages[region]].model_validate_json(path.read_bytes())
         written = json.loads(path.read_bytes())["schema_version"]
