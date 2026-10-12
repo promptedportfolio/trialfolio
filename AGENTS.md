@@ -16,7 +16,7 @@ Trial Folio is a Python CLI (`trialfolio`) for comparing, reproducing, and event
 
 [docs/spec-authoring-guide.md](docs/spec-authoring-guide.md) is bootstrap context. When it disagrees with a document above, the document above wins.
 
-To use Trial Folio rather than change it, read the [user guide](docs/user-guide.md). The user manual replaces it once UM-T01 builds it ([docs/user-manual.md](docs/user-manual.md)).
+To use Trial Folio rather than change it, read the [user guide](docs/user-guide.md). The user manual ([docs/user-manual.md](docs/user-manual.md)) replaces it at 0.4.0's documentation task. Until then, from UM-T01 on, both describe the same workflows, and a change to behavior both describe updates both.
 
 When proposing or completing a release specification, follow [Product direction (D-23)](docs/spec.md#product-direction) and the [roadmap's release planning requirements](docs/roadmap.md#release-planning-requirements). Identify the research task, the manual work removed or question enabled, and the scenario that will demonstrate it. The roadmap's future targets do not authorize implementation or expand an assigned release's scope.
 
