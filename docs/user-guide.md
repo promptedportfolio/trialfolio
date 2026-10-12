@@ -452,7 +452,7 @@ Each case is a screen backtest, sent just as a screen configuration with its set
    - what's sent to Portfolio123, and what isn't, such as the experiment's ID, title, purpose, and prior research, and each case's key and description
    - the plan hash. One approval covers every case and the whole budget.
 
-3. Type `approve`, or give the hash with `--approve sha256:<the plan hash>`. Trial Folio authenticates once, and runs the cases one at a time, in order. A case that fails is recorded, and the next one runs. Progress goes to the terminal.
+3. Type `approve`, or give the hash with `--approve sha256:<the plan hash>`. Trial Folio runs the cases one at a time, in order. It authenticates before the first request, and again only before a request that follows a 401 or 403, which drops its token. A case that fails is recorded, and the next one runs. Progress goes to the terminal.
 
 When every case succeeds, it exits 0. When one doesn't, it exits 6, with `execution.partial`. The message lists each case that didn't succeed, with its outcome and error code, and gives the option that repeats each one whose request may have reached Portfolio123 ([repeating a case](#12-resume-repeat-or-revise-an-experiment)). Either way, the run writes its report and manifest.
 
