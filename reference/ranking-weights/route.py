@@ -2,11 +2,21 @@
 the offline weight changes between them (release 0.4.0, R04-T01).
 
 The live calls read the credentials from `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`,
-injected for the one command, as AGENTS.md describes, and make one HTTP attempt per call. Every
-definition and response is saved in `payloads/`, which is git-ignored. What the script prints is
-only what the run record may hold: counts, positions, verdicts, and the credits Portfolio123
-reports. It never prints a node's name, formula, or weight, the XML, a ranking system's ID, or the
-account's remaining quota.
+injected for the one command, as AGENTS.md describes. They configure `p123api`'s client as Trial
+Folio's provider client does (ADR 0006): one attempt, no environment settings, authentication in a
+call of its own, and Trial Folio's `ExchangeRecordingAdapter`, which allows one HTTP exchange in
+each call, so a re-authentication after a 401 or 403, or a redirect, is refused before it's sent.
+Every definition, each response's body as Portfolio123 sent it, and each call's exchanges are
+saved in `payloads/`, which is git-ignored. Files are read and written with their line endings
+unchanged.
+What the script prints is only what the run record may hold: counts, positions, verdicts, the
+exchanges' methods, paths, and statuses, and the credits Portfolio123 reports. It never prints a
+node's name, formula, or weight, an amount moved, the XML, a ranking system's ID, the account's
+remaining quota, or Portfolio123's message on a failure, which it saves with the credentials and
+the token redacted.
+
+The script changed after R04-T01's checks, in their pull request's review: the run record says
+how.
 
     route.py get NAME LABEL [--compare XML --method M --currency C]   1 credit
     route.py update XML LABEL --method M --currency C                 1 credit
@@ -21,10 +31,14 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn, cast
+
+if TYPE_CHECKING:
+    from trialfolio.provider import ExchangeRecordingAdapter
 
 PAYLOADS = Path(__file__).resolve().parent / "payloads"
 FORMULA_NODES = ("StockFormula", "IndFormula", "SecFormula", "StockFactor")
@@ -144,7 +158,8 @@ def without(xml: str, node_index: int) -> str:
         end = close + len(f"</{tag}>")
     line_start = xml.rfind("\n", 0, start)
     if line_start >= 0 and xml[line_start + 1 : start].strip() == "":
-        start = line_start
+        # The line ending before it goes too, a carriage return included.
+        start = line_start - 1 if xml[line_start - 1 : line_start] == "\r" else line_start
     return xml[:start] + xml[end:]
 
 
@@ -162,8 +177,19 @@ def scaled(weights: list[Decimal], whole: bool) -> list[Decimal]:
     return floored
 
 
+def read(path: Path) -> str:
+    """`path`'s text, with its line endings as they are: `read_text` would make a `\\r\\n` or a
+    `\\r` a `\\n`, and the XML sent would no longer be the file's."""
+    return path.read_bytes().decode("utf-8")
+
+
+def write(path: Path, text: str) -> None:
+    """`text` in `path`, with its line endings as they are."""
+    path.write_text(text, encoding="utf-8", newline="")
+
+
 def variant(kind: str, source: Path, label: str) -> None:
-    xml = source.read_text(encoding="utf-8")
+    xml = read(source)
     root, found, children = nodes_of(xml)
 
     def usable(parent: ET.Element, at_least: int) -> list[Node] | None:
@@ -188,12 +214,14 @@ def variant(kind: str, source: Path, label: str) -> None:
         donor = max(kids, key=weight)
         recipient = next(k for k in kids if k is not donor)
         amount = min(MOVED, weight(donor) / 2)
-        out = rewrite(
-            xml, {donor.index: weight(donor) - amount, recipient.index: weight(recipient) + amount}
-        )
+        sent = {donor.index: weight(donor) - amount, recipient.index: weight(recipient) + amount}
+        out = rewrite(xml, sent)
+        # Not the amount: when it's half the largest weight, it gives that weight away.
+        whole = all(w == w.to_integral() for w in sent.values())
         print(
-            f"  At {where}, with {len(kids)} child nodes: moved {amount} points from child "
-            f"{kids.index(donor) + 1} (the largest weight) to child {kids.index(recipient) + 1}; their sum is unchanged."
+            f"  At {where}, with {len(kids)} child nodes: moved weight from child "
+            f"{kids.index(donor) + 1} (the largest weight) to child {kids.index(recipient) + 1}; their sum is unchanged. "
+            f"The two new weights are {'whole numbers' if whole else 'written with a decimal'}."
         )
     else:
         kids, holder = None, None
@@ -220,7 +248,7 @@ def variant(kind: str, source: Path, label: str) -> None:
         )
     _, check_found, _ = nodes_of(out)
     target = PAYLOADS / f"{label}.xml"
-    target.write_text(out, encoding="utf-8")
+    write(target, out)
     print(
         f"  Saved {target.relative_to(PAYLOADS.parent)}: it parses, with {len(check_found)} nodes "
         f"(the source has {len(found)})."
@@ -231,60 +259,86 @@ def variant(kind: str, source: Path, label: str) -> None:
 # The calls
 
 
-def client():
+def sent_once(label: str, send: Callable[[Any], object]) -> dict[str, object]:
+    """Authenticates, then makes the one call `send` makes, each in a call of its own, with the
+    client configured as the module says. Saves the response's body as Portfolio123 sent it, in
+    `{label}.json`, cost and quota included, and the exchanges in `{label}.exchanges.json`, and
+    returns the body, decoded."""
     import p123api
 
-    made = p123api.Client(
-        api_id=os.environ["TRIALFOLIO_P123_API_ID"], api_key=os.environ["TRIALFOLIO_P123_API_KEY"]
-    )
+    from trialfolio.provider import ExchangeRecordingAdapter
+
+    secrets = (os.environ["TRIALFOLIO_P123_API_ID"], os.environ["TRIALFOLIO_P123_API_KEY"])
+    made = p123api.Client(api_id=secrets[0], api_key=secrets[1])
     made.set_max_request_retries(1)
-    return made
+    # The private attribute ADR 0006 relies on (`Client._session` in 3.1.0).
+    session = made._session
+    session.trust_env = False
+    adapter = ExchangeRecordingAdapter()
+    session.adapters.clear()
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    with made:
+        try:
+            with adapter.call("authentication"):
+                made.auth()
+            with adapter.call("request") as call:
+                send(made)
+        except Exception as error:  # noqa: BLE001
+            failed(error, exchanges(adapter), (*secrets, made.get_token()))
+    (PAYLOADS / f"{label}.exchanges.json").write_text(
+        json.dumps([e.model_dump(mode="json") for e in adapter.exchanges], indent=2),
+        encoding="utf-8",
+    )
+    if call.body is None:
+        sys.exit("The call returned without a 200's body to save; stopping.")
+    (PAYLOADS / f"{label}.json").write_bytes(call.body)
+    print(f"  Exchanges: {exchanges(adapter)}.")
+    decoded = json.loads(call.body)
+    if not isinstance(decoded, dict):
+        sys.exit(f"The response isn't a JSON object; it's saved in payloads/{label}.json.")
+    return cast(dict[str, object], decoded)
 
 
-def failed(error: Exception, sent: str | None) -> NoReturn:
-    """Prints a failed call's status, and Portfolio123's message only when it holds nothing of the
-    definition sent; saves the message either way."""
-    resp = getattr(error, "get_resp", lambda: None)()
-    status = getattr(resp, "status_code", None)
+def exchanges(adapter: "ExchangeRecordingAdapter") -> list[str]:
+    """Each exchange's method, path, and status, or how it ended without one."""
+    return [
+        f"{e.request} {e.status if e.status is not None else e.result}" for e in adapter.exchanges
+    ]
+
+
+def failed(error: Exception, made: list[str], secrets: tuple[str | None, ...]) -> NoReturn:
+    """Prints a failed call's exchanges and the exception's type, never its message, which can
+    hold Portfolio123's text: part of the definition sent, or the account's details. Saves the
+    message, with the credentials and the token redacted, longest first and in one pass, so
+    replacing one can't leave part of another."""
+    present = sorted({s for s in secrets if s}, key=len, reverse=True)
     message = str(error)
-    (PAYLOADS / "last-error.txt").write_text(message, encoding="utf-8")
-    shown = message
-    if sent is not None:
-        _, found, _ = nodes_of(sent)
-        texts = {n.element.attrib.get("Name", "") for n in found} | {
-            (f.text or "").strip() for n in found for f in n.element.iter() if f.text
-        }
-        if any(t and t in message for t in texts):
-            shown = "(it names part of the definition; saved in payloads/last-error.txt)"
-    print(f"  Failed: HTTP {status}. {type(error).__name__}: {shown}")
+    if present:
+        message = re.sub("|".join(re.escape(s) for s in present), "[redacted]", message)
+    write(PAYLOADS / "last-error.txt", message)
+    print(
+        f"  Failed: {type(error).__name__}, after the exchanges {made}. Its message, with the "
+        "credentials and the token redacted, is in payloads/last-error.txt."
+    )
     sys.exit(1)
 
 
 def get(
     name: str, label: str, compare: Path | None, method: int | None, currency: str | None
 ) -> None:
-    with client() as c:
-        try:
-            result = c.rank_get(name=name)
-        except Exception as error:  # noqa: BLE001
-            failed(error, None)
-        record = {
-            k: (int(v) if k == "rankingMethod" and v is not None else v)
-            for k, v in vars(result).items()
-        }
-        cost = c.cost
-    (PAYLOADS / f"{label}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+    record = sent_once(label, lambda made: made.rank_get(name=name))
     xml = str(record.get("xml") or "")
-    (PAYLOADS / f"{label}.xml").write_text(xml, encoding="utf-8")
+    write(PAYLOADS / f"{label}.xml", xml)
     print(
-        f"  rank_get succeeded. Fields: {sorted(record)}. ID present: {'id' in record and record['id'] is not None}. "
+        f"  rank_get succeeded. Fields: {sorted(record)}. ID present: {record.get('id') is not None}. "
         f"Ranking method: {record.get('rankingMethod')}. Currency: {record.get('currency')}. Type: {record.get('type')}. "
         f"Name as Portfolio123 gives it equals the one asked for: {record.get('name') == name}. "
-        f"Credits reported: {cost}."
+        f"Credits reported: {record.get('cost')}."
     )
     describe(xml)
     if compare is not None:
-        sent = compare.read_text(encoding="utf-8")
+        sent = read(compare)
         same_bytes = sent == xml
         same_tree = ET.canonicalize(sent, strip_text=True) == ET.canonicalize(xml, strip_text=True)
         print(
@@ -295,19 +349,12 @@ def get(
 
 
 def update(source: Path, label: str, method: int, currency: str) -> None:
-    sent = source.read_text(encoding="utf-8")
+    sent = read(source)
     params = {"type": "stock", "nodes": sent, "rankingMethod": method, "currency": currency}
-    with client() as c:
-        try:
-            response = c.rank_update(params)
-        except Exception as error:  # noqa: BLE001
-            failed(error, sent)
-        cost = c.cost
-    (PAYLOADS / f"{label}.json").write_text(json.dumps(response, indent=2), encoding="utf-8")
-    keys = sorted(response) if isinstance(response, dict) else type(response).__name__
+    response = sent_once(label, lambda made: made.rank_update(params))
     print(
         f"  rank_update succeeded with {source.name}, ranking method {method}, currency {currency}. "
-        f"Response: {keys}. Credits reported: {cost}."
+        f"Response: {sorted(response)}. Credits reported: {response.get('cost')}."
     )
 
 
