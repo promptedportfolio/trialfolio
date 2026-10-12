@@ -6,6 +6,8 @@ injected for the one command, as AGENTS.md describes. They configure `p123api`'s
 Folio's provider client does (ADR 0006): one attempt, no environment settings, authentication in a
 call of its own, and Trial Folio's `ExchangeRecordingAdapter`, which allows one HTTP exchange in
 each call, so a re-authentication after a 401 or 403, or a redirect, is refused before it's sent.
+Like Trial Folio's CLI, the script removes `SSLKEYLOGFILE` from its own environment before a call,
+with a warning, so no TLS session keys are written.
 Every definition, each 200's body as Portfolio123 sent it, and each call's exchanges, a failed
 call's included, are saved in `payloads/`, which is git-ignored. Files are read and written with
 their line endings unchanged.
@@ -47,6 +49,7 @@ FORMULA_NODES = ("StockFormula", "IndFormula", "SecFormula", "StockFactor")
 list of node types; R04-T01 found it in a saved system."""
 WEIGHT = re.compile(r'(\bWeight\s*=\s*")([^"]*)(")')
 MOVED = Decimal(10)
+KEY_LOG = "SSLKEYLOGFILE"
 
 
 # The definition
@@ -270,6 +273,7 @@ def sent_once(label: str, send: Callable[[Any], object]) -> dict[str, object]:
     A failed call is reported by its exchanges and the exception's type, never its message, which
     can hold Portfolio123's text: part of the definition sent, or the account's details. The
     message is saved in `last-error.txt`, with the credentials and the token redacted."""
+    ignore_key_log()
     import p123api
 
     from trialfolio.provider import ExchangeRecordingAdapter
@@ -324,6 +328,19 @@ def sent_once(label: str, send: Callable[[Any], object]) -> dict[str, object]:
     if not isinstance(decoded, dict):
         sys.exit(f"The response isn't a JSON object; it's saved in payloads/{label}.json.")
     return cast(dict[str, object], decoded)
+
+
+def ignore_key_log() -> None:
+    """Removes `SSLKEYLOGFILE` from the process environment before any request, with a warning,
+    as Trial Folio's CLI does (docs/contracts.md, credentials). `urllib3` writes TLS session keys
+    to the file it names, whatever `trust_env` says, which would let a capture of the traffic
+    show the credentials and the token."""
+    if os.environ.pop(KEY_LOG, None) is not None:
+        print(
+            f"Warning: {KEY_LOG} is set, so TLS session keys could be written to a file; route.py "
+            "ignores it, and removed it from its own environment. Your shell is unaffected.",
+            file=sys.stderr,
+        )
 
 
 def exchanges(adapter: "ExchangeRecordingAdapter") -> list[str]:

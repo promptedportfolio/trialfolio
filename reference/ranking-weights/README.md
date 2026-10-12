@@ -70,8 +70,9 @@ The pull request's third review, after step 8, found more in the script as step 
 
 - **A failed call's evidence.** As step 8 ran it, the script saved a call's exchanges, and its 200's body, only when the call succeeded. A failed call kept only its message, even one that failed after a 200, on a body the wrapper couldn't decode, such as malformed JSON or a ranking method `p123api` doesn't know. The script now saves the exchanges, and any 200's body, however the call ended.
 - **A file that can't be saved.** As step 8 ran it, the script saved a failure's message inside the handler of the wrapper's exception. Had that save failed, Python would have printed the exception, with Portfolio123's message unredacted. Only the exception's type and its redacted message now leave the handler, and a file the script can't save is reported with the operating system's reason alone.
+- **The TLS key log.** Neither the script as step 8 ran it nor as steps 1 to 7 ran it removed `SSLKEYLOGFILE`. `urllib3` writes TLS session keys to the file it names, whatever `requests`' environment settings, and the keys would let anyone with a capture of the traffic read the credentials and the token. The script now removes it from its own environment before a call, with a warning, as Trial Folio's CLI does ([credentials](../../docs/contracts.md#credentials)).
 
-Neither bears on steps 1 to 8: every call in them succeeded, so neither failure path ran.
+The first two don't bear on steps 1 to 8: every call in them succeeded, so neither failure path ran. The key log would have only if `SSLKEYLOGFILE` was set when the script made a call, and this record doesn't say whether it was. It wasn't set in the environment this change was checked in, on the owner's machine, and none of the shell's startup files there sets it. The backtests ran through `trialfolio run`, which removes it.
 
 ## Findings for R04-T02 and R04-T03
 
