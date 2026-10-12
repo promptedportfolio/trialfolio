@@ -45,7 +45,7 @@ Date: 2026-10-12, 12:25:23 to 12:37:15 UTC, on macOS 26.6.2 with Python 3.14.8, 
 
 **Credits:** 39, each as Portfolio123 reported it in the call's response: 1 for each `rank_get` and `rank_update`, and 5 for each backtest, as documented. Authentication's cost wasn't measured.
 
-**After the checks,** `ApiRankingSystem` holds step 7's definition, the last one written. The owner's comparison of the account's ranking systems after the checks is pending.
+**After the checks,** `ApiRankingSystem` holds step 7's definition, the last one written. After the checks, the owner compared the account's ranking systems with the list from before: only `ApiRankingSystem` had changed, so `rank_update` touched no other ranking system.
 
 **A scan of every file the checks wrote,** 156 files, found the API key in none. The API ID matched once, inside a longer number in step 4's saved response: digits that happen to coincide.
 
