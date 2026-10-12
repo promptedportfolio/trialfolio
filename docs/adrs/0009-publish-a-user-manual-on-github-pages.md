@@ -7,7 +7,7 @@
 
 ## Context
 
-Users learn Trial Folio from the [user guide](../user-guide.md): one page of 14 numbered workflows, which grew with each release. It mixes four kinds of writing: a first walk-through, the steps for particular tasks, tables to look things up in, and the reasons behind the rules. A reader looking up an error reads past a walk-through, and a new reader meets reference tables in the middle of a first run. Release 0.4.0 adds ranking-weight variants, and each later release adds workflows, so the page keeps growing.
+Users learn Trial Folio from the [user guide](../user-guide.md): one page of 14 numbered workflows, which grew with each release. It mixes four kinds of writing: a first walk-through, the steps for particular tasks, tables to look things up in, and the reasons behind the rules. A reader looking up an error reads past a walk-through, and a new reader meets reference tables in the middle of a first run. Release [0.4.0](../releases/0.4.0-ranking-weights.md) adds ranking-weight variants, and each later release adds workflows, so the page keeps growing.
 
 The guide sits in `docs/` among the specifications, which are written for agents and reviewers. [docs/README.md](../README.md) maps it as the one document there that owns no requirement.
 

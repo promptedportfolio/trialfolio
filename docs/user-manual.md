@@ -2,7 +2,7 @@
 
 **Status:** Ready. The owner decided its [open questions](#open-questions), accepted [ADR 0009](adrs/0009-publish-a-user-manual-on-github-pages.md), and set it to Ready on 2026-10-12. UM-T01 is its first task.
 **Decided by:** [D-35](spec.md#decisions), on 2026-10-12
-**Depends on:** the [user guide](user-guide.md), as release [0.3.0](releases/0.3.0-experiments.md) left it. It runs alongside 0.4.0's specification work, R04-T02 to R04-T04, and finishes before 0.4.0's implementation starts: [doing the next item](../AGENTS.md#doing-the-next-item) holds 0.4.0's implementation tasks until this file's status line says each task below is done.
+**Depends on:** the [user guide](user-guide.md), as release [0.3.0](releases/0.3.0-experiments.md) left it. It runs alongside [0.4.0](releases/0.4.0-ranking-weights.md)'s specification work, R04-T02 to R04-T04, and finishes before 0.4.0's implementation starts: [doing the next item](../AGENTS.md#doing-the-next-item) holds 0.4.0's implementation tasks until this file's status line says each task below is done.
 
 This is the plan for Trial Folio's user manual: the documentation for people who use Trial Folio, organized by the [Diátaxis](https://diataxis.fr/) framework into tutorials, how-to guides, reference, and explanation. Its pages are in `manual/`, at the repository's root, and [Zensical](https://zensical.org/) builds them into a site that GitHub Pages publishes at `https://promptedportfolio.github.io/trialfolio/` ([D-10](spec.md#decisions)).
 
