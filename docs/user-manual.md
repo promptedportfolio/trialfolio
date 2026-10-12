@@ -100,7 +100,7 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
 
 ## What UM-T01 settled
 
-**Details from UM-T01 (2026-10-12), awaiting the owner's confirmation.** Each is a detail the specification left open:
+**Details from UM-T01 (2026-10-12), confirmed by the owner the same day.** Each is a detail the specification left open:
 
 1. **The footer.** `overrides/partials/copyright.html`, in the theme's `custom_dir`, replaces the theme's footer text on every page. It holds:
    - the copyright line, "Copyright © 2026 Nathan Slaughter", naming the license with a link to LICENSE on `main`;
@@ -123,13 +123,17 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
    - It runs the check of the built site again before publishing, because a pull request can merge without being up to date with `main`.
    - It runs `actions/configure-pages`, as Zensical's own workflow does.
 6. **The home page** names `v0.2.1` as the latest tag. It sends the reader of a tagged copy to the user guide at that tag.
-7. **Where the user guide was wrong, or incomplete,** the manual follows the owning documents:
+7. **Where the user guide was wrong, or incomplete,** the manual follows the owning documents. As the owner decided, UM-T01 corrected the guide in the same places:
    - `--json` gives no summary on a usage error, which exits 2 ([contracts.md](contracts.md#cli-behavior)).
    - The workspace's `screen.yaml` has its `purpose` line commented out.
    - An experiment's `sessions/<s>/` is written only for a run that passed its checks and its approval.
    - Only `trialfolio run` warns about `SSLKEYLOGFILE`.
    - `environment.unsupported` also covers an importable `simplejson`, whose remedy isn't `uv sync`.
-   - The errors reference lists all 21 codes, including the three the guide's table leaves out: `license.not_acknowledged`, `artifact.unknown_schema_version`, and `provider.request_rejected`.
+   - The errors reference lists all 21 codes, including the three the guide's table leaves out: `license.not_acknowledged`, `artifact.unknown_schema_version`, and `provider.request_rejected`. The guide's table now has the last two. Section 2 covers the first.
+
+**UM-T01's scope,** decided by the owner on 2026-10-12. UM-T01 moves the user guide's content, checked against the owning documents and the code, and corrects the guide where it's wrong. It doesn't audit all present behavior for pages the guide lacks: UM-T02's generated reference pages cover every command, field, and error.
+
+**Deferred by the owner** (2026-10-12): an explanation page on credentials and local data, until a later pull request. It would explain why credentials come only from environment variables, why proxy settings, `.netrc`, and `SSLKEYLOGFILE` are ignored, and why logs stay local. The guide gives the steps, but has no such content to move.
 
 ## Open questions
 
