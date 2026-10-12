@@ -1,0 +1,57 @@
+# Builds the user manual, manual/, and publishes it on GitHub Pages at
+# https://promptedportfolio.github.io/trialfolio/ (docs/user-manual.md, tooling and hosting), on
+# each push to main. The required check workflow builds and checks the site on each pull request,
+# through scripts/check. This one checks it again before publishing, because a pull request can
+# merge without its branch being up to date with main. The owner authorized adding it on
+# 2026-10-12, and sets the repository's Pages source to GitHub Actions (AGENTS.md, Git workflow).
+name: docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Reading the repository, publishing to Pages, and the token Pages checks the deployment with.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time. A newer push waits for the one in progress, rather than cancelling it
+# partway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # Actions are pinned to a commit, with the release it is in a comment.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          # The same uv as the check workflow's.
+          version: "0.12.23"
+          python-version: "3.12"
+      # The Zensical uv.lock pins, as scripts/check builds and checks the site.
+      - run: uv run zensical build --clean
+      - run: uv run python scripts/check_manual.py site
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

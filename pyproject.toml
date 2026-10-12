@@ -40,6 +40,7 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.10",
     "types-pyyaml>=6.0.12.20260906",
+    "zensical>=0.0.69",
 ]
 
 [tool.pytest.ini_options]
@@ -76,6 +77,6 @@ extend-exclude = ["*.md"]
 "src/trialfolio/contracts/*.py" = ["TRY004"]
 
 [tool.pyright]
-include = ["src", "tests", "conftest.py"]
+include = ["src", "tests", "scripts", "conftest.py"]
 strict = ["src/trialfolio"]
 extraPaths = ["src", "tests/support/network_guard"]

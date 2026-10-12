@@ -1,0 +1,17 @@
+{#-
+  The footer's text on every page (docs/user-manual.md, rule 3): a copyright line that links to
+  LICENSE, the site's third-party notices, and the non-affiliation notice, as the README gives it.
+  scripts/check fails when a page's footer lacks the notice or the link to LICENSE (UM-AC04).
+-#}
+<div class="md-copyright">
+  <p>
+    Copyright &copy; 2026 Nathan Slaughter. Trial Folio is source available under the
+    <a href="https://github.com/promptedportfolio/trialfolio/blob/main/LICENSE">Nathan Slaughter Personal Research License</a>.
+    The site's <a href="{{ 'third-party-notices/' | url }}">third-party notices</a>.
+  </p>
+  <p>
+    <strong>Not affiliated with Portfolio123.</strong> This is an independent project. It is not an
+    official Portfolio123 project and has not been reviewed by Portfolio123. No endorsement by
+    Portfolio123 is implied.
+  </p>
+</div>

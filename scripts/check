@@ -47,6 +47,16 @@ if [ -n "$untracked" ]; then
   exit 1
 fi
 
+# The user manual's site (docs/user-manual.md). The build is strict, so a broken link or anchor
+# in a page's Markdown fails it (UM-AC01). Then the built site is checked: nothing loaded from
+# another host, every footer's notices, and every link between pages (UM-AC04, UM-AC06, UM-AC07).
+# site/ is the build's output, which Git ignores. It's removed first, so a page since removed from
+# manual/ can't linger there and pass.
+step "Manual"
+rm -rf site
+uv run zensical build --clean
+uv run python scripts/check_manual.py site
+
 # A pytest step that collects no tests fails too (exit 5), so a missing test can't pass.
 step "Tests"
 uv run pytest
