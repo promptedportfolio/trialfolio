@@ -9,6 +9,7 @@ Brought to you by [The Prompted Portfolio](https://promptedportfolio.com).
 Trial Folio is a command-line tool for investors who research strategies in [Portfolio123](https://www.portfolio123.com/). It helps you:
 
 - Run backtests through the Portfolio123 API, with every setting recorded next to its result.
+- Run a small, planned experiment: a baseline screen and a few variants of it, under one approval and one budget, which you can resume safely.
 - Compare runs and see exactly which settings differ between them.
 - Keep a durable, inspectable record of what you tested, including the tests that failed.
 
@@ -16,14 +17,14 @@ Portfolio123 does the backtesting. Trial Folio plans each request, records exact
 
 ## Status
 
-**Pre-release. Nothing is installable yet.** Release 0.1.0 is built, has passed its tests, including a live run through the Portfolio123 API, and is in private use. Release 0.2.0, which compares saved runs, is built, has passed its tests, including reviews of real runs, and is in private use too. Release 0.2.1 changes only the license, to version 1.1. None has been released.
+**Pre-release. Nothing is installable yet.** Release 0.1.0 is built, has passed its tests, including a live run through the Portfolio123 API, and is in private use. Release 0.2.0, which compares saved runs, is built, has passed its tests, including reviews of real runs, and is in private use too. Release 0.2.1 changes only the license, to version 1.1. Release 0.3.0, which runs experiments, is built, and has passed its tests, including a live experiment through the Portfolio123 API. None has been released.
 
 | Capability | Planned release | Status |
 |---|---|---|
 | Run one screen backtest through the Portfolio123 API and keep the settings with the results | [0.1.0](docs/releases/0.1.0-api-execution.md) | Implemented: built, tested, and used privately; not yet released |
 | Compare saved runs, offline, against a baseline | [0.2.0](docs/releases/0.2.0-review.md) | Implemented: built, tested, and used privately; not yet released |
 | Version 1.1 of the license: your own trust, retirement accounts, and single-member LLC count as you | [0.2.1](docs/releases/0.2.1-license.md) | Ready: signed off, tagged, and every release requirement met; not yet released |
-| Run a small, planned experiment of screen variants, with safe resume | [0.3.0](docs/releases/0.3.0-experiments.md) | Specified (Ready) |
+| Run a small, planned experiment of screen variants, with safe resume | [0.3.0](docs/releases/0.3.0-experiments.md) | Built and tested; not yet in private use or released |
 | Descriptive return analytics, robustness diagnostics, statistical evaluation, forward tracking | [Roadmap](docs/roadmap.md) | Not specified |
 
 **Supported inputs:** release 0.1.0 runs one long-only stock screen backtest through the Portfolio123 API, described in a YAML file. It accepts only the settings and values that live calls have verified:
@@ -38,6 +39,15 @@ Anything else is rejected with a clear error before anything is sent. The text P
 
 Release 0.2.0 compares two or more saved runs that `trialfolio run` or `trialfolio demo` wrote, offline, against a baseline you name. A review configuration, also a YAML file, names the runs, and the changes you meant to make. [The review configuration](docs/contracts.md#review-configuration) gives its keys, with an example. Trial Folio doesn't import results produced elsewhere.
 
+Release 0.3.0 runs an experiment: a baseline screen, with the settings above, and a few variants of it, described in an experiment configuration, another YAML file. It also declares the experiment's purpose, the earlier research on the same idea, and a budget of provider requests. Each variant changes one of the baseline's settings, and only a setting that live calls have verified for a variant:
+
+- a rule: one of the baseline's rules replaced, as with a stricter liquidity floor, or a rule added, such as one that excludes microcaps
+- the maximum number of holdings
+- rebalancing every week or every 4 weeks. Unless the configuration lists its own, Trial Folio adds a variant for whichever of the two the baseline doesn't use.
+- the slippage
+
+The universe, the ranking, the benchmark, and the dates are the baseline's in every case. [The experiment configuration](docs/contracts.md#experiment-configuration) gives every key, with an example.
+
 Statistical validation and trading readiness are **not assessed** by any planned release before the statistical evaluation increment.
 
 ## Installation
@@ -46,7 +56,7 @@ No installation is available yet. When 0.1.0 is released, this section will give
 
 ## Usage
 
-These are the commands of releases 0.1.0 and 0.2.0. The [user guide](docs/user-guide.md) walks through each workflow, from setting up to reading the report, with what to check at each step. Put your Portfolio123 API ID and API key in the environment variables `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`. The user guide's [credentials section](docs/user-guide.md#6-set-your-credentials) shows how to keep the key in your system's keychain or password manager, never in a file or your shell's history. Then run a screen configuration:
+These are the commands of releases 0.1.0 to 0.3.0. The [user guide](docs/user-guide.md) walks through each workflow, from setting up to reading the report, with what to check at each step. Put your Portfolio123 API ID and API key in the environment variables `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`. The user guide's [credentials section](docs/user-guide.md#6-set-your-credentials) shows how to keep the key in your system's keychain or password manager, never in a file or your shell's history. Then run a screen configuration:
 
 ```text
 trialfolio run screen.yaml --out runs/baseline/
@@ -60,6 +70,20 @@ Trial Folio shows you the exact request, its credit cost, and a plan hash, and s
 - a self-contained HTML report
 
 A missing value is shown as unavailable, never as zero.
+
+`trialfolio run` runs an experiment's configuration the same way:
+
+```text
+trialfolio run experiment.yaml --out runs/study/
+```
+
+The plan shows every case, its request, and the experiment's budget, and one approval covers them all. Trial Folio sends the cases one at a time, and records each attempt, including those that fail. Each case that succeeds gets its own normalized tables, and each run of the command writes a report and a manifest.
+
+- **Resume.** Run the same command again to resume the experiment, after an interrupt or a failed case. It skips the cases that succeeded, and never resends on its own a request that may already have been charged.
+- **Repeat.** `--repeat <case-key>` sends such a request again, once you confirm that it may be charged again.
+- **Revise.** After you change the configuration, `--revision-reason <text>` and the approval of the new plan revise it. A case whose settings didn't change keeps its results, and a case whose settings changed is kept in the record, retired.
+
+The report shows every case with its outcome, and its metrics beside the other cases', without ranking them.
 
 The other commands:
 
@@ -82,7 +106,7 @@ Add `--json` to any command for one JSON summary on stdout.
 ## Limitations
 
 - **Summary statistics can't show everything.** Trial Folio reports what Portfolio123 returns. It doesn't reconstruct returns, drawdowns, or confidence intervals from summary statistics.
-- **Runs cost API credits.** Each backtest uses Portfolio123 API credits: 5 for a screen backtest, as Portfolio123 documents. Trial Folio shows the documented cost and a request budget before sending anything. Whether Portfolio123 charges for a failed request is unknown, so any request that may have reached Portfolio123 is recorded as possibly charged.
+- **Runs cost API credits.** Each backtest uses Portfolio123 API credits: 5 for a screen backtest, as Portfolio123 documents, and so 5 for each case of an experiment. Trial Folio shows the documented cost and a request budget before sending anything. Whether Portfolio123 charges for a failed request is unknown, so any request that may have reached Portfolio123 is recorded as possibly charged.
 - **No proxy.** Trial Folio connects to Portfolio123's API directly. It ignores proxy settings, such as `HTTPS_PROXY`, certificate-bundle settings, such as `REQUESTS_CA_BUNDLE`, and `.netrc`, so nothing in your environment can redirect your credentials. If you can reach the internet only through a proxy, release 0.1.0 can't run your backtests.
 - **Reruns can differ.** A Portfolio123 rerun can give different results as its data and engine change, so Trial Folio treats each run as a new attempt.
 - **A backtest is a simulation.** See [research limitations](docs/disclaimers.md).

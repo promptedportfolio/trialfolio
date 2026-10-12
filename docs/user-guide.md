@@ -1,8 +1,8 @@
 # Trial Folio user guide
 
-This guide walks through Trial Folio's workflows, from setting up to reading a report: release 0.1.0's, and the review 0.2.0 adds, which compares saved runs. Each workflow ends with what to check, so you can confirm it works as described.
+This guide walks through Trial Folio's workflows, from setting up to reading a report: release 0.1.0's; the review 0.2.0 adds, which compares saved runs; and the experiment 0.3.0 adds, which runs a baseline screen and a few variants of it under one plan. Each workflow ends with what to check, so you can confirm it works as described.
 
-It describes behavior; it doesn't define it. Where it and an owning document disagree, such as [contracts.md](contracts.md) or a release specification, [0.1.0's](releases/0.1.0-api-execution.md) or [0.2.0's](releases/0.2.0-review.md), the owning document wins, and this guide is the one to fix.
+It describes behavior; it doesn't define it. Where it and an owning document disagree, such as [contracts.md](contracts.md) or a release specification, [0.1.0's](releases/0.1.0-api-execution.md), [0.2.0's](releases/0.2.0-review.md), or [0.3.0's](releases/0.3.0-experiments.md), the owning document wins, and this guide is the one to fix.
 
 **Platforms.** So far, Trial Folio has been tested on macOS only. The commands below are for macOS and Linux shells.
 
@@ -375,11 +375,199 @@ It doesn't copy a run's request, its response, or its report.
 - A `run` directory that doesn't exist fails with `input.not_found`, and one that isn't a complete run with `input.not_a_run`, both with exit code 3. The message names the result's label and its `run` path, and nothing is written.
 - Reviewing into a directory that isn't empty fails with `output.not_empty`, exit code 4, and changes nothing in it.
 
-## 11. Use it from a script
+## 11. Run an experiment
 
-Add `--json` to any command. stdout then holds exactly one JSON object, on success and on failure, and everything else goes to stderr. The object gives the outcome, the exit code, the IDs, such as the plan hash, the output files, the counts, such as `provider_requests` and the credit `cost`, and the error, if any. For a review, `ids` holds the review ID, and `counts` the results, the flagged setting rows, the unavailable metric rows, and the warnings. Its schema is `schemas/json-summary-1.2.0.schema.json`. Trial Folio 0.1.0 writes version 1.0.0, and 0.2.0 version 1.1.0, whose schemas, `schemas/json-summary-1.0.0.schema.json` and `schemas/json-summary-1.1.0.schema.json`, are kept beside it: each version only adds to the one before.
+An experiment runs a baseline screen and a few variants of it, each changing one setting of the baseline, under one plan, one approval, and one budget. Trial Folio compiles every case before it sends anything, runs the cases one at a time, and records every attempt, including those that fail. It doesn't rank the cases, or say which is better.
 
-Approve only a plan you've reviewed. A script can read the hash from a run that wasn't approved, in `ids.plan_hash`, and approve it, but that skips the review the plan exists for.
+Each case is a screen backtest, sent just as a screen configuration with its settings would be, so each costs 5 API credits.
+
+1. Write an experiment configuration, a YAML file. This is the documented example, each of whose cases Portfolio123 accepted in a live call:
+
+   ```yaml
+   kind: experiment
+   schema_version: 1.0.0
+   experiment_id: earnyield-sensitivity                 # names the experiment; never sent
+   title: Earnings yield sensitivity
+   purpose: How do holdings, slippage, and a stricter liquidity rule change the earnings-yield screen's results?
+   prior_research:
+     status: partial                                    # complete, partial, or unknown
+     description: Earlier backtests of this screen in the Portfolio123 website compared 25 and 50 holdings. Other variations tried there weren't recorded.
+   baseline:
+     universe: 'SP500'
+     rules:
+       - 'AvgDailyTot(30) > 1000000'
+     ranking:
+       formula: 'EarnYield'
+       lower_is_better: false
+     max_holdings: 25
+     benchmark: 'SPY'
+     start_date: 2016-01-01
+     end_date: 2025-12-31
+     rebalance_weeks: 4
+     transaction_price: open
+     slippage_percent: 0.25
+     pit_method: complete
+     precision: 4
+   variants:
+     rules:
+       - key: liquidity-100m
+         description: A stricter liquidity floor, 100 million dollars a day.   # optional
+         replace: 'AvgDailyTot(30) > 1000000'
+         with: 'AvgDailyTot(30) > 100000000'
+     max_holdings:
+       - key: holdings-50
+         value: 50
+     slippage_percent:
+       - key: slippage-050
+         value: 0.5
+   budget:
+     provider_requests: 6
+   ```
+
+   - **The research context.** `experiment_id` names the experiment, as a review's labels name results: lowercase letters, digits, `-`, and `_`. `purpose`, the question the experiment addresses, is required. `prior_research` declares the earlier work on the same idea whose results you saw, in Trial Folio or anywhere else: `complete` when its description accounts for all of it, or says there was none; `partial` when there was more than it describes; or `unknown`. A description is required with `complete` or `partial`. Trial Folio records the declaration as you wrote it, and can't verify it. None of these is sent.
+   - **The baseline** holds a screen's settings: the keys of a [screen configuration](#4-write-a-screen-configuration) from `universe` to `data_vendor`, with the same rules, so the text Portfolio123 receives goes in quotes. It has no `kind`, `schema_version`, `title`, or `purpose`: those are the experiment's. Every case uses the baseline's universe, ranking, benchmark, and dates.
+   - **Each variant changes one setting** of the baseline, and is listed under that setting, with a `key` that names its case, and an optional `description`. Four settings can vary, those live calls verified:
+     - `rules`: `replace` one of the baseline's rules, written exactly as it is there, `with` another, as for a stricter liquidity floor; or `add` a rule, such as `'MktCap > 300'`, which excludes microcaps.
+     - `max_holdings`, `rebalance_weeks` (1 or 4), and `slippage_percent`: a `value` other than the baseline's.
+
+     A variant of any other setting, such as `universe`, fails with `config.invalid`. Another universe, or another `experiment_id`, is another experiment.
+   - **The default variant.** Without a `rebalance_weeks` list, Trial Folio adds a case for the other verified rebalance frequency: `rebalance-weeks-1` here, since the baseline rebalances every 4 weeks. It costs 5 credits, like any case. `rebalance_weeks: []` turns it off.
+   - **The budget** is the most provider requests the experiment may send, across every run of it, repeats included. It must be at least the number of cases, so each can be sent once. One more, as here, leaves room for one [repeat](#12-resume-repeat-or-revise-an-experiment). The plan shows its credits, at 5 a request.
+   - **The cases run in this order:** the baseline, then the variants of `rules`, `max_holdings`, `rebalance_weeks`, and `slippage_percent`, each list in its order. This example has five: `baseline`, `liquidity-100m`, `holdings-50`, `rebalance-weeks-1`, and `slippage-050`. The smallest experiment is a baseline with no `variants`: the baseline and the default variant, two cases and 10 credits.
+
+   [The experiment configuration](contracts.md#experiment-configuration) gives every key's rules.
+
+2. Review the plan. Write the experiment under `runs/`, which the workspace's `.gitignore` keeps out of Git, because an experiment holds Portfolio123 data, as a run does:
+
+   ```sh
+   trialfolio run experiment.yaml --out runs/study/
+   ```
+
+   In a terminal, it shows the whole plan and asks you to type `approve`, as for a screen. The plan shows:
+
+   - the experiment's ID, title, purpose, and prior research, which Trial Folio can't verify
+   - the baseline's settings, once, with the provenance each value will have
+   - each case, in the order it runs, with its key, its `case_id`, its change from the baseline, its description, and its request, exactly as it will be sent
+   - the budget: the provider requests and authentication calls, and the credits at Portfolio123's documented cost
+   - what's sent to Portfolio123, and what isn't, such as the experiment's ID, title, purpose, and prior research, and each case's key and description
+   - the plan hash. One approval covers every case and the whole budget.
+
+3. Type `approve`, or give the hash with `--approve sha256:<the plan hash>`. Trial Folio runs the cases one at a time, in order. It authenticates before the first request, and again only before a request that follows a 401 or 403, which drops its token. A case that fails is recorded, and the next one runs. Progress goes to the terminal.
+
+When every case succeeds, it exits 0. When one doesn't, it exits 6, with `execution.partial`. The message lists each case that didn't succeed, with its outcome and error code, and gives the option that repeats each one awaiting a repeat: one whose request may have reached Portfolio123, and none of whose attempts succeeded ([repeating a case](#12-resume-repeat-or-revise-an-experiment)). A case whose response was saved but failed validation, `failed` with `provider.response_invalid`, has no tables and gets no option: its attempt succeeded, so the case is complete, and is never sent again. Its response stays in its attempt's folder, for you to [report](#14-when-something-goes-wrong). Either way, the run writes its report and manifest.
+
+Two failures stop the run before its later cases, since each of those would fail the same way: Trial Folio's own authentication call failing, as with wrong credentials, and `provider.quota_exceeded`. The run ends with exit 6, and once you've fixed the cause, running the same command again runs the cases it didn't start.
+
+An experiment's directory holds:
+
+| Path | What it is |
+|---|---|
+| `experiment.lock` | The lock, which claims the directory for the experiment, so that only one process runs it at a time. It isn't evidence. |
+| `plans/<n>/` | One for each plan you approved, numbered from 1: `configuration.yaml`, your configuration byte for byte; `plan.json`; and `experiment.json`, the experiment's research record as of that plan, with every plan before it and the reason for each revision |
+| `cases/<case_id>/attempts/<attempt_id>/` | Each attempt's records, as a run's are. The attempt that authenticated also has `authenticating.json`. |
+| `cases/<case_id>/normalized/` | The case's `metrics.csv` and `settings.csv`, as a run's, once its attempt succeeds |
+| `sessions/<s>/` | One for each time the command ran the experiment, numbered from 1: `session.json`, `report.html`, and `manifest.json`, which is written last |
+| `logs/trialfolio.log` | The log of every session |
+
+- **A case's folder is named by its `case_id`,** never its key. The plan display and the report give each case's key beside its `case_id`.
+- **The newest session's report and manifest supersede the earlier ones.** A session without a manifest, because its command was interrupted, reads as incomplete until the same command resumes the experiment.
+- **It isn't a run.** `trialfolio report` and `trialfolio review` read runs only, and fail with `input.not_a_run` given an experiment. Each session writes its own report.
+
+**In the report** (`sessions/<s>/report.html`):
+
+- The research notice, the Portfolio123 data statement, and "Not assessed", as in a run's report.
+- The research context: the purpose, the prior research, and every plan, with its reason and what it changed.
+- Each case's change from the baseline, and its coverage.
+- The metrics side by side, with a column for each case that has results. The report computes no difference between cases, and orders, ranks, and marks no case by a value.
+- The counts of cases and attempts; every case with its outcome and attempts; the cases awaiting a repeat, each with the option that repeats it; and the retired cases.
+- In its limitations, that a prior-research declaration other than `complete` limits any claim drawn from the cases.
+
+**Check:**
+
+- Without approval, from a script, it fails with `plan.approval_required`, exit code 2, and shows only the plan hash and the budget: 6 provider requests, 30 credits. `runs/study/` doesn't exist.
+- In a terminal, the plan lists the five cases in the order above, each with its `case_id`, the default `rebalance-weeks-1` among them.
+- A budget below the number of cases fails with `config.invalid`, exit code 3, and the message gives the number of cases. So does a variant of `universe`, and the message names the settings a variant may change.
+- Approved without credentials, it fails with `provider.auth_failed`, exit code 5. Nothing was sent, and `runs/study/` doesn't exist.
+- When every case succeeds, stdout says "Experiment completed", the session, where its report is, the plan hash, and that statistical validation and trading readiness are not assessed. With exit code 6, stdout is empty, and the message on stderr lists the cases that didn't succeed.
+- In the session's `manifest.json`, the planned cases equal those that succeeded, failed, were skipped, are unknown, and haven't run yet, and the report gives the same counts.
+- Each case that succeeded has `metrics.csv` and `settings.csv` in its own `normalized/` folder, labeled with its `case_id`.
+- The log names cases by their `case_id`, and holds no case key or description, formula, or result.
+
+## 12. Resume, repeat, or revise an experiment
+
+To go on with an experiment, run the same command again, into the same directory. Trial Folio reads and checks the experiment's records, then shows the plan with each case's outcome so far, and the budget counted so far. It needs the plan's approval again, by the same hash, so the same `--approve` approves it. Each run that's approved is a new session of the same experiment.
+
+**Resume.** A resume treats each case by its state:
+
+| State | What a resume does with it |
+|---|---|
+| **Complete:** one of its attempts succeeded, so its response was saved, even one that then failed validation | Skips it. It's never sent again. |
+| **Due:** it has no attempt, or each failed before its request could reach Portfolio123, as after a failed authentication | Sends it |
+| **Awaiting a repeat:** its request may have reached Portfolio123, and may have been charged, but none of its attempts succeeded. It's `unknown`, as after a timeout or an interrupt while waiting for Portfolio123, or `failed`, as after Portfolio123 rejected it. | Never sends it on its own. Only a repeat, below, sends it again. |
+
+- **After an interrupt,** such as Ctrl-C, a storage failure, or a crash, the attempts recorded so far are kept. Run the same command again: it records what the stopped run left, such as an attempt interrupted while it waited for Portfolio123, which becomes `unknown`, writes the tables the stopped run didn't, and sends the cases that are due. If the first run was interrupted before its plan was recorded, nothing was sent, and the message says to remove the directory and run the command again.
+- **A resume that sends nothing needs no credentials.** When no case is due and no repeat is to be made, it writes a new session's report and manifest, and sends nothing.
+- **The records are checked first.** If one is missing or changed, as after an incomplete copy, the resume fails with `input.not_a_run`, exit code 3, and sends nothing.
+- **One process at a time.** While one command runs the experiment, or waits for your approval, another fails with `experiment.locked`, exit code 4. Wait for the first to end, and run the command again.
+
+**Repeat a case.** A case awaiting a repeat is sent again only when `--repeat` names it and you confirm that its request may be charged again. The plan display, the message of a run that leaves such a case, the report, and the [JSON summary](#13-use-it-from-a-script) each give its exact option:
+
+```sh
+trialfolio run experiment.yaml --out runs/study/ --repeat holdings-50
+trialfolio run experiment.yaml --out runs/study/ --approve sha256:<the plan hash> --repeat holdings-50:<attempt-id>
+```
+
+- **In a terminal, without `--approve`, the key alone** asks you to type `repeat`, once you've approved the plan. The prompt lists each case to repeat, with its latest attempt whose request may have been charged, and the budget that would remain.
+- **With the attempt ID,** the option is the confirmation, and Trial Folio doesn't ask. With `--approve`, or from a script, a repeat needs it.
+- **Give `--repeat` once for each case** you repeat.
+- **A repeat is a new attempt of the same case,** and counts against the budget. When the budget can't cover it, it doesn't start, and a revision that raises the budget lets the same option repeat it.
+- **One confirmation, one repeat.** Once the repeat may have reached Portfolio123, running the same command again never repeats the case on the same confirmation:
+  - **With the attempt ID,** it says the case was repeated already, and resumes the rest. A repeat that didn't succeed needs a new confirmation, which names the repeat's own attempt.
+  - **With the key alone,** when the repeat succeeded, it says the case is complete, and resumes the rest. When the repeat didn't succeed, the case awaits a repeat again, and in a terminal the command asks you to type `repeat` again, for the repeat's own attempt: that's a new confirmation, and typing it repeats the case again.
+
+Whether Portfolio123 charges for a request that fails is unknown, and an `unknown` request may have gone through. Before you repeat one, you can check your API credits on Portfolio123's website, as an interrupt's message suggests.
+
+**Revise the plan.** After you change the configuration, the same command builds a new plan, a revision of the current one, and fails with `plan.changed`, exit code 3, until you give a reason and approve the revision:
+
+```sh
+trialfolio run experiment.yaml --out runs/study/ --revision-reason 'Raise the budget, and try 0.75% slippage.'
+```
+
+In a terminal, it shows the revision, with what changed and your reason, and asks you to type `approve`. Or give the revision's hash, which the `plan.changed` message gives, with `--approve`.
+
+- **What revises the plan:** a change to a case's settings, an added or removed variant, a change to the budget, the title, the purpose, the prior research, a case's key or description, or the order of one setting's variants. So does a new version of Trial Folio, `p123api`, `requests`, or `urllib3`, even with the same configuration. A change the plan doesn't record, such as a comment, doesn't.
+- **What a revision keeps.** A case whose settings didn't change keeps its `case_id` and its attempts, whatever its key, so a case that succeeded isn't sent again. A case whose settings changed is a new case, with a new `case_id`, even under the same key. The old case is retired: it and its attempts stay in the record, the report lists it, and the budget still counts its attempts.
+- **The reason** is recorded in the new plan's `experiment.json`, and shown in the report. It's never sent or logged. Every revision needs one.
+- **Running the approving command again** resumes the revised plan, as after an interrupt. A reason when there's no revision fails with `plan.approval_required`: check that the configuration is the file you changed.
+- **Another experiment.** A configuration with another `experiment_id`, or whose baseline has another universe, is another experiment, not a revision. Run into this directory, it fails with `output.not_empty`: give it a new one.
+
+[Running an experiment](contracts.md#running-an-experiment), [repeating a case](contracts.md#repeating-a-case), and [experiment plans and revisions](contracts.md#experiment-plans-and-revisions) give the rules.
+
+**Check:**
+
+- After a run that ends, the same command resumes. stderr says the plan is the experiment's current plan, plan 1, which this run resumes, and gives the provider requests counted so far. It skips the complete cases, and writes `sessions/2/`.
+- A resume with no case due and no repeat to make sends nothing, needs no credentials, and writes its session's report and manifest.
+- An `unknown` or rejected case isn't sent again without `--repeat`, and the plan display gives its option, `--repeat <case-key>:<attempt-id>`.
+- `--repeat <case-key>` alone, with `--approve` or from a script, fails with `plan.approval_required`, exit code 2, and the message gives the option with the attempt ID. Nothing was sent.
+- After a repeat confirmed by its attempt ID, the same command again says the case isn't repeated, because its confirmation was used, and sends nothing for it.
+- A changed configuration fails with `plan.changed`, exit code 3, names the current plan, and gives the revision's hash. Nothing was sent or written.
+- After a revision that changes a case's settings, the plan display and the report list the old case as retired, with its attempts.
+- While a command waits for approval, the same command in another terminal fails with `experiment.locked`, exit code 4.
+
+## 13. Use it from a script
+
+Add `--json` to any command. stdout then holds exactly one JSON object, on success and on failure, and everything else goes to stderr. The object gives the outcome, the exit code, the IDs, such as the plan hash, the output files, the counts, such as `provider_requests` and the credit `cost`, and the error, if any. For a review, `ids` holds the review ID, and `counts` the results, the flagged setting rows, the unavailable metric rows, and the warnings.
+
+For an experiment:
+
+- **`ids`** holds the `experiment_id`, the hash of the plan the command built, and the session's number, once each is known.
+- **`cases`** lists each case of the plan, in its order, with its `case_key`, `case_id`, `outcome`, and `repeat_attempt_id`: the attempt ID that `--repeat <case-key>:<attempt-id>` names to repeat a case awaiting a repeat, or `null` for any other case.
+- **`counts`** gives the experiment's counts, across every run of it: the cases by outcome, the retired cases, the attempts and the repeats, the provider requests and authentication calls, the cost, the unavailable metric rows, and this command's warnings.
+- **`outputs`** gives the session's manifest and report.
+
+Its schema is `schemas/json-summary-1.2.0.schema.json`, the version 0.3.0 writes for every command. Trial Folio 0.1.0 writes version 1.0.0, and 0.2.0 version 1.1.0, whose schemas, `schemas/json-summary-1.0.0.schema.json` and `schemas/json-summary-1.1.0.schema.json`, are kept beside it: each version only adds to the one before.
+
+Approve only a plan you've reviewed. A script can read the hash from a run that wasn't approved, in `ids.plan_hash`, and approve it, but that skips the review the plan exists for. The same goes for a repeat: a script can read each case's `repeat_attempt_id` and repeat it, but each repeat may be charged again.
 
 Exit codes:
 
@@ -389,37 +577,43 @@ Exit codes:
 | 1 | An unexpected internal error |
 | 2 | A usage error, a plan not approved, or the license not acknowledged |
 | 3 | An invalid configuration, input, artifact, or environment |
-| 4 | An output problem: the directory isn't empty, or a write failed |
+| 4 | An output problem: the directory isn't empty, a write failed, or another process is running the experiment |
 | 5 | A Portfolio123 error |
+| 6 | An experiment ended with a planned case that didn't succeed. Every case is accounted for. |
 | 130 | Interrupted, for example with Ctrl-C |
 
 **Check:**
 
 - `trialfolio demo --out demo2/ --json` prints one object with `"outcome": "completed"`.
 - A plan run without approval, with `--json`, prints one object with `"exit_code": 2`, the plan hash in `ids`, and the error.
+- An experiment's plan run without approval, with `--json`, also lists every case in `cases`. In a new experiment, each is `not_yet_run`.
+- After a run of an experiment that leaves a case awaiting a repeat, `--json` gives that case's `repeat_attempt_id`, the one in the message's `--repeat` option.
 
-## 12. When something goes wrong
+## 14. When something goes wrong
 
 Every error message says what failed, why, and what to do next. These are the ones you're most likely to see:
 
 | Code | What happened | What to do |
 |---|---|---|
 | `config.invalid` | The configuration has a problem; the message lists each one | Fix them. Nothing was sent. |
-| `output.not_empty` | `--out`, or the folder given to `trialfolio init`, names a directory that isn't empty | Choose a new or empty directory |
-| `plan.approval_required` | The plan wasn't approved, or the hash didn't match | Approve it in a terminal, or give its full hash. Nothing was sent. |
+| `output.not_empty` | `--out`, or the folder given to `trialfolio init`, names a directory that isn't empty. For an experiment, it holds something other than an experiment, or another experiment, with another `experiment_id` or universe. | Choose a new or empty directory |
+| `plan.approval_required` | The plan wasn't approved, or the hash didn't match. For an experiment, also a `--repeat` that names no case awaiting a repeat, or that wasn't confirmed, or a `--revision-reason` with no revision. | Approve it in a terminal, or give its full hash. For a repeat, give the option the message shows. Nothing was sent. |
+| `plan.changed` | An experiment's configuration, or the installed versions, changed since its current plan, and the revision wasn't approved with a reason | Give `--revision-reason`, and approve the revision's hash, which the message gives. Nothing was sent. |
+| `experiment.locked` | Another process is running the experiment, or waiting for its approval | Wait for it to end, and run the command again. Nothing was sent. |
+| `execution.partial` | An experiment ended with a planned case that didn't succeed; the message lists each one | Run the same command again to send the cases that are due, and repeat each case awaiting a repeat with the option the message gives |
 | `input.not_found`, `input.not_a_run` | `trialfolio report`'s run directory, or a review's `run` path, doesn't exist, or isn't a complete run. A review's message names the result. | Give the output directory of a run that finished. Nothing was written. |
 | `environment.unsupported` | The installed `p123api`, `requests`, or `urllib3` isn't the verified version | Run `uv sync` in the repository to restore the locked versions |
 | `provider.auth_failed` | The credentials are missing, or Portfolio123 refused them | Check the API ID and key |
 | `provider.unavailable` | Portfolio123 couldn't be reached; the request wasn't sent | Try again later |
 | `provider.quota_exceeded` | Portfolio123 refused the request for quota or credits | Check your API credits. The request may have been charged. |
 | `provider.unsupported_capability` | Portfolio123 rejected a setting; its own message follows | Change the setting. The request may have been charged. |
-| `provider.outcome_unknown` | The request may have been sent and charged, but no response was saved, for example after a timeout | Trial Folio never resends it on its own. Running the command again is a new attempt, and may be charged again. |
+| `provider.outcome_unknown` | The request may have been sent and charged, but no response was saved, for example after a timeout | Trial Folio never resends it on its own. Running a screen's command again is a new attempt, and may be charged again. In an experiment, only a [repeat](#12-resume-repeat-or-revise-an-experiment) sends it again. |
 | `provider.response_invalid` | A response was saved, but didn't have the expected layout | The response stays in the run. Report it, because Portfolio123's response may have changed. |
 | `storage.write_failed` | A file couldn't be written durably, for example on macOS or Linux to an exFAT or FAT drive, which lacks hard links | Use another drive. If the request was sent, the attempt record says whether it may have been charged. |
-| `command.interrupted` | You pressed Ctrl-C | The message says whether a request may have been sent |
+| `command.interrupted` | You pressed Ctrl-C | The message says whether a request may have been sent. For an experiment, run the same command again to resume it. |
 | `internal.unexpected` | A defect in Trial Folio | Report it, with the log the message names |
 
-After a Portfolio123 error, the run's directory still has its report and manifest, which record the failure. After an interrupt, a storage failure, or an internal error, there's no manifest, so the run, or the review, reads as incomplete. [Errors](contracts.md#errors) lists every code.
+After a Portfolio123 error, the run's directory still has its report and manifest, which record the failure. After an interrupt, a storage failure, or an internal error, there's no manifest, so the run, or the review, reads as incomplete. An experiment's session is the same: it ends with its report and manifest even when cases fail, and without them after an interrupt, until the same command resumes the experiment. [Errors](contracts.md#errors) lists every code.
 
 **Logs.** Each command with an output directory logs to `logs/trialfolio.log` there. `trialfolio init`, `trialfolio license`, and an internal error before the output directory is claimed log to a per-user directory, which the README's [Your data stays on your machine](../README.md#your-data-stays-on-your-machine) lists, with how to delete it. To see more detail, set `TRIALFOLIO_LOG_LEVEL=DEBUG`. At every level, logs hold no credentials, configuration values, formulas, or results.
 
