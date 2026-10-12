@@ -146,7 +146,8 @@ The full notice is in [docs/disclaimers.md](docs/disclaimers.md).
 
 ## Documentation
 
-- [docs/user-guide.md](docs/user-guide.md): how to set up and use Trial Folio, workflow by workflow.
+- [The user manual](https://promptedportfolio.github.io/trialfolio/): how to set up and use Trial Folio, in tutorials, how-to guides, reference, and explanation. Its source is in [manual/](manual/).
+- [docs/user-guide.md](docs/user-guide.md): how to set up and use Trial Folio, workflow by workflow. The user manual replaces it at release 0.4.0.
 - [docs/README.md](docs/README.md): a map of the specifications.
 - [AGENTS.md](AGENTS.md): instructions for coding agents.
 - [docs/ai-development.md](docs/ai-development.md): how AI is used to build Trial Folio.

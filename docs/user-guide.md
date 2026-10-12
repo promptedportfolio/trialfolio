@@ -1,5 +1,7 @@
 # Trial Folio user guide
 
+> **The [user manual](https://promptedportfolio.github.io/trialfolio/) now covers these workflows,** as tutorials, how-to guides, reference, and explanation. This guide stays until release 0.4.0's documentation task turns it into a page that points there. Until then, both are kept up to date.
+
 This guide walks through Trial Folio's workflows, from setting up to reading a report: release 0.1.0's; the review 0.2.0 adds, which compares saved runs; and the experiment 0.3.0 adds, which runs a baseline screen and a few variants of it under one plan. Each workflow ends with what to check, so you can confirm it works as described.
 
 It describes behavior; it doesn't define it. Where it and an owning document disagree, such as [contracts.md](contracts.md) or a release specification, [0.1.0's](releases/0.1.0-api-execution.md), [0.2.0's](releases/0.2.0-review.md), or [0.3.0's](releases/0.3.0-experiments.md), the owning document wins, and this guide is the one to fix.
