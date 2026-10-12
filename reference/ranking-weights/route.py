@@ -6,14 +6,15 @@ injected for the one command, as AGENTS.md describes. They configure `p123api`'s
 Folio's provider client does (ADR 0006): one attempt, no environment settings, authentication in a
 call of its own, and Trial Folio's `ExchangeRecordingAdapter`, which allows one HTTP exchange in
 each call, so a re-authentication after a 401 or 403, or a redirect, is refused before it's sent.
-Every definition, each response's body as Portfolio123 sent it, and each call's exchanges are
-saved in `payloads/`, which is git-ignored. Files are read and written with their line endings
-unchanged.
+Every definition, each 200's body as Portfolio123 sent it, and each call's exchanges, a failed
+call's included, are saved in `payloads/`, which is git-ignored. Files are read and written with
+their line endings unchanged.
 What the script prints is only what the run record may hold: counts, positions, verdicts, the
 exchanges' methods, paths, and statuses, and the credits Portfolio123 reports. It never prints a
 node's name, formula, or weight, an amount moved, the XML, a ranking system's ID, the account's
 remaining quota, or Portfolio123's message on a failure, which it saves with the credentials and
-the token redacted.
+the token redacted. Nothing it raises after a failure carries the wrapper's exception, so Python
+can't print the message either.
 
 The script changed after R04-T01's checks, in their pull request's review: the run record says
 how.
@@ -35,7 +36,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn, cast
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from trialfolio.provider import ExchangeRecordingAdapter
@@ -261,9 +262,14 @@ def variant(kind: str, source: Path, label: str) -> None:
 
 def sent_once(label: str, send: Callable[[Any], object]) -> dict[str, object]:
     """Authenticates, then makes the one call `send` makes, each in a call of its own, with the
-    client configured as the module says. Saves the response's body as Portfolio123 sent it, in
-    `{label}.json`, cost and quota included, and the exchanges in `{label}.exchanges.json`, and
-    returns the body, decoded."""
+    client configured as the module says. Saves the exchanges in `{label}.exchanges.json`, and a
+    200's body on the call, as Portfolio123 sent it, cost and quota included, in `{label}.json`,
+    whether or not the call then succeeded: the wrapper can fail after a 200, on a body it can't
+    decode. Returns the body, decoded.
+
+    A failed call is reported by its exchanges and the exception's type, never its message, which
+    can hold Portfolio123's text: part of the definition sent, or the account's details. The
+    message is saved in `last-error.txt`, with the credentials and the token redacted."""
     import p123api
 
     from trialfolio.provider import ExchangeRecordingAdapter
@@ -278,23 +284,43 @@ def sent_once(label: str, send: Callable[[Any], object]) -> dict[str, object]:
     session.adapters.clear()
     session.mount("https://", adapter)
     session.mount("http://", adapter)
+    request = None
+    failure: tuple[str, str] | None = None
     with made:
         try:
             with adapter.call("authentication"):
                 made.auth()
-            with adapter.call("request") as call:
+            with adapter.call("request") as request:
                 send(made)
         except Exception as error:  # noqa: BLE001
-            failed(error, exchanges(adapter), (*secrets, made.get_token()))
-    (PAYLOADS / f"{label}.exchanges.json").write_text(
-        json.dumps([e.model_dump(mode="json") for e in adapter.exchanges], indent=2),
-        encoding="utf-8",
+            # Only its type and its redacted message leave the handler. Anything raised in the
+            # handler, such as a file that can't be saved, would have the exception as its
+            # context, which Python prints with the message unredacted.
+            failure = (type(error).__name__, redacted(str(error), (*secrets, made.get_token())))
+    seen = exchanges(adapter)
+    body = request.body if request is not None else None
+    if failure is None:
+        print(f"  Exchanges: {seen}.")
+    else:
+        print(f"  Failed: {failure[0]}, after the exchanges {seen}.")
+    kept = saved(
+        f"{label}.exchanges.json",
+        json.dumps([e.model_dump(mode="json") for e in adapter.exchanges], indent=2).encode(),
     )
-    if call.body is None:
+    if body is not None:
+        kept = saved(f"{label}.json", body) and kept
+    if failure is not None:
+        if saved("last-error.txt", failure[1].encode()):
+            print(
+                "  Its message, with the credentials and the token redacted, is in "
+                "payloads/last-error.txt."
+            )
+        sys.exit(1)
+    if not kept:
+        sys.exit("The call succeeded, but not all of its evidence is saved; stopping.")
+    if body is None:
         sys.exit("The call returned without a 200's body to save; stopping.")
-    (PAYLOADS / f"{label}.json").write_bytes(call.body)
-    print(f"  Exchanges: {exchanges(adapter)}.")
-    decoded = json.loads(call.body)
+    decoded = json.loads(body)
     if not isinstance(decoded, dict):
         sys.exit(f"The response isn't a JSON object; it's saved in payloads/{label}.json.")
     return cast(dict[str, object], decoded)
@@ -307,21 +333,25 @@ def exchanges(adapter: "ExchangeRecordingAdapter") -> list[str]:
     ]
 
 
-def failed(error: Exception, made: list[str], secrets: tuple[str | None, ...]) -> NoReturn:
-    """Prints a failed call's exchanges and the exception's type, never its message, which can
-    hold Portfolio123's text: part of the definition sent, or the account's details. Saves the
-    message, with the credentials and the token redacted, longest first and in one pass, so
+def redacted(message: str, secrets: tuple[str | None, ...]) -> str:
+    """`message` with the credentials and the token redacted, longest first and in one pass, so
     replacing one can't leave part of another."""
     present = sorted({s for s in secrets if s}, key=len, reverse=True)
-    message = str(error)
-    if present:
-        message = re.sub("|".join(re.escape(s) for s in present), "[redacted]", message)
-    write(PAYLOADS / "last-error.txt", message)
-    print(
-        f"  Failed: {type(error).__name__}, after the exchanges {made}. Its message, with the "
-        "credentials and the token redacted, is in payloads/last-error.txt."
-    )
-    sys.exit(1)
+    if not present:
+        return message
+    return re.sub("|".join(re.escape(s) for s in present), "[redacted]", message)
+
+
+def saved(name: str, data: bytes) -> bool:
+    """Saves `data` in `payloads/{name}`, as it is, and returns whether it could. A file it can't
+    save is reported with the operating system's reason alone, not raised, so a failed call's
+    report, and its other files, aren't lost with it."""
+    try:
+        (PAYLOADS / name).write_bytes(data)
+    except OSError as error:
+        print(f"  Couldn't save payloads/{name}: {error.strerror or type(error).__name__}.")
+        return False
+    return True
 
 
 def get(

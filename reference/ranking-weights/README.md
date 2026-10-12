@@ -66,6 +66,13 @@ The review of R04-T01's pull request found the following in [`route.py`](route.p
 - **Line endings.** As run, the script read the XML files with `read_text`, which makes a carriage return a line feed. Counted offline after the checks, step 1's saved XML of C and step 2's read-back each hold no carriage return. So the script's reading changed nothing: step 2 sent C's XML unchanged, and the byte-for-byte comparison holds for the website's own XML. The script now reads and writes files with their line endings unchanged. On XML without a carriage return, its variants are byte for byte the ones it wrote before.
 - **The amount moved.** As run, the weight change printed the amount it moved, which can give a weight away. It now prints only whether the new weights are whole.
 
+The pull request's third review, after step 8, found more in the script as step 8 ran it, and changed it again. The changed script was exercised offline, against a local fake server.
+
+- **A failed call's evidence.** As step 8 ran it, the script saved a call's exchanges, and its 200's body, only when the call succeeded. A failed call kept only its message, even one that failed after a 200, on a body the wrapper couldn't decode, such as malformed JSON or a ranking method `p123api` doesn't know. The script now saves the exchanges, and any 200's body, however the call ended.
+- **A file that can't be saved.** As step 8 ran it, the script saved a failure's message inside the handler of the wrapper's exception. Had that save failed, Python would have printed the exception, with Portfolio123's message unredacted. Only the exception's type and its redacted message now leave the handler, and a file the script can't save is reported with the operating system's reason alone.
+
+Neither bears on steps 1 to 8: every call in them succeeded, so neither failure path ran.
+
 ## Findings for R04-T02 and R04-T03
 
 - **The route works.** `rank_update` writes the definition into `ApiRankingSystem`, and a backtest ranked by that name uses it at once. No `rank_touch` was needed between them, within about a minute (step 5).
