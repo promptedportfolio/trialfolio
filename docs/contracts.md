@@ -1942,7 +1942,7 @@ Exit codes:
 | 0 | Command completed and outputs were written. This says nothing about any strategy. |
 | 1 | Unexpected internal error |
 | 2 | Usage error: invalid arguments, missing plan approval, or license not acknowledged |
-| 3 | Invalid or unsupported configuration, input, artifact, or environment |
+| 3 | Invalid or unsupported configuration, input, artifact, or environment, or an experiment's changed plan whose revision wasn't approved with a reason (`plan.changed`) |
 | 4 | Output problem: directory not empty, write failure, or experiment locked by another process |
 | 5 | Provider error: authentication, provider unavailable, quota, unsupported capability, rejected request, uncertain outcome, or invalid response |
 | 6 | Partial completion: at least one planned case failed, was skipped, or is uncertain |
