@@ -474,38 +474,36 @@ WINDOWS_RESERVED: Final = (
     *(f"com{n}" for n in range(1, 10)),
     *(f"lpt{n}" for n in range(1, 10)),
 )
-# The keywords a schema's value may use. Any other fails the generator.
-KEYWORDS: Final = frozenset(
-    {
-        "$ref",
-        "additionalProperties",
-        "anyOf",
-        "const",
-        "default",
-        "description",
-        "enum",
-        "exclusiveMaximum",
-        "exclusiveMinimum",
-        "format",
-        "items",
-        "maxItems",
-        "maxLength",
-        "maximum",
-        "minItems",
-        "minLength",
-        "minimum",
-        "not",
-        "pattern",
-        "patternProperties",
-        "prefixItems",
-        "properties",
-        "propertyNames",
-        "required",
-        "title",
-        "type",
-    }
-)
-ROOT_KEYWORDS: Final = KEYWORDS | {"$schema", "$comment", "$defs"}
+# The keywords any value may use: a description and a default, which the pages give, and a title,
+# the model's own name for it, which they leave out.
+ANNOTATIONS: Final = frozenset({"default", "description", "title"})
+_NUMBER: Final = frozenset({"type", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"})
+# The keywords each kind of value may use, by the kind `_Walk.kind` gives it: those its words cover.
+# Any other fails the generator, rather than being dropped. So a schema reaches a value inside it
+# only where the words do: through `$ref`, `anyOf`, an object's `properties`, an array's `items`
+# and `prefixItems`, a mapping's `patternProperties` and `propertyNames`, and a string's `not`.
+# Beside `$ref` or `anyOf`, only the annotations: any other keyword there would narrow the value
+# the reference or the alternatives give, unseen.
+KEYWORDS: Final[Mapping[str, frozenset[str]]] = {
+    kind: ANNOTATIONS | keywords
+    for kind, keywords in {
+        "object": frozenset({"type", "properties", "required", "additionalProperties"}),
+        "reference": frozenset({"$ref"}),
+        "alternatives": frozenset({"anyOf"}),
+        "constant": frozenset({"type", "const"}),
+        "enumeration": frozenset({"type", "enum"}),
+        "string": frozenset({"type", "format", "pattern", "minLength", "maxLength", "not"}),
+        "integer": _NUMBER,
+        "number": _NUMBER,
+        "boolean": frozenset({"type"}),
+        "null": frozenset({"type"}),
+        "array": frozenset({"type", "items", "prefixItems", "minItems", "maxItems"}),
+        "mapping": frozenset(
+            {"type", "properties", "patternProperties", "propertyNames", "additionalProperties"}
+        ),
+    }.items()
+}
+ROOT_KEYWORDS: Final = KEYWORDS["object"] | {"$schema", "$comment", "$defs"}
 # The keywords a mapping's `propertyNames` may use: those that describe text.
 NAME_KEYWORDS: Final = frozenset({"format", "maxLength", "minLength", "not", "pattern"})
 NULL: Final = {"type": "null"}
@@ -579,7 +577,10 @@ class _Walk:
         return self.by_node[id(node)]
 
     def add(self, node: Mapping[str, Any], title: str, path: str) -> None:
-        """Adds the object `node` holds, unless it's added already, then the objects in it."""
+        """Adds the object `node` holds, unless it's added already, then the objects in it. It
+        checks `node` first, so the keywords beside a reference are checked each time it's
+        reached, and from wherever."""
+        self.check_keywords(node, path)
         if ("$ref" in node and node["$ref"] in self.by_ref) or id(node) in self.by_node:
             return
         schema = self.resolved(node)
@@ -599,13 +600,14 @@ class _Walk:
             self.visit(value, f"{path}.{name}")
 
     def visit(self, node: Mapping[str, Any], path: str) -> None:
-        """Adds the objects a key's value can hold."""
-        self.check_keywords(node, path)
-        if "$ref" in node and not self.is_object(node):
-            self.visit(self.definition(node["$ref"]), path)
-        elif self.is_object(node):
+        """Adds the objects a key's value can hold, and checks each value the schema reaches
+        from it."""
+        kind = self.check_keywords(node, path)
+        if self.is_object(node):
             self.add(node, self.title(path), path)
-        elif "anyOf" in node:
+        elif kind == "reference":
+            self.visit(self.definition(node["$ref"]), path)
+        elif kind == "alternatives":
             objects = [option for option in node["anyOf"] if self.is_object(option)]
             for option in node["anyOf"]:
                 if self.is_object(option) and len(objects) > 1:
@@ -616,18 +618,18 @@ class _Walk:
                     self.add(option, title, f"{path}-{first}")
                 else:
                     self.visit(option, path)
-        elif node.get("type") == "array":
+        elif kind == "array":
             for item in [node.get("items"), *node.get("prefixItems", [])]:
                 if item is not None:
                     self.visit(item, f"{path}[]")
-        elif "patternProperties" in node:
+        elif kind == "mapping":
             unknown = sorted(node.get("propertyNames", {}).keys() - NAME_KEYWORDS)
             if unknown:
                 raise GenerationError(
                     f"{self.page.schema}: {path}'s keys use {', '.join(unknown)}, which the"
                     " generator can't put in plain words"
                 )
-            for value in node["patternProperties"].values():
+            for value in node.get("patternProperties", {}).values():
                 if self.is_object(value) or value.get("type") in ("array", "object"):
                     raise GenerationError(f"{self.page.schema}: {path} maps names to objects")
                 self.visit(value, f"{path}.*")
@@ -637,15 +639,38 @@ class _Walk:
             return f"Each of {_code(path[:-2])}"
         return _code(path)
 
-    def check_keywords(self, node: Mapping[str, Any], path: str, top: bool = False) -> None:
-        unknown = sorted(node.keys() - (ROOT_KEYWORDS if top else KEYWORDS))
+    def kind(self, node: Mapping[str, Any], path: str) -> str:
+        """The kind of value `node` allows, which says how it's put in words, and so which
+        keywords it may use."""
+        if isinstance(node.get("type"), list):
+            raise GenerationError(f"{self.page.schema}: {path} has a list of types")
+        if self.is_object(node):
+            return "reference" if "$ref" in node else "object"
+        for keyword, kind in (
+            ("$ref", "reference"),
+            ("anyOf", "alternatives"),
+            ("const", "constant"),
+            ("enum", "enumeration"),
+        ):
+            if keyword in node:
+                return kind
+        kind = node.get("type")
+        if kind == "object":
+            return "mapping"
+        if kind not in ("string", "integer", "number", "boolean", "null", "array"):
+            raise GenerationError(f"{self.page.schema}: {path} has no type the generator knows")
+        return kind
+
+    def check_keywords(self, node: Mapping[str, Any], path: str, top: bool = False) -> str:
+        """Fails when `node` uses a keyword its kind of value doesn't, and gives the kind."""
+        kind = "object" if top else self.kind(node, path)
+        unknown = sorted(node.keys() - (ROOT_KEYWORDS if top else KEYWORDS[kind]))
         if unknown:
             raise GenerationError(
                 f"{self.page.schema}: {path} uses {', '.join(unknown)}, which the generator can't"
                 " put in plain words"
             )
-        if isinstance(node.get("type"), list):
-            raise GenerationError(f"{self.page.schema}: {path} has a list of types")
+        return kind
 
     # Describing a value
 
@@ -660,17 +685,17 @@ class _Walk:
         return words
 
     def value(self, node: Mapping[str, Any], path: str) -> str:
+        kind = self.kind(node, path)
         if self.is_object(node):
             return f"an {self.link(node, 'object')}"
-        if "$ref" in node:
+        if kind == "reference":
             return self.phrase(self.definition(node["$ref"]), path)
-        if "anyOf" in node:
+        if kind == "alternatives":
             return self.any_of(node["anyOf"], path)
-        if "const" in node:
+        if kind == "constant":
             return _code(node["const"])
-        if "enum" in node:
+        if kind == "enumeration":
             return _alternatives([_code(value) for value in node["enum"]])
-        kind = node.get("type")
         if kind == "string":
             return self.string(node, path)
         if kind in ("integer", "number"):
@@ -681,9 +706,7 @@ class _Walk:
             return "empty" if self.page.csv else "`null`"
         if kind == "array":
             return self.array(node, path)
-        if kind == "object":
-            return self.mapping(node, path)
-        raise GenerationError(f"{self.page.schema}: {path} has no type the generator knows")
+        return self.mapping(node, path)
 
     def any_of(self, options: Sequence[Mapping[str, Any]], path: str) -> str:
         parts: list[str] = []

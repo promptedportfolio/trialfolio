@@ -479,6 +479,69 @@ def _options(schema: Any) -> Any:
             "the top level allows any key",
             id="a top level that doesn't say it's closed",
         ),
+        # Each way the schema reaches a value: a keyword beside a reference or alternatives would
+        # narrow what they give, and one that's not its kind's would be dropped.
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["$defs"]["Ranking"]["anyOf"][0].update(
+                allOf=[{"properties": {"formula": {"maxLength": 1}}}]
+            ),
+            "ranking-formula uses allOf, which the generator can't put in plain words",
+            id="a keyword beside a reference to one of several objects",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["properties"].update(
+                fallback={
+                    "anyOf": [
+                        {"$ref": "#/$defs/FormulaRanking", "maxLength": 1},
+                        {"$ref": "#/$defs/NameRanking"},
+                    ]
+                }
+            ),
+            "fallback-formula uses maxLength, which the generator can't put in plain words",
+            id="a keyword beside a reference to an object reached before",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["properties"]["ranking"].update(maxLength=1),
+            "ranking uses maxLength, which the generator can't put in plain words",
+            id="a keyword beside a key's reference",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["properties"].update(
+                universe={"anyOf": [{"type": "string"}, {"type": "null"}], "maxLength": 1}
+            ),
+            "universe uses maxLength, which the generator can't put in plain words",
+            id="a keyword beside alternatives",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["$defs"]["NameRanking"].update(anyOf=[{"required": ["name"]}]),
+            "ranking-name uses anyOf, which the generator can't put in plain words",
+            id="alternatives beside an object's keys",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["properties"]["max_holdings"].update({"not": {"enum": [3]}}),
+            "max_holdings uses not, which the generator can't put in plain words",
+            id="an exclusion beside a number",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["properties"]["rules"].update(
+                patternProperties={"^a$": {"allOf": [{}]}}
+            ),
+            "rules uses patternProperties, which the generator can't put in plain words",
+            id="a mapping's values beside a list",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["properties"]["universe"].update(items={"allOf": [{}]}),
+            "universe uses items, which the generator can't put in plain words",
+            id="a list's items beside text",
+        ),
     ],
 )
 def test_a_schema_the_generator_cant_put_in_plain_words_fails(
