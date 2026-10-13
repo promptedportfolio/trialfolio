@@ -299,7 +299,7 @@ Every task changes `src/`, so each depends on the `v0.3.0` tag, which is met, as
 
 ## What RF-T01 settled
 
-**Details from RF-T01 (2026-10-13), awaiting the owner's confirmation.** RF-T01 resolves items 3 and 9 of the [repeated logic](#repeated-logic) as they give, apart from `ReviewConfiguration.results`, as detail 9 below says. Each item is a detail this file left open:
+**Details from RF-T01 (2026-10-13), confirmed by the owner on 2026-10-13.** RF-T01 resolves items 3 and 9 of the [repeated logic](#repeated-logic) as they give, apart from `ReviewConfiguration.results`, as detail 9 below says. Each item is a detail this file left open, apart from item 11, which is what RF-T01 leaves out:
 
 1. **Where the check of the reports lives.** It's a module, `tests/support/rewritten_fixtures.py`, run with `uv run python -m`, as [the check of the reports](#the-check-of-the-reports) gives, beside the synthetic experiment's writer, which it calls. The alternative was a script in `scripts/`, which would import that writer and the tests' clock from `tests/support/`.
 2. **Its tests,** in `tests/interface/test_rewritten_fixtures.py`, which RF-AC07's exception for RF-T01's check covers. The alternative was the check without tests: a change that made what Trial Folio writes depend on the wall clock or on a random value would then show only as a difference in a later task's comparison, where it would read as that task's.
@@ -310,6 +310,8 @@ Every task changes `src/`, so each depends on the `v0.3.0` tag, which is met, as
 7. **The one helper that lists items in a sentence** is `series(items)`, in `display.py`, whose docstring now covers it. The review's warning gives it the results' positions as text. The alternative was a module of its own for one function.
 8. **The aliases are generic through a `TypeVar`,** in `contracts/common.py`, since a `type` statement's alias would add `$defs` entries. They replace 14 annotations: the 13 the repeated logic's item 9 counts, and `RuleVariant.with_`'s, which gives its alias, `with`, around `OptionalKey`.
 9. **`ReviewConfiguration.results` stays written out.** Its minimum is 2, and a minimum given around `OrderedList` is checked as a value's, not a list's: Pydantic's message would read "Value should have at least 2 items" instead of "Tuple should have at least 2 items", and the schema would give `minLength` instead of `minItems`. So 5 of the 6 lists the repeated logic's item 9 counts take an alias. The alternative was a fourth alias, for one field.
+10. **`compare` exits with 2 when it can't compare.** When either directory isn't one, or a file or folder under it can't be read, it prints the error and exits with 2, as for a wrong usage, so 1 means only that it found differences ([the check of the reports](#the-check-of-the-reports)). The alternative was to exit with 1, which would merge "different" and "couldn't check".
+11. **The recorder of messages isn't committed.** The scratch recorder of errors and log messages that RF-T01's evidence used stays out of its pull request; a later task that rebuilds messages may propose it.
 
 RF-T01 moves no code that logs, so contracts.md's rule that core modules log through `logging.getLogger(__name__)` waits for the first task that does ([decision 11](#the-owners-decisions)).
 
