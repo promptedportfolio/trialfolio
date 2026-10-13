@@ -60,7 +60,7 @@ Identifiers are introduced with the release that can define their semantics.
 | `experiment_id` | 0.3.0 | One declared experiment | User-declared slug, same pattern as `label`, with the same reserved names ([experiment configuration](#experiment-configuration)) |
 | `study_id`, `candidate_id`, `assessment_id` | Later | Defined when their increment is specified | — |
 
-The forms of the identifiers 0.1.0 introduces are requirements since 0.1.0's sign-off (2026-10-01), those 0.2.0 introduces since 0.2.0's (2026-10-05), and those 0.3.0 introduces since 0.3.0's (2026-10-08). The others are proposed until their release is Ready.
+The forms of the identifiers 0.1.0 introduces are requirements since 0.1.0's sign-off (2026-10-01), those 0.2.0 introduces since 0.2.0's (2026-10-05), those 0.3.0 introduces since 0.3.0's (2026-10-08), and those 0.4.0 introduces since 0.4.0's (2026-10-13). The others are proposed until their release is Ready.
 
 Configuration identity and attempt identity MUST stay separate. Re-running the same resolved configuration creates a new attempt of the same case. Changing any resolved setting creates a different case.
 

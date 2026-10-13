@@ -30,7 +30,7 @@ For example, the proposed 0.5.0 scenario is: open a saved experiment, identify t
 
 Use actual research to refine subsequent priorities. A proposed product checkpoint is completing three substantially different reproduction studies with their evidence and reports assembled in Trial Folio, then recording the remaining manual steps. This is a planning exercise, not a requirement that their findings be positive, a statistical validation, or an additional 1.0.0 gate. Reference payloads stay local; committed examples and fixtures are synthetic under [REQ-11](spec.md#enduring-requirements).
 
-Release specifications continue to own their scope and status. This planning direction leaves 0.1.0's criteria and the settled scope of 0.2.0 and 0.3.0 intact. Future specifications remain Draft until their dependencies, contracts, acceptance evidence, and owner decisions are resolved.
+Release specifications continue to own their scope and status. This planning direction leaves 0.1.0's criteria and the settled scope of 0.2.0, 0.3.0, and 0.4.0 intact. Future specifications remain Draft until their dependencies, contracts, acceptance evidence, and owner decisions are resolved.
 
 ## Releases 0.1.0 to 0.3.0
 
@@ -46,7 +46,7 @@ Later releases keep the 0.1.0 run and report path, and 0.2.0 compares the runs i
 
 ## After 0.3.0
 
-The following are proposed planning targets, not complete release specifications or implementation assignments. Release [0.4.0](releases/0.4.0-ranking-weights.md) is outlined, and no release after 0.3.0 is specified yet. On 2026-10-12 the owner planned 0.4.0 ahead of the results workspace and the graphical experiment workflow, which this table had numbered 0.4.0 and 0.5.0 ([D-34](spec.md#decisions)). Keep the sequence useful at every stop; refine scope through the planning requirements above rather than adding features to complete an operation checklist.
+The following are proposed planning targets, not complete release specifications or implementation assignments. Release [0.4.0](releases/0.4.0-ranking-weights.md) is specified, Ready since the owner's sign-off on 2026-10-13, and no release after it is specified yet. On 2026-10-12 the owner planned 0.4.0 ahead of the results workspace and the graphical experiment workflow, which this table had numbered 0.4.0 and 0.5.0 ([D-34](spec.md#decisions)). Keep the sequence useful at every stop; refine scope through the planning requirements above rather than adding features to complete an operation checklist.
 
 | Target | Added research value | Intended scope and important dependencies |
 |---|---|---|
