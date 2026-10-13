@@ -1,19 +1,21 @@
 """`trialfolio run` stops an experiment before it exceeds the current plan's budget, which bounds
 the provider requests and the authentication calls across every run: a case, or a repeat, the
-budget can't cover isn't started, and neither are the cases after it; a `running` attempt counts
-as one request; and a revision may set a budget below what's counted, after which nothing more is
-sent.
+budget can't cover isn't started, and neither are the cases after it; a run whose remaining budget
+can't cover the first case it would send starts none, and needs no credentials; a `running`
+attempt counts as one request; and a revision may set a budget below what's counted, after which
+nothing more is sent.
 
 Traces to R03-AC10's interface part, and to docs/contracts.md, the experiment's budget, budget and
 retries (within budget), the budget across runs (what's counted, and a budget below it),
 repeating a case (the budget: a repeat the remaining budget can't cover isn't started, its
 confirmation stays unused, and a revision that raises the budget lets the same confirmation
-repeat it), and the experiment manifest (`counts`). Each test writes `default-only.yaml`'s
-experiment, whose budget is its 2 cases, or `example.yaml`'s, whose budget is 6, with the
-experiment builder, through the CLI's entry function in the test process, over the fake server,
-and runs it again, or a revision of it from `experiment-configs/revisions/`. The `running`
-attempt is left by a run the builder kills with `SIGKILL`, under the test launcher, while the
-fake server holds the reply to its request.
+repeat it), running an experiment (step 7, and a run that sends nothing needs no credentials,
+for a due case, as D-38 decided), and the experiment manifest (`counts`). Each test writes
+`default-only.yaml`'s experiment, whose budget is its 2 cases, or `example.yaml`'s, whose budget
+is 6, with the experiment builder, through the CLI's entry function in the test process, over the
+fake server, and runs it again, or a revision of it from `experiment-configs/revisions/`. The
+`running` attempt is left by a run the builder kills with `SIGKILL`, under the test launcher,
+while the fake server holds the reply to its request.
 """
 
 import sys
@@ -31,6 +33,7 @@ from tests.support.experiment_builder import (
     held,
     returns,
 )
+from tests.support.fake_portfolio123 import Reply
 from trialfolio.contracts.attempt import AttemptRecordV1_1, StartRecordV1_1
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
 
@@ -43,6 +46,10 @@ SEND = "POST /screen/backtest"
 
 BUDGET_SPENT = "The experiment's budget couldn't cover the next case"
 """What `execution.partial`'s message says when the budget stops the run."""
+
+QUOTA = Reply(402, b"")
+"""A 402 to a case's request: `failed`, possibly charged, with `provider.quota_exceeded`, which
+stops the run before its later cases (D-32)."""
 
 type Builder = ExperimentBuilder[Outcome]
 
@@ -143,6 +150,42 @@ def test_a_repeat_the_spent_budget_cant_cover_waits_for_a_revision_that_raises_i
     counts = manifest(out, 3).counts
     assert (counts.provider_requests, counts.budget.provider_requests) == (3, 3)
     assert counts.attempts.repeats == 1
+    assert_within_budget(cli, out, 3)
+
+
+def test_a_due_case_the_spent_budget_cant_cover_needs_no_credentials(
+    cli: Cli, experiments: Builder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    # A 402 fails the baseline, and stops the run, so the other case is still due.
+    first = experiments.run(DEFAULT_ONLY, out, sends=[QUOTA])
+    assert first.exit_code == 6, first.stderr
+    baseline, other = case_id(first, "baseline"), case_id(first, "rebalance-weeks-1")
+    (failed,) = attempts_of(out, baseline)
+    # The baseline's repeat takes the budget's second and last request, so the due case isn't
+    # started.
+    repeated = experiments.run(
+        DEFAULT_ONLY, out, "--repeat", f"baseline:{failed.attempt_id}", sends=[returns()]
+    )
+    assert repeated.exit_code == 6, repeated.stderr
+    assert BUDGET_SPENT in error_of(repeated)["message"]
+    assert cases_of(repeated)["rebalance-weeks-1"]["outcome"] == "not_yet_run"
+    monkeypatch.delenv("TRIALFOLIO_P123_API_ID")
+    monkeypatch.delenv("TRIALFOLIO_P123_API_KEY")
+    received = len(cli.server.received)
+
+    outcome = experiments.run(DEFAULT_ONLY, out)
+
+    # The due case is the first case the run would send, and the remaining budget can't cover
+    # it, so the run starts nothing, and needs no credentials (D-38).
+    assert outcome.exit_code == 6, outcome.stderr
+    assert len(cli.server.received) == received
+    error = error_of(outcome)
+    assert error["code"] == "execution.partial"
+    assert BUDGET_SPENT in error["message"]
+    assert attempts_of(out, other) == []
+    assert manifest(out, 3).outcome == "partial"
     assert_within_budget(cli, out, 3)
 
 

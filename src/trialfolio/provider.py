@@ -67,6 +67,9 @@ _REDIRECTS: Final = frozenset({301, 302, 303, 307, 308})
 _REAUTHENTICATES: Final = frozenset({401, 403})
 """The statuses after which the wrapper drops its token, re-authenticates, and resends."""
 
+_REJECTS_A_SETTING: Final = frozenset({400, 409})
+"""The request's statuses that say Portfolio123 rejected a setting or value in it."""
+
 _MAX_PROVIDER_MESSAGE: Final = 300
 """The most characters of Portfolio123's own message an error keeps."""
 
@@ -121,7 +124,7 @@ class ProviderError(TrialFolioError):
     def __init__(self, code: ErrorCode, message: str, provider_message: str | None = None) -> None:
         full = message
         if provider_message is not None:
-            full = f'{message} Portfolio123\'s message: "{provider_message}"'
+            full = f'{message}{_PROVIDER_MESSAGE}"{provider_message}"'
         super().__init__(code, full, message)
         self.provider_message = provider_message
 
@@ -129,6 +132,18 @@ class ProviderError(TrialFolioError):
         self,
     ) -> tuple[type["ProviderError"], tuple[ErrorCode, str, str | None]]:
         return (type(self), (self.code, self.log_message, self.provider_message))
+
+
+_PROVIDER_MESSAGE: Final = " Portfolio123's message: "
+
+
+def provider_message_of(message: str) -> str | None:
+    """Portfolio123's own text in a `ProviderError`'s full message, as an attempt record keeps
+    it, or None when it carries none. Trial Folio's own text before it never holds the marker."""
+    _, marker, quoted = message.partition(_PROVIDER_MESSAGE)
+    if not marker or not quoted.startswith('"') or not quoted.endswith('"'):
+        return None
+    return quoted[1:-1]
 
 
 class ExchangeRefused(Exception):
@@ -584,12 +599,13 @@ def _request_failure(call: _Call, provider_message: str | None, error: Exception
             f" error. {_MAY_BE_CHARGED} {unknown}",
         )
     again = "Running the command again is a new attempt."
-    if status == 400:
+    # Portfolio123 answered a rule that names no factor with a 409 (D-38).
+    if status in _REJECTS_A_SETTING:
         return ProviderError(
             "provider.unsupported_capability",
-            "Portfolio123 rejected the screen backtest request (HTTP 400): it doesn't support a"
-            f" setting or value in it. {_MAY_BE_CHARGED} Check the configuration before running"
-            f" the command again, which is a new attempt.",
+            f"Portfolio123 rejected the screen backtest request (HTTP {status}): it doesn't"
+            f" support a setting or value in it. {_MAY_BE_CHARGED} Check the configuration"
+            " before running the command again, which is a new attempt.",
             provider_message,
         )
     if status == 402:

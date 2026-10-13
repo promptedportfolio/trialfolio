@@ -39,7 +39,7 @@ Each attempt's record, `attempt.json`, gives its outcome, `possibly_charged`, an
 `possibly_charged` is true exactly when the attempt's outcome is `unknown`, or when its request may have reached Portfolio123. So:
 
 - **A request that succeeded** is possibly charged: Portfolio123 received it.
-- **A request Portfolio123 rejected,** such as with a 400 (`provider.unsupported_capability`), a 402 (`provider.quota_exceeded`), or a 401 or 403 (`provider.auth_failed`), failed, and is possibly charged.
+- **A request Portfolio123 rejected,** such as with a 400 or a 409 (`provider.unsupported_capability`), a 402 (`provider.quota_exceeded`), or a 401 or 403 (`provider.auth_failed`), failed, and is possibly charged.
 - **A failed authentication** is not possibly charged: the backtest request was never sent.
 - **A request that never connected** is not possibly charged (`provider.unavailable`).
 
@@ -82,7 +82,7 @@ To resume after an interrupt, see [recovering from an interrupt](../how-to/recov
 
 A case awaiting a repeat is sent again only when `--repeat` names it, and you confirm that its request may be charged again ([repeating a case](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#repeating-a-case)). You confirm by typing `repeat` in a terminal, or by giving the attempt's ID, as in `--repeat holdings-50:<attempt-id>`. The attempt ID names the attempt whose possible charge you acknowledge, as `--approve` names the plan you approve. Without `--repeat`, such a case could never be sent again: a revision keeps a case whose settings didn't change, with its attempts.
 
-A repeat is a new attempt of the same case, with the same `case_id`. It may be charged again, and it counts against the experiment's budget. When the budget can't cover it, it doesn't start, and a revision that raises the budget lets the same option repeat it.
+A repeat is a new attempt of the same case, with the same `case_id`. It may be charged again, and it counts against the experiment's budget. When the budget can't cover it, it doesn't start. A run that starts nothing for that reason needs no credentials, and a revision that raises the budget lets the same option repeat it.
 
 One confirmation allows one repeat. Once the repeat may have reached Portfolio123, running the same command again, as after an interruption, doesn't repeat the case on the same confirmation. If that repeat didn't succeed either, repeating the case again needs a new confirmation, which names the repeat's own attempt. A key with a flag that acknowledged the charge would have repeated the case each time the same command ran ([open questions](https://github.com/promptedportfolio/trialfolio/blob/main/docs/releases/0.3.0-experiments.md#open-questions)).
 

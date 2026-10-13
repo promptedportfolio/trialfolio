@@ -301,11 +301,14 @@ class _AttemptFiles:
         log_fields: Callable[[str], dict[str, str]],
         *,
         synthetic: bool,
+        case_id: str | None = None,
     ) -> None:
+        """`case_id` is an experiment's attempt's case, which its ending's line names."""
         self._store = store
         self._directory = directory
         self._log_fields = log_fields
         self._synthetic = synthetic
+        self._case_id = case_id
         self._started = time.monotonic()
         self._files: list[AttemptFile] = []
         self.request: StoredFile | None = None
@@ -398,15 +401,30 @@ class _AttemptFiles:
         charged = "yes" if written.possibly_charged else "no"
         if self._synthetic and written.possibly_charged:
             charged = "yes, in its invented records, though nothing was sent"
+        subject = "Attempt" if self._case_id is None else f"Attempt for {self._case_id}"
         _logger.log(
             logging.INFO if error is None else logging.ERROR,
-            "Attempt ended %s after %.3f s: %s; possibly charged: %s; attempt record written: %s.",
+            "%s ended %s after %.3f s: %s; possibly charged: %s; attempt record written: %s.",
+            subject,
             written.outcome,
             time.monotonic() - self._started,
             "no error" if error is None else error.code,
             charged,
             "yes" if recorded else "no",
-            extra=self._log_fields("attempt.completed"),
+            extra={
+                **self._log_fields("attempt.completed"),
+                # An experiment's session goes on after an attempt whose record was written, unless
+                # an interrupt or a storage failure ended it, as `_run_cases` does, or ends with
+                # `execution.partial`, so the terminal shows that ending, an internal error's
+                # included (D-38). The command shows the error of any other ending itself, as it
+                # does a screen run's.
+                "terminal": error is None
+                or (
+                    self._case_id is not None
+                    and recorded
+                    and error.code not in ("command.interrupted", "storage.write_failed")
+                ),
+            },
         )
         return written, recorded, error
 
@@ -738,7 +756,9 @@ class ExperimentAttempt:
         self._params: dict[str, object] = request.params.model_dump(mode="json")
         self._clock = clock
         self._directory = attempt_directory(case.case_id, self._attempt_id)
-        self._files = _AttemptFiles(store, self._directory, self._log_fields, synthetic=synthetic)
+        self._files = _AttemptFiles(
+            store, self._directory, self._log_fields, synthetic=synthetic, case_id=case.case_id
+        )
         self._start: StartRecordV1_1 | None = None
         self._authenticated = False
         self._authentication_failed = False

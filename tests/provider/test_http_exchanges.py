@@ -331,6 +331,8 @@ def test_a_redirect_on_authentication_is_refused_before_connecting(
     ("status", "code"),
     [
         (400, "provider.unsupported_capability"),
+        # Portfolio123 answered a rule that names no factor with a 409 (D-38).
+        (409, "provider.unsupported_capability"),
         (402, "provider.quota_exceeded"),
         (204, "provider.request_rejected"),
         (300, "provider.request_rejected"),
@@ -672,6 +674,7 @@ ENDINGS: dict[str, Ending] = {
         f"request {status}": on_request(replying(Reply(status)), status, "failed", code)
         for status, code in [
             (400, "provider.unsupported_capability"),
+            (409, "provider.unsupported_capability"),
             (401, "provider.auth_failed"),
             (402, "provider.quota_exceeded"),
             (403, "provider.auth_failed"),

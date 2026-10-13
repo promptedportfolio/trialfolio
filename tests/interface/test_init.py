@@ -178,6 +178,14 @@ def test_the_readme_links_to_this_versions_user_guide() -> None:
     assert "{version}" not in readme
 
 
+def test_the_readme_says_how_to_compare_runs_and_run_an_experiment() -> None:
+    """The 0.3.0 walk-through found that the starter README named only a screen's run (D-38)."""
+    readme = STARTER["README.md"].decode()
+
+    assert "`trialfolio review`" in readme
+    assert "`trialfolio run experiment.yaml --out runs/study/`" in readme
+
+
 def test_the_starter_configuration_has_a_comment_on_each_key() -> None:
     text = STARTER["screen.yaml"].decode()
     # Each key, `purpose` commented out included, and the comment after its value.

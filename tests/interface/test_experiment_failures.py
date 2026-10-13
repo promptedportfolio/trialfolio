@@ -7,11 +7,13 @@ Traces to R03-AC05's interface part (D-32), and to docs/contracts.md, the budget
 failure that every later case would get stops the run, and the message names the error and says
 that a resume runs the cases not started), HTTP exchanges (when Trial Folio authenticates),
 experiment attempts (`authenticated_by`), running an experiment (the cases that are due, and
-`execution.partial`'s message, with the option that repeats a case), and the experiment manifest
-(`outcome`). Each test writes `example.yaml`'s experiment with the experiment builder, through
-the CLI's entry function in the test process, over the fake server, which answers a case's
-request with a 400, a 404, a 503, a 403, or a 402, or Trial Folio's authentication call with a
-401 or a 503. Each case's request is told apart by its body, which is the case's request as the
+`execution.partial`'s message, with the option that repeats a case), the experiment manifest
+(`outcome`), and logging (which attempt endings the terminal shows, D-38). Each test writes
+`example.yaml`'s experiment with the experiment builder, through the CLI's entry function in the
+test process, over the fake server, which answers a case's request with a 400, a 404, a 503, a
+403, or a 402, or Trial Folio's authentication call with a 401 or a 503; three tests also fail a
+write with the storage faults: an attempt record's, and a case's request's, as on a full disk or
+unexpectedly. Each case's request is told apart by its body, which is the case's request as the
 plan gives it.
 """
 
@@ -22,7 +24,7 @@ from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome
+from tests.interface.conftest import Cli, FaultyStores, Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     REFUSED,
@@ -33,6 +35,7 @@ from tests.support.experiment_builder import (
     returns,
 )
 from tests.support.fake_portfolio123 import Reply
+from tests.support.socket_faults import SocketFaults
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1, StartRecordV1_1
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
@@ -169,6 +172,176 @@ def test_after_a_403_the_next_case_authenticates_again_and_its_request_is_sent(
     assert [(e.request, e.status) for e in start.exchanges] == [(AUTH, 200)]
     assert only_record(out, HOLDINGS).outcome == "succeeded"
     assert manifest(out, 1).counts.authentication_calls == 2
+
+
+# What a failed case shows: its ending, Portfolio123's message, and what to do (D-38)
+
+MISSPELLED = Reply(
+    409, b"ERROR: Invalid criteria in Rule 2. Error near 'MktCapp': Invalid command 'MktCapp'"
+)
+"""A 409 to a case's request, as Portfolio123 answered a rule that names no factor in 0.3.0's
+live walk-through: `failed`, possibly charged, with `provider.unsupported_capability`."""
+
+
+@pytest.mark.parametrize(
+    ("reply", "code", "revise"),
+    [
+        pytest.param(REJECTED, "provider.unsupported_capability", True, id="400"),
+        pytest.param(MISSPELLED, "provider.unsupported_capability", True, id="409"),
+        pytest.param(
+            Reply(429, b"Too many requests"), "provider.request_rejected", False, id="429"
+        ),
+    ],
+)
+def test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_report(
+    cli: Cli, experiments: Builder, reply: Reply, code: str, revise: bool
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+
+    ran = experiments.run(EXAMPLE, out, sends=[returns(), returns(), reply, returns(), returns()])
+
+    assert ran.exit_code == 6, ran.stderr
+    record = only_record(out, HOLDINGS)
+    assert record.error is not None and record.error.code == code
+    holdings = plan().cases[HOLDINGS].case_id
+    lines = ran.stderr.splitlines()
+    # Each case's place among the cases the session sends, and each attempt's ending, the failed
+    # one's included, by the case's `case_id`.
+    assert [line for line in lines if line.startswith("Case ")] == [
+        f"Case {place} of 5 this session: {case.case_id}."
+        for place, case in enumerate(plan().cases, 1)
+    ]
+    endings = [line for line in lines if line.startswith("Attempt for ")]
+    assert [line.split(" ended ")[0] for line in endings] == [
+        f"Attempt for {case.case_id}" for case in plan().cases
+    ]
+    assert endings[HOLDINGS].startswith(f"Attempt for {holdings} ended failed after ")
+    assert endings[HOLDINGS].endswith(
+        f": {code}; possibly charged: yes; attempt record written: yes."
+    )
+    text = reply.body.decode()
+    rejected = (
+        "Portfolio123 rejected a setting of `holdings-50`: a repeat sends the same request"
+        " again, so change the setting instead, and revise the plan with --revision-reason."
+    )
+    message = error_of(ran)["message"]
+    assert f'Portfolio123\'s message for `holdings-50`: "{text}".' in message
+    assert (rejected in message) is revise
+    assert message.endswith(
+        f"Session 1's report gives each case's attempts: {out / 'sessions/1/report.html'}."
+    )
+    # The log names the case by its `case_id`, and holds none of Portfolio123's message, the
+    # revision's sentence, and the report's path.
+    log = (out / "logs/trialfolio.log").read_text(encoding="utf-8")
+    assert f"{holdings}, failed ({code})" in log
+    assert text not in log
+    assert "holdings-50" not in log
+    assert "Portfolio123 rejected a setting of" not in log
+    assert "report gives each case's attempts" not in log
+
+    # A resume reads Portfolio123's message from the attempt record.
+    resumed = experiments.run(EXAMPLE, out)
+
+    assert resumed.exit_code == 6, resumed.stderr
+    message = error_of(resumed)["message"]
+    assert f'Portfolio123\'s message for `holdings-50`: "{text}".' in message
+    assert (rejected in message) is revise
+    assert message.endswith(
+        f"Session 2's report gives each case's attempts: {out / 'sessions/2/report.html'}."
+    )
+    assert not [line for line in resumed.stderr.splitlines() if line.startswith("Case ")]
+
+
+def test_an_attempt_interrupted_during_its_send_leaves_its_ending_to_the_command(
+    cli: Cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    cli.server.reply("/auth", AUTHENTICATED)
+    with monkeypatch.context() as patch:
+        SocketFaults(patch).interrupt_send(b"POST /screen/backtest")
+        interrupted = cli("run", EXAMPLE, "--out", out, "--approve", plan().plan_hash)
+
+    assert interrupted.exit_code == 130, interrupted.stderr
+    assert f"Case 1 of 5 this session: {plan().cases[0].case_id}." in interrupted.stderr
+    assert "Attempt for " not in interrupted.stderr
+    assert "Error (command.interrupted): " in interrupted.stderr
+
+
+def test_an_attempt_whose_record_isnt_written_leaves_its_ending_to_the_command(
+    cli: Cli, experiments: Builder, faults: FaultyStores
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    # The first case's request gets a 503, so its outcome is unknown, and the write of its
+    # attempt record fails unexpectedly, so the record isn't written, and the session ends.
+    faults.fail_before("attempt.json", RuntimeError())
+
+    ran = experiments.run(EXAMPLE, out, sends=[UNAVAILABLE], store_factory=faults)
+
+    assert ran.exit_code == 5, ran.stderr
+    first = plan().cases[0].case_id
+    assert not list((out / "cases" / first / "attempts").glob("*/attempt.json"))
+    assert f"Case 1 of 5 this session: {first}." in ran.stderr
+    # The command's error follows, so the terminal doesn't show the attempt's ending too.
+    assert "Attempt for " not in ran.stderr
+    assert "Error (provider.outcome_unknown): " in ran.stderr
+
+
+def test_an_attempt_a_storage_failure_ended_leaves_its_ending_to_the_command(
+    cli: Cli, experiments: Builder, faults: FaultyStores
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    # The write of the first case's request fails as on a full disk, so its attempt ends with
+    # `storage.write_failed` before its send, and its attempt record is written.
+    faults.fail_os("request.json")
+
+    ran = experiments.run(EXAMPLE, out, authenticates=[AUTHENTICATED], store_factory=faults)
+
+    assert ran.exit_code == 4, ran.stderr
+    record = only_record(out, 0)
+    assert record.error is not None and record.error.code == "storage.write_failed"
+    assert f"Case 1 of 5 this session: {plan().cases[0].case_id}." in ran.stderr
+    # The session ends there, and the command's error follows, so the terminal doesn't show the
+    # attempt's ending too.
+    assert "Attempt for " not in ran.stderr
+    assert "Error (storage.write_failed): " in ran.stderr
+    assert cli.server.requests() == [AUTH]
+
+
+def test_a_recorded_internal_error_shows_its_ending_and_the_session_goes_on(
+    cli: Cli, experiments: Builder, faults: FaultyStores
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    # The write of the first case's request fails unexpectedly once the store has published it,
+    # so its attempt ends with `internal.unexpected` before its send, and its attempt record is
+    # written. The owner decided on 2026-10-13 that the terminal shows such an ending (D-38).
+    faults.fail_after("request.json", RuntimeError())
+
+    ran = experiments.run(EXAMPLE, out, sends=[returns()] * 4, store_factory=faults)
+
+    assert ran.exit_code == 6, ran.stderr
+    record = only_record(out, 0)
+    assert (record.outcome, record.possibly_charged) == ("failed", False)
+    assert record.error is not None and record.error.code == "internal.unexpected"
+    first, second = (case.case_id for case in plan().cases[:2])
+    lines = ran.stderr.splitlines()
+    # The first case's ending, by its `case_id`, comes before the next case starts.
+    (ending,) = [line for line in lines if line.startswith(f"Attempt for {first} ")]
+    assert ending.startswith(f"Attempt for {first} ended failed after ")
+    assert ending.endswith(
+        ": internal.unexpected; possibly charged: no; attempt record written: yes."
+    )
+    assert lines.index(ending) < lines.index(f"Case 2 of 5 this session: {second}.")
+    # The session goes on: each later case is sent, with the session's token.
+    assert cli.server.requests() == [AUTH, *[SEND] * 4]
+    assert sent(cli) == KEYS[1:]
+    error = error_of(ran)
+    assert error["code"] == "execution.partial"
+    assert "`baseline`, failed (internal.unexpected)" in error["message"]
 
 
 # A failure every later case would get: no later case starts (D-32)
