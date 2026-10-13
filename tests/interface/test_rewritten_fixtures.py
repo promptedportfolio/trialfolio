@@ -3,8 +3,9 @@ refactoring task's base and on its branch (docs/refactoring.md).
 
 Traces to RF-AC04: each committed fixture is written again through the real code, with the fixed
 clock and a fixed sequence of IDs, so the same code writes the same bytes, apart from `logs/`, and
-a difference between the base and the branch is the change's. The comparison fails, rather than
-pass, when it can't read what it compares. RF-T01 wrote the check, and these tests, with it.
+a difference between the base and the branch is the change's. The review and the report read a
+copy of the committed run, and the comparison fails, rather than pass, when it can't read what it
+compares. RF-T01 wrote the check, and these tests, with it.
 """
 
 import os
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.rewritten_fixtures import FIXTURES, differences, main, write
+from tests.support.rewritten_fixtures import FIXTURES, RUN, differences, main, write
 
 _ATTEMPT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 
@@ -55,8 +56,20 @@ def test_each_fixture_is_written_again_with_its_files(
     assert _layout(written / name) == _layout(FIXTURES / fixture)
 
 
+@pytest.mark.parametrize("label", ["demo", "demo-again"])
+def test_the_review_reads_a_copy_of_the_committed_run(written: Path, label: str) -> None:
+    copy = written / "review" / "inputs" / label
+    copied = sorted(path.relative_to(copy) for path in copy.rglob("*") if path.is_file())
+    assert copied
+    for name in copied:
+        assert (copy / name).read_bytes() == (RUN / name).read_bytes(), name
+
+
 def test_the_committed_run_s_report_is_rendered_again(written: Path) -> None:
     assert _layout(written / "report") == {"report.html"}
+    (attempt,) = (RUN / "cases").glob("*/attempts/*")
+    in_the_copy = f"../inputs/runs/demo/{attempt.relative_to(RUN).as_posix()}/"
+    assert in_the_copy in (written / "report" / "report.html").read_text(encoding="utf-8")
 
 
 def test_the_comparison_finds_each_changed_file_but_those_in_logs(
