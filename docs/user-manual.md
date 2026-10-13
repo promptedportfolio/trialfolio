@@ -91,7 +91,7 @@ If the site's build moves from `scripts/check` to the docs workflow ([open quest
 
 ## Tasks
 
-The owner assigns these by ID. They aren't next items: [doing the next item](../AGENTS.md#doing-the-next-item) goes through the release files only. Branches follow the same form, such as `docs/um-t01-manual-site`.
+The owner assigns these by ID. They aren't next items: [doing the next item](../AGENTS.md#doing-the-next-item) goes through the release files and the readability refactor's tasks only. Branches follow the same form, such as `docs/um-t01-manual-site`.
 
 | ID | Task | Depends on |
 |---|---|---|
