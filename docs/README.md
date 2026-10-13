@@ -39,6 +39,7 @@ These are the specifications for Trial Folio. The implementation tasks of releas
 | [adrs/0009-publish-a-user-manual-on-github-pages.md](adrs/0009-publish-a-user-manual-on-github-pages.md) | The user manual: Diátaxis's four sections in `manual/`, with `docs/` unchanged, built with Zensical and published on GitHub Pages |
 | [graphical-prototype.md](graphical-prototype.md) | The read-only graphical prototype, outside any release ([D-29](spec.md#decisions)): its scope, criteria, and tasks (GP), and what each build found |
 | [user-manual.md](user-manual.md) | The user manual, outside any release ([D-35](spec.md#decisions)): its layout, rules, tooling and hosting, criteria, and tasks (UM). The manual's pages are in `manual/`, and own no requirement. |
+| [refactoring.md](refactoring.md) | The readability refactor of `src/trialfolio`, outside any release ([D-39](spec.md#decisions)): what it doesn't change, its constraints, findings, criteria, and tasks (RF) |
 | [written-permission-template.md](written-permission-template.md) | The form a written permission grant takes |
 | [user-guide.md](user-guide.md) | How to set up and use Trial Folio, workflow by workflow, with what to check at each step. It owns no requirement: where it disagrees with an owning document, the guide is fixed. |
 | [ai-development.md](ai-development.md) | How AI is used to build Trial Folio, in plain language |
