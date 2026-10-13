@@ -4,6 +4,10 @@ This page lists what each command writes into its output directory, the one `--o
 
 A command writes only into a new or empty directory, and never overwrites a file. An experiment's directory is the exception: it grows with each run of its configuration into it, and each run adds new files.
 
+[Output file fields](output-fields.md) lists the fields of each JSON file below, such as `manifest.json` and `plan.json`.
+
+**The tables' columns.** The tables of each CSV file's columns are generated from its row's schema. The schema describes a row as Trial Folio reads it back: a cell that may be empty is null, and a list is one cell, its items separated by semicolons.
+
 ## A run's directory
 
 `trialfolio run` writes one from a screen configuration, and `trialfolio demo` writes one from invented values.
@@ -34,26 +38,73 @@ A command writes only into a new or empty directory, and never overwrites a file
 ### `normalized/metrics.csv`
 
 - **Rows:** 20. The coverage first, `coverage_start`, `coverage_end`, and `coverage_periods`; then the strategy's `total_return`, `annualized_return`, `max_drawdown`, `standard_deviation`, `sharpe_ratio`, `sortino_ratio`, `correlation`, `r_squared`, `beta`, `alpha`, and `risk_samples`; then the benchmark's `total_return`, `annualized_return`, `max_drawdown`, `standard_deviation`, `sharpe_ratio`, and `sortino_ratio`.
-- **Columns:** `label`, `subject`, `metric_id`, `source_label`, `value`, `unit`, `source_decimals`, `availability`, `unavailable_reason`, `origin`, `provenance`, `period_start`, `period_end`, `benchmark`, `source_artifact`, and `source_location`.
 - **`label`** is the run's `case_id`.
 - **A value missing from the response** is `unavailable`, with an empty value and a reason code in `unavailable_reason`, never zero.
 - **The report's values** match this table's.
+
+**Columns,** in order:
+
+<!-- generated: outputs-metrics-csv -->
+
+| Column | Value | Description |
+|---|---|---|
+| `label` | Lowercase letters, digits, `-`, and `_`, starting with a letter or a digit, at most 64 characters | |
+| `subject` | `strategy` or `benchmark` | |
+| `metric_id` | Lowercase letters, digits, and `_`, starting with a letter | |
+| `source_label` | Text, not all whitespace; or empty | |
+| `value` | Text, not all whitespace; or empty | A decimal with exactly its source's digits, or a date. Null when unavailable. |
+| `unit` | `percent`, `ratio`, `count`, `days`, `date`, or `currency:` and three capital letters | |
+| `source_decimals` | An integer, 0 or more; or empty | The digits after the decimal point, as reported. Null for dates, counts, and unavailable values. |
+| `availability` | `available` or `unavailable` | |
+| `unavailable_reason` | `absent_from_layout`, `blank_in_source`, `unparseable_in_source`, `not_applicable`, `not_supported`, or `input_unavailable`; or empty | |
+| `origin` | `reported` or `calculated` | |
+| `provenance` | `verified`, `user_supplied`, `inferred`, or `unknown` | |
+| `period_start` | A date, `YYYY-MM-DD`; or empty | |
+| `period_end` | A date, `YYYY-MM-DD`; or empty | |
+| `benchmark` | Text, not all whitespace; or empty | |
+| `source_artifact` | `sha256:` and 64 lowercase hexadecimal digits | |
+| `source_location` | Text, not all whitespace; or empty | The value's JSON path in the response. Null for calculated values. |
+
+<!-- end generated: outputs-metrics-csv -->
 
 [`metrics.csv`](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#metricscsv), in the specification, gives each column's meaning, and [metrics and missing values](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#metrics-and-missing-values) each unit and reason code.
 
 ### `normalized/settings.csv`
 
 - **Rows:** 23, one for each setting, in this order: `universe`, `screen_type`, `rules`, `ranking`, `max_holdings`, `position_method`, `benchmark`, `currency`, `start_date`, `end_date`, `rebalance_weeks`, `transaction_price`, `slippage_percent`, `commission`, `pit_method`, `data_vendor`, `precision`, `risk_stats_period`, `max_pos_pct`, `rank_tolerance`, `carry_cost`, `long_weight`, and `short_weight`.
-- **Columns:** `label`, `setting`, `category`, `critical`, `value`, `unit`, `interpretation`, `provenance`, `inference_rule`, `original_key`, `original_value`, `source_artifact`, and `flags`.
 - **`commission`** is `not_modeled`: the API documents no commission setting, and slippage is the only cost sent.
 - **`data_vendor` and `risk_stats_period`** are flagged `inferred_default`.
 - **Five parameters Trial Folio doesn't send,** `max_pos_pct`, `rank_tolerance`, `carry_cost`, `long_weight`, and `short_weight`, are `not_sent`, with `unknown` provenance.
 - **The universe, and a ranking by name or ID,** are flagged `not_snapshotted`, and the manifest's reproducibility is `incomplete`.
 - **`start_date` and `end_date`** are flagged `coverage_mismatch` when the response covers different dates than you asked for.
 
+**Columns,** in order:
+
+<!-- generated: outputs-settings-csv -->
+
+| Column | Value | Description |
+|---|---|---|
+| `label` | Lowercase letters, digits, `-`, and `_`, starting with a letter or a digit, at most 64 characters | |
+| `setting` | Lowercase letters, digits, and `_`, starting with a letter | |
+| `category` | `dates`, `benchmark`, `currency`, `costs`, `execution`, `universe`, `data_source`, `strategy`, or `other` | |
+| `critical` | `true` or `false` | |
+| `value` | Text, not all whitespace | The normalized value, as text: lists and mappings as JSON, and `not_sent` or `not_modeled` when the request gives none. Never empty. |
+| `unit` | `count`, `weeks`, or `percent`; or empty | |
+| `interpretation` | `interpreted` or `not_interpreted` | |
+| `provenance` | `verified`, `user_supplied`, `inferred`, or `unknown` | |
+| `inference_rule` | Text, not all whitespace; or empty | |
+| `original_key` | Text, not all whitespace; or empty | |
+| `original_value` | Text, not empty; or empty | The value exactly as written in the configuration; null when absent. |
+| `source_artifact` | `sha256:` and 64 lowercase hexadecimal digits | |
+| `flags` | Items separated by semicolons, each `critical_unexplained_mismatch`, `critical_unknown`, `intended_change_not_observed`, `inferred_default`, `time_dependent_default`, `unsupported_value`, `not_snapshotted`, `coverage_mismatch`, or `identical_source`; empty when there are none | |
+
+<!-- end generated: outputs-settings-csv -->
+
 [`settings.csv`](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#settingscsv) and the [screen settings](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#screen-settings), in the specification, give each column and row. [The flag codes](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#flag-codes) explain each flag.
 
 ### `manifest.json`
+
+[Output file fields](output-fields.md#a-runs-manifestjson) lists its fields.
 
 - **It's written last.** A run without it is incomplete, as after an interrupt, a storage failure, or an internal error. A run whose request failed at Portfolio123 still has it, and it records the failure.
 - **It records** the command and its options, the outcome and the error, the plan hash and how the plan was approved, every file with its hash, the reproducibility, and the counts.
@@ -111,6 +162,33 @@ It doesn't copy a run's request, its response, or its report.
 - **A declared change whose values are the same** is `same`, flagged `intended_change_not_observed`.
 - **Metric rows** are classified `differenced`, `not_comparable`, or `unavailable`.
 - **Two runs with byte-identical saved responses,** such as two demo runs: the review warns that they share one response, and the metric rows of each result but the baseline are flagged `identical_source`.
+
+**Columns,** in order:
+
+<!-- generated: outputs-differences-csv -->
+
+| Column | Value | Description |
+|---|---|---|
+| `label` | Lowercase letters, digits, `-`, and `_`, starting with a letter or a digit, at most 64 characters, not a name Windows reserves: `con`, `prn`, `aux`, `nul`, `com1` to `com9`, or `lpt1` to `lpt9` | |
+| `baseline_label` | Lowercase letters, digits, `-`, and `_`, starting with a letter or a digit, at most 64 characters, not a name Windows reserves: `con`, `prn`, `aux`, `nul`, `com1` to `com9`, or `lpt1` to `lpt9` | |
+| `kind` | `setting` or `metric` | |
+| `name` | Lowercase letters, digits, and `_`, starting with a letter | The setting, or the `metric_id`. |
+| `subject` | `strategy` or `benchmark`; or empty | For metrics. Null for settings. |
+| `category` | `dates`, `benchmark`, `currency`, `costs`, `execution`, `universe`, `data_source`, `strategy`, or `other`; or empty | For settings, as in `settings.csv`. Null for metrics. |
+| `critical` | `true` or `false`; or empty | For settings, as in `settings.csv`. Null for metrics. |
+| `baseline_value` | Text, not all whitespace; or empty | |
+| `value` | Text, not all whitespace; or empty | The two values compared, as their tables write them. Null when unavailable. |
+| `unit` | `percent`, `ratio`, `count`, `days`, `date`, or `currency:` and three capital letters; `count`, `weeks`, or `percent`; or empty | |
+| `classification` | `same`, `intended_change`, `unexplained_mismatch`, or `unknown`; or `differenced`, `not_comparable`, or `unavailable` | |
+| `difference` | Text, not all whitespace; or empty | For `differenced` metrics, `value - baseline_value`, with exactly `difference_decimals` digits after the decimal point, and never a signed zero. Null otherwise. |
+| `difference_unit` | `pp`, `ratio`, `count`, `days`, or `currency:` and three capital letters; or empty | |
+| `difference_decimals` | An integer, 0 or more; or empty | |
+| `reason` | `different_benchmark`, `different_period`, `unknown_period`, `different_unit`, or `input_unavailable`; or empty | For `not_comparable` and `unavailable` metrics. Null otherwise. |
+| `declared_reason` | Text, 1 to 500 characters, not all whitespace; or empty | For a setting declared as an intended change, its reason, whatever the classification. Only a declarable setting has one. |
+| `flagged` | `true` or `false` | True exactly when a flag in `FLAGGING` applies. |
+| `flags` | Items separated by semicolons, each `critical_unexplained_mismatch`, `critical_unknown`, `intended_change_not_observed`, `inferred_default`, `time_dependent_default`, `unsupported_value`, `not_snapshotted`, `coverage_mismatch`, or `identical_source`; empty when there are none | |
+
+<!-- end generated: outputs-differences-csv -->
 
 [`differences.csv`](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#differencescsv), in the specification, gives each column, and [differences between screen runs](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#differences-between-screen-runs) when a metric is differenced.
 

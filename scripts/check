@@ -53,6 +53,10 @@ fi
 # site/ is the build's output, which Git ignores. It's removed first, so a page since removed from
 # manual/ can't linger there and pass.
 step "Manual"
+# First, the reference pages' generated tables match their sources: the CLI's parser, the
+# committed schemas, and contracts.md's errors, which must agree with EXIT_CODES (UM-AC08). It
+# writes nothing. `uv run python scripts/manual_reference.py` regenerates them.
+uv run python scripts/manual_reference.py --check
 rm -rf site
 uv run zensical build --clean
 uv run python scripts/check_manual.py site
