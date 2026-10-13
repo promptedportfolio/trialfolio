@@ -11,9 +11,10 @@ experiment attempts (`authenticated_by`), running an experiment (the cases that 
 (`outcome`), and logging (which attempt endings the terminal shows, D-38). Each test writes
 `example.yaml`'s experiment with the experiment builder, through the CLI's entry function in the
 test process, over the fake server, which answers a case's request with a 400, a 404, a 503, a
-403, or a 402, or Trial Folio's authentication call with a 401 or a 503; one test also fails the
-write of an attempt record with the storage faults. Each case's request is told apart by its
-body, which is the case's request as the plan gives it.
+403, or a 402, or Trial Folio's authentication call with a 401 or a 503; three tests also fail a
+write with the storage faults: an attempt record's, and a case's request's, as on a full disk or
+unexpectedly. Each case's request is told apart by its body, which is the case's request as the
+plan gives it.
 """
 
 import functools
@@ -286,6 +287,61 @@ def test_an_attempt_whose_record_isnt_written_leaves_its_ending_to_the_command(
     # The command's error follows, so the terminal doesn't show the attempt's ending too.
     assert "Attempt for " not in ran.stderr
     assert "Error (provider.outcome_unknown): " in ran.stderr
+
+
+def test_an_attempt_a_storage_failure_ended_leaves_its_ending_to_the_command(
+    cli: Cli, experiments: Builder, faults: FaultyStores
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    # The write of the first case's request fails as on a full disk, so its attempt ends with
+    # `storage.write_failed` before its send, and its attempt record is written.
+    faults.fail_os("request.json")
+
+    ran = experiments.run(EXAMPLE, out, authenticates=[AUTHENTICATED], store_factory=faults)
+
+    assert ran.exit_code == 4, ran.stderr
+    record = only_record(out, 0)
+    assert record.error is not None and record.error.code == "storage.write_failed"
+    assert f"Case 1 of 5 this session: {plan().cases[0].case_id}." in ran.stderr
+    # The session ends there, and the command's error follows, so the terminal doesn't show the
+    # attempt's ending too.
+    assert "Attempt for " not in ran.stderr
+    assert "Error (storage.write_failed): " in ran.stderr
+    assert cli.server.requests() == [AUTH]
+
+
+def test_a_recorded_internal_error_shows_its_ending_and_the_session_goes_on(
+    cli: Cli, experiments: Builder, faults: FaultyStores
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    # The write of the first case's request fails unexpectedly once the store has published it,
+    # so its attempt ends with `internal.unexpected` before its send, and its attempt record is
+    # written. The owner decided on 2026-10-13 that the terminal shows such an ending (D-38).
+    faults.fail_after("request.json", RuntimeError())
+
+    ran = experiments.run(EXAMPLE, out, sends=[returns()] * 4, store_factory=faults)
+
+    assert ran.exit_code == 6, ran.stderr
+    record = only_record(out, 0)
+    assert (record.outcome, record.possibly_charged) == ("failed", False)
+    assert record.error is not None and record.error.code == "internal.unexpected"
+    first, second = (case.case_id for case in plan().cases[:2])
+    lines = ran.stderr.splitlines()
+    # The first case's ending, by its `case_id`, comes before the next case starts.
+    (ending,) = [line for line in lines if line.startswith(f"Attempt for {first} ")]
+    assert ending.startswith(f"Attempt for {first} ended failed after ")
+    assert ending.endswith(
+        ": internal.unexpected; possibly charged: no; attempt record written: yes."
+    )
+    assert lines.index(ending) < lines.index(f"Case 2 of 5 this session: {second}.")
+    # The session goes on: each later case is sent, with the session's token.
+    assert cli.server.requests() == [AUTH, *[SEND] * 4]
+    assert sent(cli) == KEYS[1:]
+    error = error_of(ran)
+    assert error["code"] == "execution.partial"
+    assert "`baseline`, failed (internal.unexpected)" in error["message"]
 
 
 # A failure every later case would get: no later case starts (D-32)

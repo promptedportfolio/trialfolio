@@ -413,11 +413,17 @@ class _AttemptFiles:
             "yes" if recorded else "no",
             extra={
                 **self._log_fields("attempt.completed"),
-                # An experiment's session goes on after a provider error, or ends with
-                # `execution.partial`, so the terminal shows that ending; the command shows any
-                # other error itself.
+                # An experiment's session goes on after an attempt whose record was written, unless
+                # an interrupt or a storage failure ended it, as `_run_cases` does, or ends with
+                # `execution.partial`, so the terminal shows that ending, an internal error's
+                # included (D-38). The command shows the error of any other ending itself, as it
+                # does a screen run's.
                 "terminal": error is None
-                or (self._case_id is not None and recorded and error.code.startswith("provider.")),
+                or (
+                    self._case_id is not None
+                    and recorded
+                    and error.code not in ("command.interrupted", "storage.write_failed")
+                ),
             },
         )
         return written, recorded, error
