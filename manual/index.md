@@ -21,7 +21,7 @@ The demo runs without one. `trialfolio demo` writes a complete example run from 
 
 This manual describes Trial Folio as it is on the `main` branch of [its repository](https://github.com/promptedportfolio/trialfolio), until the first release is distributed. Until then, you run Trial Folio from a copy of the repository, as the [first tutorial](tutorials/first-backtest.md) shows.
 
-The latest tagged version is `v0.2.1`. A tagged version can lack behavior this manual describes. If you run a tagged copy, follow the user guide at its tag instead, such as [the user guide at `v0.2.1`](https://github.com/promptedportfolio/trialfolio/blob/v0.2.1/docs/user-guide.md).
+The latest tagged version is `v0.3.0`. A tagged version can lack behavior this manual describes. If you run a tagged copy, follow the user guide at its tag instead, such as [the user guide at `v0.3.0`](https://github.com/promptedportfolio/trialfolio/blob/v0.3.0/docs/user-guide.md).
 
 The manual describes Trial Folio's behavior; it doesn't define it. The [specifications](https://github.com/promptedportfolio/trialfolio/blob/main/docs/README.md) define it. Where the manual and a specification disagree, the specification wins, and the manual is the one to fix.
 
