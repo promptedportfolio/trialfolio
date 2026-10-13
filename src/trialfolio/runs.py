@@ -49,7 +49,7 @@ from trialfolio.contracts.manifest import ArtifactRole, ManifestArtifact, RunMan
 from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, SettingsRow
 from trialfolio.display import visible
-from trialfolio.errors import ErrorCode, TrialFolioError
+from trialfolio.errors import ErrorCode, TrialFolioError, reason_of
 from trialfolio.normalization import METRICS, METRICS_PATH, SETTINGS_PATH
 from trialfolio.planning import plan_hash
 from trialfolio.storage import ArtifactStore
@@ -184,7 +184,7 @@ def _read_manifest(store: ArtifactStore) -> bytes:
     except NotADirectoryError:
         raise _not_a_run("it isn't a directory.") from None
     except OSError as error:
-        raise _not_a_run(f"its manifest.json can't be read ({_reason(error)}).") from None
+        raise _not_a_run(f"its manifest.json can't be read ({reason_of(error)}).") from None
 
 
 def _manifest(content: bytes) -> RunManifest:
@@ -203,7 +203,7 @@ def _listed(store: ArtifactStore, artifact: ManifestArtifact) -> bytes:
         raise _not_a_run(f"its manifest lists {_named(artifact.path)}, which is missing.") from None
     except OSError as error:
         raise _not_a_run(
-            f"{_named(artifact.path)}, which its manifest lists, can't be read ({_reason(error)})."
+            f"{_named(artifact.path)}, which its manifest lists, can't be read ({reason_of(error)})."
         ) from None
     if len(content) != artifact.size or "sha256:" + sha256_hex(content) != artifact.artifact_id:
         raise _not_a_run(
@@ -398,10 +398,6 @@ def _validated[M: BaseModel](model: type[M], content: bytes, path: str, what: st
 
 def _named(path: str) -> str:
     return f"`{visible(path)}`"
-
-
-def _reason(error: OSError) -> str:
-    return error.strerror or type(error).__name__
 
 
 class _Refused(Exception):

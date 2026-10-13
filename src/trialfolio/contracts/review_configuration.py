@@ -20,14 +20,14 @@ from pydantic import (
 
 from trialfolio.contracts.common import (
     ContractModel,
+    NonEmptyOrderedList,
     NonEmptyText,
+    OptionalKey,
     Purpose,
     ReviewLabel,
     ShortText,
     Title,
-    optional_key,
     ordered,
-    present,
 )
 from trialfolio.contracts.screen_settings import DECLARABLE_SETTINGS
 
@@ -62,9 +62,7 @@ class IntendedChange(ContractModel):
     """Why the setting was changed, shown in the report: 1 to 500 characters."""
 
 
-IntendedChanges = Annotated[
-    tuple[IntendedChange, ...], Field(min_length=1), Strict(False), BeforeValidator(ordered)
-]
+IntendedChanges = NonEmptyOrderedList[IntendedChange]
 """At least one declared change, in order. A result that declares none leaves the key out."""
 
 
@@ -75,17 +73,9 @@ class ReviewResult(ContractModel):
     run: NonEmptyText
     """The run's directory, as `trialfolio run` wrote it. A relative path is relative to the
     configuration file."""
-    description: Annotated[
-        ShortText | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
+    description: OptionalKey[ShortText] = None
     """Up to 500 characters, shown in the report."""
-    intended_changes: Annotated[
-        IntendedChanges | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
+    intended_changes: OptionalKey[IntendedChanges] = None
     """The settings this result changes on purpose. Never on the baseline."""
 
     @field_validator("intended_changes")
@@ -111,13 +101,11 @@ class ReviewConfiguration(ContractModel):
     kind: Literal["review"]
     schema_version: ReviewSchemaVersion
     title: Title
-    purpose: Annotated[
-        Purpose | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
+    purpose: OptionalKey[Purpose] = None
     baseline: ReviewLabel
     """The label of the result the others are compared with."""
+    # Not `OrderedList`: a minimum given around it is checked as a value's, not a list's, so this
+    # one comes before the validators, as `NonEmptyOrderedList`'s does.
     results: Annotated[
         tuple[ReviewResult, ...], Field(min_length=2), Strict(False), BeforeValidator(ordered)
     ]

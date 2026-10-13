@@ -32,6 +32,7 @@ from trialfolio.contracts.review_configuration import ReviewConfiguration, Revie
 from trialfolio.contracts.review_manifest import ReviewArtifactRole, ReviewedResult
 from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError
+from trialfolio.paths import existing_path
 from trialfolio.runs import MANIFEST_PATH, CheckedRun, RunName, SavedRun, check_run, not_a_run
 from trialfolio.storage import ArtifactStore, LocalArtifactStore
 
@@ -89,21 +90,9 @@ def local_run_stores(configuration_path: str | os.PathLike[str]) -> RunStores:
     directory = Path(configuration_path).parent
 
     def store(run: str) -> ArtifactStore | None:
-        path = directory / run
-        try:
-            # Whether anything exists there, as opening the path finds it. realpath alone can't
-            # tell: Python 3.12's removes a `..` after a file, which the file system refuses.
-            os.stat(path)
-            # The path the file system resolves, which then reads the run. A `..` after a
-            # symbolic link leads to the parent of the link's target, as opening the path does,
-            # not where the store's abspath would lead, by removing it with the segment before
-            # it.
-            resolved = os.path.realpath(path, strict=True)
-        except (OSError, ValueError):
-            # Nothing exists there: a link leads to nothing, a part can't be read or is a file,
-            # or the path holds a NUL, which no path can.
-            return None
-        return LocalArtifactStore(resolved)
+        # The path the file system resolves, which then reads the run.
+        resolved = existing_path(directory / run)
+        return None if resolved is None else LocalArtifactStore(resolved)
 
     return store
 

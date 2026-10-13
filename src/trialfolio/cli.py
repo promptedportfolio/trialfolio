@@ -87,9 +87,10 @@ from trialfolio.contracts.summary import (
     SummaryIdsV1_2,
 )
 from trialfolio.display import visible
-from trialfolio.errors import EXIT_CODES, TrialFolioError
+from trialfolio.errors import EXIT_CODES, TrialFolioError, interrupted, reason_of
 from trialfolio.logs import LOGS_DIRECTORY, CommandLogs
 from trialfolio.notices import CONCISE_NOTICE, FULL_NOTICE, LICENSE_ID, LICENSE_NAME, NOTICE_VERSION
+from trialfolio.paths import existing_path
 from trialfolio.planning import build_plan, installed_versions
 from trialfolio.starter import CONFIGURATION, starter_files
 from trialfolio.storage import LOCK_PATH, ArtifactStore, LocalArtifactStore
@@ -447,9 +448,7 @@ class _Invocation:
             where = (
                 "Its log couldn't be written." if path is None else f"Its log is {_shown(path)}."
             )
-            error = TrialFolioError(
-                error.code, f"{error.message} {where}", f"{error.log_message} {where}"
-            )
+            error = error.with_detail(where)
         exit_code = 0 if error is None else EXIT_CODES[error.code]
         detail = "no error" if error is None else f"{error.code}: {error.log_message}"
         _logger.log(
@@ -754,8 +753,9 @@ class _Invocation:
     def _interrupted(self) -> TrialFolioError:
         """`command.interrupted` for an interrupt the command didn't record itself: before the
         claim, or a second one while the attempt ended."""
-        detail = self._execution_detail() or "Nothing was sent, and no output was created."
-        return TrialFolioError("command.interrupted", f"Trial Folio was interrupted. {detail}")
+        return interrupted(
+            self._execution_detail() or "Nothing was sent, and no output was created."
+        )
 
     def _unexpected(self, failure: Exception) -> TrialFolioError:
         """`internal.unexpected` for a defect. Its log gives the exception's type and frames,
@@ -838,14 +838,8 @@ def _init(invocation: _Invocation) -> TrialFolioError | None:
             " trialfolio init there again."
         )
         if isinstance(failure, KeyboardInterrupt):
-            return TrialFolioError(
-                "command.interrupted", f"Trial Folio was interrupted. Nothing was sent. {left}"
-            )
-        return TrialFolioError(
-            failure.code,
-            f"{failure.message} Nothing was sent. {left}",
-            f"{failure.log_message} Nothing was sent. {left}",
-        )
+            return interrupted(f"Nothing was sent. {left}")
+        return failure.with_detail(f"Nothing was sent. {left}")
     where = "the current directory" if directory == "." else directory
     invocation.result = [
         f"Set up a workspace in {where}: {CONFIGURATION}, README.md, and .gitignore.",
@@ -1177,7 +1171,8 @@ def _demo(invocation: _Invocation) -> TrialFolioError | None:
 def _report(invocation: _Invocation) -> TrialFolioError | None:
     args = invocation.args
     _require_acknowledgment(invocation)
-    run_dir = _resolved(args.run_dir)
+    # Where the file system resolves it, as a review finds its runs.
+    run_dir = existing_path(args.run_dir)
     if run_dir is None:
         raise TrialFolioError(
             "input.not_found",
@@ -1300,7 +1295,7 @@ def _read_input(path: str) -> bytes:
     try:
         return Path(path).read_bytes()
     except OSError as error:
-        reason = error.strerror or type(error).__name__
+        reason = reason_of(error)
         raise TrialFolioError(
             "input.not_found",
             f"Couldn't read the configuration file {_shown(path)}: {reason}. Check the path."
@@ -1407,21 +1402,6 @@ def _cant_read_runs(failure: ImportError) -> TrialFolioError:
     )
 
 
-def _resolved(run_dir: str) -> str | None:
-    """The run directory at the one path the file system resolves, as a review finds its runs, or
-    None when nothing exists there. A `..` after a symbolic link leads to the parent of the
-    link's target, as opening the path does, not where the store's `abspath` would lead, by
-    removing it with the segment before it."""
-    try:
-        # Whether anything exists there, as opening the path finds it. realpath alone can't tell:
-        # Python 3.12's removes a `..` after a file, which the file system refuses.
-        os.stat(run_dir)
-        return os.path.realpath(run_dir, strict=True)
-    except (OSError, ValueError):
-        # A link leads to nothing, a part can't be read or is a file, or the path holds a NUL.
-        return None
-
-
 def _run_path(run_dir: str, out: str) -> str | None:
     """The run's directory relative to the report's, with `/` separators, or None when there's
     no relative path, as between two Windows drives. Both are where the file system puts them:
@@ -1506,7 +1486,7 @@ def _record_acknowledgment(
     try:
         acknowledgment.write_record(path, method, invocation.clock())
     except OSError as error:
-        reason = error.strerror or type(error).__name__
+        reason = reason_of(error)
         if required:
             raise TrialFolioError(
                 "storage.write_failed",

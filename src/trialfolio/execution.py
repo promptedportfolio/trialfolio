@@ -60,7 +60,7 @@ from trialfolio.contracts.manifest import (
 )
 from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION
-from trialfolio.errors import TrialFolioError
+from trialfolio.errors import TrialFolioError, interrupted
 from trialfolio.normalization import (
     LAYOUT,
     LAYOUT_VERSION,
@@ -226,25 +226,11 @@ class Execution:
             self._files.append(("report", report))
             self._write_manifest(self._build_manifest(result.record, error, created_at))
         except KeyboardInterrupt:
-            return prevailing(
-                TrialFolioError(
-                    "command.interrupted",
-                    f"Trial Folio was interrupted after the attempt ended. {self.ending_detail()}",
-                ),
-                error,
-            )
+            return prevailing(interrupted(self.ending_detail(), after="the attempt ended"), error)
         except TrialFolioError as failure:
             if failure.code != "storage.write_failed":
                 raise
-            ending = self.ending_detail()
-            return prevailing(
-                TrialFolioError(
-                    failure.code,
-                    f"{failure.message} {ending}",
-                    f"{failure.log_message} {ending}",
-                ),
-                error,
-            )
+            return prevailing(failure.with_detail(self.ending_detail()), error)
         _logger.log(
             logging.INFO if error is None else logging.ERROR,
             "Run ended %s: %s.",

@@ -26,7 +26,8 @@ A store serves one output directory, its root, and takes paths relative to it.
   Windows, `close` unlocks the byte before closing the file, as Microsoft's documentation asks.
 - **Discarding.** A write can fail after it has published its file. `discard` removes that file,
   when it holds exactly the write's bytes, for a caller whose file says something by being
-  there, such as the manifest.
+  there, such as the manifest. `published` reads it back instead, for a caller that lists a file
+  the store published whole.
 - **Names in logs.** The store logs each file it writes by its path, and names it in its errors'
   logged messages, unless the caller gives another name for logs, because the path holds a
   configuration value: a review's copies are under `inputs/<label>/` (release 0.2.0, R02-T08).
@@ -76,7 +77,7 @@ from types import FrameType, TracebackType
 from typing import Final, NoReturn, Protocol, Self
 
 from trialfolio.contracts.common import valid_relative_path
-from trialfolio.errors import TrialFolioError
+from trialfolio.errors import TrialFolioError, reason_of
 
 if sys.platform == "win32":
     import msvcrt
@@ -146,6 +147,13 @@ class StoredFile:
     """`sha256:` and the hex SHA-256 of the file's bytes."""
     size: int
     """In bytes."""
+
+    @classmethod
+    def of(cls, path: str, data: bytes) -> Self:
+        """The file at `path` that holds `data`."""
+        return cls(
+            path=path, artifact_id="sha256:" + hashlib.sha256(data).hexdigest(), size=len(data)
+        )
 
 
 class ArtifactStore(Protocol):
@@ -255,6 +263,18 @@ class ArtifactStore(Protocol):
         ...
 
 
+def published(store: ArtifactStore, path: str, data: bytes) -> StoredFile | None:
+    """The file `path`, if a write of `data` that failed published it whole, as the store can
+    before a later step fails or an interrupt stops it; None if it holds other bytes, or can't be
+    read, as when it was never published."""
+    try:
+        if store.read(path) != data:
+            return None
+    except OSError:
+        return None
+    return StoredFile.of(path, data)
+
+
 class LocalArtifactStore:
     """An `ArtifactStore` for a directory on a local file system.
 
@@ -299,7 +319,7 @@ class LocalArtifactStore:
         except OSError as error:
             raise TrialFolioError(
                 "storage.write_failed",
-                f"Couldn't read the output directory: {_reason(error)}. Check its permissions.",
+                f"Couldn't read the output directory: {reason_of(error)}. Check its permissions.",
             ) from error
         if occupied:
             _not_empty("The output directory isn't empty.")
@@ -324,13 +344,13 @@ class LocalArtifactStore:
             if isinstance(error, OSError):
                 raise TrialFolioError(
                     "storage.write_failed",
-                    f"Couldn't claim the output directory with {path}: {_reason(error)}. Check"
+                    f"Couldn't claim the output directory with {path}: {reason_of(error)}. Check"
                     " its free space and permissions.",
                 ) from error
             raise
         self._lock = claim.lock
         self._claimed = True
-        return _stored(path, data)
+        return StoredFile.of(path, data)
 
     def lock(self, path: str) -> None:
         if "/" in valid_relative_path(path):
@@ -346,7 +366,7 @@ class LocalArtifactStore:
         except OSError as error:
             raise TrialFolioError(
                 "storage.write_failed",
-                f"Couldn't open the experiment lock, {path}: {_reason(error)}. Check the output"
+                f"Couldn't open the experiment lock, {path}: {reason_of(error)}. Check the output"
                 " directory's permissions.",
             ) from error
         held = False
@@ -385,7 +405,7 @@ class LocalArtifactStore:
             temporary = None
             self._sync_new_entries(final)
         except OSError as error:
-            reason = _reason(error)
+            reason = reason_of(error)
 
             def problem(name: str) -> str:
                 return (
@@ -397,7 +417,7 @@ class LocalArtifactStore:
         finally:
             if temporary is not None:
                 _remove(temporary)
-        stored = _stored(path, data)
+        stored = StoredFile.of(path, data)
         _logger.debug(
             "Wrote %s (%s).",
             logged,
@@ -422,7 +442,7 @@ class LocalArtifactStore:
         except OSError as error:
             raise TrialFolioError(
                 "storage.write_failed",
-                f"Couldn't remove {path}, which a failed write may have left: {_reason(error)}.",
+                f"Couldn't remove {path}, which a failed write may have left: {reason_of(error)}.",
             ) from error
         try:
             self._sync_directories([final.parent])
@@ -665,7 +685,7 @@ def _publish(temporary: Path, final: Path, path: str, logged: str) -> None:
     except OSError as error:
         if sys.platform == "win32" or error.errno not in _NO_HARD_LINKS:
             raise
-        reason = _reason(error)
+        reason = reason_of(error)
 
         def no_links(name: str) -> str:
             return (
@@ -702,7 +722,7 @@ def _take_lock(descriptor: int, name: str) -> None:
         raise TrialFolioError(
             "storage.write_failed",
             f"Couldn't take the experiment lock, {name}: the output directory's file system"
-            f" refused it ({_reason(error)}). Trial Folio locks an experiment's directory so"
+            f" refused it ({reason_of(error)}). Trial Folio locks an experiment's directory so"
             " that only one process runs it at a time. Choose an output directory on another"
             " file system. Nothing was sent.",
         ) from error
@@ -766,17 +786,6 @@ def _remove(path: Path) -> None:
         os.unlink(path)
     except OSError:
         pass  # Already gone, or the failure being reported matters more.
-
-
-def _stored(path: str, data: bytes) -> StoredFile:
-    return StoredFile(
-        path=path, artifact_id="sha256:" + hashlib.sha256(data).hexdigest(), size=len(data)
-    )
-
-
-def _reason(error: OSError) -> str:
-    # strerror never includes the path, which the error's text would.
-    return error.strerror or type(error).__name__
 
 
 def _not_empty(problem: str) -> NoReturn:

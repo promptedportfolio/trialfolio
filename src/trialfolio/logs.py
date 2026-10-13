@@ -27,14 +27,14 @@ an exception's message or a traceback's local variables. Log size is bounded by 
 import json
 import logging
 import logging.handlers
-import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Final, Self, TextIO
-from unicodedata import normalize
 
+from trialfolio.errors import reason_of
+from trialfolio.paths import is_within
 from trialfolio.userdirs import log_directory
 
 LEVEL_VARIABLE: Final = "TRIALFOLIO_LOG_LEVEL"
@@ -189,7 +189,7 @@ class CommandLogs:
         file."""
         if self._sink.file is not None or self._declined:
             return self.path
-        if self._workspace is not None and _within(directory, self._workspace):
+        if self._workspace is not None and is_within(directory, self._workspace):
             self._logger.warning(
                 "The log directory is in the workspace, which holds only the starter files, so"
                 " this command writes no log.",
@@ -207,7 +207,7 @@ class CommandLogs:
             self._logger.warning(
                 "Couldn't open a log file in %s (%s), so this command writes no log.",
                 directory,
-                error.strerror or type(error).__name__,
+                reason_of(error),
                 extra={"event": "cli.log.unavailable"},
             )
             return None
@@ -223,55 +223,3 @@ class CommandLogs:
         """Attaches to the per-user log directory: for a command without an output directory,
         and for an internal error before a command claimed its own."""
         return self.attach(log_directory(self._environ))
-
-
-def _within(path: Path, directory: Path) -> bool:
-    """Whether `path` is `directory` or in it, where the file system puts each: `directory` as
-    the output directory's claim reads a path, with `..` resolved as written, and `path` as
-    creating it does, once symbolic links are resolved.
-
-    The parts of each that exist are compared as the file system identifies them, so another
-    spelling of the same folder counts: in another case, on a file system that ignores case, as
-    macOS's and Windows' do by default, or in another Unicode normalization, on one that ignores
-    that, as macOS's does. Names that don't exist yet are compared ignoring both, as such a file
-    system would: on one that doesn't ignore them, a log directory that differs from the
-    workspace only that way gets no log file either."""
-    workspace = _existing(os.path.abspath(directory))
-    log = _existing(os.path.realpath(path))
-    if workspace is None or log is None:
-        return False  # Where no part of a path exists, nothing can be created.
-    _, status, unmade = workspace
-    start, start_status, names = log
-    if unmade:
-        # The workspace doesn't exist yet: `path` is in it only if it will be made in the same
-        # folder, through the same names.
-        same_names = _folded(names[: len(unmade)]) == _folded(unmade)
-        return same_names and os.path.samestat(start_status, status)
-    return any(_is(part, status) for part in (start, *start.parents))
-
-
-def _existing(path: str) -> tuple[Path, os.stat_result, tuple[str, ...]] | None:
-    """`path`'s deepest part that exists, its status, and the names after it; None when no part
-    of it exists."""
-    whole = Path(path)
-    for part in (whole, *whole.parents):
-        try:
-            status = os.stat(part)
-        except OSError:
-            continue
-        return part, status, whole.parts[len(part.parts) :]
-    return None
-
-
-def _is(path: Path, status: os.stat_result) -> bool:
-    """Whether `path` exists, and is the file `status` describes."""
-    try:
-        return os.path.samestat(os.stat(path), status)
-    except OSError:
-        return False
-
-
-def _folded(names: tuple[str, ...]) -> tuple[str, ...]:
-    """The names as a file system that ignores case and Unicode normalization compares them:
-    Unicode's canonical caseless match."""
-    return tuple(normalize("NFD", normalize("NFD", name).casefold()) for name in names)

@@ -1,8 +1,12 @@
-"""Showing text Trial Folio didn't write, such as a configuration's title and formulas, or a path a
-saved run names, so that it can't act on a terminal or reorder what's shown (docs/contracts.md,
-reports)."""
+"""Showing text in messages and reports.
+
+`visible` shows text Trial Folio didn't write, such as a configuration's title and formulas, or a
+path a saved run names, so that it can't act on a terminal or reorder what's shown
+(docs/contracts.md, reports). `series` lists items in a sentence.
+"""
 
 import unicodedata
+from collections.abc import Sequence
 from typing import Final
 
 _ESCAPED_CATEGORIES: Final = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
@@ -18,3 +22,10 @@ def visible(text: str, *, keep: str = "") -> str:
         else char
         for char in text
     )
+
+
+def series(items: Sequence[str]) -> str:
+    """The items as a sentence lists them: `a`, `a and b`, or `a, b, and c`."""
+    if len(items) <= 2:
+        return " and ".join(items)
+    return f"{', '.join(items[:-1])}, and {items[-1]}"
