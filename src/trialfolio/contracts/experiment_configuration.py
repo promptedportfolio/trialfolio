@@ -14,28 +14,22 @@ cases, each with its case's settings: the baseline's, with the variant's one cha
 from dataclasses import dataclass
 from typing import Annotated, Final, Literal, Self, get_args
 
-from pydantic import (
-    BeforeValidator,
-    ConfigDict,
-    Field,
-    Strict,
-    model_validator,
-)
+from pydantic import ConfigDict, Field, model_validator
 
 from trialfolio.contracts.common import (
     BASELINE_CASE_KEY,
     MAX_SAFE_INTEGER,
     ContractModel,
     ExperimentKey,
+    NonEmptyOrderedList,
     NonEmptyText,
+    OptionalKey,
+    OrderedList,
     PriorResearchStatus,
     PriorResearchText,
     Purpose,
     ShortText,
     Title,
-    optional_key,
-    ordered,
-    present,
 )
 from trialfolio.contracts.plan import CREDITS_PER_REQUEST
 from trialfolio.contracts.screen_configuration import (
@@ -72,11 +66,7 @@ class PriorResearch(ContractModel):
     status: PriorResearchStatus
     """`complete`: the description accounts for all of it, or says there was none. `partial`:
     for some of it. `unknown`: the user can't say what earlier work there was."""
-    description: Annotated[
-        PriorResearchText | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
+    description: OptionalKey[PriorResearchText] = None
     """Required with `complete` or `partial`: 1 to 5,000 characters."""
 
     @model_validator(mode="after")
@@ -93,11 +83,7 @@ class _Variant(ContractModel):
     key: ExperimentKey
     """The case's `case_key`: unique among the experiment's cases, the default's included, and
     not `baseline`."""
-    description: Annotated[
-        ShortText | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
+    description: OptionalKey[ShortText] = None
     """Up to 500 characters, shown in the report."""
 
 
@@ -108,23 +94,11 @@ class RuleVariant(_Variant):
     # `with` is a Python keyword, so the field takes another name. Only `with` is accepted.
     model_config = ConfigDict(serialize_by_alias=True)
 
-    add: Annotated[
-        NonEmptyText | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
+    add: OptionalKey[NonEmptyText] = None
     """A screening formula, added after the baseline's rules."""
-    replace: Annotated[
-        NonEmptyText | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
+    replace: OptionalKey[NonEmptyText] = None
     """One of the baseline's rules, the same text, character for character."""
-    with_: Annotated[
-        NonEmptyText | None,
-        BeforeValidator(present),
-        Field(alias="with", json_schema_extra=optional_key),
-    ] = None
+    with_: Annotated[OptionalKey[NonEmptyText], Field(alias="with")] = None
     """The formula that takes `replace`'s place, so the rules keep their order."""
 
     @model_validator(mode="after")
@@ -167,17 +141,11 @@ class SlippageVariant(_Variant):
 type AnyVariant = RuleVariant | HoldingsVariant | RebalanceVariant | SlippageVariant
 
 
-RuleVariants = Annotated[
-    tuple[RuleVariant, ...], Field(min_length=1), Strict(False), BeforeValidator(ordered)
-]
-HoldingsVariants = Annotated[
-    tuple[HoldingsVariant, ...], Field(min_length=1), Strict(False), BeforeValidator(ordered)
-]
-RebalanceVariants = Annotated[tuple[RebalanceVariant, ...], Strict(False), BeforeValidator(ordered)]
+RuleVariants = NonEmptyOrderedList[RuleVariant]
+HoldingsVariants = NonEmptyOrderedList[HoldingsVariant]
+RebalanceVariants = OrderedList[RebalanceVariant]
 """May be empty, which turns the default rebalance variant off."""
-SlippageVariants = Annotated[
-    tuple[SlippageVariant, ...], Field(min_length=1), Strict(False), BeforeValidator(ordered)
-]
+SlippageVariants = NonEmptyOrderedList[SlippageVariant]
 
 
 class Variants(ContractModel):
@@ -185,27 +153,11 @@ class Variants(ContractModel):
     holds at least one variant, except `rebalance_weeks`'s, where an empty list turns the default
     variant off."""
 
-    rules: Annotated[
-        RuleVariants | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
-    max_holdings: Annotated[
-        HoldingsVariants | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
-    rebalance_weeks: Annotated[
-        RebalanceVariants | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
+    rules: OptionalKey[RuleVariants] = None
+    max_holdings: OptionalKey[HoldingsVariants] = None
+    rebalance_weeks: OptionalKey[RebalanceVariants] = None
     """Replaces the default rebalance variant. An empty list turns it off."""
-    slippage_percent: Annotated[
-        SlippageVariants | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
+    slippage_percent: OptionalKey[SlippageVariants] = None
 
 
 MAX_PROVIDER_REQUESTS: Final = MAX_SAFE_INTEGER // CREDITS_PER_REQUEST
@@ -236,11 +188,7 @@ class ExperimentConfiguration(ContractModel):
     """The question the experiment addresses. Required: it's part of the research history."""
     prior_research: PriorResearch
     baseline: ScreenFields
-    variants: Annotated[
-        Variants | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
+    variants: OptionalKey[Variants] = None
     """When it's absent, the only variant is the default."""
     budget: ExperimentBudget
 

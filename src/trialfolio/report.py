@@ -85,7 +85,7 @@ from trialfolio.contracts.review_configuration import ReviewConfiguration
 from trialfolio.contracts.review_manifest import ReviewArtifact, ReviewArtifactRole
 from trialfolio.contracts.tables import DifferenceReason, DifferencesRow, MetricsRow, SettingsRow
 from trialfolio.differences import METHOD, METHOD_VERSION, Differences
-from trialfolio.display import visible
+from trialfolio.display import series, visible
 from trialfolio.normalization import LAYOUT, METRICS, setting_text
 from trialfolio.notices import (
     CONCISE_NOTICE,
@@ -1496,13 +1496,6 @@ def _flag_list(flags: Sequence[str]) -> str:
     return "<br>".join(f"{_code(flag)}: {_FLAGS.get(flag, '')}" for flag in flags)
 
 
-def _series(items: Sequence[str]) -> str:
-    """`a`, `a and b`, or `a, b, and c`."""
-    if len(items) <= 2:
-        return " and ".join(items)
-    return f"{', '.join(items[:-1])}, and {items[-1]}"
-
-
 class _ReviewReport:
     def __init__(self, review: ReviewEvidence, version: str) -> None:
         self._review = review
@@ -1580,7 +1573,7 @@ class _ReviewReport:
         return _code(label) + (" (synthetic)" if label in self._synthetic else "")
 
     def _labels(self, labels: Sequence[str]) -> str:
-        return _series([_code(label) for label in labels])
+        return series([_code(label) for label in labels])
 
     def _sharing(self, label: str) -> tuple[str, ...]:
         """The other results whose runs saved the response `label`'s run did."""
@@ -1698,7 +1691,7 @@ class _ReviewReport:
         shown = meanings[row.classification]
         flagged = [flag for flag in row.flags if flag in _COMPARISON_FLAGS]
         if flagged:
-            shown += ", flagged " + _series([_code(flag) for flag in flagged])
+            shown += ", flagged " + series([_code(flag) for flag in flagged])
         return shown
 
     # 2. Definitions
@@ -1895,7 +1888,7 @@ class _ReviewReport:
         ]
         parts = [
             "<h3>Settings that are the same</h3>",
-            f"<p>The settings that read the same as the baseline's: {_series(counts)}.</p>",
+            f"<p>The settings that read the same as the baseline's: {series(counts)}.</p>",
         ]
         if not flagged:
             return parts
@@ -3191,7 +3184,7 @@ class _ExperimentReport:
                 found.append(f"the {which} differs{flag}")
         if not found:
             return "Matches"
-        sentence = _series(found)
+        sentence = series(found)
         return f"{sentence[0].upper()}{sentence[1:]}."
 
     def _missing(self) -> list[str]:
@@ -3281,7 +3274,7 @@ class _ExperimentReport:
             if without:
                 parts.append(
                     "<p>Not shown, without normalized tables: "
-                    + _series([_code(view.case.case_key) for view in without])
+                    + series([_code(view.case.case_key) for view in without])
                     + ". The coverage above says why.</p>"
                 )
             for subject, heading in (("strategy", "Strategy"), ("benchmark", "Benchmark")):
@@ -3367,7 +3360,7 @@ class _ExperimentReport:
             rows.append(
                 f"<tr><td>{_code(name)}</td><td>{_code(setting.value)}</td>"
                 f"<td>{_unit(setting.unit)}</td>"
-                f"<td>{_series(changed) if changed else 'No case'}</td><td>{note}</td></tr>"
+                f"<td>{series(changed) if changed else 'No case'}</td><td>{note}</td></tr>"
             )
         return [
             '<div class="wide"><table>',
@@ -3846,7 +3839,7 @@ class _ExperimentReport:
         if mismatched:
             items.append(
                 "The coverage differs from the requested dates for "
-                + _series([_code(key) for key in mismatched])
+                + series([_code(key) for key in mismatched])
                 + "."
             )
         unavailable = sum(row.value is None for view in self._cases for row in view.metrics or ())
@@ -3860,7 +3853,7 @@ class _ExperimentReport:
         if without:
             items.append(
                 "No normalized result for "
-                + _series([_code(key) for key in without])
+                + series([_code(key) for key in without])
                 + ": section 5 gives each case's outcome."
             )
         items.append(
@@ -4018,7 +4011,7 @@ def _plan_changes(changes: PlanChanges | None) -> str:
     for cases, verb in ((changes.cases_added, "added"), (changes.cases_retired, "retired")):
         if cases:
             named = [f"{_code(case.case_key)} ({_code(case.case_id)})" for case in cases]
-            lines.append(f"Cases {verb}: {_series(named)}")
+            lines.append(f"Cases {verb}: {series(named)}")
     if changes.parts:
-        lines.append("Other parts changed: " + _series([_code(part) for part in changes.parts]))
+        lines.append("Other parts changed: " + series([_code(part) for part in changes.parts]))
     return "<br>".join(lines)

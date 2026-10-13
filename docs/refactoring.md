@@ -1,6 +1,6 @@
 # Readability refactor
 
-**Status:** Ready. The owner decided each of its [open questions](#open-questions) on 2026-10-13, and set it to Ready the same day, once the review of its pull request had ended. No task is done yet. RF-T01 and RF-T02 run first ([decision 5](#the-owners-decisions)), each once the owner assigns it by ID.
+**Status:** Ready. The owner decided each of its [open questions](#open-questions) on 2026-10-13, and set it to Ready the same day, once the review of its pull request had ended. RF-T01 (2026-10-13) wrote the [check of the reports](#the-check-of-the-reports), and extracted the small shared helpers ([what RF-T01 settled](#what-rf-t01-settled)). RF-T02 runs next ([decision 5](#the-owners-decisions)), once the owner assigns it by ID.
 **Decided by:** [D-39](spec.md#decisions), on 2026-10-12 and 2026-10-13
 **Depends on:** the code on `main` at 8a4c475, the merge of [D-38](spec.md#decisions)'s fixes (#80), against which the findings below were checked. Each task also depends on the `v0.3.0` tag, which is met: `v0.3.0` was tagged on 2026-10-13, on 6da0c3f, the merge commit of the pull request that set [0.3.0](releases/0.3.0-experiments.md) to Implemented.
 
@@ -251,6 +251,32 @@ RF-AC01 to RF-AC10 apply to each task, checked on its pull request. RF-AC11 appl
 | RF-AC10 | Each finding the task covers is resolved as this file gives, or declined with a reason recorded in this file. The documents that describe the code as it is give its new paths and names, and `git grep` finds an old path only in the records of past work. |
 | RF-AC11 | The last task, RF-T11, measures the code again, as [the size of the work](#the-size-of-the-work) does, and records both measurements in this file |
 
+### The check of the reports
+
+RF-T01 wrote the check that RF-AC04 runs: `tests/support/rewritten_fixtures.py`. It writes the committed fixtures again through the real code, and compares two such writes, so that a task writes them with the code before its change and with the code after it.
+
+- **`write <out>`** writes into `<out>`, a new or empty directory:
+  - `run/`, as `trialfolio demo` wrote `runs/synthetic-run-1.0.0/`;
+  - `review/`, as `trialfolio review` wrote `reviews/synthetic-review-1.0.0/`, from `review-configs/synthetic-only.yaml`, over a copy of the committed run at the `run` path it gives, `runs/demo`;
+  - `report/`, the committed run's report, rendered again from its records by `trialfolio report`, from that copy;
+  - `experiment/`, as the synthetic experiment's writer, `tests/support/synthetic_experiment.py`, wrote `experiments/synthetic-experiment-1.0.0/`, with both sessions' reports.
+
+  The configuration and the copy of the run are in `inputs/`, beside the outputs, so the paths the reports give between them don't depend on where `<out>` is. The commands run through the CLI's entry function, with the license acknowledged by `TRIALFOLIO_ACCEPT_LICENSE`, in the tests' environment. Each fixture is written with a new fixed clock, and with a fixed sequence of version 4 UUIDs in place of `uuid.uuid4`, from `00000000-0000-4000-8000-000000000001` on.
+- **`compare <before> <after>`** lists each file that's in only one of the two directories, or whose bytes differ, leaving out every `logs/`, and exits with 1 when it lists any. When either isn't a directory, or a file or folder under it can't be read, it prints the error and exits with 2, as for a wrong usage, rather than leave out what it can't read.
+- **Its tests,** in `tests/interface/test_rewritten_fixtures.py`, check that the same code writes the same bytes, that each fixture is written again with its files, that the review reads a copy of the committed run, and the report is rendered from that copy, and that the comparison finds a changed file, apart from one in `logs/`, and fails when a path isn't a directory or a folder can't be read.
+
+A task runs it from its worktree, with `<base>` the commit its branch starts from, such as `origin/main`, and `<scratch>` a directory outside the repository:
+
+```sh
+git worktree add --detach <scratch>/base <base>
+(cd <scratch>/base && uv sync && uv run python -m tests.support.rewritten_fixtures write <scratch>/before)
+uv run python -m tests.support.rewritten_fixtures write <scratch>/after
+uv run python -m tests.support.rewritten_fixtures compare <scratch>/before <scratch>/after
+git diff --exit-code <base> -- tests/fixtures/
+```
+
+The two worktrees need the same Python and the same locked packages, since the manifests record the installed versions. The last command checks the rest of RF-AC04: the branch changes no file under `tests/fixtures/`. RF-T01's base had no copy of the check, so RF-T01 ran it there from a copy of its file.
+
 ## Tasks
 
 The owner assigns these by ID. They aren't next items: [doing the next item](../AGENTS.md#doing-the-next-item) goes through the release files only. Each task is one pull request, and follows that section's steps 4 to 11, with a branch such as `refactor/rf-t01-shared-helpers`, and a commit subject that ends with its ID, such as `refactor(report): split the report into a package (RF-T02)`. Each adds itself, with its date, to this file's status line, and records the details it settled in this file, in a section of its own, for the owner to confirm, as the user manual's tasks did.
@@ -270,6 +296,24 @@ Every task changes `src/`, so each depends on the `v0.3.0` tag, which is met, as
 | RF-T09 | **Storage, configuration, and normalization:** the platform's primitives moved out of `storage.py`, and the narrower store Protocols, which `ArtifactStore` combines, with the readers taking the reader's, and `open_experiment` the reader's and the lock's ([question 8](#open-questions)), listed under `ArtifactStore`'s row, and contracts.md's rule on Protocols reworded to allow them, if it's the first of RF-T05, RF-T08, and RF-T09 to add such a Protocol ([decisions 13 and 15](#the-owners-decisions)); `strict_yaml.py` and the configuration's error messages split out, with THIRD_PARTY_NOTICES.md's PyYAML row naming `strict_yaml.py`, `_Builder`'s key-name check and scalar policy moved to module functions, and the three configuration readers sharing their steps; `normalization.py` separated, with its repeats removed; and `LocalArtifactStore._claim` and `_Builder._scalar` shortened | RF-T01 |
 | RF-T10 | **Plans, approval, and contracts:** `planning.py` and `experiment_approval.py` separated, with `Versions.of(plan)`, the approval prompts' shared messages, and `format_experiment_plan` and `_check_repeats` shortened; and in the contracts, the shared parts of `contracts/manifest.py` and `contracts/plan.py` moved, and the repeated validators, the setting check, the metric unit's pattern, and the rule of a variant's change each written once | RF-T05 |
 | RF-T11 | **`ExperimentExecution`, last:** its split, from [the classes](#classes-that-are-too-large); the modules separated from `experiment_execution.py`; `SavedExperimentAttempt.completed_record` moved to the resume's code; `_write_plan` and `_write_revision` sharing their steps; and `__init__`, `_run_cases`, and `_partial` shortened. Then measure the code again, and record both measurements (RF-AC11), and ask the owner to plan the tests' second pass ([question 4](#open-questions)). | Every other RF task |
+
+## What RF-T01 settled
+
+**Details from RF-T01 (2026-10-13), confirmed by the owner on 2026-10-13.** RF-T01 resolves items 3 and 9 of the [repeated logic](#repeated-logic) as they give, apart from `ReviewConfiguration.results`, as detail 9 below says. Each item is a detail this file left open, apart from item 11, which is what RF-T01 leaves out:
+
+1. **Where the check of the reports lives.** It's a module, `tests/support/rewritten_fixtures.py`, run with `uv run python -m`, as [the check of the reports](#the-check-of-the-reports) gives, beside the synthetic experiment's writer, which it calls. The alternative was a script in `scripts/`, which would import that writer and the tests' clock from `tests/support/`.
+2. **Its tests,** in `tests/interface/test_rewritten_fixtures.py`, which RF-AC07's exception for RF-T01's check covers. The alternative was the check without tests: a change that made what Trial Folio writes depend on the wall clock or on a random value would then show only as a difference in a later task's comparison, where it would read as that task's.
+3. **`TrialFolioError.with_detail(detail)`** gives a `TrialFolioError`, never a subclass, as each of the eight sites built one.
+4. **`interrupted(detail=None, *, after=None)`,** in `errors.py`, builds `command.interrupted` in its three forms: `interrupted(detail)`, `interrupted(detail, after="the attempt ended")`, and `interrupted()`. **`reason_of(error)`,** the one `_reason`, is in `errors.py` too, since the store, the readers, the CLI, and the logs all use it.
+5. **The module that resolves paths** is `paths.py`. Its `existing_path` is what `cli._resolved` and `review_inputs.local_run_stores` each did. Its `is_within` is `logs._within`, which the repeated logic's item 3 said could share the module, moved with `_existing`, `_is`, and `_folded`, so `logs.py` holds only logging. The alternative was to leave the containment in `logs.py`.
+6. **`StoredFile.of(path, data)` and `published(store, path, data)`** are in `storage.py`, as the repeated logic's item 3 gives. `published` gives the file, or None, rather than whether it was published, so a caller that lists it doesn't build it again. `ExperimentExecution._published` is gone, and `_AttemptFiles.published` keeps its name and its answer, and calls it.
+7. **The one helper that lists items in a sentence** is `series(items)`, in `display.py`, whose docstring now covers it. The review's warning gives it the results' positions as text. The alternative was a module of its own for one function.
+8. **The aliases are generic through a `TypeVar`,** in `contracts/common.py`, since a `type` statement's alias would add `$defs` entries. They replace 14 annotations: the 13 the repeated logic's item 9 counts, and `RuleVariant.with_`'s, which gives its alias, `with`, around `OptionalKey`.
+9. **`ReviewConfiguration.results` stays written out.** Its minimum is 2, and a minimum given around `OrderedList` is checked as a value's, not a list's: Pydantic's message would read "Value should have at least 2 items" instead of "Tuple should have at least 2 items", and the schema would give `minLength` instead of `minItems`. So 5 of the 6 lists the repeated logic's item 9 counts take an alias. The alternative was a fourth alias, for one field.
+10. **`compare` exits with 2 when it can't compare.** When either directory isn't one, or a file or folder under it can't be read, it prints the error and exits with 2, as for a wrong usage, so 1 means only that it found differences ([the check of the reports](#the-check-of-the-reports)). The alternative was to exit with 1, which would merge "different" and "couldn't check".
+11. **The recorder of messages isn't committed.** The scratch recorder of errors and log messages that RF-T01's evidence used stays out of its pull request; a later task that rebuilds messages may propose it.
+
+RF-T01 moves no code that logs, so contracts.md's rule that core modules log through `logging.getLogger(__name__)` waits for the first task that does ([decision 11](#the-owners-decisions)).
 
 ## Open questions
 

@@ -2,6 +2,8 @@
 
 The core raises `TrialFolioError`. Only the CLI turns an error into an exit code, using
 `EXIT_CODES`; the JSON summary model uses the same table to check a summary's `exit_code`.
+`interrupted` builds `command.interrupted`, `TrialFolioError.with_detail` adds a sentence to an
+error's messages, and `reason_of` says why a file system call failed, without its path.
 """
 
 from collections.abc import Mapping
@@ -83,3 +85,28 @@ class TrialFolioError(Exception):
         # Pickling and copying rebuild an exception from its arguments, which hold only the
         # loggable message here.
         return (type(self), (self.code, self.message, self.log_message))
+
+    def with_detail(self, detail: str) -> "TrialFolioError":
+        """A `TrialFolioError` with this one's code, and `detail` appended, after a space, to both
+        its messages. `detail` must be safe to log. The result is never a subclass, such as a
+        provider error, whose own rules would build its messages again."""
+        return TrialFolioError(
+            self.code, f"{self.message} {detail}", f"{self.log_message} {detail}"
+        )
+
+
+def interrupted(detail: str | None = None, *, after: str | None = None) -> TrialFolioError:
+    """`command.interrupted`, whose message is "Trial Folio was interrupted.", or, with `after`,
+    such as "the attempt ended", "Trial Folio was interrupted after the attempt ended.". `detail`,
+    which says what the interrupt left, follows it after a space. It must be safe to log."""
+    when = "" if after is None else f" after {after}"
+    message = f"Trial Folio was interrupted{when}."
+    return TrialFolioError(
+        "command.interrupted", message if detail is None else f"{message} {detail}"
+    )
+
+
+def reason_of(error: OSError) -> str:
+    """Why a file system call failed, for a message: the error's `strerror`, which never holds
+    the path, as the error's text would, or its type's name when it has none."""
+    return error.strerror or type(error).__name__

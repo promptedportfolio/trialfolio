@@ -2,7 +2,7 @@
 
 import re
 from datetime import UTC, date, datetime, timedelta
-from typing import Annotated, Final, Literal, cast
+from typing import Annotated, Final, Literal, TypeVar, cast
 
 from pydantic import (
     UUID4,
@@ -11,6 +11,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    Strict,
     StringConstraints,
 )
 from pydantic.config import JsonDict
@@ -220,6 +221,25 @@ def ordered(value: object) -> object:
     if not isinstance(value, list | tuple):
         raise ValueError("must be a list")
     return cast("list[object] | tuple[object, ...]", value)
+
+
+# The aliases below are generic through a TypeVar: a `type` statement's alias would add an entry
+# to the schemas' `$defs`.
+_T = TypeVar("_T")
+
+OptionalKey = Annotated[_T | None, BeforeValidator(present), Field(json_schema_extra=optional_key)]
+"""An optional configuration key: left out, never null (`present`), and shown so in its schema
+(`optional_key`). Give the field a default of None."""
+
+OrderedList = Annotated[tuple[_T, ...], Strict(False), BeforeValidator(ordered)]
+"""A configuration's ordered list, kept as a tuple, which may be empty. A minimum length must come
+before the validators, as `NonEmptyOrderedList` gives it: one given around this alias is checked
+as a value's, not a list's, and its schema gives `minLength` instead of `minItems`."""
+
+NonEmptyOrderedList = Annotated[
+    tuple[_T, ...], Field(min_length=1), Strict(False), BeforeValidator(ordered)
+]
+"""A configuration's ordered list, kept as a tuple, of at least one item."""
 
 
 def valid_date_text(value: str) -> str:
