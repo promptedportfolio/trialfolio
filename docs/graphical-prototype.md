@@ -84,7 +84,7 @@ On a Mac, the owner launches a packaged app without a terminal and opens a saved
 
 ## Tasks
 
-The owner assigns these by ID. They aren't next items: [Doing the next item](../AGENTS.md#doing-the-next-item) goes through the release files only. Branches follow the same form, such as `docs/gp-t01-toolkit-candidates`.
+The owner assigns these by ID. They aren't next items: [Doing the next item](../AGENTS.md#doing-the-next-item) goes through the release files and the readability refactor's tasks only. Branches follow the same form, such as `docs/gp-t01-toolkit-candidates`.
 
 | ID | Task | Depends on |
 |---|---|---|

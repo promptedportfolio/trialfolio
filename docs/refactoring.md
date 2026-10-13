@@ -1,6 +1,6 @@
 # Readability refactor
 
-**Status:** Ready. The owner decided each of its [open questions](#open-questions) on 2026-10-13, and set it to Ready the same day, once the review of its pull request had ended. RF-T01 (2026-10-13) wrote the [check of the reports](#the-check-of-the-reports), and extracted the small shared helpers ([what RF-T01 settled](#what-rf-t01-settled)). RF-T02 runs next ([decision 5](#the-owners-decisions)), once the owner assigns it by ID.
+**Status:** Ready. The owner decided each of its [open questions](#open-questions) on 2026-10-13, and set it to Ready the same day, once the review of its pull request had ended. RF-T01 (2026-10-13) wrote the [check of the reports](#the-check-of-the-reports), and extracted the small shared helpers ([what RF-T01 settled](#what-rf-t01-settled)). RF-T02 is next ([decision 5](#the-owners-decisions)).
 **Decided by:** [D-39](spec.md#decisions), on 2026-10-12 and 2026-10-13
 **Depends on:** the code on `main` at 8a4c475, the merge of [D-38](spec.md#decisions)'s fixes (#80), against which the findings below were checked. Each task also depends on the `v0.3.0` tag, which is met: `v0.3.0` was tagged on 2026-10-13, on 6da0c3f, the merge commit of the pull request that set [0.3.0](releases/0.3.0-experiments.md) to Implemented.
 
@@ -35,6 +35,7 @@ After the review of this plan's pull request, on 2026-10-13, the owner also deci
     - RF-T05 waits for RF-T03 as well as RF-T04, so it ends the scope's third step, as decision 9 assumes.
     - `_Invocation` stays in RF-T08, holding a `_Context` and an `_Outcome`, rather than splitting into them, so `trialfolio.cli._Invocation.claimed` keeps working.
 15. **The first task that adds a Protocol the rule covers rewords it (2026-10-13).** RF-T09 depends only on RF-T01, so RF-T05 can merge before it. So the first of RF-T05, RF-T08, and RF-T09 that adds a Protocol that contracts.md's rule on Protocols covers rewords that rule, as decision 13 gives, just as the first task that moves code that logs rewords the logging rule (decision 11). The alternatives were for RF-T05 to wait for RF-T09, or to let the rule be out of date between the two merges.
+16. **RF tasks are next items of their own track (2026-10-13).** A request for the next item starts the release's next task and the next RF task that can start, at the same time, each in a worktree of its own, so the owner needn't assign each by ID. An RF task starts only when its dependencies are done and no open pull request changes the modules it changes, as decision 5 gives. The owner may still assign one by ID, and it goes through the same checks. The alternative was to keep assigning each by ID, with those checks run when it's assigned.
 
 ## Goal
 
@@ -279,7 +280,7 @@ The two worktrees need the same Python and the same locked packages, since the m
 
 ## Tasks
 
-The owner assigns these by ID. They aren't next items: [doing the next item](../AGENTS.md#doing-the-next-item) goes through the release files only. Each task is one pull request, and follows that section's steps 4 to 11, with a branch such as `refactor/rf-t01-shared-helpers`, and a commit subject that ends with its ID, such as `refactor(report): split the report into a package (RF-T02)`. Each adds itself, with its date, to this file's status line, and records the details it settled in this file, in a section of its own, for the owner to confirm, as the user manual's tasks did.
+They're next items of the refactor's own track: a request for the next item starts the first one that can start, beside the release's next task, each in a worktree of its own, as [doing the next item](../AGENTS.md#doing-the-next-item) describes ([decision 16](#the-owners-decisions)). The owner may also assign one by ID. Each task is one pull request, and follows that section's steps 4 to 11, with a branch such as `refactor/rf-t01-shared-helpers`, and a commit subject that ends with its ID, such as `refactor(report): split the report into a package (RF-T02)`. Each adds itself, with its date, to this file's status line, and records the details it settled in this file, in a section of its own, for the owner to confirm, as the user manual's tasks did.
 
 Every task changes `src/`, so each depends on the `v0.3.0` tag, which is met, as well as on this file's status, Ready since 2026-10-13. By the owner's decision ([question 1](#open-questions)), RF-T01 and RF-T02 run first, alongside 0.4.0's remaining specification tasks, and the others between 0.4.0's implementation tasks, each when no open pull request changes the modules it changes. The order is the scope's: the small shared helpers first, then the report, the shared core modules, the provider and the CLI, and `ExperimentExecution` last. RF-T06, RF-T09, and RF-T10 cover findings the scope's order didn't place, before the executor.
 
