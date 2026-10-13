@@ -1,6 +1,6 @@
 # User manual
 
-**Status:** Ready. The owner decided its [open questions](#open-questions), accepted [ADR 0009](adrs/0009-publish-a-user-manual-on-github-pages.md), and set it to Ready on 2026-10-12. UM-T01 (2026-10-12) built the site, and moved the user guide's content into it. UM-T02 is next.
+**Status:** Ready. The owner decided its [open questions](#open-questions), accepted [ADR 0009](adrs/0009-publish-a-user-manual-on-github-pages.md), and set it to Ready on 2026-10-12. UM-T01 (2026-10-12) built the site, and moved the user guide's content into it. UM-T02 (2026-10-12) generated the reference pages from their sources. Each task below is done, so [doing the next item](../AGENTS.md#doing-the-next-item) no longer holds 0.4.0's implementation.
 **Decided by:** [D-35](spec.md#decisions), on 2026-10-12
 **Depends on:** the [user guide](user-guide.md), as release [0.3.0](releases/0.3.0-experiments.md) left it. It runs alongside [0.4.0](releases/0.4.0-ranking-weights.md)'s specification work, R04-T02 to R04-T04, and finishes before 0.4.0's implementation starts: [doing the next item](../AGENTS.md#doing-the-next-item) holds 0.4.0's implementation tasks until this file's status line says each task below is done.
 
@@ -22,14 +22,14 @@ Someone who has never run Trial Folio follows the first tutorial from setting up
 
 ## Layout
 
-A home page and four sections. UM-T01 wrote these pages (2026-10-12). A later task that renames, merges, or adds a page updates this table.
+A home page and four sections. UM-T01 wrote these pages (2026-10-12), and UM-T02 added `reference/output-fields.md` (2026-10-12). A later task that renames, merges, or adds a page updates this table.
 
 | Section | What it's for | Pages |
 |---|---|---|
 | Home, `manual/index.md` | What Trial Folio is, the notices, and where to start | `index.md` |
 | Tutorials, `manual/tutorials/` | Learning by doing: a guided first run that works | `first-backtest.md`, `first-experiment.md` |
 | How-to guides, `manual/how-to/` | The steps for one task the reader already has | `store-credentials.md`, `re-render-a-report.md`, `compare-runs.md`, `recover-from-an-interrupt.md`, `repeat-a-case.md`, `revise-an-experiment.md`, `use-from-a-script.md` |
-| Reference, `manual/reference/` | Exact descriptions to look up | `cli.md`, `screen-configuration.md`, `review-configuration.md`, `experiment-configuration.md`, `outputs.md`, `errors.md`, `json-summary.md` |
+| Reference, `manual/reference/` | Exact descriptions to look up | `cli.md`, `screen-configuration.md`, `review-configuration.md`, `experiment-configuration.md`, `outputs.md`, `output-fields.md`, `errors.md`, `json-summary.md` |
 | Explanation, `manual/explanation/` | Understanding: why Trial Folio works as it does | `plans-and-approval.md`, `credits-and-uncertain-charges.md`, `reproducibility.md`, `what-a-backtest-can-support.md` |
 | Third-party notices, `manual/third-party-notices.md` | The licenses of the theme's files the site serves ([tooling and hosting](#tooling-and-hosting)), linked from every page's footer | `third-party-notices.md` |
 
@@ -143,6 +143,31 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
 **UM-T01's scope,** decided by the owner on 2026-10-12. UM-T01 moves the user guide's content, checked against the owning documents and the code, and corrects the guide where it's wrong. It doesn't audit all present behavior for pages the guide lacks: UM-T02's generated reference pages cover every command, field, and error.
 
 **Deferred by the owner** (2026-10-12): an explanation page on credentials and local data, until a later pull request. It would explain why credentials come only from environment variables, why proxy settings, `.netrc`, and `SSLKEYLOGFILE` are ignored, and why logs stay local. The guide gives the steps, but has no such content to move.
+
+
+## What UM-T02 settled
+
+**Details from UM-T02 (2026-10-12), confirmed by the owner the same day.** Each is a detail the specification left open:
+
+1. **The generator and its markers.** `scripts/manual_reference.py` generates the reference pages' tables, and holds the registry of what generates each.
+   - Each generated region of a page is between `<!-- generated: <region-id> -->` and `<!-- end generated: <region-id> -->`, each on a line of its own. Everything outside them is hand-written.
+   - `uv run python scripts/manual_reference.py` rewrites the regions in place, and `--check` writes nothing. `scripts/check` runs the check in its "Manual" step, before the site's build. It fails when a region differs from what its source generates, a page names an unknown region, a registered region is on no page or on more than one, the markers are unbalanced or nested, or a hand-written cell is empty. A rewrite writes nothing while a marker is wrong.
+   - The sources: the CLI's parser, `_parser` in `src/trialfolio/cli.py`; the committed schemas in `schemas/`; and [contracts.md](contracts.md)'s "Errors" table and its exit-code table in "CLI behavior".
+   - The output depends on the sources only. Usage lines are wrapped as for an 80-column terminal, without color, and argparse's own help texts are read in English, whatever the terminal, the environment, or the locale. The parser is built with a placeholder version, and nothing generated holds a date.
+   - Each schema fact is written in plain words: "not all whitespace" for the pattern of text that isn't all whitespace, and "at most 200 characters" for a `maxLength` of 200, for example. A pattern, format, or keyword the generator has no words for fails it, rather than being dropped.
+   - Each object of a schema has a table of its own, linked from the key that holds it, under a generated heading with a fixed anchor, the region's ID.
+   - On `cli.md`, each command's table leaves out `-h` and `--json`, which the table of options every command takes lists. A flag's default reads "Off", and an option without one "None".
+   - On `outputs.md`, the CSV files' columns are described as their row schemas give them, read back: a null is an empty cell, and a list's items are separated by semicolons.
+   - Its tests are `tests/manual/test_manual_reference.py`.
+2. **The hand-written column, kept by key.** Some tables end with one hand-written column: What to do, on `errors.md`; What it's for, on the configuration pages; and What it holds, in `json-summary.md`'s top-level table. Regenerating keeps each of its cells, matched by the row's key in the first column. A row whose key is new gets an empty cell, which fails the check until it's written, and a row whose key left the source goes, with its cell. The generated columns are never edited by hand: the check finds that too.
+3. **What stays hand-written.** The text outside the regions: on `cli.md`, which commands need the license's acknowledgment and which send anything, the plan and approval, `--out`, `--revision-reason`, `--repeat`, credentials, the license acknowledgment, the environment variables, stdout and stderr, and the files `trialfolio init` writes; on the configuration pages, the examples, which keys are sent to Portfolio123, quoting, comments, how values are written, the verified values, and the rules that span keys; on `outputs.md`, each directory's files and the notes on rows and flags; on `json-summary.md`, which command gives which `ids` and `counts`, what each of `outputs`' roles names, the example, and the schema versions; and on `errors.md`, the remedies, "More about some codes", what a failure leaves, and the logs. Where a generated table now gives a fact the hand-written text gave, that text went, and each fact it gave that its source doesn't stayed, in a hand-written cell or the page's prose (UM-AC03).
+4. **The new page,** `reference/output-fields.md`, "Output file fields": the fields of each JSON file Trial Folio writes, at the version it writes now. A screen run's plan and records are 1.0.0, and an experiment's 1.1.0, as `src/trialfolio/contracts/schema_files.py` gives. Each file's section links to its section of contracts.md, and its region links to its schema. A test runs `trialfolio demo`, a review of two demo runs, and the core's synthetic experiment, offline, and checks that each JSON file they write is valid against the model of the schema its section names, at that schema's version.
+5. **The meanings copied from contracts.md, with absolute links.** `errors.md` copies each meaning as contracts.md gives it, with one change: each link leads to its file on GitHub, such as `https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#the-lock`. The user guide's "What happened" column went: each fact it gave that the meaning doesn't is in What to do, or in "More about some codes". Nothing is filtered out, so the page also carries contracts.md's clause on 0.4.0's ranking snapshots under `input.not_a_run`, which says "From 0.4.0", and its spec-level detail, such as the core's demo client under `output.not_empty`.
+6. **The cross-check with `EXIT_CODES`.** The generator fails when contracts.md's errors table and `EXIT_CODES` in `src/trialfolio/errors.py` disagree, in either direction: a code only one of them has, or another exit code. It also fails when the exit-code table lacks an error's exit code or 0, or has one that no error has.
+
+**Deferred by the owner** (2026-10-12): rewording the schema descriptions that name the specification's internals, until a later pull request. About six descriptions on the generated pages do, such as "P-13's default rebalance variant", "(R03-AC08)", and "a flag in `FLAGGING`". They come from the models' docstrings in `src/`, and rewording one behind an earlier schema version, such as the JSON summary's 1.0.0, would change a frozen schema's bytes. Until then, the generated pages give them as the schemas do.
+
+**The first deployment (UM-T02).** The docs workflow's run [38288103983](https://github.com/promptedportfolio/trialfolio/actions/runs/38288103983) deployed the site on 2026-10-12, from 4a3bd93, the squash merge of #78. It started at 18:01:15Z, and ended successfully at 18:02:50Z. **UM-AC02 checked (2026-10-12):** each of the 33 files of a local build of 4a3bd93 was fetched from the published address, and each was byte-identical to it.
 
 ## Open questions
 
