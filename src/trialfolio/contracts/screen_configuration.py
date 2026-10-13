@@ -24,6 +24,7 @@ from trialfolio.contracts.common import (
     ContractModel,
     IntegerOnly,
     NonEmptyText,
+    OptionalKey,
     Purpose,
     Title,
     optional_key,
@@ -221,11 +222,7 @@ class _ScreenHeader(ContractModel):
     kind: Literal["screen"]
     schema_version: ScreenSchemaVersion
     title: Title
-    purpose: Annotated[
-        Purpose | None,
-        BeforeValidator(present),
-        Field(json_schema_extra=optional_key),
-    ] = None
+    purpose: OptionalKey[Purpose] = None
 
 
 # Pydantic orders the fields of the bases last to first, so the header's come first, as in the

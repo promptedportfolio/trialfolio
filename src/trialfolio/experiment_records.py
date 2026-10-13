@@ -100,7 +100,7 @@ from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
 from trialfolio.contracts.experiment_record import ExperimentRecord, RecordedCase, SessionRecord
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, SettingsRow
 from trialfolio.display import visible
-from trialfolio.errors import TrialFolioError
+from trialfolio.errors import TrialFolioError, reason_of
 from trialfolio.normalization import (
     METRICS,
     METRICS_PATH,
@@ -685,7 +685,7 @@ class _Reader:
             except FileNotFoundError:
                 self._contents[path] = None
             except OSError as error:
-                raise _refused(f"{_named(path)} can't be read ({_reason(error)}).") from None
+                raise _refused(f"{_named(path)} can't be read ({reason_of(error)}).") from None
         return self._contents[path]
 
     def require(self, path: str) -> bytes:
@@ -705,7 +705,7 @@ class _Reader:
         except NotADirectoryError:
             raise _refused(f"{_named(path)} isn't a directory.") from None
         except OSError as error:
-            raise _refused(f"{_named(path)} can't be read ({_reason(error)}).") from None
+            raise _refused(f"{_named(path)} can't be read ({reason_of(error)}).") from None
         return tuple(name for name in found if not name.startswith("."))
 
     def numbered(self, path: str) -> list[int]:
@@ -800,12 +800,12 @@ def _plan(reader: _Reader, number: int, previous: SavedPlan | None) -> SavedPlan
         number=number,
         plan=plan,
         record=record,
-        configuration=_stored(configuration_path, configuration),
+        configuration=StoredFile.of(configuration_path, configuration),
         configuration_content=configuration,
         files=(
-            ("configuration", _stored(configuration_path, configuration)),
-            ("plan", _stored(path, content)),
-            ("experiment_record", _stored(record_path, record_content)),
+            ("configuration", StoredFile.of(configuration_path, configuration)),
+            ("plan", StoredFile.of(path, content)),
+            ("experiment_record", StoredFile.of(record_path, record_content)),
         ),
         configuration_version="",
     )
@@ -981,7 +981,9 @@ def _attempt(
             f"the records in {_named(directory + '/')} name a session the experiment doesn't have."
         )
     files = tuple(
-        AttemptFile(role, _stored(f"{directory}/{name}", reader.require(f"{directory}/{name}")))
+        AttemptFile(
+            role, StoredFile.of(f"{directory}/{name}", reader.require(f"{directory}/{name}"))
+        )
         for name, role in _ATTEMPT_FILES.items()
         if name in names
     )
@@ -1239,10 +1241,10 @@ def _tables(
                     f"{_named(settings_path)} was drawn from another configuration than that of"
                     " the plan its case's attempt ran under."
                 )
-            settings = _stored(settings_path, settings_content)
+            settings = StoredFile.of(settings_path, settings_content)
             settings_rows = rows
         tables[case_id] = SavedTables(
-            metrics=_stored(metrics_path, content),
+            metrics=StoredFile.of(metrics_path, content),
             metrics_rows=metrics,
             settings=settings,
             settings_rows=settings_rows,
@@ -1427,20 +1429,12 @@ def _authentications(exchanges: Sequence[Exchange]) -> int:
     return sum(exchange.request == AUTHENTICATION_REQUEST for exchange in exchanges)
 
 
-def _stored(path: str, content: bytes) -> StoredFile:
-    return StoredFile(path=path, artifact_id=_artifact_id(content), size=len(content))
-
-
 def _artifact_id(content: bytes) -> str:
     return "sha256:" + sha256_hex(content)
 
 
 def _named(path: str) -> str:
     return f"`{visible(path)}`"
-
-
-def _reason(error: OSError) -> str:
-    return error.strerror or type(error).__name__
 
 
 def _refused(problem: str) -> TrialFolioError:

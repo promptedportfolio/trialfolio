@@ -53,7 +53,8 @@ from trialfolio.differences import (
     SharedResponse,
     compare,
 )
-from trialfolio.errors import TrialFolioError
+from trialfolio.display import series
+from trialfolio.errors import TrialFolioError, interrupted
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
 from trialfolio.report import HtmlReportRenderer, ReviewEvidence, write_review_report
 from trialfolio.review_inputs import ReviewInput
@@ -188,16 +189,11 @@ class Review:
             self._artifacts.append(_listed(self._report, "report", None))
             self._write_manifest(self._build_manifest(differences, self._clock()))
         except KeyboardInterrupt:
-            return TrialFolioError(
-                "command.interrupted", f"Trial Folio was interrupted. {self.ending_detail()}"
-            )
+            return interrupted(self.ending_detail())
         except TrialFolioError as failure:
             if failure.code != "storage.write_failed":
                 raise
-            ending = self.ending_detail()
-            return TrialFolioError(
-                failure.code, f"{failure.message} {ending}", f"{failure.log_message} {ending}"
-            )
+            return failure.with_detail(self.ending_detail())
         return None
 
     def ending_detail(self) -> str:
@@ -237,7 +233,7 @@ class Review:
             "Results %s have byte-identical saved responses, so their metrics come from one"
             " response. differences.csv flags the metric rows of each that isn't the baseline"
             " identical_source, and the report names them.",
-            _series(shared.positions),
+            series([str(position) for position in shared.positions]),
             extra=self._log_fields("review.response.shared"),
         )
 
@@ -323,11 +319,3 @@ def _listed(
         source=source,
         label=label,
     )
-
-
-def _series(positions: Sequence[int]) -> str:
-    """Positions as a sentence lists them: `1 and 2`, or `1, 2, and 3`."""
-    items = [str(position) for position in positions]
-    if len(items) < 3:
-        return " and ".join(items)
-    return f"{', '.join(items[:-1])}, and {items[-1]}"

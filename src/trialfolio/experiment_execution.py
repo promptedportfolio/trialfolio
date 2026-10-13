@@ -80,7 +80,6 @@ from trialfolio.attempts import (
     request_detail,
     utc_now,
 )
-from trialfolio.canonical import sha256_hex
 from trialfolio.configuration import experiment_original_values, read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1
 from trialfolio.contracts.common import (
@@ -111,7 +110,8 @@ from trialfolio.contracts.manifest import (
 )
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, SettingsRow
 from trialfolio.demo import SyntheticScreenBacktestClient
-from trialfolio.errors import TrialFolioError
+from trialfolio.display import series
+from trialfolio.errors import TrialFolioError, interrupted
 from trialfolio.experiment_records import (
     CaseAttempt,
     CaseOutcome,
@@ -152,7 +152,7 @@ from trialfolio.report import (
     RetiredCaseView,
     write_experiment_report,
 )
-from trialfolio.storage import LOCK_LINE, LOCK_PATH, ArtifactStore, StoredFile
+from trialfolio.storage import LOCK_LINE, LOCK_PATH, ArtifactStore, StoredFile, published
 from trialfolio.tables import read_metrics_csv
 
 _logger = logging.getLogger(__name__)
@@ -684,9 +684,7 @@ class ExperimentExecution:
                 if self._revision is not None:
                     self._write_revision(self._revision, configuration)
         except KeyboardInterrupt:
-            return self._before_cases(
-                TrialFolioError("command.interrupted", "Trial Folio was interrupted.")
-            )
+            return self._before_cases(interrupted())
         except TrialFolioError as failure:
             if failure.code != "storage.write_failed":
                 raise
@@ -706,9 +704,7 @@ class ExperimentExecution:
             error = self._partial()
             self._write_ending(error)
         except KeyboardInterrupt:
-            return self._incomplete(
-                TrialFolioError("command.interrupted", "Trial Folio was interrupted.")
-            )
+            return self._incomplete(interrupted())
         except TrialFolioError as failure:
             if failure.code != "storage.write_failed":
                 raise
@@ -756,7 +752,7 @@ class ExperimentExecution:
         except BaseException:
             # A record the store published before its write failed reserves the session, as an
             # attempt record published so counts as written (R03-T11).
-            self._session_record = self._published(path, data)
+            self._session_record = published(self._store, path, data)
             raise
 
     def _write_plan(self, configuration: bytes) -> None:
@@ -838,9 +834,9 @@ class ExperimentExecution:
             except BaseException:
                 # The store may publish the record and still fail its write, as when the
                 # directory's sync fails. The records then hold it, so the counts read it.
-                published = self._published(path, data)
-                if published is not None:
-                    files = (*saved.files, AttemptFile("attempt_record", published))
+                whole = published(self._store, path, data)
+                if whole is not None:
+                    files = (*saved.files, AttemptFile("attempt_record", whole))
                     self._attempts[place] = _recorded(record, files)
                 raise
             files = (*saved.files, AttemptFile("attempt_record", stored))
@@ -1071,16 +1067,6 @@ class ExperimentExecution:
         except (OSError, TrialFolioError):
             return  # Never published, or not readable: a resume's records check reads it.
 
-    def _published(self, path: str, data: bytes) -> StoredFile | None:
-        """The file `path`, if a write of `data` that failed published it whole."""
-        try:
-            published = self._store.read(path) == data
-        except OSError:
-            return None  # Never published, or not readable: a resume's records check reads it.
-        if not published:
-            return None
-        return StoredFile(path=path, artifact_id="sha256:" + sha256_hex(data), size=len(data))
-
     def _case_invalid(self, case_id: str, failure: TrialFolioError) -> None:
         self._invalid[case_id] = failure
         _logger.error(
@@ -1258,7 +1244,7 @@ class ExperimentExecution:
             and giving.error_code == "provider.unsupported_capability"
         ]
         revise = (
-            f" Portfolio123 rejected a setting of {_and(rejected)}: a repeat sends the same"
+            f" Portfolio123 rejected a setting of {series(rejected)}: a repeat sends the same"
             " request again, so change the setting instead, and revise the plan with"
             " --revision-reason."
             if rejected
@@ -1500,22 +1486,16 @@ class ExperimentExecution:
         """The error of a session that stopped before its first case: nothing was sent. Its
         directory can be resumed only once its first plan's `experiment.json` is written, which
         an interrupt may have stopped just after the store published it."""
-        if self._record is None and self._record_data:
-            try:
-                published = self._store.read(plan_path(1, "experiment.json")) == self._record_data
-            except OSError:
-                published = False
-            if not published:
-                return self._unrecorded(failure)
-        elif self._record is None:
+        if self._record is None and (
+            not self._record_data
+            or published(self._store, plan_path(1, "experiment.json"), self._record_data) is None
+        ):
             return self._unrecorded(failure)
         detail = (
             "Nothing was sent. The session has no manifest, so the experiment's output reads as"
             " incomplete until running the same command again resumes it."
         )
-        return TrialFolioError(
-            failure.code, f"{failure.message} {detail}", f"{failure.log_message} {detail}"
-        )
+        return failure.with_detail(detail)
 
     def _unrecorded(self, failure: TrialFolioError) -> TrialFolioError:
         """The error of a session that stopped before its first plan was recorded."""
@@ -1524,9 +1504,7 @@ class ExperimentExecution:
             " incomplete, and the directory can't be resumed: remove the directory, and run the"
             " command again."
         )
-        return TrialFolioError(
-            failure.code, f"{failure.message} {detail}", f"{failure.log_message} {detail}"
-        )
+        return failure.with_detail(detail)
 
     def _incomplete(self, failure: TrialFolioError) -> TrialFolioError:
         """The error of a session that stopped without its manifest, with what its records say.
@@ -1539,9 +1517,7 @@ class ExperimentExecution:
         last = self._results[-1] if self._results else None
         if last is not None and last.recorded and failure is last.error:
             detail = self._manifest_detail()
-        return TrialFolioError(
-            failure.code, f"{failure.message} {detail}", f"{failure.log_message} {detail}"
-        )
+        return failure.with_detail(detail)
 
     def _attempt_detail(self) -> str:
         current = self._current
@@ -1712,10 +1688,3 @@ def _utc(moment: datetime) -> datetime:
     if moment.utcoffset() != timedelta(0):
         raise ValueError("the clock must give UTC times")
     return moment
-
-
-def _and(items: Sequence[str]) -> str:
-    """`a`, `a and b`, or `a, b, and c`."""
-    if len(items) <= 2:
-        return " and ".join(items)
-    return f"{', '.join(items[:-1])}, and {items[-1]}"

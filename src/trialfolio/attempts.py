@@ -67,7 +67,6 @@ from typing import Final, Literal, TypedDict, cast
 
 from pydantic import BaseModel
 
-from trialfolio.canonical import sha256_hex
 from trialfolio.contracts.attempt import (
     ArtifactReference,
     AttemptRecord,
@@ -87,7 +86,7 @@ from trialfolio.contracts.common import (
 )
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
 from trialfolio.contracts.plan import Plan
-from trialfolio.errors import TrialFolioError
+from trialfolio.errors import TrialFolioError, interrupted
 from trialfolio.planning import check_approval
 from trialfolio.provider import (
     DecodedResponse,
@@ -96,7 +95,7 @@ from trialfolio.provider import (
     ScreenBacktestResponse,
     UndecodedResponse,
 )
-from trialfolio.storage import ArtifactStore, StoredFile
+from trialfolio.storage import ArtifactStore, StoredFile, published
 
 _logger = logging.getLogger(__name__)
 
@@ -368,15 +367,10 @@ class _AttemptFiles:
 
     def published(self, name: str, data: bytes, role: AttemptRole) -> bool:
         """Whether an interrupted write of `name` published it whole. If it did, it's listed."""
-        path = f"{self._directory}/{name}"
-        try:
-            published = self._store.read(path) == data
-        except OSError:
-            return False
-        if published:
-            stored = StoredFile(path=path, artifact_id="sha256:" + sha256_hex(data), size=len(data))
+        stored = published(self._store, f"{self._directory}/{name}", data)
+        if stored is not None:
             self._files.append(AttemptFile(role, stored))
-        return published
+        return stored is not None
 
     def end[R: (AttemptRecord, AttemptRecordV1_1)](
         self,
@@ -463,7 +457,7 @@ class _AttemptFiles:
         try:
             self.write(ATTEMPT_RECORD, data, "attempt_record")
         except KeyboardInterrupt:
-            error = prevailing(_interrupted(end), error)
+            error = prevailing(interrupted(end.detail), error)
             if self.published(ATTEMPT_RECORD, data, "attempt_record"):
                 return True, error, record
             if record.error is not None:
@@ -471,7 +465,7 @@ class _AttemptFiles:
             return self._write_again(record), error, record
         except TrialFolioError as failure:
             recorded = self.published(ATTEMPT_RECORD, data, "attempt_record")
-            return recorded, prevailing(_with_detail(failure, end), error), record
+            return recorded, prevailing(failure.with_detail(end.detail), error), record
         # Unwritten, the start record, if any, reads as running.
         except Exception as failure:  # noqa: BLE001
             self.log_unexpected(failure)
@@ -973,24 +967,14 @@ def _error(ending: BaseException | None, end: _Ending) -> TrialFolioError | None
                 " Folio; please report it.",
             )
         case KeyboardInterrupt():
-            return _interrupted(end)
+            return interrupted(end.detail)
         case ProviderError():
             # Its message already says whether the request may have been charged.
             return ending
         case TrialFolioError():
-            return _with_detail(ending, end)
+            return ending.with_detail(end.detail)
         case _:
             return _unexpected(ending, end)
-
-
-def _interrupted(end: _Ending) -> TrialFolioError:
-    return TrialFolioError("command.interrupted", f"Trial Folio was interrupted. {end.detail}")
-
-
-def _with_detail(error: TrialFolioError, end: _Ending) -> TrialFolioError:
-    return TrialFolioError(
-        error.code, f"{error.message} {end.detail}", f"{error.log_message} {end.detail}"
-    )
 
 
 def _unexpected(error: BaseException, end: _Ending) -> TrialFolioError:
