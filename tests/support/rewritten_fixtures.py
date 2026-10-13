@@ -23,7 +23,9 @@ attempts' and the review's IDs. So the same code writes the same bytes, apart fr
 paths between them, which the reports give, don't depend on where `<out>` is.
 
 `compare <before> <after>` compares two such directories: it lists each file that's in only one,
-or whose bytes differ, leaving out `logs/`, and fails when it lists any.
+or whose bytes differ, leaving out `logs/`, and fails when it lists any. It fails too, with the
+error, and exit code 2, as for a wrong usage, when either isn't a directory, or a file or folder
+under it can't be read, rather than leave out what it can't read.
 
 For a task, write the fixtures again on its base and on its branch, each in a worktree of its own
 synced with `uv sync`, on the same Python, since the manifests record the installed packages'
@@ -46,7 +48,7 @@ import tempfile
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Final
+from typing import Final, NoReturn
 from unittest import mock
 
 FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
@@ -133,11 +135,16 @@ def write(out: Path) -> None:
             write_synthetic_experiment(out / "experiment")
 
 
+def _raise(error: OSError) -> NoReturn:
+    raise error
+
+
 def _files(directory: Path) -> dict[str, Path]:
     """Each file under `directory`, by its path relative to it, with `/` separators, leaving out
-    `logs/`."""
+    `logs/`. Raises the `OSError` when `directory` isn't a directory, or a folder under it can't
+    be read, which `os.walk` would otherwise skip."""
     files: dict[str, Path] = {}
-    for root, folders, names in os.walk(directory):
+    for root, folders, names in os.walk(directory, onerror=_raise):
         folders[:] = [folder for folder in folders if folder != LOGS]
         for name in names:
             path = Path(root, name)
@@ -147,7 +154,8 @@ def _files(directory: Path) -> dict[str, Path]:
 
 def differences(before: Path, after: Path) -> list[str]:
     """Each file that's in only one of `before` and `after`, or whose bytes differ, leaving out
-    `logs/`, in order."""
+    `logs/`, in order. Raises an `OSError` when either isn't a directory, or a file or folder
+    under it can't be read."""
     first, second = _files(before), _files(after)
     found: list[str] = []
     for path in sorted(first.keys() | second.keys()):
@@ -161,11 +169,18 @@ def differences(before: Path, after: Path) -> list[str]:
 
 
 def compare(before: Path, after: Path) -> int:
-    """Prints each difference `differences` finds. Returns 1 when there's any, and 0 otherwise."""
-    found = differences(before, after)
+    """Prints each difference `differences` finds. Returns 1 when there's any, and 0 otherwise.
+    When either isn't a directory, or a file or folder under it can't be read, prints the error
+    instead, and returns 2."""
+    try:
+        found = differences(before, after)
+        compared = len(_files(after))
+    except OSError as error:
+        print(f"Can't compare: {error}", file=sys.stderr)
+        return 2
     for line in found:
         print(line)
-    print(f"{len(_files(after))} files compared, {len(found)} differences.")
+    print(f"{compared} files compared, {len(found)} differences.")
     return 1 if found else 0
 
 

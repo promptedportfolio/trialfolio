@@ -262,8 +262,8 @@ RF-T01 wrote the check that RF-AC04 runs: `tests/support/rewritten_fixtures.py`.
   - `experiment/`, as the synthetic experiment's writer, `tests/support/synthetic_experiment.py`, wrote `experiments/synthetic-experiment-1.0.0/`, with both sessions' reports.
 
   The configuration and the copy of the run are in `inputs/`, beside the outputs, so the paths the reports give between them don't depend on where `<out>` is. The commands run through the CLI's entry function, with the license acknowledged by `TRIALFOLIO_ACCEPT_LICENSE`, in the tests' environment. Each fixture is written with a new fixed clock, and with a fixed sequence of version 4 UUIDs in place of `uuid.uuid4`, from `00000000-0000-4000-8000-000000000001` on.
-- **`compare <before> <after>`** lists each file that's in only one of the two directories, or whose bytes differ, leaving out every `logs/`, and exits with 1 when it lists any.
-- **Its tests,** in `tests/interface/test_rewritten_fixtures.py`, check that the same code writes the same bytes, that each fixture is written again with its files, and that the comparison finds a changed file, apart from one in `logs/`.
+- **`compare <before> <after>`** lists each file that's in only one of the two directories, or whose bytes differ, leaving out every `logs/`, and exits with 1 when it lists any. When either isn't a directory, or a file or folder under it can't be read, it prints the error and exits with 2, as for a wrong usage, rather than leave out what it can't read.
+- **Its tests,** in `tests/interface/test_rewritten_fixtures.py`, check that the same code writes the same bytes, that each fixture is written again with its files, and that the comparison finds a changed file, apart from one in `logs/`, and fails when a path isn't a directory or a folder can't be read.
 
 A task runs it from its worktree, with `<base>` the commit its branch starts from, such as `origin/main`, and `<scratch>` a directory outside the repository:
 
