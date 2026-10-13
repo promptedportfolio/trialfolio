@@ -201,11 +201,11 @@ Synthetic example output from `trialfolio demo`, shown over several lines; the c
 {
   "schema_version": "1.2.0",
   "command": "demo",
-  "trialfolio_version": "0.3.0",
+  "trialfolio_version": "0.4.0",
   "outcome": "completed",
   "exit_code": 0,
   "ids": {
-    "plan_hash": "sha256:c10831d21f098224d7ddcc68c25cc818585839cde0dfe8ac4890cbfd6d41ec93",
+    "plan_hash": "sha256:17a821fc6aaa4b61797ed6bb9be56c563e1aa8d48035231e201dc6fd4ced6164",
     "case_id": "case-e29404ddebf86363",
     "attempt_id": "e31caaee-0ceb-48c1-8975-31794c74cfcc"
   },
