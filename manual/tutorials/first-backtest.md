@@ -49,7 +49,7 @@ Until Trial Folio is released as a package, you run it from a copy of its reposi
     trialfolio --help
     ```
 
-    `trialfolio --version` prints the version of the tag your copy came from, such as `trialfolio 0.2.1` from `v0.2.1`. A copy of `main`, like the one you just cloned, prints the version of the latest release whose specification is complete, which may not be tagged yet ([D-26](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#decisions)).
+    `trialfolio --version` prints the version of the tag your copy came from, such as `trialfolio 0.3.0` from `v0.3.0`. A copy of `main`, like the one you just cloned, prints the version of the latest release whose specification is complete, which may not be tagged yet ([D-26](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#decisions)).
 
     `trialfolio --help` lists the commands `init`, `run`, `report`, `demo`, `review`, and `license`.
 

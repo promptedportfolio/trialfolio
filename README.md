@@ -17,14 +17,14 @@ Portfolio123 does the backtesting. Trial Folio plans each request, records exact
 
 ## Status
 
-**Pre-release. Nothing is installable yet.** Release 0.1.0 is built, has passed its tests, including a live run through the Portfolio123 API, and is in private use. Release 0.2.0, which compares saved runs, is built, has passed its tests, including reviews of real runs, and is in private use too. Release 0.2.1 changes only the license, to version 1.1. Release 0.3.0, which runs experiments, is built, has passed its tests, including a live experiment through the Portfolio123 API, and is in private use too. None has been released.
+**Pre-release. Nothing is installable yet.** Release 0.1.0 is built, has passed its tests, including a live run through the Portfolio123 API, and is in private use. Release 0.2.0, which compares saved runs, is built, has passed its tests, including reviews of real runs, and is in private use too. Release 0.2.1 changes only the license, to version 1.1. Release 0.3.0, which runs experiments, is built, has passed its tests, including a live experiment through the Portfolio123 API, and is in private use too. All four are tagged, with every release requirement met, but none has been released.
 
 | Capability | Planned release | Status |
 |---|---|---|
 | Run one screen backtest through the Portfolio123 API and keep the settings with the results | [0.1.0](docs/releases/0.1.0-api-execution.md) | Implemented: built, tested, and used privately; not yet released |
 | Compare saved runs, offline, against a baseline | [0.2.0](docs/releases/0.2.0-review.md) | Implemented: built, tested, and used privately; not yet released |
 | Version 1.1 of the license: your own trust, retirement accounts, and single-member LLC count as you | [0.2.1](docs/releases/0.2.1-license.md) | Ready: signed off, tagged, and every release requirement met; not yet released |
-| Run a small, planned experiment of screen variants, with safe resume | [0.3.0](docs/releases/0.3.0-experiments.md) | Implemented: built, tested, and used privately; not yet released |
+| Run a small, planned experiment of screen variants, with safe resume | [0.3.0](docs/releases/0.3.0-experiments.md) | Implemented: built, tested, used privately, tagged, and every release requirement met; not yet released |
 | Vary a ranking system's weights, at the top level or within a composite, or remove a factor, as an experiment's variants | [0.4.0](docs/releases/0.4.0-ranking-weights.md) | Planned: a Draft outline, being completed. Live calls verified Portfolio123's support (R04-T01), and the ranking definition and its variants are specified (R04-T02) |
 | Descriptive return analytics, robustness diagnostics, statistical evaluation, forward tracking | [Roadmap](docs/roadmap.md) | Not specified |
 
