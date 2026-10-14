@@ -41,6 +41,8 @@ nav = [
     "explanation/credits-and-uncertain-charges.md",
     "explanation/reproducibility.md",
     "explanation/what-a-backtest-can-support.md",
+    "explanation/the-research-method.md",
+    "explanation/where-trial-folio-is-going.md",
   ] },
 ]
 # The third-party notices page, third-party-notices.md, isn't in the navigation: every page's
