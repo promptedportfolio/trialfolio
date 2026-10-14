@@ -1,6 +1,6 @@
 # ADR 0009: Publish a user manual on GitHub Pages
 
-**Status:** Accepted, by the owner, on 2026-10-12. Decision 7 is amended by the owner's amendment of [D-35](../spec.md#decisions), on 2026-10-13: only the track's first two tasks, UM-T01 and UM-T02, finish before 0.4.0's implementation starts.
+**Status:** Accepted, by the owner, on 2026-10-12. Decision 7 is amended by [D-35](../spec.md#decisions), which the owner amended on 2026-10-13: only the track's first two tasks, UM-T01 and UM-T02, finish before 0.4.0's implementation starts, and the tasks added later hold no release.
 **Date:** 2026-10-12
 **Decision owner:** Nathan Slaughter
 **Owner decisions:** D-10 and D-35 in the [product specification](../spec.md#decisions)
@@ -35,7 +35,6 @@ The tool was checked too, on 2026-10-12:
 5. **D-10 is amended** to allow the site's address, which contains the brand's name, as it allows the repository's URL.
 6. **The manual owns no requirement, and the specifications stay off the site.** Explanation pages link to the specifications on GitHub, and reference pages that list commands, fields, and errors are generated from their sources.
 7. **A track outside any release** ([D-35](../spec.md#decisions)), specified in [user-manual.md](../user-manual.md), whose tasks the owner assigns by ID. It runs alongside 0.4.0's specification work and finishes before 0.4.0's implementation starts. 0.4.0's documentation task then writes that release's pages in the manual, and turns the user guide into a page that points to it.
-   *Amended on 2026-10-13, when the owner amended [D-35](../spec.md#decisions) and added the track's later tasks: only its first two tasks, UM-T01 and UM-T02, finish before 0.4.0's implementation starts. The later tasks, from UM-T03 on, hold no release.*
 
 ## Alternatives considered
 
