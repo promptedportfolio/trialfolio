@@ -1,7 +1,9 @@
 """The CLI's logging configuration (docs/contracts.md, logging and local diagnostics; REQ-06,
 INV-14).
 
-Core modules log through `logging.getLogger(__name__)` and never configure handlers. For the
+Core modules log through `logging.getLogger(__name__)`, apart from code moved out of a module
+that logs, which keeps logging under that module's name, as the `trialfolio.report` package logs as
+`trialfolio.report` (docs/refactoring.md, decision 11). They never configure handlers. For the
 length of one command, `CommandLogs` gives the `trialfolio` logger two handlers:
 
 - **The log file,** one JSON object per line, at INFO and above, or at the level
