@@ -10,7 +10,8 @@ It fails when:
   stylesheet the site serves does (UM-AC07);
 - a page's markup turns on a feature for which the theme's script loads code from another host:
   diagrams, image lightboxes, or runnable Python code blocks (UM-AC07);
-- a page's footer lacks the non-affiliation notice or the link to LICENSE (UM-AC04);
+- a page's footer lacks the non-affiliation notice or the link to LICENSE (UM-AC04), or the link
+  to the third-party notices, which is the only link to that page (tooling and hosting);
 - a link between pages doesn't resolve: the page it names, or its anchor, is missing (UM-AC06).
 
 Zensical's strict build already fails on a broken link in a page's Markdown. This reads the built
@@ -33,6 +34,9 @@ from urllib.parse import unquote, urlsplit
 SITE_URL = "https://promptedportfolio.github.io/trialfolio/"
 SITE_PATH = urlsplit(SITE_URL).path
 LICENSE_URL = "https://github.com/promptedportfolio/trialfolio/blob/main/LICENSE"
+# The site's third-party notices page, which every page's footer links to, and nothing else does
+# (docs/user-manual.md, tooling and hosting).
+NOTICES_PAGE = "third-party-notices/index.html"
 # The README's non-affiliation notice (docs/disclaimers.md, DSC-06), with its whitespace collapsed.
 NON_AFFILIATION_NOTICE = (
     "Not affiliated with Portfolio123. This is an independent project. It is not an official "
@@ -229,6 +233,12 @@ def check_site(site: Path) -> list[str]:
             problems.append(f"{url}: the footer lacks the non-affiliation notice (UM-AC04)")
         if LICENSE_URL not in page.footer_links:
             problems.append(f"{url}: the footer lacks the link to LICENSE (UM-AC04)")
+        footer_targets = [_target(site, url, href) for href in page.footer_links]
+        if not any(target and target[0] == NOTICES_PAGE for target in footer_targets):
+            problems.append(
+                f"{url}: the footer lacks the link to the third-party notices "
+                "(docs/user-manual.md, tooling and hosting)"
+            )
         for href in page.links:
             target = _target(site, url, href)
             if target is None:
