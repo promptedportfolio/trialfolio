@@ -22,7 +22,15 @@ After the iterative review, the owner confirmed three of its changes the same da
 - **The survey is a document in `docs/`,** `related-tools.md`, which the page cites on GitHub. Its facts carry dates and sources, and the manual owns no facts of its own ([rule 1](#rules)).
 - **The method is one page,** in two parts: what the research says, and a walkthrough of a study. It's split only if it grows too long to read as one.
 - **Only UM-T01 and UM-T02 hold 0.4.0's implementation** ([D-35](spec.md#decisions), amended). The tasks added later hold no release.
-- **Rules 9 and 10, UM-AC09 to UM-AC11, and the survey's scope, as UM-T03 gives it,** stand as written. The owner confirmed them on 2026-10-13.
+- **Rules 9 and 10, UM-AC09 to UM-AC11, and the survey's scope, as UM-T03 gives it.** The owner confirmed them on 2026-10-13.
+
+After the iterative review of the plan, the owner decided three changes to them on 2026-10-14:
+
+- **[Rule 9](#rules)'s triggers.** A change to a release's status triggers it, not every change to its status line, and so does a change to roadmap.md's later increments. It also keeps current the method page's labels that name a release or target.
+- **[Rule 10](#rules)'s scope.** A fact that another document in `docs/` owns, such as ADR 0001's facts about `p123api`, keeps citing that document, so the fact has one source.
+- **UM-AC10's targets.** The roadmap page labels as proposed each target in roadmap.md that has no release file yet, so a target with a release file, such as 0.4.0, appears once, with its release's status.
+
+The owner also decided that [ADR 0009](adrs/0009-publish-a-user-manual-on-github-pages.md) gives its amendment of decision 7 as one note, in its status line.
 
 ## User outcome
 
