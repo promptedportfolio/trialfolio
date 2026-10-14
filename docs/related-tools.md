@@ -1,6 +1,6 @@
 # Related tools
 
-**Status:** Verified observations, checked 2026-10-13, with nine checked again, and one added, on 2026-10-14. Recheck before relying on them.
+**Status:** Verified observations, checked 2026-10-13, with nine checked again, and two added, on 2026-10-14. Recheck before relying on them.
 **Written by:** UM-T03 ([user-manual.md](user-manual.md#tasks)), on 2026-10-13
 
 This survey holds the facts behind the user manual's claims about other tools ([rule 10](user-manual.md#rules)): the tools a Portfolio123 member could use for some of what Trial Folio does. A manual page that says what another tool does or doesn't do, or that no other tool does something, cites this file and the date its facts were checked. A fact that another document in `docs/` owns, such as one of [ADR 0001](adrs/0001-python-and-portfolio123-integration.md)'s about `p123api`, keeps citing that document rather than this survey, so the fact has one source. The sections on [DataMiner](#dataminer) and [the API](#the-api-and-its-python-wrapper-p123api) say which of their facts ADR 0001 and ADR 0005 own.
@@ -69,7 +69,7 @@ The survey was done in three parts on 2026-10-13: Portfolio123's own tools; tool
 - **Not searched:** Reddit, YouTube, X, Discord, and forums other than Portfolio123's and WealthLab's. Tools shared privately weren't searched either, and couldn't be: several forum posts offer code by direct message. So "none found" applies only to the searches listed.
 - **Facts change.** Each was true of its source on its check date. Recheck before relying on one.
 
-**Spot checks.** After the three parts, 14 of the facts that bear most on the claims were checked again against their sources, the same day. Three were corrected here: `p123api` 3.1.0's upload date, which API responses document their cost and quota, and the wording of a quote from WealthLab's extension page. The rest held. On 2026-10-14, in the review of this survey, nine facts the claims rest on were checked again against their sources, and all held: WealthLab's extension page; §17 of Portfolio123's terms; QuantConnect's optimization deployment and pricing pages; Portfolio123's API credits page, its API page for AI Factor, and its list of DataMiner operations; the Download Factors estimate post; and `p123api`'s `client.py`. The review also found a fact the survey had missed: the LEAN CLI asks the user to confirm a cloud optimization's estimated cost before starting it. [LEAN](#lean) and [QuantConnect](#quantconnect) now give it, read from QuantConnect's two optimization deployment pages that day.
+**Spot checks.** After the three parts, 14 of the facts that bear most on the claims were checked again against their sources, the same day. Three were corrected here: `p123api` 3.1.0's upload date, which API responses document their cost and quota, and the wording of a quote from WealthLab's extension page. The rest held. On 2026-10-14, in the review of this survey, nine facts the claims rest on were checked again against their sources, and all held: WealthLab's extension page; §17 of Portfolio123's terms; QuantConnect's optimization deployment and pricing pages; Portfolio123's API credits page, its API page for AI Factor, and its list of DataMiner operations; the Download Factors estimate post; and `p123api`'s `client.py`. The review also found a fact the survey had missed: the LEAN CLI asks the user to confirm a cloud optimization's estimated cost before starting it. [LEAN](#lean) and [QuantConnect](#quantconnect) now give it, read from QuantConnect's two optimization deployment pages that day. It found a second: Equities Lab keeps a named backtest's completed results until the user removes them. [Equities Lab](#equities-lab) now gives it, read from its Recent Backtests page that day.
 
 ## Summary
 
@@ -115,7 +115,7 @@ One row per tool, with short cells. "Not found" means the public sources checked
 | Qlib | Its own; the user's data | Yes: task queues | Parameters, metrics, artifacts | Not found | Train, valid, and test segments | MIT | Not found |
 | WealthLab | Its own; the user's providers | Yes: optimizers | Saves and resumes long runs | Not found | Walk-forward, out-of-sample | Subscription | Through an extension |
 | Zacks Research Wizard | Zacks's | Not found | Saved screens; Excel export | Not found | Not found | Paid; free trial | Not found |
-| Equities Lab | Its own; Morningstar built in | Not found | Trade log | Not found | Not found | Subscription; free trial | Not found |
+| Equities Lab | Its own; Morningstar built in | Not found | Trade log; named backtests' results, until removed | Not found | Not found | Subscription; free trial | Not found |
 | GuruFocus screener backtest | GuruFocus's | Not found | Results and holdings | Not found | Not found | Membership | Not found |
 | Portfolio Visualizer | Its own; Morningstar, CSI, others | Not found | Saved portfolios and results | Not found | Not found | Free and paid plans | Not found |
 | **Factor datasets** | | | | | | | |
@@ -677,9 +677,10 @@ Checked 2026-10-13.
 - **What it is:** A web platform for screening, backtesting, and simulation ([equitieslab.com][eqlab]).
 - **Engine and data:** Its own engine, with Morningstar data built in: "This means no data fees for you". Its dataset contains delisted stocks ([FAQ][eqlab-faq]). It claims "no survivorship bias, no lookahead bias, no restatement bias" ([equitieslab.com][eqlab]). These are the vendor's claims.
 - **Many variants:** None found.
-- **What it records:** A log of every trade ([FAQ][eqlab-faq]).
+- **What it records:** A log of every trade ([FAQ][eqlab-faq]). A backtest sent to the background is named: "Name the strategy and press okay". Its completed results "will stay instantly available to you for as long as you keep them saved in the recent backtest area", until the user removes each one, or all of them with "Clear All" ([Recent Backtests][eqlab-recent], linked from the FAQ, checked 2026-10-14). The page isn't dated.
 - **Access and license:** A proprietary subscription, with a "Free one month trial".
-- **Compared with Trial Folio:** It backtests fundamental screens on bundled data. No batch or run-record features found.
+- **Compared with Trial Folio:** It backtests fundamental screens on bundled data, and keeps each named backtest's results until the user removes them. No batch of variants found.
+- **Not verified:** whether a saved backtest keeps the settings it ran with, or the software or data version; whether a failed backtest is kept.
 
 ### GuruFocus screener backtest
 
@@ -767,6 +768,7 @@ Checked 2026-10-13.
 [zacks-pro]: https://advisortools-st2.zacks.com/Screening/ZacksProBacktester
 [eqlab]: https://www.equitieslab.com/
 [eqlab-faq]: https://www.equitieslab.com/faq/
+[eqlab-recent]: https://www.equitieslab.com/run-backtests-in-the-background-with-recent-backtests/
 [guru]: https://www.gurufocus.com/news/1811493/gurufocus-feature-highlight-backtesting-in-the-screener
 [guru-2021]: https://www.gurufocus.com/news/1527290/allinone-screener-backtesting-now-available-for-over-80-countries
 [pv]: https://www.portfoliovisualizer.com/
