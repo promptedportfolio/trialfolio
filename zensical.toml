@@ -44,7 +44,8 @@ nav = [
   ] },
 ]
 # The third-party notices page, third-party-notices.md, isn't in the navigation: every page's
-# footer links to it (docs/user-manual.md, rule 3).
+# footer links to it (docs/user-manual.md, tooling and hosting), and scripts/check fails when one
+# doesn't.
 
 [project.theme]
 # No web fonts: the theme would load them from Google's servers (UM-AC07). Pages use the

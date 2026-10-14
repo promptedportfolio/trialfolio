@@ -2,10 +2,11 @@
 
 Traces to docs/user-manual.md: UM-AC07, a page or a stylesheet that loads a resource from another
 host, and a page whose markup turns on a feature for which the theme's script loads code from
-another host; UM-AC04, a footer without the non-affiliation notice or the link to LICENSE; and
-UM-AC06, a link between pages whose page or anchor is missing. Each test writes a small site by hand, as the
-theme lays one out, and runs `scripts/check_manual.py` on it. scripts/check runs the same script
-on the manual's real build.
+another host; UM-AC04, a footer without the non-affiliation notice or the link to LICENSE; tooling
+and hosting, a footer without the link to the third-party notices, the only link to that page;
+and UM-AC06, a link between pages whose page or anchor is missing. Each test writes a small site
+by hand, as the theme lays one out, and runs `scripts/check_manual.py` on it. scripts/check runs
+the same script on the manual's real build.
 """
 
 import importlib.util
@@ -19,7 +20,8 @@ FOOTER = """
 <footer class="md-footer"><div class="md-copyright">
   <p>Copyright &copy; 2026 Nathan Slaughter. Trial Folio is source available under the
   <a href="https://github.com/promptedportfolio/trialfolio/blob/main/LICENSE">Nathan Slaughter
-  Personal Research License</a>.</p>
+  Personal Research License</a>. The site's
+  <a href="/trialfolio/third-party-notices/">third-party notices</a>.</p>
   <p><strong>Not affiliated with Portfolio123.</strong> This is an independent project. It is not
   an official Portfolio123 project and has not been reviewed by Portfolio123. No endorsement by
   Portfolio123 is implied.</p>
@@ -69,6 +71,7 @@ def _site(tmp_path: Path, **pages: str) -> Path:
         "how-to/a/index.html",
         _page(body='<h2 id="steps">Steps</h2><a href="../../">Home</a><a href="#steps">Here</a>'),
     )
+    _write(site, "third-party-notices/index.html", _page(body="<h1>Third-party notices</h1>"))
     _write(site, "assets/main.css", "body{background:url(../images/x.png)}")
     _write(site, "assets/bundle.js", "")
     for name, text in pages.items():
@@ -261,12 +264,49 @@ def test_a_footer_without_the_link_to_license_fails(tmp_path: Path) -> None:
     ]
 
 
+def test_a_footer_without_the_link_to_the_notices_fails(tmp_path: Path) -> None:
+    # The footer's link is the only one to the notices page, which isn't in the navigation. A link
+    # elsewhere on the page doesn't count, and neither does a footer link to another page.
+    footer = FOOTER.replace("/trialfolio/third-party-notices/", "/trialfolio/how-to/a/")
+    body = '<a href="third-party-notices/">Notices</a>'
+    site = _site(tmp_path, b=_page(body=body, footer=footer))
+
+    assert check_manual.check_site(site) == [
+        (
+            "b.html: the footer lacks the link to the third-party notices "
+            "(docs/user-manual.md, tooling and hosting)"
+        )
+    ]
+
+
+def test_a_footer_link_to_the_notices_resolves_from_any_page(tmp_path: Path) -> None:
+    # The theme writes the link relative to each page, and from the root on the 404 page, as
+    # FOOTER does.
+    def footer(href: str) -> str:
+        return FOOTER.replace("/trialfolio/third-party-notices/", href)
+
+    site = _site(
+        tmp_path,
+        **{
+            "c": _page(footer=footer("third-party-notices/")),
+            "how-to__d__index": _page(footer=footer("../../third-party-notices/#mit")),
+            "third-party-notices__index": _page(body='<h2 id="mit">MIT</h2>', footer=footer("./")),
+        },
+    )
+
+    assert check_manual.check_site(site) == []
+
+
 def test_a_page_without_a_footer_fails(tmp_path: Path) -> None:
     site = _site(tmp_path, b=_page(footer=""))
 
     assert check_manual.check_site(site) == [
         "b.html: the footer lacks the non-affiliation notice (UM-AC04)",
         "b.html: the footer lacks the link to LICENSE (UM-AC04)",
+        (
+            "b.html: the footer lacks the link to the third-party notices "
+            "(docs/user-manual.md, tooling and hosting)"
+        ),
     ]
 
 

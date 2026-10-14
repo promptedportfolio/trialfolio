@@ -182,7 +182,7 @@ On 2026-10-14 the site gained colors, more of the theme's navigation, a logo, an
   - the address and the list of the page's sections follow the section in view (`navigation.tracking` and `toc.follow`);
   - search highlights the words it found on the page it opens (`search.highlight`).
 - **The logo** is Lucide's `flask-conical` icon. The favicon, `manual/assets/favicon.svg`, is the same icon, in the accent color. The theme's own favicon is still served, though no page uses it, so its notice stays.
-- **The third-party notices page** isn't in the navigation. Every page's footer links to it ([rule 3](#rules)).
+- **The third-party notices page** isn't in the navigation. Every page's footer links to it, as [tooling and hosting](#tooling-and-hosting) requires, and that link is now the only one to it. So `scripts/check_manual.py` also fails when a page's footer lacks the link. The review of this change added that check on 2026-10-14, and it awaits the owner's confirmation.
 
 ## Open questions
 
