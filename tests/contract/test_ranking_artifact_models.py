@@ -2309,6 +2309,27 @@ SNAPSHOT_MANIFEST_REJECTS: dict[str, Change] = {
     "a configuration the provider returned": lambda d: snapshot_artifact(d, "configuration")[
         "source"
     ].update(provenance="verified"),
+    "a response of another version of its format": lambda d: snapshot_artifact(
+        d, "provider_response"
+    )["source"].update(format_version="2"),
+    "an undecoded response of another version of its format": lambda d: (
+        snapshot_failed(d),
+        d["artifacts"].insert(
+            4,
+            listed(f"{SNAPSHOT_DIRECTORY}/response.raw", "provider_response_undecoded")
+            | {
+                "source": source(
+                    "p123api-rank-get-response_undecoded", operation="rank_get", version="2"
+                )
+            },
+        ),
+    ),
+    "a request of another version of its format": lambda d: snapshot_artifact(
+        d, "provider_request"
+    )["source"].update(format_version="2"),
+    "a configuration of a version the snapshot configuration doesn't have": lambda d: (
+        snapshot_artifact(d, "configuration")["source"].update(format_version="1.1.0")
+    ),
     "a plan in an experiment's place": lambda d: snapshot_artifact(d, "plan").update(
         path="plans/1/plan.json"
     ),

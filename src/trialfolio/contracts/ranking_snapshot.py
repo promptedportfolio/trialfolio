@@ -49,6 +49,7 @@ from trialfolio.contracts.manifest import (
     check_ranking_artifact,
 )
 from trialfolio.contracts.plan import Budget, DataCategory, DocumentedSource, RetryPolicy
+from trialfolio.contracts.ranking_snapshot_configuration import RANKING_SNAPSHOT_SCHEMA_VERSIONS
 
 RANK_GET_COST_SOURCE: Final = DocumentedSource(
     title="API functions: Rank",
@@ -204,14 +205,25 @@ SNAPSHOT_ROLE_PATHS: Final[dict[str, re.Pattern[str]]] = {
 }
 """Where the file of each role is in a snapshot's directory (ranking snapshot output)."""
 
-_SNAPSHOT_SOURCES: Final[dict[str, tuple[str, int | None, str | None]]] = {
-    "configuration": ("ranking-snapshot-configuration", None, None),
-    "provider_request": ("p123api-rank-get-request", None, "rank_get"),
-    "provider_response": ("p123api-rank-get", 1, "rank_get"),
-    "provider_response_undecoded": ("p123api-rank-get-response_undecoded", None, "rank_get"),
+_SNAPSHOT_SOURCES: Final[dict[str, tuple[str, tuple[str, ...], int | None, str | None]]] = {
+    "configuration": (
+        "ranking-snapshot-configuration",
+        RANKING_SNAPSHOT_SCHEMA_VERSIONS,
+        None,
+        None,
+    ),
+    "provider_request": ("p123api-rank-get-request", ("1",), None, "rank_get"),
+    "provider_response": ("p123api-rank-get", ("1",), 1, "rank_get"),
+    "provider_response_undecoded": (
+        "p123api-rank-get-response_undecoded",
+        ("1",),
+        None,
+        "rank_get",
+    ),
 }
-"""Each source artifact's format, parser version, and provider operation, but the definition's
-copy, which a run's manifest checks too."""
+"""Each source artifact's format, its format versions, its parser version, and its provider
+operation, but the definition's copy, which a run's manifest checks too. The configuration's
+format version is its schema version, and each of the `rank_get`'s files is version 1."""
 
 _SNAPSHOT_PARSERS: Final = (
     ParserVersion(layout="p123api-rank-get", layout_version=1, parser_version=1),
@@ -245,7 +257,7 @@ class SnapshotArtifact(ContractModel):
         check_ranking_artifact(self.role, self.path, self.schema_version, self.source)
         expected = _SNAPSHOT_SOURCES.get(self.role)
         if expected is not None and self.source is not None:
-            format_, parser, operation = expected
+            format_, versions, parser, operation = expected
             provenance = "user_supplied" if self.role == "configuration" else "verified"
             found = (
                 self.source.format,
@@ -253,10 +265,13 @@ class SnapshotArtifact(ContractModel):
                 self.source.operation,
                 self.source.provenance,
             )
-            if found != (format_, parser, operation, provenance):
+            if (
+                found != (format_, parser, operation, provenance)
+                or self.source.format_version not in versions
+            ):
                 raise ValueError(
-                    f"a file of the role {self.role} is the format {format_}, with "
-                    f"{provenance} provenance"
+                    f"a file of the role {self.role} is the format {format_}, version "
+                    f"{' or '.join(versions)}, with {provenance} provenance"
                 )
         return self
 
