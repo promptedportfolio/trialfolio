@@ -855,7 +855,9 @@ def test_a_metrics_table_the_installed_parser_doesnt_write_fails_the_check(lab: 
 
     error = refused(resumed, "input.not_a_run")
     assert "isn't what this version's parser writes" in error.message
-    assert "0.3.0" in error.message
+    # The version that wrote the session, the installed one: 0.4.0, whose specification R04-T04
+    # completed (D-26).
+    assert "0.4.0" in error.message
     assert resumed.received == () and not (lab.out / "sessions/2").exists()
 
 

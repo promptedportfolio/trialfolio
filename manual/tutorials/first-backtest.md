@@ -129,7 +129,7 @@ The demo writes a complete example run from invented values. It needs no Portfol
     ```text
     Synthetic example run written to demo/. Nothing was sent to Portfolio123: every value is invented.
     Report: demo/report.html
-    Plan hash: sha256:c10831d21f098224d7ddcc68c25cc818585839cde0dfe8ac4890cbfd6d41ec93
+    Plan hash: sha256:17a821fc6aaa4b61797ed6bb9be56c563e1aa8d48035231e201dc6fd4ced6164
     Statistical validation and trading readiness: not assessed.
     ```
 
