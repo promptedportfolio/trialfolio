@@ -8,7 +8,7 @@ These notices are for the files of Zensical 0.0.69, the version the repository's
 
 ## Zensical's theme
 
-The page templates, the scripts in `assets/javascripts/`, the stylesheets in `assets/stylesheets/`, and the favicon, `assets/images/favicon.png`, come from Zensical's theme. Its license is MIT:
+The page templates, the scripts in `assets/javascripts/`, the stylesheets in `assets/stylesheets/`, and the theme's favicon, `assets/images/favicon.png`, which the site serves though its pages use their own, come from Zensical's theme. Its license is MIT:
 
 ```text
 Copyright (c) 2025-2026 Zensical and contributors
@@ -125,7 +125,7 @@ Copyright (c) 2015-2018 Google, Inc., Netflix, Inc., Microsoft Corp. and contrib
 
 ## Icons
 
-The pages and the stylesheets include icons from four sets.
+The pages and the stylesheets include icons from four sets. The site's favicon, `assets/favicon.svg`, is Lucide's `flask-conical` icon, in the site's accent color.
 
 ### Lucide
 

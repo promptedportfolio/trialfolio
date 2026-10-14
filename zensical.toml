@@ -42,8 +42,9 @@ nav = [
     "explanation/reproducibility.md",
     "explanation/what-a-backtest-can-support.md",
   ] },
-  { "Third-party notices" = "third-party-notices.md" },
 ]
+# The third-party notices page, third-party-notices.md, isn't in the navigation: every page's
+# footer links to it (docs/user-manual.md, rule 3).
 
 [project.theme]
 # No web fonts: the theme would load them from Google's servers (UM-AC07). Pages use the
@@ -52,4 +53,47 @@ font = false
 # overrides/partials/copyright.html replaces the theme's footer text with the notices every page
 # carries (docs/user-manual.md, rule 3).
 custom_dir = "overrides"
-features = ["navigation.sections", "content.code.copy"]
+# The four sections are tabs across the top. Instant navigation loads each page from this site
+# only, as the search does.
+features = [
+  "navigation.tabs",
+  "navigation.sections",
+  "navigation.path",
+  "navigation.footer",
+  "navigation.top",
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.tracking",
+  "search.highlight",
+  "toc.follow",
+  "content.code.copy",
+]
+# Lucide's flask icon, in the header. The favicon is the same icon, in the accent color
+# (manual/third-party-notices.md, Icons).
+favicon = "assets/favicon.svg"
+
+[project.theme.icon]
+logo = "lucide/flask-conical"
+
+# Light and dark schemes, with a switch in the header, following the reader's system setting
+# until they choose.
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "teal"
+accent = "teal"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "teal"
+accent = "teal"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
