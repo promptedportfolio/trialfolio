@@ -174,7 +174,7 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
 On 2026-10-14 the site gained colors, more of the theme's navigation, a logo, and a favicon of its own. It still loads nothing from another host (UM-AC07), and it serves the same theme files as before ([THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#the-user-manuals-site)). The owner decided the variant, the colors, the logo and the favicon, and the notices page's place on 2026-10-14, and that the change needs no task. In `zensical.toml`:
 
 - **The variant** is `modern`, the theme's default.
-- **The colors** are the theme's `teal`, in a light scheme and a dark one. They follow the reader's system setting, until the reader chooses one with the switch in the header.
+- **The colors** are the theme's `teal`, in a light scheme and a dark one. They follow the reader's system setting, until the reader chooses one with the switch in the header. The system setting's entry names the colors too, so a page starts in teal before the theme's script runs, and stays teal without it.
 - **The navigation:**
   - the home page and the four sections are tabs across the top (`navigation.tabs`);
   - each page shows the path to it (`navigation.path`), links to the pages before and after it (`navigation.footer`), and has a button back to the top (`navigation.top`);

@@ -77,9 +77,13 @@ favicon = "assets/favicon.svg"
 logo = "lucide/flask-conical"
 
 # Light and dark schemes, with a switch in the header, following the reader's system setting
-# until they choose.
+# until they choose. The first entry, the system setting, names the colors too. Each page's
+# markup starts in the first entry's colors, which would be the theme's indigo without them, and
+# keeps them until the theme's script runs, or for good without it.
 [[project.theme.palette]]
 media = "(prefers-color-scheme)"
+primary = "teal"
+accent = "teal"
 toggle.icon = "lucide/sun-moon"
 toggle.name = "Switch to light mode"
 
