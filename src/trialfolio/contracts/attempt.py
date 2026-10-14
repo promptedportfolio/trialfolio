@@ -597,8 +597,9 @@ def check_ranking_ending(record: _RankingEnding) -> list[Exchange]:
 def _check_rank_update(
     update: RankingUpdate, rank: Exchange | None, backtest: Exchange | None
 ) -> None:
-    """Raises `ValueError` unless the `rank_update`'s files follow its exchange, and a backtest
-    follows only a `rank_update` that got a 200 the wrapper decoded, whose response was saved."""
+    """Raises `ValueError` unless the `rank_update`'s files follow its exchange, a note on that
+    exchange comes with its saved response, and a backtest follows only a `rank_update` that got
+    a 200 the wrapper decoded, whose response was saved."""
     if rank is not None and update.request is None:
         raise ValueError("a rank_update's exchange requires its saved request reference")
     if update.response is not None and (rank is None or rank.status != 200):
@@ -607,6 +608,11 @@ def _check_rank_update(
         raise ValueError(
             "a note on the rank_update marks an attempt a resume recorded from its update record, "
             "which sent no backtest"
+        )
+    if rank is not None and rank.note is not None and update.response is None:
+        raise ValueError(
+            "a note on the rank_update marks an attempt a resume recorded from the rank_update's "
+            "saved response, which its record references"
         )
     if backtest is not None and (
         rank is None

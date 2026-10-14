@@ -1764,6 +1764,13 @@ ATTEMPT_1_2_REJECTS: dict[str, tuple[Callable[[], Document], Change]] = {
         attempt_record_1_2,
         lambda d: unknown(d, AUTH, RANK | {"note": "completed_from_saved_response"}),
     ),
+    "a noted rank_update without its saved response": (
+        attempt_record_1_2,
+        lambda d: (
+            failed(d, AUTH, RANK | {"note": "completed_from_saved_response"}),
+            update_of(d).update(response=None),
+        ),
+    ),
     "a noted authentication": (
         attempt_record_1_2,
         lambda d: d.update(
@@ -1898,6 +1905,10 @@ ATTEMPT_1_3_REJECTS: dict[str, Change] = {
         unknown(d, RANK),
         update_of(d).update(response=None),
         d.update(request=reference("request.json")),
+    ),
+    "a noted rank_update without its saved response": lambda d: (
+        failed(d, RANK | {"note": "completed_from_saved_response"}),
+        update_of(d).update(response=None),
     ),
 }
 
