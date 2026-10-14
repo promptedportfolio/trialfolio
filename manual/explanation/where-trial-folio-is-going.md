@@ -25,7 +25,7 @@ These are the releases in `docs/releases/`, with the status each one's status li
 | [0.2.0: Review](https://github.com/promptedportfolio/trialfolio/blob/main/docs/releases/0.2.0-review.md) | Compares saved runs, offline, against a baseline you choose, and shows exactly what differs | Implemented, and tagged `v0.2.0` |
 | [0.2.1: License version 1.1](https://github.com/promptedportfolio/trialfolio/blob/main/docs/releases/0.2.1-license.md) | Changes only the license, to version 1.1. It adds no workflow. | Ready, and tagged `v0.2.1` |
 | [0.3.0: Experiments](https://github.com/promptedportfolio/trialfolio/blob/main/docs/releases/0.3.0-experiments.md) | Runs a baseline and predefined variants of it as one finite experiment, under one plan and one approval, with resume, and accounts for every planned case | Implemented, and tagged `v0.3.0` |
-| [0.4.0: Ranking-weight variants](https://github.com/promptedportfolio/trialfolio/blob/main/docs/releases/0.4.0-ranking-weights.md) | Variants that change the weights of a ranking system's nodes, or remove one factor, with every case's ranking definition recorded, and snapshots of a ranking system saved in your account | Ready: its specification is complete, and it isn't built yet |
+| [0.4.0: Ranking-weight variants](https://github.com/promptedportfolio/trialfolio/blob/main/docs/releases/0.4.0-ranking-weights.md) | Variants that change the weights of a ranking system's nodes, or remove one factor, with every case's ranking definition recorded, and snapshots of a ranking system saved in your account | Ready: its specification is complete, and the owner has signed off on it |
 
 Release 0.2.1 is tagged, and each of its release requirements is met, but its status line reads Ready. The owner sets its later statuses.
 
