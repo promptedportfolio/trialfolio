@@ -958,6 +958,33 @@ def test_each_weight_problem_names_its_entry() -> None:
     assert "Value" not in message and "Momentum" not in message
 
 
+@pytest.mark.parametrize("weight", ["sixty", "60%"])
+def test_a_weight_written_as_plain_text_is_reported_as_a_weight(weight: str) -> None:
+    """A weight is never text, so a plain one is a weight written wrongly, not a node path
+    written without quotes: the entry's key, `'Value'`, is quoted."""
+    content = ranking_line(
+        VALUE_HEAVY, f"      set: {{'Value': {weight}, 'Momentum': 20, 'Quality': 20}}"
+    )
+
+    message = ranking_rejection(content)
+
+    assert message == (
+        "experiment.yaml isn't a valid configuration:\n"
+        "- `variants.ranking[0].set[0]` must be a number written without quotes, such as 0.25."
+    )
+
+
+def test_a_plain_path_with_a_plain_weight_is_reported_once_for_each() -> None:
+    content = ranking_line(VALUE_HEAVY, "      set: {Value: sixty, 'Momentum': 20, 'Quality': 20}")
+
+    message = ranking_rejection(content)
+
+    assert message.count("`variants.ranking[0].set[0]` is a node path written without quotes") == 1
+    assert (
+        message.count("`variants.ranking[0].set[0]` must be a number written without quotes") == 1
+    )
+
+
 def test_an_empty_set_names_its_variant() -> None:
     message = ranking_rejection(ranking_line(VALUE_HEAVY, "      set: {}"))
 

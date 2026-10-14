@@ -655,7 +655,9 @@ class _Builder:
         """Every value's text, by its key path as messages write it, once `document` has
         returned."""
         self.plain_text: list[KeyPath] = []
-        """Where a plain scalar, without quotes or a block indicator, was read as text."""
+        """Where a plain scalar, without quotes or a block indicator, was read as text. A ranking
+        variant's `set` entry is there, by its place, when its key, a node path, is written that
+        way."""
 
     def document(self) -> object:
         try:
@@ -774,7 +776,11 @@ class _Builder:
             return text
         tag = self._loader.resolve(ScalarNode, text, (True, False))
         if tag == _STR:
-            self.plain_text.append(path)
+            # A ranking variant's `set` entry is named by its place, which `_key` records when
+            # its node path is written without quotes. Its value is a weight, never text, which
+            # the model reports, so it isn't recorded there too.
+            if not _names_by_place(path[:-1]):
+                self.plain_text.append(path)
             return text
         if tag == f"{_TAG}null":
             raise _Invalid(path, "has no value. Give it one, or leave the key out.")
