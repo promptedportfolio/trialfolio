@@ -1,5 +1,5 @@
-"""The experiment configuration, `kind: experiment`, schema version 1.0.0 (docs/contracts.md,
-experiment configuration).
+"""The experiment configuration, `kind: experiment`, schema versions 1.0.0 and 1.1.0
+(docs/contracts.md, experiment configuration).
 
 `trialfolio.configuration` reads it from YAML, applying the rules for every configuration file,
 and checks that the text Portfolio123 receives is quoted. This model applies the rest: the
@@ -9,8 +9,15 @@ as `variants.max_holdings[0]`, never by its key, which is the user's text.
 
 `configured_variants` gives an experiment's variants, the default included, in the order of its
 cases, each with its case's settings: the baseline's, with the variant's one change.
+
+Version 1.1.0, `ExperimentConfigurationV1_1`, adds a baseline ranked by a definition or a
+snapshot, and ranking variants, which change its definition's weights or remove a factor
+(ranking variants); its budget is then at least two requests a case. `configured_variants_v1_1`
+gives its variants. A ranking variant's paths name nodes of the baseline's definition, so what
+they name, and the case's definition, are read with the definition, not here.
 """
 
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Final, Literal, Self, get_args
 
@@ -34,21 +41,40 @@ from trialfolio.contracts.common import (
 from trialfolio.contracts.plan import CREDITS_PER_REQUEST
 from trialfolio.contracts.screen_configuration import (
     ConfigDecimal,
+    ConfigWeight,
+    DefinitionRanking,
     MaxHoldings,
     RebalanceWeeks,
     ScreenFields,
+    ScreenFieldsV1_1,
+    SnapshotRanking,
 )
 
 ExperimentSchemaVersion = Literal["1.0.0"]
 
 EXPERIMENT_SCHEMA_VERSIONS: Final = get_args(ExperimentSchemaVersion)
-"""The experiment configuration versions this release reads."""
+"""The experiment configuration versions `trialfolio run` reads, until its path for a ranking
+definition is built (release 0.4.0's R04-T12)."""
+
+EXPERIMENT_SCHEMA_VERSIONS_V1_1: Final = ("1.0.0", "1.1.0")
+"""The experiment configuration versions 0.4.0's readers read: 1.0.0, and 1.1.0, which adds a
+baseline ranked by a definition or a snapshot, and ranking variants."""
 
 VariantSetting = Literal["rules", "max_holdings", "rebalance_weeks", "slippage_percent"]
 """A setting a variant may change: the types R03-T01 verified."""
 
 VARIANT_SETTINGS: Final[tuple[VariantSetting, ...]] = get_args(VariantSetting)
 """The settings a variant may change, in the screen settings' order, which orders the cases."""
+
+VariantSettingV1_1 = Literal[
+    "rules", "ranking", "max_holdings", "rebalance_weeks", "slippage_percent"
+]
+"""A setting a variant of experiment configuration 1.1.0 may change: 1.0.0's, and the ranking,
+the types R04-T01 verified."""
+
+VARIANT_SETTINGS_V1_1: Final[tuple[VariantSettingV1_1, ...]] = get_args(VariantSettingV1_1)
+"""The settings a 1.1.0 variant may change, in the screen settings' order, which orders the
+cases."""
 
 DEFAULT_REBALANCE_WEEKS: Final = (1, 4)
 """P-13's default variant set for screens: rebalancing every 1 week and every 4 weeks."""
@@ -138,10 +164,23 @@ class SlippageVariant(_Variant):
     value: ConfigDecimal
 
 
+class RankingVariant(_Variant):
+    """A variant of the baseline's ranking definition, from experiment configuration 1.1.0: the
+    weights of the nodes of one parent, with `set`; or the removal of one factor, with `remove`,
+    and the weights of the nodes left beside it, with `set` (ranking variants)."""
+
+    set: Annotated[dict[str, ConfigWeight], Field(min_length=1)]
+    """Node paths, each with the weight its node gets: every node of one parent, each once,
+    summing to what the same nodes' weights sum to in the baseline."""
+    remove: OptionalKey[str] = None
+    """The path of the factor the variant removes, a `StockFormula` or a `StockFactor`."""
+
+
 type AnyVariant = RuleVariant | HoldingsVariant | RebalanceVariant | SlippageVariant
 
 
 RuleVariants = NonEmptyOrderedList[RuleVariant]
+RankingVariants = NonEmptyOrderedList[RankingVariant]
 HoldingsVariants = NonEmptyOrderedList[HoldingsVariant]
 RebalanceVariants = OrderedList[RebalanceVariant]
 """May be empty, which turns the default rebalance variant off."""
@@ -154,6 +193,19 @@ class Variants(ContractModel):
     variant off."""
 
     rules: OptionalKey[RuleVariants] = None
+    max_holdings: OptionalKey[HoldingsVariants] = None
+    rebalance_weeks: OptionalKey[RebalanceVariants] = None
+    """Replaces the default rebalance variant. An empty list turns it off."""
+    slippage_percent: OptionalKey[SlippageVariants] = None
+
+
+class VariantsV1_1(ContractModel):
+    """The variants of an experiment configuration 1.1.0: 1.0.0's, and the ranking's, by the
+    setting each one changes, in lists whose order is kept."""
+
+    rules: OptionalKey[RuleVariants] = None
+    ranking: OptionalKey[RankingVariants] = None
+    """Only with a baseline ranked by a definition or a snapshot."""
     max_holdings: OptionalKey[HoldingsVariants] = None
     rebalance_weeks: OptionalKey[RebalanceVariants] = None
     """Replaces the default rebalance variant. An empty list turns it off."""
@@ -194,24 +246,68 @@ class ExperimentConfiguration(ContractModel):
 
     @model_validator(mode="after")
     def _cases(self) -> Self:
-        if self.variants is not None and not self.variants.model_fields_set:
-            raise ValueError(
-                "`variants` lists no setting. List at least one, or leave `variants` out for the "
-                "default rebalance variant alone"
-            )
-        variants = configured_variants(self)
-        cases = 1 + len(variants)
-        if cases == 1:
-            raise ValueError(
-                "`variants.rebalance_weeks` is empty, and `variants` lists no other variant, so "
-                "the experiment's only case would be its baseline. List a variant, or leave "
-                "`rebalance_weeks` out for the default. A screen configuration runs one screen"
-            )
-        if self.budget.provider_requests < cases:
-            raise ValueError(
-                f"`budget.provider_requests` is less than the experiment's {cases} cases. It "
-                "must be at least the number of cases, so that each can be sent once"
-            )
+        cases = 1 + len(configured_variants(self))
+        _check_budget(self.variants, cases, self.budget.provider_requests)
+        return self
+
+
+def _check_budget(
+    variants: object, cases: int, provider_requests: int, *, per_case: int = 1
+) -> None:
+    """Raises `ValueError` when `variants` lists no setting, the experiment's only case is its
+    baseline, or the budget can't send each case once: `per_case` requests a case."""
+    if isinstance(variants, ContractModel) and not variants.model_fields_set:
+        raise ValueError(
+            "`variants` lists no setting. List at least one, or leave `variants` out for the "
+            "default rebalance variant alone"
+        )
+    if cases == 1:
+        raise ValueError(
+            "`variants.rebalance_weeks` is empty, and `variants` lists no other variant, so "
+            "the experiment's only case would be its baseline. List a variant, or leave "
+            "`rebalance_weeks` out for the default. A screen configuration runs one screen"
+        )
+    if per_case == 1 and provider_requests < cases:
+        raise ValueError(
+            f"`budget.provider_requests` is less than the experiment's {cases} cases. It "
+            "must be at least the number of cases, so that each can be sent once"
+        )
+    if provider_requests < per_case * cases:
+        raise ValueError(
+            f"`budget.provider_requests` is less than the {per_case * cases} requests the "
+            f"experiment's {cases} cases need. With a ranking definition, each case sends a "
+            "rank_update and a backtest, so the budget must be at least twice the number of "
+            "cases, so that each can be sent once"
+        )
+
+
+class ExperimentConfigurationV1_1(ContractModel):
+    """An experiment configuration 1.1.0, `kind: experiment`: 1.0.0's, with a baseline whose
+    ranking may be a definition or a snapshot, and, with one, ranking variants
+    (docs/contracts.md, experiment configuration, ranking variants)."""
+
+    kind: Literal["experiment"]
+    schema_version: Literal["1.1.0"]
+    experiment_id: ExperimentKey
+    """The experiment's identity."""
+    title: Title
+    purpose: Purpose
+    """The question the experiment addresses. Required: it's part of the research history."""
+    prior_research: PriorResearch
+    baseline: ScreenFieldsV1_1
+    variants: OptionalKey[VariantsV1_1] = None
+    """When it's absent, the only variant is the default."""
+    budget: ExperimentBudget
+    """With a ranking definition, at least two requests a case: its `rank_update` and its
+    backtest."""
+
+    @model_validator(mode="after")
+    def _cases(self) -> Self:
+        cases = 1 + len(configured_variants_v1_1(self))
+        ranked = isinstance(self.baseline.ranking, DefinitionRanking | SnapshotRanking)
+        _check_budget(
+            self.variants, cases, self.budget.provider_requests, per_case=2 if ranked else 1
+        )
         return self
 
 
@@ -232,12 +328,33 @@ class ConfiguredVariant:
     """The case's settings: the baseline's, with this variant's one change."""
 
 
-def _changed(baseline: ScreenFields, setting: VariantSetting, value: object) -> ScreenFields:
+@dataclass(frozen=True)
+class ConfiguredVariantV1_1:
+    """One variant of an experiment configuration 1.1.0, with its case's settings."""
+
+    place: str | None
+    """Where the file writes it, such as `variants.ranking[0]`; None for the default."""
+    setting: VariantSettingV1_1
+    key: str
+    description: str | None
+    variant: AnyVariant | RankingVariant | None
+    """The variant as the file gives it; None for the default."""
+    default: bool
+    """True for P-13's default rebalance variant."""
+    screen: ScreenFieldsV1_1 | None
+    """The case's settings: the baseline's, with this variant's one change. None for a ranking
+    variant: its case's definition is the baseline's with the variant's change, which reading the
+    baseline's definition gives."""
+
+
+def _changed[S: (ScreenFields, ScreenFieldsV1_1)](baseline: S, setting: str, value: object) -> S:
     # The value was validated with the setting's own type, so the copy needs no validation.
     return baseline.model_copy(update={setting: value})
 
 
-def _rules_of(baseline: ScreenFields, place: str, variant: RuleVariant) -> tuple[str, ...]:
+def _rules_of(
+    baseline: ScreenFields | ScreenFieldsV1_1, place: str, variant: RuleVariant
+) -> tuple[str, ...]:
     rules = baseline.rules
     if variant.add is not None:
         if variant.add in rules:
@@ -262,7 +379,9 @@ def _rules_of(baseline: ScreenFields, place: str, variant: RuleVariant) -> tuple
     return tuple(with_ if rule == replace else rule for rule in rules)
 
 
-def _value_of(baseline: ScreenFields, place: str, setting: VariantSetting, value: object) -> object:
+def _value_of(
+    baseline: ScreenFields | ScreenFieldsV1_1, place: str, setting: str, value: object
+) -> object:
     # Decimals are normalized, so 0.250 equals the baseline's 0.25.
     if value == getattr(baseline, setting):
         raise ValueError(
@@ -283,50 +402,99 @@ def configured_variants(configuration: ExperimentConfiguration) -> tuple[Configu
     the baseline's rules; or two variants that give one case.
     """
     baseline = configuration.baseline
-    variants = configuration.variants or Variants()
-    configured: list[ConfiguredVariant] = []
-    for setting in VARIANT_SETTINGS:
-        listed: tuple[AnyVariant, ...] | None = getattr(variants, setting)
-        if setting == "rebalance_weeks" and listed is None:
-            (value,) = (
-                weeks for weeks in DEFAULT_REBALANCE_WEEKS if weeks != baseline.rebalance_weeks
-            )
-            configured.append(
-                ConfiguredVariant(
-                    None,
-                    setting,
-                    default_variant_key(value),
-                    None,
-                    None,
-                    True,
-                    _changed(baseline, setting, value),
-                )
-            )
-            continue
-        for index, variant in enumerate(listed or ()):
-            place = f"variants.{setting}[{index}]"
-            if isinstance(variant, RuleVariant):
-                value: object = _rules_of(baseline, place, variant)
-            else:
-                value = _value_of(baseline, place, setting, variant.value)
-            configured.append(
-                ConfiguredVariant(
-                    place,
-                    setting,
-                    variant.key,
-                    variant.description,
-                    variant,
-                    False,
-                    _changed(baseline, setting, value),
-                )
-            )
+    configured = [
+        ConfiguredVariant(
+            place,
+            setting,
+            key,
+            description,
+            variant,
+            place is None,
+            _changed(baseline, setting, value),
+        )
+        for place, setting, key, description, variant, value in _listed(
+            baseline, configuration.variants or Variants(), VARIANT_SETTINGS
+        )
+        if not isinstance(variant, RankingVariant)  # a 1.0.0 file has none
+    ]
     _check_keys(configured)
     _check_cases(configured)
     return tuple(configured)
 
 
-def _check_keys(variants: list[ConfiguredVariant]) -> None:
-    seen: dict[str, ConfiguredVariant] = {}
+def configured_variants_v1_1(
+    configuration: ExperimentConfigurationV1_1,
+) -> tuple[ConfiguredVariantV1_1, ...]:
+    """An experiment configuration 1.1.0's variants, in the order of its cases, after the
+    baseline's: those of `rules`, `ranking`, `max_holdings`, `rebalance_weeks`, and
+    `slippage_percent`, each list in its order, with P-13's default in `rebalance_weeks`' place,
+    as `configured_variants` gives 1.0.0's (docs/contracts.md, cases and their order).
+
+    Raises `ValueError` as `configured_variants` does, and when `variants` lists ranking variants
+    and the baseline's ranking isn't a definition or a snapshot. A ranking variant's case has no
+    settings here: what its paths name, and whether two ranking variants give one case, depend
+    on the baseline's definition, which is read with it.
+    """
+    baseline = configuration.baseline
+    variants = configuration.variants or VariantsV1_1()
+    if variants.ranking is not None and not isinstance(
+        baseline.ranking, DefinitionRanking | SnapshotRanking
+    ):
+        raise ValueError(
+            "`variants.ranking` changes the baseline's ranking definition, so the baseline's "
+            "ranking must be a definition or a snapshot. A ranking by formula, name, or ID has "
+            "no nodes to vary"
+        )
+    configured = [
+        ConfiguredVariantV1_1(
+            place,
+            setting,
+            key,
+            description,
+            variant,
+            place is None,
+            None if isinstance(variant, RankingVariant) else _changed(baseline, setting, value),
+        )
+        for place, setting, key, description, variant, value in _listed(
+            baseline, variants, VARIANT_SETTINGS_V1_1
+        )
+    ]
+    _check_keys(configured)
+    _check_cases(configured)
+    return tuple(configured)
+
+
+def _listed[T: str](
+    baseline: ScreenFields | ScreenFieldsV1_1,
+    variants: Variants | VariantsV1_1,
+    settings: Sequence[T],
+) -> Iterator[tuple[str | None, T, str, str | None, AnyVariant | RankingVariant | None, object]]:
+    """Each variant, in the order of `settings` and each list's, with P-13's default in
+    `rebalance_weeks`' place when `variants` has no `rebalance_weeks` key: its place, setting,
+    key, description, the variant as the file gives it, and the value its setting gets, which is
+    None for a ranking variant, and the default's value for the default. Raises `ValueError` when
+    a rule variant's or a value's change changes nothing, or isn't one."""
+    for setting in settings:
+        listed: tuple[AnyVariant | RankingVariant, ...] | None = getattr(variants, setting)
+        if listed is None and setting in ("rebalance_weeks",):
+            (value,) = (
+                weeks for weeks in DEFAULT_REBALANCE_WEEKS if weeks != baseline.rebalance_weeks
+            )
+            yield None, setting, default_variant_key(value), None, None, value
+            continue
+        for index, variant in enumerate(listed or ()):
+            place = f"variants.{setting}[{index}]"
+            if isinstance(variant, RankingVariant):
+                value: object = None
+            elif isinstance(variant, RuleVariant):
+                value = _rules_of(baseline, place, variant)
+            else:
+                value = _value_of(baseline, place, setting, variant.value)
+            yield place, setting, variant.key, variant.description, variant, value
+
+
+def _check_keys(variants: Sequence[ConfiguredVariant | ConfiguredVariantV1_1]) -> None:
+    seen: dict[str, ConfiguredVariant | ConfiguredVariantV1_1] = {}
     for variant in variants:
         if variant.key == BASELINE_CASE_KEY:
             raise ValueError(
@@ -349,11 +517,14 @@ def _check_keys(variants: list[ConfiguredVariant]) -> None:
         seen[variant.key] = variant
 
 
-def _check_cases(variants: list[ConfiguredVariant]) -> None:
+def _check_cases(variants: Sequence[ConfiguredVariant | ConfiguredVariantV1_1]) -> None:
     # Each variant changes one setting of the baseline to something else, so two cases share
-    # their settings exactly when two variants change one setting to the same value.
-    seen: dict[tuple[str, object], ConfiguredVariant] = {}
+    # their settings exactly when two variants change one setting to the same value. A ranking
+    # variant's case is its definition, which this doesn't read.
+    seen: dict[tuple[str, object], ConfiguredVariant | ConfiguredVariantV1_1] = {}
     for variant in variants:
+        if variant.screen is None:
+            continue
         changed: object = getattr(variant.screen, variant.setting)
         first = seen.get((variant.setting, changed))
         if first is not None:

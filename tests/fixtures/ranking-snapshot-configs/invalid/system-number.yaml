@@ -1,0 +1,6 @@
+# Invalid: `system` is text, never a number.
+# Key: system
+# Value: -
+kind: ranking-snapshot
+schema_version: 1.0.0
+system: 42

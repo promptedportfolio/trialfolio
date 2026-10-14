@@ -1,4 +1,4 @@
-# Invalid: A ranking given as nodes or XML isn't supported.
+# Invalid: A ranking given as nodes or XML in the configuration itself isn't supported.
 # Key: ranking
 kind: screen
 schema_version: 1.0.0

@@ -1,0 +1,7 @@
+# Invalid: The file has no title: the configuration that uses the snapshot declares the research.
+# Key: title
+# Value: -
+kind: ranking-snapshot
+schema_version: 1.0.0
+title: Value and momentum snapshot
+system: 'Value and momentum'

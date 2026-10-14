@@ -4,6 +4,13 @@ configuration files). `read_screen_configuration` reads a `kind: screen` file,
 `kind: experiment` one. `read_run_configuration` reads the configuration `trialfolio run` takes, a
 screen's or an experiment's, choosing the reader by its `kind` (D-24).
 
+Release 0.4.0's readers read its versions too: `read_screen_configuration_v1_1` reads a screen
+configuration 1.0.0 or 1.1.0, `read_experiment_configuration_v1_1` an experiment configuration
+1.0.0 or 1.1.0, each by its `schema_version`, and `read_ranking_snapshot_configuration` a
+`kind: ranking-snapshot` file. Version 1.1.0 adds a ranking given as a ranking system's
+definition or a ranking snapshot, and ranking variants. Until the CLI's path for them is built
+(R04-T10 and R04-T12), `trialfolio run` reads with 0.3.0's readers, which read 1.0.0 only.
+
 Reading is a named adapter step before model validation (ADR 0002). It builds plain values from
 PyYAML's parse events, never through PyYAML's constructors, so it decides what each scalar means:
 
@@ -20,7 +27,13 @@ PyYAML's parse events, never through PyYAML's constructors, so it decides what e
   `name: Core Combo #2` would send `Core Combo`, and Portfolio123 formulas can hold `#`, as in
   `#Industry`. Fixed words, such as `open`, and the title and purpose, which are never sent, may
   be plain. In an experiment configuration, the same holds for the baseline's text, and for each
-  rule variant's `add`, `replace`, and `with`, which are written as rules are.
+  rule variant's `add`, `replace`, and `with`, which are written as rules are. In a ranking
+  snapshot configuration, it holds for `system`.
+- A ranking variant's node paths, the keys of its `set` and its `remove`, are quoted too, since
+  a node's name can hold a space and `#` (node paths). They hold the user's strategy
+  definition, so every message names a `set` entry by its place, such as
+  `variants.ranking[0].set[1]`, never by its path, and so does each entry's key path in
+  `experiment_original_values`.
 
 `experiment_schema_version` gives the schema version an experiment configuration declares, once
 its YAML rules and its `kind` are checked, and before anything else is.
@@ -36,13 +49,13 @@ key's control and formatting characters and lone surrogates are written as escap
 """
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date
 from decimal import Decimal
 from typing import Final, NoReturn, Protocol, cast
 
 import yaml
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from pydantic_core import ErrorDetails
 from yaml.events import (
     AliasEvent,
@@ -69,13 +82,25 @@ from trialfolio.contracts.common import (
 )
 from trialfolio.contracts.experiment_configuration import (
     EXPERIMENT_SCHEMA_VERSIONS,
+    EXPERIMENT_SCHEMA_VERSIONS_V1_1,
     VARIANT_SETTINGS,
+    VARIANT_SETTINGS_V1_1,
     ExperimentConfiguration,
+    ExperimentConfigurationV1_1,
     RuleVariant,
     configured_variants,
 )
+from trialfolio.contracts.ranking_snapshot_configuration import (
+    RANKING_SNAPSHOT_SCHEMA_VERSIONS,
+    RankingSnapshotConfiguration,
+)
 from trialfolio.contracts.review_configuration import REVIEW_SCHEMA_VERSIONS, ReviewConfiguration
-from trialfolio.contracts.screen_configuration import SCREEN_SCHEMA_VERSIONS, ScreenConfiguration
+from trialfolio.contracts.screen_configuration import (
+    SCREEN_SCHEMA_VERSIONS,
+    SCREEN_SCHEMA_VERSIONS_V1_1,
+    ScreenConfiguration,
+    ScreenConfigurationV1_1,
+)
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS
 from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError
@@ -123,24 +148,32 @@ class _Invalid(Exception):
 
 
 def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfiguration:
-    """Reads a screen configuration from the bytes of a file, named `source_name` in messages.
+    """Reads a screen configuration 1.0.0 from the bytes of a file, named `source_name` in
+    messages.
 
     Raises `TrialFolioError` with `config.invalid` when the file breaks any rule of the screen
     configuration. The message lists each problem, names its key, and includes no value.
     """
     document, plain = _read_document(content, source_name, "screen", SCREEN_SCHEMA_VERSIONS)
-    unquoted = [_unquoted_text(path) for path in plain if _is_sent_text(path)]
-    try:
-        configuration = ScreenConfiguration.model_validate(document)
-    except ValidationError as error:
-        details = error.errors(include_input=False)
-        _fail(
-            source_name,
-            [_describe(detail) for detail in details if not _follows(detail, details)] + unquoted,
-        )
-    if unquoted:
-        _fail(source_name, unquoted)
-    return configuration
+    return _validated(ScreenConfiguration, document, source_name, _unquoted(plain, _is_sent_text))
+
+
+def read_screen_configuration_v1_1(
+    content: bytes, source_name: str
+) -> ScreenConfiguration | ScreenConfigurationV1_1:
+    """Reads a screen configuration of a version release 0.4.0 reads, 1.0.0 or 1.1.0, by its
+    `schema_version`, from the bytes of a file named `source_name` in messages. Version 1.1.0's
+    `ranking` may also be a definition, named by its file's path, with its `ranking_method`, or
+    a snapshot, named by its directory's path.
+
+    Raises `TrialFolioError` with `config.invalid` as `read_screen_configuration` does. A 1.0.0
+    file that gives `definition` or `snapshot` is told they need `schema_version` 1.1.0.
+    """
+    document, plain = _read_document(content, source_name, "screen", SCREEN_SCHEMA_VERSIONS_V1_1)
+    model = (
+        ScreenConfiguration if document["schema_version"] == "1.0.0" else ScreenConfigurationV1_1
+    )
+    return _validated(model, document, source_name, _unquoted(plain, _is_sent_text))
 
 
 def read_review_configuration(content: bytes, source_name: str) -> ReviewConfiguration:
@@ -151,13 +184,7 @@ def read_review_configuration(content: bytes, source_name: str) -> ReviewConfigu
     sends nothing to Portfolio123, so its text may be written without quotes.
     """
     document, _ = _read_document(content, source_name, "review", REVIEW_SCHEMA_VERSIONS)
-    try:
-        return ReviewConfiguration.model_validate(document)
-    except ValidationError as error:
-        details = error.errors(include_input=False)
-        _fail(
-            source_name, [_describe(detail) for detail in details if not _follows(detail, details)]
-        )
+    return _validated(ReviewConfiguration, document, source_name, [])
 
 
 def read_experiment_configuration(content: bytes, source_name: str) -> ExperimentConfiguration:
@@ -170,18 +197,84 @@ def read_experiment_configuration(content: bytes, source_name: str) -> Experimen
     the user's text.
     """
     document, plain = _read_document(content, source_name, "experiment", EXPERIMENT_SCHEMA_VERSIONS)
-    unquoted = [_unquoted_text(path) for path in plain if _is_sent_experiment_text(path)]
+    unquoted = _unquoted(plain, _is_sent_experiment_text)
+    return _validated(ExperimentConfiguration, document, source_name, unquoted)
+
+
+def read_experiment_configuration_v1_1(
+    content: bytes, source_name: str
+) -> ExperimentConfiguration | ExperimentConfigurationV1_1:
+    """Reads an experiment configuration of a version release 0.4.0 reads, 1.0.0 or 1.1.0, by its
+    `schema_version`, from the bytes of a file named `source_name` in messages. Version 1.1.0's
+    baseline may be ranked by a definition or a snapshot, and then its `variants` may hold
+    ranking variants, and its budget is at least two requests a case.
+
+    Raises `TrialFolioError` with `config.invalid` as `read_experiment_configuration` does. Every
+    message names a ranking variant's `set` entry by its place, such as
+    `variants.ranking[0].set[1]`, never by its path. A 1.0.0 file with a ranking variant, or a
+    baseline ranked by a definition or a snapshot, is told they need `schema_version` 1.1.0.
+    """
+    document, plain = _read_document(
+        content, source_name, "experiment", EXPERIMENT_SCHEMA_VERSIONS_V1_1
+    )
+    unquoted = _unquoted(plain, _is_sent_experiment_text)
+    if document["schema_version"] == "1.0.0":
+        return _validated(ExperimentConfiguration, document, source_name, unquoted)
+    return _validated(
+        ExperimentConfigurationV1_1,
+        document,
+        source_name,
+        unquoted,
+        variant_settings=VARIANT_SETTINGS_V1_1,
+    )
+
+
+def read_ranking_snapshot_configuration(
+    content: bytes, source_name: str
+) -> RankingSnapshotConfiguration:
+    """Reads a ranking snapshot configuration, `kind: ranking-snapshot`, from the bytes of a file
+    named `source_name` in messages (docs/contracts.md, ranking snapshot configuration).
+
+    Raises `TrialFolioError` with `config.invalid` when the file breaks any rule of the snapshot
+    configuration, or of every configuration file. `system`, the name Portfolio123 receives, is
+    written in quotes or as a block scalar. The message names each key, and includes no value.
+    """
+    document, plain = _read_document(
+        content, source_name, "ranking-snapshot", RANKING_SNAPSHOT_SCHEMA_VERSIONS
+    )
+    unquoted = _unquoted(plain, lambda path: path == ("system",))
+    return _validated(RankingSnapshotConfiguration, document, source_name, unquoted)
+
+
+def _validated[M: BaseModel](
+    model: type[M],
+    document: dict[str, object],
+    source_name: str,
+    unquoted: list[str],
+    *,
+    variant_settings: tuple[str, ...] = VARIANT_SETTINGS,
+) -> M:
+    """`document` validated as `model`. Raises `TrialFolioError` with `config.invalid`, listing
+    each problem the model finds, then each text written without quotes. `variant_settings` are
+    the settings the file's version lets a variant change."""
     try:
-        configuration = ExperimentConfiguration.model_validate(document)
+        configuration = model.model_validate(document)
     except ValidationError as error:
         details = error.errors(include_input=False)
-        _fail(
-            source_name,
-            [_describe(detail) for detail in details if not _follows(detail, details)] + unquoted,
-        )
+        problems = [
+            _describe(detail, document, variant_settings)
+            for detail in details
+            if not _follows(detail, details)
+        ]
+        _fail(source_name, problems + unquoted)
     if unquoted:
         _fail(source_name, unquoted)
     return configuration
+
+
+def _unquoted(plain: list[KeyPath], quoted: Callable[[KeyPath], bool]) -> list[str]:
+    """A message for each text in `plain`, written without quotes, that must be quoted."""
+    return [_unquoted_text(path) for path in plain if quoted(path)]
 
 
 def read_run_configuration(
@@ -328,8 +421,8 @@ _RULE_CHANGES: Final = frozenset({"add", "replace", "with"})
 
 def _is_sent_experiment_text(path: KeyPath) -> bool:
     """An experiment configuration's text that's written as the text Portfolio123 receives: the
-    baseline's, as a screen configuration's, and each rule variant's `add`, `replace`, and
-    `with`."""
+    baseline's, as a screen configuration's; each rule variant's `add`, `replace`, and `with`;
+    and each node path of a ranking variant, its `set`'s keys and its `remove`."""
     if path[:1] == ("baseline",):
         return _is_sent_text(path[1:])
     return (
@@ -337,10 +430,34 @@ def _is_sent_experiment_text(path: KeyPath) -> bool:
         and path[:2] == ("variants", "rules")
         and isinstance(path[2], int)
         and path[3] in _RULE_CHANGES
+    ) or _is_node_path(path)
+
+
+def _is_node_path(path: KeyPath) -> bool:
+    """A ranking variant's node path: a key of its `set`, named by its place, or its `remove`."""
+    if len(path) < 4 or path[:2] != ("variants", "ranking") or not isinstance(path[2], int):
+        return False
+    return path[3:] == ("remove",) or (len(path) == 5 and _names_by_place(path[:4]))
+
+
+def _names_by_place(path: KeyPath) -> bool:
+    """Whether `path` is a ranking variant's `set`, whose keys are node paths, which the user's
+    strategy definition names, so messages name each entry by its place in the file."""
+    return (
+        len(path) == 4
+        and path[:2] == ("variants", "ranking")
+        and isinstance(path[2], int)
+        and path[3] == "set"
     )
 
 
 def _unquoted_text(path: KeyPath) -> str:
+    if _is_node_path(path):
+        return (
+            f"`{_format_path(path)}` is a node path written without quotes. Write it in single"
+            " quotes: outside quotes, YAML reads a space and # as the start of a comment, and a"
+            " node's name can hold both."
+        )
     return (
         f"`{_format_path(path)}` is text Portfolio123 receives, written without quotes. Write it in"
         " single quotes: outside quotes, YAML reads a space and # as the start of a comment, so"
@@ -391,8 +508,32 @@ _HEADER_KEYS: Final = frozenset({("kind",), ("schema_version",), ("title",), ("p
 doesn't: the experiment's own are at the top level."""
 
 
-def _describe(detail: ErrorDetails) -> str:
-    location = detail["loc"]
+def _placed(location: KeyPath, document: object) -> KeyPath:
+    """`location`, with a ranking variant's `set` entry named by its place, counted from 0, in
+    place of its node path, which is the user's strategy definition. An entry that can't be
+    found is named by its `set`."""
+    if len(location) < 5 or not _names_by_place(location[:4]) or not isinstance(location[4], str):
+        return location
+    entries: object = document
+    for part in location[:4]:
+        if isinstance(entries, dict) and isinstance(part, str):
+            entries = cast("dict[str, object]", entries).get(part)
+        elif isinstance(entries, list) and isinstance(part, int):
+            listed = cast("list[object]", entries)
+            entries = listed[part] if part < len(listed) else None
+        else:
+            entries = None
+    if not isinstance(entries, dict) or location[4] not in entries:
+        return location[:4]
+    return (*location[:4], list(cast("dict[str, object]", entries)).index(location[4]))
+
+
+def _describe(
+    detail: ErrorDetails,
+    document: object = None,
+    variant_settings: tuple[str, ...] = VARIANT_SETTINGS,
+) -> str:
+    location = _placed(detail["loc"], document)
     key = _format_path(location)
     kind = detail["type"]
     message = detail["msg"].removeprefix("Value error, ").rstrip(".")
@@ -400,11 +541,18 @@ def _describe(detail: ErrorDetails) -> str:
         return f"{message}."
     if kind == "missing":
         return f"`{key}` is required."
-    if kind == "extra_forbidden" and location[:1] == ("variants",) and len(location) == 2:
+    settings = f"{', '.join(variant_settings[:-1])}, or {variant_settings[-1]}"
+    if (
+        kind == "extra_forbidden"
+        and location == ("variants", "ranking")
+        and "ranking" not in variant_settings
+    ):
         return (
-            f"`{key}` isn't a setting a variant may change. A variant may change "
-            f"{', '.join(VARIANT_SETTINGS[:-1])}, or {VARIANT_SETTINGS[-1]}."
+            f"`{key}` needs schema_version 1.1.0, with a baseline ranked by a definition or a "
+            f"snapshot. In 1.0.0, a variant may change {settings}."
         )
+    if kind == "extra_forbidden" and location[:1] == ("variants",) and len(location) == 2:
+        return f"`{key}` isn't a setting a variant may change. A variant may change {settings}."
     if kind == "extra_forbidden" and location[0] == "baseline" and location[1:] in _HEADER_KEYS:
         return (
             f"`{key}` isn't a key of the baseline: an experiment's kind, schema_version, "
@@ -549,11 +697,22 @@ class _Builder:
         if isinstance(event, MappingStartEvent):
             self._no_tag(event.tag, path)
             mapping: dict[str, object] = {}
+            # A ranking variant's `set` is keyed by node paths, so each entry is named by its
+            # place, never by its key.
+            by_place = _names_by_place(path)
             while not isinstance(self._loader.peek_event(), MappingEndEvent):
-                key = self._key(path)
+                place: KeyPath | None = (*path, len(mapping)) if by_place else None
+                key = self._key(path, place)
+                where = (*path, key) if place is None else place
                 if key in mapping:
-                    raise _Invalid((*path, key), "appears more than once.")
-                mapping[key] = self._value((*path, key))
+                    raise _Invalid(
+                        where,
+                        "appears more than once."
+                        if place is None
+                        else "repeats the path of an earlier entry of the same set. Write each "
+                        "path once.",
+                    )
+                mapping[key] = self._value(where)
             self._close(event)
             return mapping
         raise _Invalid(path, "isn't a value this reader accepts.")
@@ -565,7 +724,9 @@ class _Builder:
         if start.flow_style:
             self._end = _index(end.end_mark)
 
-    def _key(self, path: KeyPath) -> str:
+    def _key(self, path: KeyPath, place: KeyPath | None = None) -> str:
+        """The next key of the mapping at `path`. `place` names it by its place, for a key that's
+        a node path, which messages never quote."""
         event = self._loader.get_event()
         if not isinstance(event, ScalarEvent) or event.anchor is not None or event.tag is not None:
             raise _Invalid(path, "has a key that isn't plain text.")
@@ -574,11 +735,20 @@ class _Builder:
             raise _Invalid(path, "has a key that YAML doesn't read as text. Quote it.")
         folded = key.lower().replace("-", "_")
         if any(word in folded for word in CREDENTIAL_WORDS):
+            if place is not None:
+                raise _Invalid(
+                    place,
+                    "is a node path that holds a word a credential's key would, which no "
+                    "configuration's key may hold. Name the node whose name holds it by its "
+                    "position instead, such as #2.",
+                )
             raise _Invalid(
                 (*path, key),
                 "looks like a credential. A configuration never holds credentials: the CLI "
                 "reads them from TRIALFOLIO_P123_API_ID and TRIALFOLIO_P123_API_KEY.",
             )
+        if place is not None and event.style is None:
+            self.plain_text.append(place)
         return key
 
     @staticmethod

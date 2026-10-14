@@ -7,6 +7,9 @@ to release 0.2.0's open question on the summary's version: 1.0.0's schema keeps 
 1.1.0 only adds to it; and to R03-AC16, as release 0.3.0's open question on the summary's version
 settled (D-33): 1.1.0's schema keeps v0.2.0's bytes, and a 1.1.0 summary of each command, with
 its version changed, is a valid 1.2.0 summary. R03-T06 wrote 1.2.0's checks, ahead of R03-T11.
+And to release 0.4.0's other checks in the default suite: every schema file `v0.3.0` committed
+keeps its bytes, and the new ones are generated from the models. R04-T05 wrote that check, with
+the new schemas, ahead of R04-T13.
 """
 
 import hashlib
@@ -416,3 +419,70 @@ def test_the_json_summary_1_2_0_schema_only_adds_to_1_1_0() -> None:
     for name, definition in old["$defs"].items():
         if name != "SummaryIdsV1_1":
             assert new["$defs"][name] == definition, name
+
+
+# Release 0.4.0's schemas, beside v0.3.0's
+
+V0_3_0_SCHEMAS = {
+    "attempt-record-1.0.0.schema.json": "b2d3a2141b9fd73d7e385510b9b0a3ae67ab13c2563221560d0a0782543475b6",
+    "attempt-record-1.1.0.schema.json": "74cf70c9b0fa11d58a011c61ce99bd99cf36fb4ca475c55e5430b668408aafca",
+    "authentication-record-1.0.0.schema.json": "789fe5b3e4406b16c6e67b747131d2be8ada445bd3c78f214d496f5c4b507c1e",
+    "differences-row-1.0.0.schema.json": "5d3caa06a37bd230c5e55309016dfea0d40fba54b4dc6d672b6225cabd01790c",
+    "experiment-configuration-1.0.0.schema.json": "ab17dc08167f45285a5fcf61e81644fb48ea7f691274a451424bde310ebfd5c5",
+    "experiment-manifest-1.0.0.schema.json": "4b234f7512f35d1230d7fda45f926e2d647ea03787bb8de6694afa9fcb187430",
+    "experiment-record-1.0.0.schema.json": "d832ea97dc50ae8bf778424c5ee541384d1f52027cb6fea8369e7a8a6e7b5741",
+    "json-summary-1.0.0.schema.json": "0ce25e981d49a06d433fd68dd15bc15e50d929ca37604a7af79f5b51bcfdb67d",
+    "json-summary-1.1.0.schema.json": "e0892988444d87e6ff8a0cb02fd72cec990ce3c354193308093fe75d4a3918e6",
+    "json-summary-1.2.0.schema.json": "1a552660d7eafd648087df1622411c1a88e9062d885f86ae6e415b3d841a9a9b",
+    "license-acknowledgment.schema.json": "1c284b5e99d6f6ff74ebd5e92c763b3c57213702f111b4e7c81e43c65a3001f2",
+    "metrics-row-1.0.0.schema.json": "ea82a9b2d2a298d9f8830963664ec627ea6d9fc5e97d27870c00131ce5f69487",
+    "plan-1.0.0.schema.json": "5d30065e163f69154bb850fbe85e7f605e46cb3b4616b10976edc9ed4136cd74",
+    "plan-1.1.0.schema.json": "d9f02471292ece14584344c35f1d428db1e785d9ca3d9a9526f1e828bbe0d1e9",
+    "review-configuration-1.0.0.schema.json": "0acf4b5083adfc7f3fcbf0793416fd753e9af3a1366c79ef57fb58ad6dd92d17",
+    "review-manifest-1.0.0.schema.json": "96b560a9f0a6b38bff224dc20e5c6315013a76fb96767f328d9476f7b5358fcd",
+    "run-manifest-1.0.0.schema.json": "3f7b214594b10c7806379bf8751e1864645626f6e7be732810245cd30bd5f097",
+    "screen-configuration-1.0.0.schema.json": "1faf093849fce03fc3708578dcc3cdc82b88c118bbb4cf7e61824d1173127828",
+    "session-record-1.0.0.schema.json": "064386e478e6c367ca0a4f1a70356a6368709fef212eb2ae362157e21d15f97a",
+    "settings-row-1.0.0.schema.json": "799cc89bbc588a012ca7a08f329f40e2268bbabd0c1046455f0eebf5892076c8",
+    "start-record-1.0.0.schema.json": "676038952e12eb2286886a670816084a35720ba744694743fe0975f8c57c34e3",
+    "start-record-1.1.0.schema.json": "879dc9e4db665d09cdcdf3263411bdb2cba342bcd898c6b6c3fbc1b967b4ef78",
+}
+"""The SHA-256 of each schema file at the tag v0.3.0, written by hand: for each file of
+`git ls-tree --name-only v0.3.0 schemas/`, `git show v0.3.0:<file> | shasum -a 256`."""
+
+RELEASE_0_4_0_SCHEMAS = (
+    "screen-configuration-1.1.0.schema.json",
+    "experiment-configuration-1.1.0.schema.json",
+    "ranking-snapshot-configuration-1.0.0.schema.json",
+    "plan-1.2.0.schema.json",
+    "plan-1.3.0.schema.json",
+    "ranking-snapshot-plan-1.0.0.schema.json",
+    "start-record-1.2.0.schema.json",
+    "start-record-1.3.0.schema.json",
+    "attempt-record-1.2.0.schema.json",
+    "attempt-record-1.3.0.schema.json",
+    "experiment-record-1.1.0.schema.json",
+    "run-manifest-1.1.0.schema.json",
+    "experiment-manifest-1.1.0.schema.json",
+    "ranking-snapshot-manifest-1.0.0.schema.json",
+    "ranking-snapshot-record-1.0.0.schema.json",
+    "settings-row-1.1.0.schema.json",
+    "differences-row-1.1.0.schema.json",
+)
+"""The schemas release 0.4.0's verification commands name for `scripts/schemas --check`."""
+
+
+@pytest.mark.parametrize("name", sorted(V0_3_0_SCHEMAS))
+def test_each_schema_v0_3_0_committed_keeps_its_bytes(name: str) -> None:
+    """A screen, an experiment, or a review without a ranking definition writes the contracts it
+    wrote in 0.3.0, so their schemas don't change (release 0.4.0's contracts and schema
+    versions)."""
+    committed = (ROOT / "schemas" / name).read_bytes()
+
+    assert hashlib.sha256(generate()[name]).hexdigest() == V0_3_0_SCHEMAS[name]
+    assert hashlib.sha256(committed).hexdigest() == V0_3_0_SCHEMAS[name]
+
+
+def test_release_0_4_0_adds_its_schemas_and_removes_none() -> None:
+    assert set(generate()) == set(V0_3_0_SCHEMAS) | set(RELEASE_0_4_0_SCHEMAS)
+    assert len(V0_3_0_SCHEMAS) + len(RELEASE_0_4_0_SCHEMAS) == len(SCHEMA_FILES)

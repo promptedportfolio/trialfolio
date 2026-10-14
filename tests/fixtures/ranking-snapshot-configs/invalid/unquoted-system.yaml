@@ -1,0 +1,6 @@
+# Invalid: `system`, the name Portfolio123 receives, is written in quotes or as a block scalar (R01-T18).
+# Key: system
+# Value: Value and momentum
+kind: ranking-snapshot
+schema_version: 1.0.0
+system: Value and momentum

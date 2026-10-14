@@ -26,21 +26,44 @@ from trialfolio.contracts.acknowledgment import AcknowledgmentRecord
 from trialfolio.contracts.attempt import (
     AttemptRecord,
     AttemptRecordV1_1,
+    AttemptRecordV1_2,
+    AttemptRecordV1_3,
     AuthenticationRecord,
     StartRecord,
     StartRecordV1_1,
+    StartRecordV1_2,
+    StartRecordV1_3,
 )
-from trialfolio.contracts.experiment_configuration import ExperimentConfiguration
-from trialfolio.contracts.experiment_manifest import ExperimentManifest
-from trialfolio.contracts.experiment_plan import PlanV1_1
-from trialfolio.contracts.experiment_record import ExperimentRecord, SessionRecord
-from trialfolio.contracts.manifest import RunManifest
-from trialfolio.contracts.plan import Plan
+from trialfolio.contracts.experiment_configuration import (
+    ExperimentConfiguration,
+    ExperimentConfigurationV1_1,
+)
+from trialfolio.contracts.experiment_manifest import ExperimentManifest, ExperimentManifestV1_1
+from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
+from trialfolio.contracts.experiment_record import (
+    ExperimentRecord,
+    ExperimentRecordV1_1,
+    SessionRecord,
+)
+from trialfolio.contracts.manifest import RunManifest, RunManifestV1_1
+from trialfolio.contracts.plan import Plan, PlanV1_2
+from trialfolio.contracts.ranking_snapshot import (
+    RankingSnapshotManifest,
+    RankingSnapshotPlan,
+    RankingSnapshotRecord,
+)
+from trialfolio.contracts.ranking_snapshot_configuration import RankingSnapshotConfiguration
 from trialfolio.contracts.review_configuration import ReviewConfiguration
 from trialfolio.contracts.review_manifest import ReviewManifest
-from trialfolio.contracts.screen_configuration import ScreenConfiguration
+from trialfolio.contracts.screen_configuration import ScreenConfiguration, ScreenConfigurationV1_1
 from trialfolio.contracts.summary import JsonSummary, JsonSummaryV1_1, JsonSummaryV1_2
-from trialfolio.contracts.tables import DifferencesRow, MetricsRow, SettingsRow
+from trialfolio.contracts.tables import (
+    DifferencesRow,
+    DifferencesRowV1_1,
+    MetricsRow,
+    SettingsRow,
+    SettingsRowV1_1,
+)
 
 JSON_SCHEMA_DIALECT: Final = "https://json-schema.org/draft/2020-12/schema"
 
@@ -82,6 +105,34 @@ SCHEMA_FILES: Final = (
     SchemaFile("json-summary-1.1.0.schema.json", JsonSummaryV1_1, "serialization"),
     SchemaFile("json-summary-1.2.0.schema.json", JsonSummaryV1_2, "serialization"),
     SchemaFile("license-acknowledgment.schema.json", AcknowledgmentRecord, "serialization"),
+    # Release 0.4.0's, for a ranking given as a definition and for ranking snapshots. Each file
+    # above keeps the bytes v0.3.0 committed: a screen, an experiment, or a review without a
+    # definition writes the contracts it wrote in 0.3.0.
+    SchemaFile("screen-configuration-1.1.0.schema.json", ScreenConfigurationV1_1, "validation"),
+    SchemaFile(
+        "experiment-configuration-1.1.0.schema.json", ExperimentConfigurationV1_1, "validation"
+    ),
+    SchemaFile(
+        "ranking-snapshot-configuration-1.0.0.schema.json",
+        RankingSnapshotConfiguration,
+        "validation",
+    ),
+    SchemaFile("plan-1.2.0.schema.json", PlanV1_2, "serialization"),
+    SchemaFile("plan-1.3.0.schema.json", PlanV1_3, "serialization"),
+    SchemaFile("ranking-snapshot-plan-1.0.0.schema.json", RankingSnapshotPlan, "serialization"),
+    SchemaFile("start-record-1.2.0.schema.json", StartRecordV1_2, "serialization"),
+    SchemaFile("start-record-1.3.0.schema.json", StartRecordV1_3, "serialization"),
+    SchemaFile("attempt-record-1.2.0.schema.json", AttemptRecordV1_2, "serialization"),
+    SchemaFile("attempt-record-1.3.0.schema.json", AttemptRecordV1_3, "serialization"),
+    SchemaFile("experiment-record-1.1.0.schema.json", ExperimentRecordV1_1, "serialization"),
+    SchemaFile("run-manifest-1.1.0.schema.json", RunManifestV1_1, "serialization"),
+    SchemaFile("experiment-manifest-1.1.0.schema.json", ExperimentManifestV1_1, "serialization"),
+    SchemaFile(
+        "ranking-snapshot-manifest-1.0.0.schema.json", RankingSnapshotManifest, "serialization"
+    ),
+    SchemaFile("ranking-snapshot-record-1.0.0.schema.json", RankingSnapshotRecord, "serialization"),
+    SchemaFile("settings-row-1.1.0.schema.json", SettingsRowV1_1, "serialization"),
+    SchemaFile("differences-row-1.1.0.schema.json", DifferencesRowV1_1, "serialization"),
 )
 """Every published schema: one for each contract and each schema version that has a reader."""
 

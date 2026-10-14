@@ -1,0 +1,7 @@
+# Invalid: Duplicate keys are rejected.
+# Key: system
+# Value: Growth and quality
+kind: ranking-snapshot
+schema_version: 1.0.0
+system: 'Value and momentum'
+system: 'Growth and quality'

@@ -1,0 +1,5 @@
+# Invalid: `kind` is required.
+# Key: kind
+# Value: -
+schema_version: 1.0.0
+system: 'Value and momentum'

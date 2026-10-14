@@ -4,10 +4,16 @@ Traces to R01-AC02, R01-AC09, and R01-AC11 (Compustat) in release 0.1.0's test p
 the configuration file rules in docs/contracts.md. The fixtures are in
 tests/fixtures/screen-configs/. `test_documented_example_resolves_to_reference_request` traces to
 the example's validation against the request Portfolio123 accepted in R01-T01.
+
+Screen configuration 1.1.0's tests, at the end, trace to R04-AC02's ranking forms, as release
+0.4.0's test pairing gives them for `test_screen_configuration.py`: each invalid ranking form
+fails with `config.invalid`, and a 1.0.0 file with `definition` or `snapshot` says they need
+1.1.0. R04-T05 wrote them, with the reader of both versions, which the invalid files' test uses.
 """
 
 import json
 import re
+from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -16,12 +22,17 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from trialfolio.configuration import read_screen_configuration
+from trialfolio.configuration import read_screen_configuration, read_screen_configuration_v1_1
 from trialfolio.contracts.screen_configuration import (
+    RANKING_FORMS_MESSAGE_V1_1,
+    DefinitionRanking,
     FormulaRanking,
     IdRanking,
     NameRanking,
+    RankingV1_1,
     ScreenConfiguration,
+    ScreenConfigurationV1_1,
+    SnapshotRanking,
 )
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS_BY_NAME, check_value
 from trialfolio.errors import TrialFolioError
@@ -44,10 +55,14 @@ def read_fixture(name: str) -> ScreenConfiguration:
     return read_screen_configuration(path.read_bytes(), path.name)
 
 
-def rejection(content: bytes, source_name: str = "screen.yaml") -> str:
+def rejection(
+    content: bytes,
+    source_name: str = "screen.yaml",
+    reader: Callable[[bytes, str], object] = read_screen_configuration,
+) -> str:
     """Reads `content`, expects `config.invalid`, and returns the message."""
     with pytest.raises(TrialFolioError) as caught:
-        read_screen_configuration(content, source_name)
+        reader(content, source_name)
     assert caught.value.code == "config.invalid"
     return caught.value.message
 
@@ -112,7 +127,7 @@ def test_invalid_configuration_is_rejected_naming_its_key(path: Path) -> None:
     key = re.search(r"^# Key: (.+)$", content.decode(), re.MULTILINE)
     assert key, f"{path.name} has no '# Key:' line"
 
-    message = rejection(content, path.name)
+    message = rejection(content, path.name, read_screen_configuration_v1_1)
 
     assert message.startswith(f"{path.name} isn't a valid configuration:")
     if key.group(1) != "-":
@@ -131,7 +146,7 @@ def test_a_ranking_given_as_xml_names_the_system_it_would_change() -> None:
 
 def test_every_invalid_case_is_in_its_readme() -> None:
     readme = (INVALID / "README.md").read_text(encoding="utf-8")
-    listed = set(re.findall(r"^\| `([a-z0-9-]+)\.yaml` \|", readme, re.MULTILINE))
+    listed = set(re.findall(r"^\| `([a-z0-9.-]+)\.yaml` \|", readme, re.MULTILINE))
 
     assert listed == {path.stem for path in INVALID.glob("*.yaml")}
 
@@ -571,3 +586,152 @@ def test_empty_purpose_must_be_omitted(purpose: str) -> None:
         "purpose: Reference backtest for the 0.1.0 response layout.", f"purpose: {purpose}"
     )
     assert "`purpose`" in rejection(content)
+
+
+# Screen configuration 1.1.0, from 0.4.0: a ranking given as a definition or a snapshot.
+
+DEFINITION_PATH = "'../ranking/value-momentum.xml'"
+
+
+def version_1_1(ranking: str) -> bytes:
+    """The documented example as version 1.1.0, with `ranking` in place of its formula."""
+    example = documented_example().replace("schema_version: 1.0.0", "schema_version: 1.1.0", 1)
+    old = "ranking:\n  formula: 'EarnYield'\n  lower_is_better: false\n"
+    assert old in example
+    return example.replace(old, ranking, 1).encode()
+
+
+@pytest.mark.parametrize(
+    ("ranking", "expected"),
+    [
+        (
+            f"ranking:\n  definition: {DEFINITION_PATH}\n  ranking_method: percentile_nas_negative\n",
+            DefinitionRanking(
+                definition="../ranking/value-momentum.xml", ranking_method="percentile_nas_negative"
+            ),
+        ),
+        (
+            f"ranking:\n  definition: {DEFINITION_PATH}\n  ranking_method: percentile_nas_neutral\n",
+            DefinitionRanking(
+                definition="../ranking/value-momentum.xml", ranking_method="percentile_nas_neutral"
+            ),
+        ),
+        (
+            "ranking:\n  snapshot: 'ranking/value-momentum/'\n",
+            SnapshotRanking(snapshot="ranking/value-momentum/"),
+        ),
+        (
+            "ranking:\n  formula: 'EarnYield'\n  lower_is_better: false\n",
+            FormulaRanking(formula="EarnYield", lower_is_better=False),
+        ),
+        (
+            "ranking:\n  name: 'Synthetic Value Composite'\n",
+            NameRanking(name="Synthetic Value Composite"),
+        ),
+        ("ranking:\n  id: 424242\n", IdRanking(id=424242)),
+    ],
+    ids=["definition", "definition-neutral", "snapshot", "formula", "name", "id"],
+)
+def test_version_1_1_0_reads_each_ranking_form(ranking: str, expected: RankingV1_1) -> None:
+    """Version 1.1.0 adds the definition and the snapshot, and keeps 1.0.0's three forms."""
+    configuration = read_screen_configuration_v1_1(version_1_1(ranking), "screen.yaml")
+
+    assert isinstance(configuration, ScreenConfigurationV1_1)
+    assert configuration.ranking == expected
+
+
+def test_a_1_1_0_file_with_a_formula_has_1_0_0_s_settings() -> None:
+    """1.1.0 adds two ranking forms and nothing else: its other settings read as 1.0.0's."""
+    old = read_screen_configuration(documented_example().encode(), "screen.yaml")
+
+    new = read_screen_configuration_v1_1(
+        version_1_1("ranking:\n  formula: 'EarnYield'\n  lower_is_better: false\n"), "screen.yaml"
+    )
+
+    assert new.model_dump(exclude={"schema_version"}) == old.model_dump(exclude={"schema_version"})
+
+
+def test_the_reader_of_both_versions_reads_1_0_0_as_before() -> None:
+    content = documented_example().encode()
+
+    configuration = read_screen_configuration_v1_1(content, "screen.yaml")
+
+    assert configuration == read_screen_configuration(content, "screen.yaml")
+    assert type(configuration) is ScreenConfiguration
+
+
+def test_the_readers_name_the_versions_they_read() -> None:
+    """`trialfolio run` reads with the 1.0.0 reader until R04-T12 builds its path for a
+    definition, so a 1.1.0 file is a version it doesn't read yet."""
+    content = version_1_1("ranking:\n  formula: 'EarnYield'\n  lower_is_better: false\n")
+    unsupported = with_line("schema_version: 1.0.0", "schema_version: 2.0.0")
+
+    assert "Supported versions: 1.0.0." in rejection(content)
+    assert "Supported versions: 1.0.0, 1.1.0." in rejection(
+        unsupported, reader=read_screen_configuration_v1_1
+    )
+
+
+@pytest.mark.parametrize("form", ["definition", "snapshot"])
+def test_a_1_0_0_file_with_a_later_form_says_it_needs_1_1_0(form: str) -> None:
+    path = INVALID / f"{form}-in-1.0.0.yaml"
+
+    message = rejection(path.read_bytes(), path.name, read_screen_configuration_v1_1)
+
+    assert f"`ranking` gives {form}, a form that needs schema_version 1.1.0." in message
+
+
+def test_nodes_or_xml_in_1_1_0_point_to_a_definition_file() -> None:
+    message = rejection(
+        version_1_1("ranking:\n  nodes: '<RankingSystem/>'\n"),
+        reader=read_screen_configuration_v1_1,
+    )
+
+    assert "`ranking` can't be given as nodes or XML in the configuration itself." in message
+    assert "named by definition" in message
+    assert "{definition, ranking_method}, and {snapshot}" in message
+
+
+def test_a_snapshot_with_a_ranking_method_says_why() -> None:
+    path = INVALID / "ranking-method-with-snapshot.yaml"
+
+    message = rejection(path.read_bytes(), path.name, read_screen_configuration_v1_1)
+
+    assert "a snapshot records its system's ranking method" in message
+
+
+def test_a_definition_s_path_and_method_may_be_written_without_quotes() -> None:
+    """Neither is text Portfolio123 receives: the path names a file, and the method is a fixed
+    word. The file's text is sent, read from the file."""
+    content = version_1_1(
+        "ranking:\n  definition: ranking/value-momentum.xml\n  ranking_method: percentile_nas_negative\n"
+    )
+
+    configuration = read_screen_configuration_v1_1(content, "screen.yaml")
+
+    assert configuration.ranking == DefinitionRanking(
+        definition="ranking/value-momentum.xml", ranking_method="percentile_nas_negative"
+    )
+
+
+@pytest.mark.parametrize(
+    ("ranking", "expected"),
+    [
+        ("ranking: 'EarnYield'\n", "`ranking` must be a mapping."),
+        ("ranking:\n  method: 2\n  id: 424242\n", "`ranking` can't override the ranking method."),
+        (
+            "ranking: {}\n",
+            "`ranking` must hold exactly one of formula, name, id, definition, or snapshot.",
+        ),
+        (
+            "ranking:\n  name: 'Value and momentum'\n  snapshot: 'ranking/value-momentum/'\n",
+            "`ranking` must hold exactly one of formula, name, id, definition, or snapshot.",
+        ),
+    ],
+    ids=["not-a-mapping", "method-override", "no-form", "two-forms"],
+)
+def test_a_1_1_0_ranking_names_its_five_forms(ranking: str, expected: str) -> None:
+    message = rejection(version_1_1(ranking), reader=read_screen_configuration_v1_1)
+
+    assert expected in message
+    assert RANKING_FORMS_MESSAGE_V1_1 in message

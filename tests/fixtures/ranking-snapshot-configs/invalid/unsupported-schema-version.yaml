@@ -1,0 +1,6 @@
+# Invalid: `schema_version` is a supported version.
+# Key: schema_version
+# Value: -
+kind: ranking-snapshot
+schema_version: 2.0.0
+system: 'Value and momentum'

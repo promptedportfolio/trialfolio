@@ -1,0 +1,5 @@
+# Invalid: `schema_version` is required.
+# Key: schema_version
+# Value: -
+kind: ranking-snapshot
+system: 'Value and momentum'

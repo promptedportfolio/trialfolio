@@ -1,0 +1,7 @@
+# Invalid: The system is named by its name: an ID isn't offered.
+# Key: id
+# Value: 424242
+kind: ranking-snapshot
+schema_version: 1.0.0
+system: 'Value and momentum'
+id: 424242

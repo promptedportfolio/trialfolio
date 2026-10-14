@@ -1,4 +1,4 @@
-# Invalid: A variant may change only rules, max_holdings, rebalance_weeks, and slippage_percent, never ranking.
+# Invalid: In a 1.0.0 file, a variant may change only rules, max_holdings, rebalance_weeks, and slippage_percent: a ranking variant needs schema_version 1.1.0.
 # Key: variants.ranking
 # Value: -
 kind: experiment

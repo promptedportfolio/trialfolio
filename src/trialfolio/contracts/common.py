@@ -364,6 +364,31 @@ AUTHENTICATION_REQUEST: Final = "POST /auth"
 SCREEN_BACKTEST_REQUEST: Final = "POST /screen/backtest"
 """The exchange of the screen backtest request (HTTP exchanges)."""
 
+RANK_UPDATE_REQUEST: Final = "POST /rank"
+"""The exchange of a `rank_update`, which writes `ApiRankingSystem` (sending a definition)."""
+
+RANK_GET_REQUEST: Final = "GET /rank"
+"""The exchange of a snapshot's `rank_get`, which reads a ranking system (ranking snapshot
+output). The path leaves out the query, which names the system."""
+
+API_RANKING_SYSTEM: Final = "ApiRankingSystem"
+"""The ranking system each `rank_update` writes, and each backtest with a definition ranks by,
+by name, exactly as R04-T01's `rank_get` returned it (sending a definition)."""
+
+RankingMethod = Literal["percentile_nas_negative", "percentile_nas_neutral"]
+"""A definition's ranking method: Percentile NAs Negative or Percentile NAs Neutral, the two
+values the Rank API documents for `rank_update` (ranking definitions)."""
+
+RANKING_METHOD_NUMBERS: Final[dict[RankingMethod, int]] = {
+    "percentile_nas_negative": 2,
+    "percentile_nas_neutral": 4,
+}
+"""Each ranking method's number, which `rank_update` sends as `rankingMethod`."""
+
+NodePathText = Annotated[str, StringConstraints(min_length=1)]
+"""A node's canonical path, as Trial Folio writes it (node paths). A node's name may be white
+space, so its path may be too; the definition is UTF-8, so the path holds no lone surrogate."""
+
 
 def require_unique[T](values: tuple[T, ...], what: str) -> None:
     """Raises `ValueError` when `values` repeats an element."""
