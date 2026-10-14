@@ -70,6 +70,8 @@ Why Trial Folio works as it does, with links to the specifications behind it.
 - [Credits and uncertain charges](explanation/credits-and-uncertain-charges.md)
 - [Reproducibility](explanation/reproducibility.md)
 - [What a backtest can support](explanation/what-a-backtest-can-support.md)
+- [The research method, step by step](explanation/the-research-method.md)
+- [Where Trial Folio is going](explanation/where-trial-folio-is-going.md)
 
 ## Research notice
 

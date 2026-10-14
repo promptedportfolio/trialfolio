@@ -38,7 +38,7 @@ Someone who has never run Trial Folio follows the first tutorial from setting up
 
 ## Layout
 
-A home page and four sections. UM-T01 wrote these pages (2026-10-12), and UM-T02 added `reference/output-fields.md` (2026-10-12). A later task that renames, merges, or adds a page updates this table.
+A home page and four sections. UM-T01 wrote these pages (2026-10-12), UM-T02 added `reference/output-fields.md` (2026-10-12), and UM-T04 added `explanation/the-research-method.md` and `explanation/where-trial-folio-is-going.md` (2026-10-14). A later task that renames, merges, or adds a page updates this table.
 
 | Section | What it's for | Pages |
 |---|---|---|
@@ -46,7 +46,7 @@ A home page and four sections. UM-T01 wrote these pages (2026-10-12), and UM-T02
 | Tutorials, `manual/tutorials/` | Learning by doing: a guided first run that works | `first-backtest.md`, `first-experiment.md` |
 | How-to guides, `manual/how-to/` | The steps for one task the reader already has | `store-credentials.md`, `re-render-a-report.md`, `compare-runs.md`, `recover-from-an-interrupt.md`, `repeat-a-case.md`, `revise-an-experiment.md`, `use-from-a-script.md` |
 | Reference, `manual/reference/` | Exact descriptions to look up | `cli.md`, `screen-configuration.md`, `review-configuration.md`, `experiment-configuration.md`, `outputs.md`, `output-fields.md`, `errors.md`, `json-summary.md` |
-| Explanation, `manual/explanation/` | Understanding: why Trial Folio works as it does | `plans-and-approval.md`, `credits-and-uncertain-charges.md`, `reproducibility.md`, `what-a-backtest-can-support.md` |
+| Explanation, `manual/explanation/` | Understanding: why Trial Folio works as it does | `plans-and-approval.md`, `credits-and-uncertain-charges.md`, `reproducibility.md`, `what-a-backtest-can-support.md`, `the-research-method.md`, `where-trial-folio-is-going.md` |
 | Third-party notices, `manual/third-party-notices.md` | The licenses of the theme's files the site serves ([tooling and hosting](#tooling-and-hosting)), linked from every page's footer | `third-party-notices.md` |
 
 ### Where the user guide's sections go
