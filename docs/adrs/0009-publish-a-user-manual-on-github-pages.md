@@ -1,6 +1,6 @@
 # ADR 0009: Publish a user manual on GitHub Pages
 
-**Status:** Accepted, by the owner, on 2026-10-12.
+**Status:** Accepted, by the owner, on 2026-10-12. Decision 7 is amended by [D-35](../spec.md#decisions), which the owner amended on 2026-10-13: only the track's first two tasks, UM-T01 and UM-T02, finish before 0.4.0's implementation starts, and the tasks added later hold no release.
 **Date:** 2026-10-12
 **Decision owner:** Nathan Slaughter
 **Owner decisions:** D-10 and D-35 in the [product specification](../spec.md#decisions)
