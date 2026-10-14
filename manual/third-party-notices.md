@@ -125,7 +125,7 @@ Copyright (c) 2015-2018 Google, Inc., Netflix, Inc., Microsoft Corp. and contrib
 
 ## Icons
 
-The pages and the stylesheets include icons from four sets. The site's favicon, `assets/favicon.svg`, is Lucide's `flask-conical` icon, in the site's accent color.
+The pages and the stylesheets include icons from four sets. The site's favicon, `assets/favicon.svg`, is Lucide's `flask-conical` icon, in the site's teal primary color.
 
 ### Lucide
 

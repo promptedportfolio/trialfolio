@@ -76,7 +76,7 @@ Verified observation, checked 2026-10-12 from the site built with Zensical 0.0.6
 | clipboard 2.0.11, and escape-html 1.0.3 | In the theme's scripts, as the theme's list of them, `assets/javascripts/LICENSE`, gives | MIT |
 | focus-visible 5.2.1 | In the theme's scripts | W3C Software and Document License, 2015 version |
 | rxjs 7.8.2 | In the theme's scripts | Apache-2.0. Its repository has no NOTICE file at that version. |
-| Lucide icons | In the pages, in the stylesheets, and in the site's favicon, `assets/favicon.svg`, which is Lucide's `flask-conical` icon in the site's accent color | ISC. The icons derived from Feather are MIT. |
+| Lucide icons | In the pages, in the stylesheets, and in the site's favicon, `assets/favicon.svg`, which is Lucide's `flask-conical` icon in the site's teal primary color | ISC. The icons derived from Feather are MIT. |
 | Material Design Icons, by Pictogrammers | In the stylesheets | Apache-2.0, under the Pictogrammers Free License |
 | Octicons, by GitHub | In the stylesheet of the theme's classic variant | MIT |
 | Font Awesome Free 7.3.1 | One icon in the stylesheets, with its attribution in a comment | CC BY 4.0 |

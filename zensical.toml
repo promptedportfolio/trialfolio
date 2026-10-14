@@ -69,8 +69,10 @@ features = [
   "toc.follow",
   "content.code.copy",
 ]
-# Lucide's flask icon, in the header. The favicon is the same icon, in the accent color
-# (manual/third-party-notices.md, Icons).
+# Lucide's flask icon, in the header. The favicon is the same icon, in the theme's teal primary
+# color: #009485, and its light shade, #26a699, when the browser is dark. The file names them
+# itself, so a change to primary changes them there by hand (manual/third-party-notices.md,
+# Icons).
 favicon = "assets/favicon.svg"
 
 [project.theme.icon]
