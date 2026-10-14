@@ -62,7 +62,7 @@ import traceback
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Final, Literal, TypedDict, cast
 
 from pydantic import BaseModel
@@ -87,6 +87,7 @@ from trialfolio.contracts.common import (
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
 from trialfolio.contracts.plan import Plan
 from trialfolio.errors import TrialFolioError, interrupted
+from trialfolio.manifests import model_json, utc
 from trialfolio.planning import check_approval
 from trialfolio.provider import (
     DecodedResponse,
@@ -453,7 +454,7 @@ class _AttemptFiles:
         publish a file and then fail a later step, such as the directory's sync, and the attempt
         then reads as its record says, not as running.
         """
-        data = _model_json(record)
+        data = model_json(record)
         try:
             self.write(ATTEMPT_RECORD, data, "attempt_record")
         except KeyboardInterrupt:
@@ -474,7 +475,7 @@ class _AttemptFiles:
 
     def _write_again(self, record: BaseModel) -> bool:
         try:
-            self.write(ATTEMPT_RECORD, _model_json(record), "attempt_record")
+            self.write(ATTEMPT_RECORD, model_json(record), "attempt_record")
         # The interrupt's code stays; unwritten, the start record, if any, reads as running.
         except Exception as failure:  # noqa: BLE001
             if not isinstance(failure, TrialFolioError):
@@ -542,7 +543,7 @@ class Attempt:
             attempt_id=self._attempt_id,
             case_id=case.case_id,
             plan_hash=plan_hash,
-            started_at=_utc(clock()),
+            started_at=utc(clock()),
             provider_wrapper=plan.provider_wrapper,
             transport=plan.transport,
         )
@@ -631,7 +632,7 @@ class Attempt:
     def _write_start(self, start: StartRecord) -> None:
         """Writes the start record. After a failure while it's written, whatever the failure, a
         record the store published counts as written, as an `ExperimentAttempt`'s does."""
-        data = _model_json(start)
+        data = model_json(start)
         try:
             self._files.write(START_RECORD, data, "start_record")
         except BaseException:
@@ -744,7 +745,7 @@ class ExperimentAttempt:
         self._session = session
         self._sequence = sequence
         self._repeat_of = repeat_of
-        self._started_at = _utc(clock())
+        self._started_at = utc(clock())
         self._wrapper = plan.provider_wrapper
         self._transport = plan.transport
         self._params: dict[str, object] = request.params.model_dump(mode="json")
@@ -849,7 +850,7 @@ class ExperimentAttempt:
             started_at=self._started_at,
         )
         self._files.write(
-            AUTHENTICATION_RECORD, _model_json(record), "authentication_record", list_published=True
+            AUTHENTICATION_RECORD, model_json(record), "authentication_record", list_published=True
         )
         self._authenticated = True
         try:
@@ -862,7 +863,7 @@ class ExperimentAttempt:
         """Writes the start record. After a failure while it's written, an interrupt or a
         storage failure such as a sync after the store published it, a record that was
         published counts as written, so the attempt record agrees with it."""
-        data = _model_json(start)
+        data = model_json(start)
         try:
             self._files.write(START_RECORD, data, "start_record")
         except BaseException:
@@ -931,17 +932,11 @@ def _read[M: BaseModel](store: ArtifactStore, path: str, model: type[M]) -> M | 
     return model.model_validate_json(content)
 
 
-def _utc(moment: datetime) -> datetime:
-    if moment.utcoffset() != timedelta(0):
-        raise ValueError("the clock must give UTC times")
-    return moment
-
-
 def _ended(clock: Clock, started_at: datetime) -> datetime:
     """When the attempt ended, for its record: the clock's time, or `started_at` when the clock
     reads earlier, as after the wall clock moved backward during the attempt. An attempt record
     never ends before it starts, so it can still be written."""
-    return max(_utc(clock()), started_at)
+    return max(utc(clock()), started_at)
 
 
 def _outcome(send: Exchange | None, *, saved: bool) -> Outcome:
@@ -1022,10 +1017,6 @@ def _request_json(params: dict[str, object]) -> bytes:
 
 def _response_json(payload: object) -> bytes:
     return (json.dumps(payload) + "\n").encode("ascii")
-
-
-def _model_json(model: BaseModel) -> bytes:
-    return (model.model_dump_json(indent=2) + "\n").encode("utf-8")
 
 
 def _reference(stored: StoredFile) -> ArtifactReference:

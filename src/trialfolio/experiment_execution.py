@@ -46,7 +46,9 @@ A case that fails is recorded, and the session goes on to the next one. An inter
 failure ends the session at once, without its manifest, so the experiment's output reads as
 incomplete until a later run resumes it. So does an attempt whose attempt record wasn't written,
 such as after an unexpected exception while writing it, as for a run: a manifest couldn't account
-for it. Every attempt written so far stays, and is never replaced.
+for it. Every attempt written so far stays, and is never replaced. `trialfolio.manifests` holds
+what a session shares here with a run and a review: writing the manifest and discarding it, the
+endings without one, and the parts of the manifest that a run and an experiment record alike.
 
 Execution with the demo's client, which sends nothing, writes a synthetic experiment: its plan
 and manifest record the approval `not_required`, and its report says its values are invented.
@@ -65,10 +67,10 @@ import threading
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Final, Literal
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from trialfolio.attempts import (
     ATTEMPT_RECORD,
@@ -101,17 +103,11 @@ from trialfolio.contracts.experiment_manifest import (
 )
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
 from trialfolio.contracts.experiment_record import ExperimentRecord, SessionRecord
-from trialfolio.contracts.manifest import (
-    Capabilities,
-    ExternalReference,
-    ParserVersion,
-    Reproducibility,
-    SourceRecord,
-)
+from trialfolio.contracts.manifest import ParserVersion, SourceRecord
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, SettingsRow
 from trialfolio.demo import SyntheticScreenBacktestClient
 from trialfolio.display import series
-from trialfolio.errors import TrialFolioError, interrupted
+from trialfolio.errors import TrialFolioError
 from trialfolio.experiment_records import (
     CaseAttempt,
     CaseOutcome,
@@ -122,9 +118,22 @@ from trialfolio.experiment_records import (
     plan_path,
     session_path,
 )
+from trialfolio.manifests import (
+    PROVIDER_ROLES,
+    EndingWithoutManifest,
+    ManifestDetails,
+    ManifestFile,
+    capabilities,
+    configuration_source,
+    ends_without_manifest,
+    model_json,
+    parsers,
+    provider_source,
+    reproducibility,
+    running_detail,
+    utc,
+)
 from trialfolio.normalization import (
-    LAYOUT,
-    LAYOUT_VERSION,
     METRICS_PATH,
     PARSER_VERSION,
     case_tables_path,
@@ -175,6 +184,18 @@ _SCHEMA_VERSIONS: Final[dict[ExperimentArtifactRole, str]] = {
 configuration, which gives its own."""
 
 _REASON: Final = TypeAdapter[str](RevisionReason)
+
+_MANIFEST: Final = ManifestDetails(
+    written="The session's manifest was written, so the experiment's output is complete.",
+    left=(
+        "The session's manifest.json was published before the failure, and couldn't be removed,"
+        " so the experiment reads as complete although the run failed."
+    ),
+    missing=(
+        "The attempts recorded so far are kept. The session has no manifest, so the experiment's"
+        " output reads as incomplete until running the same command again resumes it."
+    ),
+)
 
 type StopReason = Literal["budget", "authentication_budget", "authentication", "quota", "cancelled"]
 
@@ -520,9 +541,9 @@ class ExperimentExecution:
         self._report: StoredFile | None = None
         self._evidence: ExperimentEvidence | None = None
         self._manifest: ExperimentManifest | None = None
-        self._manifest_file: StoredFile | None = None
-        self._manifest_left = False
-        """Whether a manifest whose write failed couldn't be discarded."""
+        self._manifest_file = ManifestFile(
+            store, session_path(self._session, "manifest.json"), _MANIFEST
+        )
         self._configuration_version = ""
         self._record_data = b""
         """The first plan's `experiment.json`, once it's built."""
@@ -673,7 +694,7 @@ class ExperimentExecution:
         if self._experiment is None:
             self._store.claim(LOCK_PATH, LOCK_LINE, lock=True)
         self._claimed = True
-        try:
+        with EndingWithoutManifest() as ended:
             if on_claimed is not None:
                 on_claimed()
             self._write_session()
@@ -683,19 +704,16 @@ class ExperimentExecution:
                 self._complete_records(self._experiment)
                 if self._revision is not None:
                     self._write_revision(self._revision, configuration)
-        except KeyboardInterrupt:
-            return self._before_cases(interrupted())
-        except TrialFolioError as failure:
-            if failure.code != "storage.write_failed":
-                raise
-            return self._before_cases(failure)
+        if ended.error is not None:
+            return self._before_cases(ended.error)
         _logger.info(
             "Session %d started, under plan %d.",
             self._session,
             self._plan_number,
             extra=self._log_fields("experiment.session.started"),
         )
-        try:
+        error: TrialFolioError | None = None  # The session's, once it reaches its end.
+        with EndingWithoutManifest() as ended:
             sends = self._sends()
             self._emit(SessionStarted(self._session, tuple(case.case_id for case, _ in sends)))
             ending = self._run_cases(sends)
@@ -703,12 +721,8 @@ class ExperimentExecution:
                 return self._incomplete(ending)
             error = self._partial()
             self._write_ending(error)
-        except KeyboardInterrupt:
-            return self._incomplete(interrupted())
-        except TrialFolioError as failure:
-            if failure.code != "storage.write_failed":
-                raise
-            return self._incomplete(failure)
+        if ended.error is not None:
+            return self._incomplete(ended.error)
         manifest = self._manifest
         if manifest is not None:
             self._emit(SessionEnded(self._session, manifest.counts))
@@ -718,7 +732,7 @@ class ExperimentExecution:
         """What the session's records say, for the message of an ending the session didn't
         record itself, such as an unexpected exception: whether the request of the attempt under
         way may have been sent, and whether the session has its manifest."""
-        return f"{self._attempt_detail()} {self._manifest_detail()}"
+        return f"{self._attempt_detail()} {self._manifest_file.detail}"
 
     # The session's records
 
@@ -744,9 +758,9 @@ class ExperimentExecution:
             schema_version=SCHEMA_VERSION,
             trialfolio_version=self._plan.trialfolio_version,
             session=self._session,
-            started_at=_utc(self._clock()),
+            started_at=utc(self._clock()),
         )
-        path, data = session_path(self._session, "session.json"), _model_json(record)
+        path, data = session_path(self._session, "session.json"), model_json(record)
         try:
             self._session_record = self._store.write(path, data)
         except BaseException:
@@ -760,16 +774,16 @@ class ExperimentExecution:
         files: list[tuple[ExperimentArtifactRole, StoredFile]] = []
         saved = self._store.write(plan_path(number, "configuration.yaml"), configuration)
         files.append(("configuration", saved))
-        plan = self._store.write(plan_path(number, "plan.json"), _model_json(self._plan))
+        plan = self._store.write(plan_path(number, "plan.json"), model_json(self._plan))
         files.append(("plan", plan))
         record = first_experiment_record(
             self._plan,
             plan_artifact_id=plan.artifact_id,
             configuration_artifact_id=saved.artifact_id,
             approval=self._approval,
-            created_at=_utc(self._clock()),
+            created_at=utc(self._clock()),
         )
-        self._record_data = _model_json(record)
+        self._record_data = model_json(record)
         written = self._store.write(plan_path(number, "experiment.json"), self._record_data)
         files.append(("experiment_record", written))
         self._record = record
@@ -788,7 +802,7 @@ class ExperimentExecution:
         files: list[tuple[ExperimentArtifactRole, StoredFile]] = []
         saved = self._store.write(plan_path(number, "configuration.yaml"), configuration)
         files.append(("configuration", saved))
-        plan = self._store.write(plan_path(number, "plan.json"), _model_json(revision.plan))
+        plan = self._store.write(plan_path(number, "plan.json"), model_json(revision.plan))
         files.append(("plan", plan))
         record = revised_experiment_record(
             previous,
@@ -798,9 +812,9 @@ class ExperimentExecution:
             plan_artifact_id=plan.artifact_id,
             configuration_artifact_id=saved.artifact_id,
             approval=self._approval,
-            created_at=_utc(self._clock()),
+            created_at=utc(self._clock()),
         )
-        written = self._store.write(plan_path(number, "experiment.json"), _model_json(record))
+        written = self._store.write(plan_path(number, "experiment.json"), model_json(record))
         files.append(("experiment_record", written))
         self._record = record
         self._plan_number = number
@@ -827,8 +841,8 @@ class ExperimentExecution:
             if saved.record is not None:
                 continue
             plan = experiment.saved_plan(saved.plan).plan
-            record = saved.completed_record(plan, _utc(self._clock()))
-            path, data = f"{saved.directory}/{ATTEMPT_RECORD}", _model_json(record)
+            record = saved.completed_record(plan, utc(self._clock()))
+            path, data = f"{saved.directory}/{ATTEMPT_RECORD}", model_json(record)
             try:
                 stored = self._store.write(path, data)
             except BaseException:
@@ -966,11 +980,7 @@ class ExperimentExecution:
             self._results.append(result)
             self._attempts.append(_ended(result))
             error = result.error
-            # A manifest can't account for an attempt without its attempt record, whose start
-            # record reads as running, so that ends the session too, whatever stopped the write.
-            if not result.recorded or (
-                error is not None and error.code in ("command.interrupted", "storage.write_failed")
-            ):
+            if ends_without_manifest(recorded=result.recorded, error=error):
                 return error
             self._write_tables(case, result)
             record = result.record
@@ -1126,7 +1136,7 @@ class ExperimentExecution:
     def _write_ending(self, error: TrialFolioError | None) -> None:
         """Writes the session's report, then its manifest. A write of the manifest that fails,
         an interrupt included, discards it if the store had published it."""
-        created_at = _utc(self._clock())
+        created_at = utc(self._clock())
         record = self._experiment_record()
         evidence = ExperimentEvidence(
             plan=self._plan,
@@ -1149,8 +1159,8 @@ class ExperimentExecution:
             ),
             counts=self._counts(),
             parsers=self._parsers(),
-            capabilities=self._capabilities(),
-            reproducibility=self._reproducibility(),
+            capabilities=capabilities(series=self._holds_series()),
+            reproducibility=reproducibility(self._plan.cases),
             artifacts=self._artifacts(),
         )
         self._evidence = evidence
@@ -1158,16 +1168,7 @@ class ExperimentExecution:
             self._store, evidence, HtmlReportRenderer(self._plan.trialfolio_version)
         )
         manifest = self._build_manifest(error, created_at)
-        data = _model_json(manifest)
-        path = session_path(self._session, "manifest.json")
-        try:
-            self._manifest_file = self._store.write(path, data)
-        except BaseException:
-            try:
-                self._store.discard(path, data)
-            except TrialFolioError:
-                self._manifest_left = True
-            raise
+        self._manifest_file.write(manifest)
         self._manifest = manifest
         _logger.log(
             logging.INFO if error is None else logging.WARNING,
@@ -1281,40 +1282,14 @@ class ExperimentExecution:
             parsers=self._parsers(),
             license_id=LICENSE_ID,
             notice_version=NOTICE_VERSION,
-            capabilities=self._capabilities(),
-            reproducibility=self._reproducibility(),
+            capabilities=capabilities(series=self._holds_series()),
+            reproducibility=reproducibility(self._plan.cases),
             counts=self._counts(),
         )
 
     def _parsers(self) -> tuple[ParserVersion, ...]:
         """Each parser that wrote a case's `metrics.csv`, or the installed one when none did."""
-        versions = sorted({tables.parser_version for tables in self._tables.values()}) or [
-            PARSER_VERSION
-        ]
-        return tuple(
-            ParserVersion(layout=LAYOUT, layout_version=LAYOUT_VERSION, parser_version=version)
-            for version in versions
-        )
-
-    def _capabilities(self) -> Capabilities:
-        return Capabilities(
-            return_series="source_only" if self._holds_series() else "absent",
-            statistical_validation="not_assessed",
-            trading_readiness="not_assessed",
-        )
-
-    def _reproducibility(self) -> Reproducibility:
-        references: dict[str, ExternalReference] = {}
-        for case in self._plan.cases:
-            for row in case.settings:
-                if "not_snapshotted" in row.flags:
-                    references.setdefault(
-                        row.setting, ExternalReference(setting=row.setting, snapshotted=False)
-                    )
-        return Reproducibility(
-            status="incomplete" if references else "complete",
-            external_references=tuple(references.values()),
-        )
+        return parsers(tables.parser_version for tables in self._tables.values())
 
     def _holds_series(self) -> bool:
         """Whether a saved response of the experiment holds per-period series: each decoded
@@ -1428,21 +1403,11 @@ class ExperimentExecution:
         ):
             return earlier
         source = None
-        if role in ("provider_request", "provider_response", "provider_response_undecoded"):
-            decoded = role == "provider_response"
+        if role in PROVIDER_ROLES:
             record = attempt.record
-            # The request was written just before the attempt's start record, and the response
-            # was saved just before its attempt record.
-            started = record.started_at if record is not None else _utc(self._clock())
+            started = record.started_at if record is not None else utc(self._clock())
             ended = record.ended_at if record is not None else started
-            source = SourceRecord(
-                acquired_at=started if role == "provider_request" else ended,
-                format=LAYOUT if decoded else f"{LAYOUT}-{role.removeprefix('provider_')}",
-                format_version=str(LAYOUT_VERSION),
-                parser_version=PARSER_VERSION if decoded else None,
-                provenance="verified",
-                operation="screen_backtest",
-            )
+            source = provider_source(role, started_at=started, ended_at=ended)
         return self._listed(role, file.file, source)
 
     def _earlier(self, path: str) -> ExperimentArtifact | None:
@@ -1463,13 +1428,8 @@ class ExperimentExecution:
             schema_version = plan.configuration_version
             # Acquired when its plan was recorded, so every session's manifest gives it the
             # same time: the plan's `experiment.json` records when.
-            source = SourceRecord(
-                acquired_at=plan.record.created_at,
-                format=EXPERIMENT_CONFIGURATION_FORMAT,
-                format_version=schema_version,
-                parser_version=None,
-                provenance="user_supplied",
-                operation=None,
+            source = configuration_source(
+                EXPERIMENT_CONFIGURATION_FORMAT, schema_version, plan.record.created_at
             )
         return ExperimentArtifact(
             path=stored.path,
@@ -1516,45 +1476,23 @@ class ExperimentExecution:
             return failure
         last = self._results[-1] if self._results else None
         if last is not None and last.recorded and failure is last.error:
-            detail = self._manifest_detail()
+            detail = self._manifest_file.detail
         return failure.with_detail(detail)
 
     def _attempt_detail(self) -> str:
         current = self._current
         if current is not None and current.start_record is not None:
-            return (
-                "The screen backtest request of the attempt under way may have been sent, and may"
-                " have been charged: its start record reads as running. Trial Folio never"
-                " retries it automatically."
-            )
+            return running_detail("the attempt under way")
         if self._results:
             last = self._results[-1]
             record = last.record
             if not last.recorded:
                 if last.start is not None:
-                    return (
-                        "The screen backtest request of the last attempt may have been sent, and"
-                        " may have been charged: its start record reads as running. Trial Folio"
-                        " never retries it automatically."
-                    )
+                    return running_detail("the last attempt")
                 return "The last attempt's request wasn't sent."
             detail = request_detail(record.outcome, possibly_charged=record.possibly_charged)
             return f"Of the last attempt: {detail}"
         return "No case's request was sent."
-
-    def _manifest_detail(self) -> str:
-        if self._manifest is not None:
-            return "The session's manifest was written, so the experiment's output is complete."
-        if self._manifest_left:
-            return (
-                "The session's manifest.json was published before the failure, and couldn't be"
-                " removed, so the experiment reads as complete although the run failed."
-            )
-        return (
-            "The attempts recorded so far are kept. The session has no manifest, so the"
-            " experiment's output reads as incomplete until running the same command again"
-            " resumes it."
-        )
 
     # Progress and logs
 
@@ -1678,13 +1616,3 @@ _STOP_MESSAGES: Final[dict[StopReason, str]] = {
         " same hash, resumes the experiment, and runs the cases not started."
     ),
 }
-
-
-def _model_json(model: BaseModel) -> bytes:
-    return (model.model_dump_json(indent=2) + "\n").encode("utf-8")
-
-
-def _utc(moment: datetime) -> datetime:
-    if moment.utcoffset() != timedelta(0):
-        raise ValueError("the clock must give UTC times")
-    return moment
