@@ -5,7 +5,7 @@
 
 This survey holds the facts behind the user manual's claims about other tools ([rule 10](user-manual.md#rules)): the tools a Portfolio123 member could use for some of what Trial Folio does. A manual page that says what another tool does or doesn't do, or that no other tool does something, cites this file and the date its facts were checked.
 
-It owns no requirement. Each fact about another tool is a verified observation, with its source and the date it was checked. The one proposed default is the claim in [what the facts support](#what-the-facts-support), which the owner decides. Where a fact here differs from one another document recorded earlier, [changes to facts the project recorded earlier](#changes-to-facts-the-project-recorded-earlier) lists it, and the owner decides whether that document changes.
+It owns no requirement. Each fact about another tool is a verified observation, with its source and the date it was checked. The owner decided on 2026-10-14 which claim in [what the facts support](#what-the-facts-support) the page on why Trial Folio exists makes. Where a fact here differs from one another document recorded earlier, [changes to facts the project recorded earlier](#changes-to-facts-the-project-recorded-earlier) lists it, and the owner decides whether that document changes.
 
 ## What's compared
 
@@ -57,7 +57,7 @@ The survey was done in three parts on 2026-10-13: Portfolio123's own tools; tool
 - Quotes are exact, including the sources' typos, with curly quotation marks written as straight ones. "…" marks an omission.
 - No Portfolio123 plan, price, or entitlement level is named ([DSC-06](disclaimers.md#dsc-06-portfolio123-notices)). For other products the survey gives the cost structure, not the price: prices change, and the link has them.
 - Each tool is described factually and neutrally, as [ADR 0005](adrs/0005-build-on-the-portfolio123-api-only.md) describes DataMiner. Nothing here judges a tool's quality or fitness for anyone else's purpose.
-- No individual is named. A forum member is "a member"; Portfolio123's staff is "a Portfolio123 staff account".
+- No individual is named. A forum member is "a member"; Portfolio123's staff is "a Portfolio123 staff account". Some sources' addresses contain a member's handle, or, for the published factor library, its author's name. The owner decided on 2026-10-14 to keep those links, since each fact needs its source (UM-AC09).
 
 **Labels.** Every fact is a verified observation: the cited source said it when it was checked. "Not found" means the public sources named describe none. It doesn't mean the tool lacks it: anything behind a login wasn't checked. "Not verified" means the survey looked and couldn't confirm. A vendor's claim, such as that its data is point-in-time, is the vendor's statement; the survey didn't test it.
 
@@ -988,9 +988,9 @@ The owner gave three claims, in order of preference, for the page on why Trial F
 
 Portfolio123's terms let it terminate access for services "that offer similar functionality", and bar using the Service "to compete with the Service" (§17). They restrict storing, redistributing, or manipulating Content without consent (§5) ([terms][p123-terms]). These are factual extracts, not legal advice. [Rule 10](user-manual.md#rules) already has each page present Trial Folio as built on Portfolio123's own engines and data, not as a substitute for Portfolio123.
 
-### The proposed default claim
+### The claim the page makes
 
-Proposed default, for the owner to decide: claim 1, in its narrowest supported form. It's the owner's first preference, and the facts support it in that form. Claim 2 isn't supported in any form that says Trial Folio was needed, and its narrow form, what Trial Folio adds, is part of this claim. Claim 3's narrow form is a cost structure, which the page gives anyway as what using Trial Folio costs. The page could state it as:
+The owner decided on 2026-10-14 that the page makes claim 1, in its narrowest supported form. It's the owner's first preference, and the facts support it in that form. Claim 2 isn't supported in any form that says Trial Folio was needed, and its narrow form, what Trial Folio adds, is part of this claim. Claim 3's narrow form is a cost structure, which the page gives anyway as what using Trial Folio costs. The page could state it as:
 
 > As of 2026-10-13, the [survey of related tools](https://github.com/promptedportfolio/trialfolio/blob/main/docs/related-tools.md) found no other tool that runs Portfolio123's own backtests as a planned experiment: a fixed set of cases, under a plan and a budget you approve before anything is sent, with each request, response, and failure kept, along with the cost Portfolio123 reported. Each part exists elsewhere. Portfolio123's Optimizer and DataMiner run many variants, FactorMiner keeps a record of each analysis, and Download Factors estimates the credits it will use. QuantConnect records each backtest and estimates a batch's cost, on its own engine and data. The survey searched public sources only, so a tool shared privately may do the same.
 
