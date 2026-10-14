@@ -24,13 +24,13 @@ The driving use case is reproducing published factor research in Portfolio123. A
 - Fixed variants: the paper's construction on the full universe and without microcaps, a practitioner screen variant, and stable-identifier universe slices.
 - Results gross and net of declared costs, rolling returns over several holding periods, quantile-bucket returns, and period splits around the paper's sample and publication dates.
 
-[methodology.md](methodology.md) (METH-09) defines the scientific meaning of these needs. [roadmap.md](roadmap.md) shows which increment delivers each one. Trial Folio stays general enough for other strategy research, but when priorities conflict, this use case decides.
+[methodology.md](methodology.md) (METH-09) defines the scientific meaning of these needs. [roadmap.md](roadmap.md) shows which increment delivers each one. Trial Folio stays general enough for other strategy research. The target user ([D-42](#product-direction)) sets the order of the roadmap's targets; this use case decides priorities within a target, and among the [later increments](roadmap.md#later-increments-selected-by-study-needs) that have no fixed order.
 
 ## Product direction
 
 **Requirement (D-23).** Prioritize complete research workflows. A feature earns its place by helping a researcher answer a stated question, understand a limitation, or remove manual work from a study. DataMiner's capabilities are a reference for provider operations; matching its operation list or every option is not a release or product-completion criterion.
 
-**Target user (D-42).** Beyond the owner, Trial Folio is built for the serious researcher who wants statistically sound evaluation of alpha claims: a search that's recorded, inference that accounts for dependence and for that search, and evidence the search never saw. It evaluates evidence; it doesn't judge whether anyone should invest ([Purpose](#purpose)). The [roadmap](roadmap.md#after-030) plans for that researcher's evidence first.
+**Target user (D-42).** Beyond the owner, Trial Folio is built for the serious researcher who wants statistically sound evaluation of alpha claims: a search that's recorded, inference that accounts for dependence and for that search, and evidence the search never saw. It evaluates evidence; it doesn't judge whether anyone should invest ([Purpose](#purpose)). The [roadmap](roadmap.md#after-030) plans for that researcher's evidence first: the target user sets the order of its targets, and [Primary use](#primary-use) says what the driving use case decides.
 
 As the product grows, organize work around the study, its experiments, and its evidence. Keep the question, baseline, known prior research, changes, and findings connected. Provider operations are steps within that workflow. Exploratory work can begin with a lightweight brief; reproduction studies and confirmatory claims still require their respective protocols and evidence under [METH-09 and METH-01 to METH-04](methodology.md).
 
