@@ -108,7 +108,7 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
    - the non-affiliation notice, as the README gives it.
 
    It leaves out the theme's "Made with Zensical" link. The alternative is to keep that link.
-2. **The theme files' notices.** The theme's scripts and stylesheets carry no license headers. So the notices are on a page of their own, `third-party-notices.md`, linked from every footer. Since 2026-10-14 it isn't in the navigation, whose tabs are the home page and the manual's four sections. It holds each license's full text, or Font Awesome's attribution. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#the-user-manuals-site) records the site as a distribution form, and asks a pull request that changes Zensical's version to check the files the site serves again.
+2. **The theme files' notices.** The theme's scripts and stylesheets carry no license headers. So the notices are on a page of their own, `third-party-notices.md`, linked from every footer. Since 2026-10-14 it isn't in the navigation, whose tabs are the home page and the manual's four sections, as the owner decided that day. It holds each license's full text, or Font Awesome's attribution. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#the-user-manuals-site) records the site as a distribution form, and asks a pull request that changes Zensical's version to check the files the site serves again.
 3. **The configuration** in `zensical.toml`:
    - `strict = true`, so a broken link or anchor fails the build;
    - `font = false`, so pages use the reader's system fonts;
@@ -171,7 +171,7 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
 
 ## The site's theme
 
-On 2026-10-14 the site gained colors, more of the theme's navigation, a logo, and a favicon of its own. It still loads nothing from another host (UM-AC07), and it serves the same theme files as before ([THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#the-user-manuals-site)). In `zensical.toml`:
+On 2026-10-14 the site gained colors, more of the theme's navigation, a logo, and a favicon of its own. It still loads nothing from another host (UM-AC07), and it serves the same theme files as before ([THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#the-user-manuals-site)). The owner decided the variant, the colors, the logo and the favicon, and the notices page's place on 2026-10-14, and that the change needs no task. In `zensical.toml`:
 
 - **The variant** is `modern`, the theme's default.
 - **The colors** are the theme's `teal`, in a light scheme and a dark one. They follow the reader's system setting, until the reader chooses one with the switch in the header.
