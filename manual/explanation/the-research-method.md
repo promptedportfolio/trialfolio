@@ -76,11 +76,11 @@ Each step is labeled:
 
 - **Trial Folio does this now,** with the release that added it, and the manual page that shows how.
 - **By hand now,** with what you do yourself.
-- **Planned,** with its target in the [roadmap](https://github.com/promptedportfolio/trialfolio/blob/main/docs/roadmap.md#driving-use-case-coverage), or "later, without a version" when the roadmap gives it none. Release 0.4.0 is specified and Ready, but not built yet. The targets after it are proposed, not commitments ([where Trial Folio is going](where-trial-folio-is-going.md)).
+- **Planned,** with its target in the [roadmap](https://github.com/promptedportfolio/trialfolio/blob/main/docs/roadmap.md#driving-use-case-coverage): a release's version; the Reproduction and sensitivity workflow, which the roadmap proposes after 1.1.0, without a version; or a later increment, labeled "later, without a version", whose order studies decide. Release 0.4.0 is specified and Ready, and its parts of a step stay Planned until Trial Folio does them. The other targets are proposed, not commitments ([where Trial Folio is going](where-trial-folio-is-going.md)).
 
 A step can have parts with different labels. Release 0.3.0 added experiments: a copy of Trial Folio at an earlier tag, such as `v0.2.1`, has none.
 
-In the table, a target named without a version is a later increment, which the roadmap gives no version.
+In the table, a target named without a version is the Reproduction and sensitivity workflow, or a later increment.
 
 | Step | Trial Folio does this now | By hand now | Planned |
 |---|---|---|---|
@@ -102,7 +102,7 @@ The study starts with a paper, and one claim from it, such as the illustrative p
 
 - **Trial Folio does this now** (0.3.0): an experiment's `purpose`, the question it addresses, is required. Trial Folio records it, shows it in the plan and the report, and never sends it ([the research context](../reference/experiment-configuration.md#the-research-context)).
 - **By hand now:** choosing the paper, and writing down the claim you'll test and what would count as reproducing it.
-- **Planned** (Reproduction and sensitivity workflow, later, without a version): a study record, which keeps the study's method, its experiments, and its findings together.
+- **Planned** (Reproduction and sensitivity workflow, proposed, without a version): a study record, which keeps the study's method, its experiments, and its findings together.
 - **Planned** (Statistical evaluation, later, without a version): confirmatory protocols, whose validation rejects a missing primary objective, benchmark, or cost input.
 
 **The research it answers:** [writing the plan first](#writing-the-plan-first), and [multiple testing in factor research](#multiple-testing-in-factor-research).
@@ -113,7 +113,7 @@ A reproduction's protocol records the paper, the claim, the criteria for reprodu
 
 - **Trial Folio does this now** (0.3.0): an experiment's plan holds every case, compiled to its full settings, and is recorded in the experiment's directory before the first request. The hash you approve identifies it, so the cases are fixed before any result exists. The experiment declares its prior research, the earlier work on the same idea whose results you saw, in Trial Folio or anywhere else, with its status: `complete`, `partial`, or `unknown`. Trial Folio records the declaration as you wrote it, and can't verify it. A change to the plan is a revision, with a reason, and the earlier cases stay in the record ([plans and approval](plans-and-approval.md), [prior research limits any claim](what-a-backtest-can-support.md#prior-research-limits-any-claim), [revise an experiment](../how-to/revise-an-experiment.md)).
 - **By hand now:** the rest of the protocol: the paper, the claim, the criteria, the planned deviations, and the measures you'll compare, written before the first test, and committed to a repository or another record that dates it. Each amendment is added with its date.
-- **Planned** (Reproduction and sensitivity workflow, later, without a version): a study record, with dated decisions and amendments.
+- **Planned** (Reproduction and sensitivity workflow, proposed, without a version): a study record, with dated decisions and amendments.
 - **Planned** (Statistical evaluation, later, without a version): a frozen confirmatory protocol, archived before protected results are released ([METH-02.5](https://github.com/promptedportfolio/trialfolio/blob/main/docs/methodology.md#meth-02-separate-development-selection-and-confirmation)).
 
 A tool on your machine can't prove you never looked at the data elsewhere. The methodology marks that unavailable by nature, and an assessment must say so (METH-02.6).
@@ -130,7 +130,7 @@ Some of the illustrative study's deviations come from Trial Folio itself. Its sc
 - **Trial Folio does this now** (0.2.0): a review compares saved runs with a baseline, and separates the changes you declared from unexplained mismatches. It compares runs with each other, not with the paper: the roadmap calls it the first step toward a deviation record ([compare runs](../how-to/compare-runs.md)).
 - **By hand now:** writing the formulas, rules, and universe, checking them against Portfolio123's documentation, and writing the deviation record. If a model drafts the formulas, the methodology asks you to keep its first output unedited, and to record each formula that failed or was invented, with its correction ([METH-09.12](https://github.com/promptedportfolio/trialfolio/blob/main/docs/methodology.md#meth-09-reproducing-published-research)).
 - **Planned** (0.4.0, Ready, not built yet): a ranking system's whole definition, in a file the configuration names, or a snapshot of one saved in your account, so a ranking of several factors is recorded completely.
-- **Planned** (Reproduction and sensitivity workflow, later, without a version): a deviation record against the paper's method.
+- **Planned** (Reproduction and sensitivity workflow, proposed, without a version): a deviation record against the paper's method.
 - **Planned** (Optional discovery, later, without a version): recording a model's drafts, with its first output unedited.
 
 **The research it answers:** [how many published factors replicate](#how-many-published-factors-replicate).
@@ -143,7 +143,7 @@ The study runs its closest reproduction as a baseline, with a fixed set of varia
 - **By hand now:** another universe is another experiment, since the universe isn't a variant ([D-19](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#decisions)). Declare the earlier experiment in the later one's prior research, so the search stays visible. A backtest you run outside Trial Folio, on Portfolio123's website, isn't in any experiment's record, since Trial Folio doesn't import results produced elsewhere. It's prior research too, as in the [experiment configuration's example](../reference/experiment-configuration.md#example).
 - **Planned** (0.4.0, Ready, not built yet): variants that change the weights of the ranking system's factors, or remove one factor.
 - **Planned** (Simulation review, later, without a version): the practitioner's rank-drop sell rule. Sell rules in screen backtests are unverified.
-- **Planned** (Reproduction and sensitivity workflow, later, without a version): universe slices, once a study verifies that `StockID` stays the same for each stock across the test period. Trial Folio accepts a `Mod(StockID,4)` rule as it does any added rule, but doesn't offer or label it as a slice ([what R03-T01 verified](https://github.com/promptedportfolio/trialfolio/blob/main/docs/releases/0.3.0-experiments.md#what-r03-t01-verified)). Slices share their dates, so they aren't independent confirmations ([METH-09.5](https://github.com/promptedportfolio/trialfolio/blob/main/docs/methodology.md#meth-09-reproducing-published-research)).
+- **Planned** (Reproduction and sensitivity workflow, proposed, without a version): universe slices, once a study verifies that `StockID` stays the same for each stock across the test period. Trial Folio accepts a `Mod(StockID,4)` rule as it does any added rule, but doesn't offer or label it as a slice ([what R03-T01 verified](https://github.com/promptedportfolio/trialfolio/blob/main/docs/releases/0.3.0-experiments.md#what-r03-t01-verified)). Slices share their dates, so they aren't independent confirmations ([METH-09.5](https://github.com/promptedportfolio/trialfolio/blob/main/docs/methodology.md#meth-09-reproducing-published-research)).
 
 **The research it answers:** [testing many variants](#testing-many-variants), and [how many published factors replicate](#how-many-published-factors-replicate).
 
@@ -180,7 +180,7 @@ The methodology's analyses for a reproduction are descriptive: results before an
 - **By hand now:** any analysis beyond the summary statistics, from the saved results, or from separate runs over each period, which a review shows side by side. Separate backtests with different dates answer a different question from splitting one run's series ([descriptive analysis before further acquisition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/roadmap.md#descriptive-analysis-before-further-acquisition)).
 - **Planned** (0.5.0, proposed): a fixed, versioned set of descriptive analyses of archived evidence, with drawdowns, rolling returns, and period splits where the dates are supplied. A descriptive t-statistic of mean excess return, labeled descriptive, is proposed for the same increment ([open questions](https://github.com/promptedportfolio/trialfolio/blob/main/docs/methodology.md#open-questions)).
 - **Planned** (1.1.0, proposed): returns by rank bucket, with the top-minus-bottom spread.
-- **Planned** (Reproduction and sensitivity workflow, later, without a version): paired analyses before and after costs, and the period splits in the study's context.
+- **Planned** (Reproduction and sensitivity workflow, proposed, without a version): paired analyses before and after costs, and the period splits in the study's context.
 
 **The research it answers:** [returns after publication](#returns-after-publication).
 
@@ -192,7 +192,7 @@ The methodology asks whether a result survives predefined, reasonable changes, s
 - **By hand now:** judging whether the differences between cases are consistent with the paper's economic idea, and with how the strategy would be traded.
 - **Planned** (0.4.0, Ready, not built yet): weight and factor-removal variants.
 - **Planned** (1.1.0, proposed): bucket performance, and comparisons of ranking definitions, as descriptive diagnostics, not a scientific assessment without the evidence it requires.
-- **Planned** (Reproduction and sensitivity workflow, later, without a version): universe slices, and targeted checks of sensitivity to costs, microcaps, and timing, where supported.
+- **Planned** (Reproduction and sensitivity workflow, proposed, without a version): universe slices, and targeted checks of sensitivity to costs, microcaps, and timing, where supported.
 - **Planned** (Simulation review, later, without a version): a portfolio's holdings, transactions, sell rules, turnover, and cash.
 
 **The research it answers:** [testing many variants](#testing-many-variants).
@@ -215,7 +215,7 @@ Every study and every case is reported on the same terms, whether or not it repr
 - **Trial Folio does this now** (0.1.0): every attempt is recorded, failures included, and every report has the same sections, marking the ones the evidence can't support as unavailable or not assessed. Each report labels its results' nature, backtested, or synthetic for the demo ([what a backtest can support](what-a-backtest-can-support.md), [DSC-04](https://github.com/promptedportfolio/trialfolio/blob/main/docs/disclaimers.md#dsc-04-actual-simulated-and-hypothetical-results)).
 - **Trial Folio does this now** (0.3.0): every planned case is accounted for. The cases that succeeded, failed, were skipped, are unknown, or haven't run add up to the planned cases, in the report and the manifest, and the report lists every case with its outcome ([why every attempt is recorded](reproducibility.md#why-every-attempt-is-recorded), [an experiment's directory](../reference/outputs.md#an-experiments-directory)).
 - **By hand now:** the study's report: its question, protocol, deviations, experiments and cases, verdict, and limits, such as a prior-research declaration that isn't `complete`.
-- **Planned** (Reproduction and sensitivity workflow, later, without a version): a reproduction report, assembled from the study's record.
+- **Planned** (Reproduction and sensitivity workflow, proposed, without a version): a reproduction report, assembled from the study's record.
 
 **Publishing.** Your reports and other outputs hold Portfolio123 data, which Portfolio123's terms govern, not Trial Folio's license. Publishing results derived from Portfolio123 data, even as charts, may need Portfolio123's written permission, and getting it is your responsibility ([DSC-10](https://github.com/promptedportfolio/trialfolio/blob/main/docs/disclaimers.md#dsc-10-portfolio123-terms-that-bear-on-users), [DSC-06](https://github.com/promptedportfolio/trialfolio/blob/main/docs/disclaimers.md#dsc-06-portfolio123-notices)). A published result is never a promise, a prediction, or a representation of gains anyone could realize ([DSC-08](https://github.com/promptedportfolio/trialfolio/blob/main/docs/disclaimers.md#dsc-08-statements-the-project-must-not-make)).
 
