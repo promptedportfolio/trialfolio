@@ -213,6 +213,12 @@ _SNAPSHOT_SOURCES: Final[dict[str, tuple[str, int | None, str | None]]] = {
 """Each source artifact's format, parser version, and provider operation, but the definition's
 copy, which a run's manifest checks too."""
 
+_SNAPSHOT_PARSERS: Final = (
+    ParserVersion(layout="p123api-rank-get", layout_version=1, parser_version=1),
+)
+"""A snapshot's parsers: the one that reads its `rank_get`'s response, as its source record
+names it (ranking snapshot output)."""
+
 
 class SnapshotArtifact(ContractModel):
     """One file of a snapshot, by path, content address, and role."""
@@ -326,13 +332,11 @@ class RankingSnapshotManifest(ContractModel):
             raise ValueError("a snapshot that isn't synthetic names the command that took it")
         check_outcome(self.outcome, self.error)
         require_unique(tuple(artifact.path for artifact in self.artifacts), "artifact paths")
-        require_unique(
-            tuple(
-                (parser.layout, parser.layout_version, parser.parser_version)
-                for parser in self.parsers
-            ),
-            "parsers",
-        )
+        if self.parsers != _SNAPSHOT_PARSERS:
+            raise ValueError(
+                "a snapshot's parsers are p123api-rank-get, layout version 1, parser version 1, "
+                "and no other"
+            )
         roles = Counter(artifact.role for artifact in self.artifacts)
         if roles["plan"] != 1 or roles["configuration"] != 1:
             raise ValueError("a snapshot lists its plan and its configuration")

@@ -2230,6 +2230,12 @@ SNAPSHOT_MANIFEST_REJECTS: dict[str, Change] = {
     "completed without its definition": lambda d: d["artifacts"].remove(
         snapshot_artifact(d, "ranking_definition")
     ),
+    "failed, with its definition alone": lambda d: (
+        snapshot_failed(d),
+        d["artifacts"].append(
+            listed("definition.xml", "ranking_definition", None, SNAPSHOT_SOURCES)
+        ),
+    ),
     "failed, with its definition and record": lambda d: d.update(
         outcome="failed",
         error={"code": "provider.unsupported_capability", "message": "Portfolio123 refused it."},
@@ -2281,6 +2287,14 @@ SNAPSHOT_MANIFEST_REJECTS: dict[str, Change] = {
     "a run's artifact type": lambda d: d.update(artifact_type="run"),
     "no parser": lambda d: d.update(parsers=[]),
     "a parser listed twice": lambda d: d.update(parsers=d["parsers"] * 2),
+    "the backtest's parser in rank_get's place": lambda d: d["parsers"][0].update(
+        layout="p123api-screen-backtest"
+    ),
+    "another version of rank_get's parser": lambda d: d["parsers"][0].update(parser_version=2),
+    "another version of rank_get's layout": lambda d: d["parsers"][0].update(layout_version=2),
+    "the backtest's parser beside rank_get's": lambda d: d["parsers"].append(
+        {"layout": "p123api-screen-backtest", "layout_version": 1, "parser_version": 1}
+    ),
 }
 
 
