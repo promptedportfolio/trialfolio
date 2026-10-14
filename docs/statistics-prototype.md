@@ -17,8 +17,8 @@ The statistical evaluation target's specification decides whether any of the pro
 SP-T01 completes it. It reads [AGENTS.md](../AGENTS.md), [spec.md](spec.md), [METH-01.3, METH-02 to METH-04, METH-06, and METH-07](methodology.md), methodology.md's [verification of statistical methods](methodology.md#verification-of-statistical-methods), and the contracts.md sections on the [screen-backtest response](contracts.md#p123api-screen-backtest-version-1), [metrics](contracts.md#metrics-and-missing-values), [default variants](contracts.md#default-variants), and [experiment output](contracts.md#experiment-output). Then it:
 
 1. **Names each procedure's exact variant and its primary source,** for every procedure in [included scope](#included-scope). For example, which block bootstrap and how its block length is chosen, and which estimate of the effective number of trials the deflated Sharpe ratio uses. It also states the inputs the procedures share: the periods every case's returns are aligned on, and the Sharpe ratio's risk-free series and return convention ([open questions](#open-questions)).
-2. **Names each procedure's independent reference calculation:** a published worked example, an established library, or a hand calculation, as methodology.md asks. A library's license is checked before it's used in a check.
-3. **Specifies the synthetic data:** the processes, with serial dependence, fat tails, and correlated cases, under a null and under alternatives; and, before any result is seen, the simulation counts, the seeds, and the tolerances ("tolerances first").
+2. **Names each procedure's independent reference calculation:** a published worked example, an established library, or a hand calculation, as methodology.md asks. A reference calculates the same quantity as its procedure, another way. For the bootstrap, that's a quantity it estimates, such as the variance of a mean, which some block schemes give exactly, and the covariance between two cases, which only joint resampling keeps. The HAC estimator is a different estimator, so it's the bootstrap's comparison, not its reference, and has a reference of its own. A library's license is checked before it's used in a check.
+3. **Specifies the synthetic data:** the processes, with serial dependence, fat tails, and correlated cases, under a null and under alternatives; and, before any result is seen, the simulation counts, the seeds, and the tolerances ("tolerances first"). It also names what each procedure's calibration measures, as [included scope](#included-scope) gives it, and any threshold that needs.
 4. **Resolves the open questions,** or confirms their defaults.
 5. **Pairs each acceptance criterion with a check,** and gives the verification commands.
 
@@ -35,11 +35,15 @@ The owner points the prototype at a saved experiment, and gets a local record of
 - **Assumption checks.** For each experiment: the number of non-overlapping periods; serial correlation; skewness and kurtosis; the correlation between cases, over the aligned periods; and an estimate of the effective number of independent trials.
 - **The candidate procedures** the roadmap's statistical evaluation target names, and methodology.md's open questions weigh:
   - a time-block bootstrap, resampling every case's periods jointly, for each case's mean excess return and Sharpe ratio ([METH-04.3](methodology.md#meth-04-inference-before-any-statistical-badge));
-  - a HAC estimator, as an independent reference calculation for the bootstrap;
+  - a HAC estimator, for the same quantities, as the bootstrap's comparison. They're different estimators, so how their results compare on the same series is evidence for the methods ADR's choice between them ([METH-04.1](methodology.md#meth-04-inference-before-any-statistical-badge), item 3), which SP-AC08 records, not a check against a tolerance;
   - Holm adjustment, and Romano–Wolf stepdown, for a family of cases;
   - the deflated Sharpe ratio, for a case a declared rule selects;
   - the probability of backtest overfitting, through combinatorially symmetric cross-validation, for an experiment treated as a search.
-- **Calibration.** Each procedure's rejection rate under synthetic nulls (size) and alternatives (power), at the sample sizes the owner's experiments have.
+- **Calibration.** How each procedure behaves on synthetic data with known properties, at the sample sizes the owner's experiments have:
+  - for the bootstrap and HAC, their rejection rates under nulls (size) and alternatives (power);
+  - for Holm and Romano–Wolf, the family-wise error rate, and power, by a definition SP-T01 states, such as the average share of false nulls rejected;
+  - for the deflated Sharpe ratio, its rejection rates, as a test of the selected case at a level SP-T01 sets;
+  - for the probability of backtest overfitting, which estimates a probability rather than testing, its estimates against the probability the synthetic process gives, or its rejection rates at a threshold SP-T01 sets beforehand.
 - **A record of the findings,** written into this file.
 
 ## Explicit exclusions
@@ -81,11 +85,11 @@ The owner points the prototype at a saved experiment, and gets a local record of
 | SP-AC01 | It reads a saved 0.3.0 experiment, a saved 0.4.0 experiment, and the committed synthetic experiments, changes no file in their directories, and opens no network connection |
 | SP-AC02 | For each case, the period returns and daily levels it reads reproduce the case's `total_return`, `annualized_return`, and `max_drawdown`, at the digits each was reported with, or this file records where and why they don't |
 | SP-AC03 | Each procedure agrees with its independent reference calculation, as SP-T01 names it, within the tolerance SP-T01 set before the result was seen |
-| SP-AC04 | On synthetic data, each procedure's size and power are recorded, at the sample sizes of the owner's experiments, with the seeds and simulation counts SP-T01 set |
+| SP-AC04 | On synthetic data, each procedure's calibration is recorded, as [included scope](#included-scope) gives it and SP-T01 named it, at the sample sizes of the owner's experiments, with the seeds and simulation counts SP-T01 set |
 | SP-AC05 | For each of the owner's experiments it's run on, this file records the assumption checks' conclusions, and the number of periods and cases. Values from real experiments stay on the owner's machine. |
 | SP-AC06 | Every result records its procedure's variant, inputs, tuning, resamples, and seed; a rerun with the same inputs gives the same values |
 | SP-AC07 | Every result is labeled as the prototype's and descriptive, shows adjusted and unadjusted values side by side, gives no single score, and names no case best |
-| SP-AC08 | This file records, for each procedure: whether its assumptions held on the owner's experiments, its calibration, how sensitive it was to its tuning, and what the statistical evaluation target's specification would need from it |
+| SP-AC08 | This file records, for each procedure: whether its assumptions held on the owner's experiments, its calibration, how sensitive it was to its tuning, and what the statistical evaluation target's specification would need from it; and, for the bootstrap and HAC, how their results compared on the same series |
 
 ## Tasks
 
