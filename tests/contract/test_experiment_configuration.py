@@ -16,8 +16,10 @@ invalid configuration fails with `config.invalid`, and the message names a ranki
 `set` entry by its place, never by its path; a 1.0.0 file with a ranking variant, or a baseline
 ranked by a definition, says they need 1.1.0; and a budget is at least two requests a case. Also
 to the ranking example's structure, which the configuration's reader accepts. R04-T05 wrote
-them, with the reader of both versions, which the invalid files' test uses. What a path names in
-the definition, and the example's cases, are R04-T06's.
+them, with the reader of both versions, which the invalid files' test uses. Until R04-T12,
+`trialfolio run` reads with the 1.0.0 reader, which refuses 1.1.0, so that reader's messages for
+such a file stay 0.3.0's, as the R04-T05 details in release 0.4.0's changes after sign-off give
+them. What a path names in the definition, and the example's cases, are R04-T06's.
 """
 
 import json
@@ -35,6 +37,7 @@ from pydantic import ValidationError
 from trialfolio.configuration import (
     read_experiment_configuration,
     read_experiment_configuration_v1_1,
+    read_run_configuration,
     read_screen_configuration,
 )
 from trialfolio.contracts.common import WINDOWS_DEVICE_NAMES
@@ -982,6 +985,41 @@ def test_a_1_0_0_file_can_t_vary_the_ranking() -> None:
         "or a snapshot. In 1.0.0, a variant may change rules, max_holdings, rebalance_weeks, or "
         "slippage_percent." in message
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "problem"),
+    [
+        (
+            "variant-ranking.yaml",
+            (
+                "`variants.ranking` isn't a setting a variant may change. A variant may change "
+                "rules, max_holdings, rebalance_weeks, or slippage_percent."
+            ),
+        ),
+        (
+            "baseline-definition-in-1.0.0.yaml",
+            (
+                "`baseline.ranking` must hold exactly one of formula, name, or id. The supported "
+                "forms are {formula, lower_is_better}, {name}, and {id}."
+            ),
+        ),
+    ],
+    ids=["ranking-variant", "baseline-definition"],
+)
+@pytest.mark.parametrize(
+    "reader", [read_experiment_configuration, read_run_configuration], ids=["experiment", "run"]
+)
+def test_run_s_reader_gives_a_1_0_0_file_0_3_0_s_message(
+    name: str, problem: str, reader: Callable[[bytes, str], object]
+) -> None:
+    """`trialfolio run` refuses a 1.1.0 file until R04-T12, so it doesn't send a 1.0.0 file to
+    1.1.0: its message is the one 0.3.0 gave."""
+    path = INVALID / name
+
+    message = rejection(path.read_bytes(), path.name, reader)
+
+    assert message == f"{name} isn't a valid configuration:\n- {problem}"
 
 
 def test_a_1_1_0_variant_of_another_setting_names_the_ranking_among_those_it_can() -> None:

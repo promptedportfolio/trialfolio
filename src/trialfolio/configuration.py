@@ -9,7 +9,9 @@ configuration 1.0.0 or 1.1.0, `read_experiment_configuration_v1_1` an experiment
 1.0.0 or 1.1.0, each by its `schema_version`, and `read_ranking_snapshot_configuration` a
 `kind: ranking-snapshot` file. Version 1.1.0 adds a ranking given as a ranking system's
 definition or a ranking snapshot, and ranking variants. Until the CLI's path for them is built
-(R04-T10 and R04-T12), `trialfolio run` reads with 0.3.0's readers, which read 1.0.0 only.
+(R04-T10 and R04-T12), `trialfolio run` reads with 0.3.0's readers, which read 1.0.0 only, and
+give 0.3.0's messages: only 0.4.0's readers tell a 1.0.0 file that a key it gives needs 1.1.0,
+since `run` refuses 1.1.0 until then.
 
 Reading is a named adapter step before model validation (ADR 0002). It builds plain values from
 PyYAML's parse events, never through PyYAML's constructors, so it decides what each scalar means:
@@ -96,6 +98,7 @@ from trialfolio.contracts.ranking_snapshot_configuration import (
 )
 from trialfolio.contracts.review_configuration import REVIEW_SCHEMA_VERSIONS, ReviewConfiguration
 from trialfolio.contracts.screen_configuration import (
+    LATER_VERSIONS,
     SCREEN_SCHEMA_VERSIONS,
     SCREEN_SCHEMA_VERSIONS_V1_1,
     ScreenConfiguration,
@@ -152,7 +155,9 @@ def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfigu
     messages.
 
     Raises `TrialFolioError` with `config.invalid` when the file breaks any rule of the screen
-    configuration. The message lists each problem, names its key, and includes no value.
+    configuration. The message lists each problem, names its key, and includes no value. It's
+    0.3.0's, for a ranking given as a definition or a snapshot too, since `trialfolio run`, which
+    reads with this reader until R04-T12, refuses 1.1.0.
     """
     document, plain = _read_document(content, source_name, "screen", SCREEN_SCHEMA_VERSIONS)
     return _validated(ScreenConfiguration, document, source_name, _unquoted(plain, _is_sent_text))
@@ -170,10 +175,10 @@ def read_screen_configuration_v1_1(
     file that gives `definition` or `snapshot` is told they need `schema_version` 1.1.0.
     """
     document, plain = _read_document(content, source_name, "screen", SCREEN_SCHEMA_VERSIONS_V1_1)
-    model = (
-        ScreenConfiguration if document["schema_version"] == "1.0.0" else ScreenConfigurationV1_1
-    )
-    return _validated(model, document, source_name, _unquoted(plain, _is_sent_text))
+    unquoted = _unquoted(plain, _is_sent_text)
+    if document["schema_version"] == "1.0.0":
+        return _validated(ScreenConfiguration, document, source_name, unquoted, later_versions=True)
+    return _validated(ScreenConfigurationV1_1, document, source_name, unquoted)
 
 
 def read_review_configuration(content: bytes, source_name: str) -> ReviewConfiguration:
@@ -194,7 +199,9 @@ def read_experiment_configuration(content: bytes, source_name: str) -> Experimen
     Raises `TrialFolioError` with `config.invalid` when the file breaks any rule of the experiment
     configuration. The message lists each problem, names its key, or a variant by its place, such
     as `variants.max_holdings[0]`, and includes no value: never a variant's key either, which is
-    the user's text.
+    the user's text. It's 0.3.0's, for a ranking variant, or a baseline ranked by a definition or a
+    snapshot, too, since `trialfolio run`, which reads with this reader until R04-T12, refuses
+    1.1.0.
     """
     document, plain = _read_document(content, source_name, "experiment", EXPERIMENT_SCHEMA_VERSIONS)
     unquoted = _unquoted(plain, _is_sent_experiment_text)
@@ -219,7 +226,9 @@ def read_experiment_configuration_v1_1(
     )
     unquoted = _unquoted(plain, _is_sent_experiment_text)
     if document["schema_version"] == "1.0.0":
-        return _validated(ExperimentConfiguration, document, source_name, unquoted)
+        return _validated(
+            ExperimentConfiguration, document, source_name, unquoted, later_versions=True
+        )
     return _validated(
         ExperimentConfigurationV1_1,
         document,
@@ -253,16 +262,20 @@ def _validated[M: BaseModel](
     unquoted: list[str],
     *,
     variant_settings: tuple[str, ...] = VARIANT_SETTINGS,
+    later_versions: bool = False,
 ) -> M:
     """`document` validated as `model`. Raises `TrialFolioError` with `config.invalid`, listing
     each problem the model finds, then each text written without quotes. `variant_settings` are
-    the settings the file's version lets a variant change."""
+    the settings the file's version lets a variant change. With `later_versions`, as 0.4.0's
+    readers read a 1.0.0 file, a key that only 1.1.0 allows is told it needs that version;
+    without it, the messages are 0.3.0's."""
+    context = {LATER_VERSIONS: True} if later_versions else None
     try:
-        configuration = model.model_validate(document)
+        configuration = model.model_validate(document, context=context)
     except ValidationError as error:
         details = error.errors(include_input=False)
         problems = [
-            _describe(detail, document, variant_settings)
+            _describe(detail, document, variant_settings, later_versions=later_versions)
             for detail in details
             if not _follows(detail, details)
         ]
@@ -532,6 +545,8 @@ def _describe(
     detail: ErrorDetails,
     document: object = None,
     variant_settings: tuple[str, ...] = VARIANT_SETTINGS,
+    *,
+    later_versions: bool = False,
 ) -> str:
     location = _placed(detail["loc"], document)
     key = _format_path(location)
@@ -542,11 +557,7 @@ def _describe(
     if kind == "missing":
         return f"`{key}` is required."
     settings = f"{', '.join(variant_settings[:-1])}, or {variant_settings[-1]}"
-    if (
-        kind == "extra_forbidden"
-        and location == ("variants", "ranking")
-        and "ranking" not in variant_settings
-    ):
+    if later_versions and kind == "extra_forbidden" and location == ("variants", "ranking"):
         return (
             f"`{key}` needs schema_version 1.1.0, with a baseline ranked by a definition or a "
             f"snapshot. In 1.0.0, a variant may change {settings}."

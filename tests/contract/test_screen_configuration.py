@@ -9,6 +9,9 @@ Screen configuration 1.1.0's tests, at the end, trace to R04-AC02's ranking form
 0.4.0's test pairing gives them for `test_screen_configuration.py`: each invalid ranking form
 fails with `config.invalid`, and a 1.0.0 file with `definition` or `snapshot` says they need
 1.1.0. R04-T05 wrote them, with the reader of both versions, which the invalid files' test uses.
+Until R04-T12, `trialfolio run` reads with the 1.0.0 reader, which refuses 1.1.0, so that reader's
+message for such a file stays 0.3.0's, as the R04-T05 details in release 0.4.0's changes after
+sign-off give it.
 """
 
 import json
@@ -22,7 +25,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from trialfolio.configuration import read_screen_configuration, read_screen_configuration_v1_1
+from trialfolio.configuration import (
+    read_run_configuration,
+    read_screen_configuration,
+    read_screen_configuration_v1_1,
+)
 from trialfolio.contracts.screen_configuration import (
     RANKING_FORMS_MESSAGE_V1_1,
     DefinitionRanking,
@@ -679,6 +686,26 @@ def test_a_1_0_0_file_with_a_later_form_says_it_needs_1_1_0(form: str) -> None:
     message = rejection(path.read_bytes(), path.name, read_screen_configuration_v1_1)
 
     assert f"`ranking` gives {form}, a form that needs schema_version 1.1.0." in message
+
+
+@pytest.mark.parametrize("form", ["definition", "snapshot"])
+@pytest.mark.parametrize(
+    "reader", [read_screen_configuration, read_run_configuration], ids=["screen", "run"]
+)
+def test_run_s_reader_gives_a_later_form_in_1_0_0_0_3_0_s_message(
+    form: str, reader: Callable[[bytes, str], object]
+) -> None:
+    """`trialfolio run` refuses a 1.1.0 file until R04-T12, so it doesn't send a 1.0.0 file to
+    1.1.0: its message is the one 0.3.0 gave."""
+    path = INVALID / f"{form}-in-1.0.0.yaml"
+
+    message = rejection(path.read_bytes(), path.name, reader)
+
+    assert message == (
+        f"{path.name} isn't a valid configuration:\n"
+        "- `ranking` must hold exactly one of formula, name, or id. The supported forms are "
+        "{formula, lower_is_better}, {name}, and {id}."
+    )
 
 
 def test_nodes_or_xml_in_1_1_0_point_to_a_definition_file() -> None:

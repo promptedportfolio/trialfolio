@@ -19,6 +19,7 @@ from pydantic import (
     AfterValidator,
     BeforeValidator,
     Field,
+    ValidationInfo,
     WithJsonSchema,
     field_validator,
     model_validator,
@@ -62,6 +63,12 @@ RANKING_FORMS_MESSAGE_V1_1: Final = (
     "The supported forms are {formula, lower_is_better}, {name}, {id}, "
     "{definition, ranking_method}, and {snapshot}."
 )
+
+LATER_VERSIONS: Final = "later_versions"
+"""The validation context's key that makes a 1.0.0 model say which of a file's keys need
+schema_version 1.1.0, as 0.4.0's readers read a 1.0.0 file. Without it, a 1.0.0 model gives 0.3.0's
+messages, as 0.3.0's readers do: `trialfolio run` reads with them, and refuses 1.1.0, until its
+path for a ranking definition is built (release 0.4.0's R04-T12)."""
 
 
 def _factset_only(value: object) -> object:
@@ -224,11 +231,13 @@ _RANKING_MODELS_V1_1: Final = {
 }
 
 
-def read_ranking(value: object) -> Ranking:
+def read_ranking(value: object, *, later_versions: bool = False) -> Ranking:
     """Validates a ranking mapping as the one form its keys name.
 
     Raises `ValueError` when the mapping names no single supported form, and a
-    `ValidationError`, located within the mapping, when that form's fields are invalid.
+    `ValidationError`, located within the mapping, when that form's fields are invalid. With
+    `later_versions`, a mapping that gives a form of screen configuration 1.1.0, `definition` or
+    `snapshot`, is told that it needs that version; without it, it's told what 0.3.0 told it.
     """
     if isinstance(value, FormulaRanking | NameRanking | IdRanking):
         return value
@@ -244,7 +253,7 @@ def read_ranking(value: object) -> Ranking:
             f"ApiRankingSystem. {RANKING_FORMS_MESSAGE}"
         )
     later = [form for form in RANKING_FORMS_V1_1 if form in keys and form not in RANKING_FORMS]
-    if later:
+    if later and later_versions:
         raise ValueError(
             f"gives {later[0]}, a form that needs schema_version 1.1.0. {RANKING_FORMS_MESSAGE}"
         )
@@ -320,8 +329,9 @@ class _ScreenRanking(ContractModel):
 
     @field_validator("ranking", mode="before")
     @classmethod
-    def _one_ranking_form(cls, value: object) -> Ranking:
-        return read_ranking(value)
+    def _one_ranking_form(cls, value: object, info: ValidationInfo) -> Ranking:
+        context = cast("dict[str, object] | None", info.context) or {}
+        return read_ranking(value, later_versions=context.get(LATER_VERSIONS) is True)
 
 
 class _ScreenRankingV1_1(ContractModel):
