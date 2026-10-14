@@ -16,7 +16,7 @@ Trial Folio is a research tool. It does not give investment advice, place trades
 
 ## Primary use
 
-The driving use case is reproducing published factor research in Portfolio123. A study takes a paper's factors, rebuilds them as Portfolio123 screens and ranking systems, and records what could and could not be reproduced. That work sets these needs, which the roadmap addresses in order:
+The driving use case is reproducing published factor research in Portfolio123. A study takes a paper's factors, rebuilds them as Portfolio123 screens and ranking systems, and records what could and could not be reproduced. That work sets these needs, which the roadmap addresses:
 
 - Preregistration: the protocol is recorded before any test, and later changes are dated amendments.
 - Every study and case is kept and reported, whether or not it reproduces.
