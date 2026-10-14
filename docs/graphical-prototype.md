@@ -1,7 +1,7 @@
 # Graphical prototype
 
-**Status:** Draft. **Don't build from it yet.** GP-T01 completes it, and then the owner sets it to Ready.
-**Decided by:** [D-29](spec.md#decisions), on 2026-10-07. The results workspace it serves, which D-29 calls 0.4.0, has been 0.5.0 since 2026-10-12 ([D-34](spec.md#decisions)).
+**Status:** Draft. **Don't build from it yet.** GP-T01 completes it, and then the owner sets it to Ready. Since 2026-10-14, its tasks wait until the results workspace is planned ([D-42](spec.md#decisions)).
+**Decided by:** [D-29](spec.md#decisions), on 2026-10-07. The results workspace it serves, which D-29 calls 0.4.0, was 0.5.0 from 2026-10-12 ([D-34](spec.md#decisions)). Since 2026-10-14 it follows the roadmap's reproduction workflow, without a version, and 0.5.0 is descriptive return analytics in the CLI's reports, with the equity and drawdown charts drawn into the report ([D-42](spec.md#decisions)).
 **Depends on:** the saved runs of [0.1.0](releases/0.1.0-api-execution.md). It runs alongside 0.3.0's specification work and doesn't wait for it.
 
 This is the read-only prototype that the [roadmap's graphical interface prerequisites](roadmap.md#graphical-interface-prerequisites) call for. It isn't a release: it has no version or tag, and it's never distributed. Its job is evidence:
@@ -10,7 +10,7 @@ This is the read-only prototype that the [roadmap's graphical interface prerequi
 - **For 0.5.0's charts.** Whether a saved run holds the series that equity and drawdown charts need, as the roadmap's 0.5.0 target requires.
 - **For the public core.** Which core functions an interface other than the CLI calls. Those are the functions a separately distributed interface would need made public ([public contract boundary](contracts.md#public-contract-boundary)).
 
-0.5.0's specification decides whether any of the prototype's code is kept.
+The results workspace's specification decides whether any of the prototype's code is kept.
 
 ## Completing this specification
 
@@ -40,7 +40,7 @@ On a Mac, the owner launches a packaged app without a terminal and opens a saved
 - Any request to Portfolio123, any credentials, and any plan or approval.
 - Experiments, which don't exist until 0.3.0, and reviews.
 - Exporting, editing, or comparing runs.
-- Platforms other than macOS. 0.5.0's specification chooses the supported platforms.
+- Platforms other than macOS. The results workspace's specification chooses the supported platforms.
 - Distribution of any kind, including code signing and notarization. The built apps stay on the owner's Mac and are never committed or uploaded.
 - Any change to the `trialfolio` package's dependencies, CLI, or outputs.
 
