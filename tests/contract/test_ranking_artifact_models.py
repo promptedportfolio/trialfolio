@@ -1694,6 +1694,29 @@ ATTEMPT_1_2_REJECTS: dict[str, tuple[Callable[[], Document], Change]] = {
         attempt_record_1_2,
         lambda d: (rank_rejected(d), d.update(outcome="unknown", error=UNKNOWN)),
     ),
+    "unknown without a rank_update exchange": (
+        attempt_record_1_2,
+        lambda d: (unknown(d, AUTH), update_of(d).update(response=None)),
+    ),
+    "unknown after a rank_update's 200, without the backtest's request": (
+        attempt_record_1_2,
+        lambda d: unknown(d, AUTH, RANK),
+    ),
+    "unknown after a rank_update's 200 the wrapper couldn't decode": (
+        attempt_record_1_2,
+        lambda d: (
+            unknown(d, AUTH, RANK),
+            d.update(ranking_update=ranking_update("undecoded"), request=reference("request.json")),
+        ),
+    ),
+    "unknown after a rank_update's 200 whose response wasn't saved": (
+        attempt_record_1_2,
+        lambda d: (
+            unknown(d, AUTH, RANK),
+            update_of(d).update(response=None),
+            d.update(request=reference("request.json")),
+        ),
+    ),
     "failed after an interrupted rank_update": (
         attempt_record_1_2,
         lambda d: (
@@ -1815,6 +1838,10 @@ ATTEMPT_1_3_ACCEPTS: dict[str, Change] = {
         ),
         update_of(d).update(response=None),
     ),
+    "resumed from started.json, without a saved response": lambda d: (
+        unknown(d, RANK),
+        d.update(request=reference("request.json")),
+    ),
 }
 
 
@@ -1836,6 +1863,20 @@ ATTEMPT_1_3_REJECTS: dict[str, Change] = {
         update_of(d).update(request=None, response=None),
     ),
     "a repeat of itself": lambda d: d.update(repeat_of=ATTEMPT_ID),
+    "unknown without a rank_update exchange": lambda d: (
+        unknown(d),
+        update_of(d).update(response=None),
+    ),
+    "unknown after a rank_update's 200, without the backtest's request": lambda d: unknown(d, RANK),
+    "unknown after a rank_update's 200 the wrapper couldn't decode": lambda d: (
+        unknown(d, RANK),
+        d.update(ranking_update=ranking_update("undecoded"), request=reference("request.json")),
+    ),
+    "unknown after a rank_update's 200 whose response wasn't saved": lambda d: (
+        unknown(d, RANK),
+        update_of(d).update(response=None),
+        d.update(request=reference("request.json")),
+    ),
 }
 
 

@@ -574,7 +574,14 @@ def check_ranking_ending(record: _RankingEnding) -> list[Exchange]:
             "a note on the rank_update marks an attempt a resume recorded as failed, from its "
             "update record and the rank_update's saved response"
         )
-    outcomes = _ranking_outcomes(rank, backtest, saved=record.response is not None)
+    # `started.json` is written after the rank_update's decoded response and the backtest's
+    # request are saved, so only an attempt that shows both can have been resumed from it.
+    started = (
+        update.response is not None
+        and update.response.form == "decoded"
+        and record.request is not None
+    )
+    outcomes = _ranking_outcomes(rank, backtest, saved=record.response is not None, started=started)
     if record.outcome not in outcomes:
         raise ValueError(f"the exchanges make the outcome {' or '.join(sorted(outcomes))}")
     sends = [exchange for exchange in (rank, backtest) if exchange is not None]
@@ -613,12 +620,16 @@ def _check_rank_update(
         )
 
 
-def _ranking_outcomes(rank: Exchange | None, backtest: Exchange | None, *, saved: bool) -> set[str]:
+def _ranking_outcomes(
+    rank: Exchange | None, backtest: Exchange | None, *, saved: bool, started: bool
+) -> set[str]:
     """The outcomes an attempt that sends a definition allows: the backtest's exchange gives it,
-    as the request's does in 1.0.0. Without one, the backtest wasn't sent, or a resume recorded the
-    attempt from `started.json` without a saved response, which is `unknown`; and without a 200 to
-    its `rank_update`, the attempt is `unknown` when the write may or may not have taken effect,
-    and `failed` otherwise, with no `rank_update` exchange included."""
+    as the request's does in 1.0.0. Without one, the backtest wasn't sent: after the
+    `rank_update`'s 200, the attempt is `failed`, or `unknown` when a resume recorded it from
+    `started.json` without a saved response, which only an attempt that `started` can be, since
+    `started.json` follows the `rank_update`'s decoded response and the backtest's request.
+    Without a 200 to its `rank_update`, the attempt is `unknown` when the write may or may not
+    have taken effect, and `failed` otherwise, with no `rank_update` exchange included."""
     if backtest is not None:
         return _outcomes_of(backtest, saved=saved)
     if rank is None or rank.result == "not_connected":
@@ -626,7 +637,7 @@ def _ranking_outcomes(rank: Exchange | None, backtest: Exchange | None, *, saved
     if rank.result == "interrupted" or (rank.status is not None and rank.status >= 500):
         return {"unknown"}
     if rank.status == 200:
-        return {"failed", "unknown"}
+        return {"failed", "unknown"} if started else {"failed"}
     return {"failed"}
 
 
