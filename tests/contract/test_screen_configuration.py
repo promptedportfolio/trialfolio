@@ -708,6 +708,28 @@ def test_run_s_reader_gives_a_later_form_in_1_0_0_0_3_0_s_message(
     )
 
 
+@pytest.mark.parametrize(
+    "reader", [read_screen_configuration, read_run_configuration], ids=["screen", "run"]
+)
+def test_run_s_reader_names_a_key_under_variants_as_0_3_0_did(
+    reader: Callable[[bytes, str], object],
+) -> None:
+    """`trialfolio run`'s reader has no node paths until R04-T12, so it names a key under a
+    ranking variant's `set` by its key, as 0.3.0 did, where 0.4.0's readers name it by its
+    place."""
+    path = FIXTURES / "formula.yaml"
+    content = (
+        path.read_bytes() + b"variants:\n  ranking:\n    - set:\n        'A': 1\n        'A': 2\n"
+    )
+
+    message = rejection(content, path.name, reader)
+
+    assert message == (
+        f"{path.name} isn't a valid configuration:\n"
+        "- `variants.ranking[0].set.A` appears more than once."
+    )
+
+
 def test_nodes_or_xml_in_1_1_0_point_to_a_definition_file() -> None:
     message = rejection(
         version_1_1("ranking:\n  nodes: '<RankingSystem/>'\n"),

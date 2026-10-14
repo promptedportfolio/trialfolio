@@ -1049,6 +1049,59 @@ def test_run_s_reader_gives_a_1_0_0_file_0_3_0_s_message(
     assert message == f"{name} isn't a valid configuration:\n- {problem}"
 
 
+RANKED_BY_SALES = (
+    "  ranking:\n"
+    "    - key: ranked-by-sales\n"
+    "      value:\n"
+    "        formula: 'SalesGr%TTM'\n"
+    "        lower_is_better: false\n"
+)
+
+NOT_A_VARIANT_SETTING = (
+    "`variants.ranking` isn't a setting a variant may change. A variant may change rules, "
+    "max_holdings, rebalance_weeks, or slippage_percent."
+)
+
+
+@pytest.mark.parametrize(
+    ("variant", "problem"),
+    [
+        ("      set:\n        Value: 100\n", NOT_A_VARIANT_SETTING),
+        ("      remove: Value\n", NOT_A_VARIANT_SETTING),
+        (
+            "      set:\n        'Value': 1\n        'Value': 2\n",
+            "`variants.ranking[0].set.Value` appears more than once.",
+        ),
+        (
+            "      set:\n        'api_key': 1\n",
+            (
+                "`variants.ranking[0].set.api_key` looks like a credential. A configuration never "
+                "holds credentials: the CLI reads them from TRIALFOLIO_P123_API_ID and "
+                "TRIALFOLIO_P123_API_KEY."
+            ),
+        ),
+    ],
+    ids=["unquoted-path", "unquoted-remove", "path-twice", "credential-word"],
+)
+@pytest.mark.parametrize(
+    "reader", [read_experiment_configuration, read_run_configuration], ids=["experiment", "run"]
+)
+def test_run_s_reader_reads_a_1_0_0_ranking_variant_s_keys_as_0_3_0_did(
+    variant: str, problem: str, reader: Callable[[bytes, str], object]
+) -> None:
+    """`trialfolio run` refuses a 1.1.0 file until R04-T12, so its reader has no node paths: it
+    reads a ranking variant's keys as any other, as 0.3.0 did, and asks for no quotes a 1.0.0
+    file can't use. Its message is the one 0.3.0 gave."""
+    path = INVALID / "variant-ranking.yaml"
+    content = path.read_text(encoding="utf-8")
+    assert content.count(RANKED_BY_SALES) == 1
+    content = content.replace(RANKED_BY_SALES, f"  ranking:\n    - key: weights\n{variant}")
+
+    message = rejection(content, path.name, reader)
+
+    assert message == f"{path.name} isn't a valid configuration:\n- {problem}"
+
+
 def test_a_1_1_0_variant_of_another_setting_names_the_ranking_among_those_it_can() -> None:
     content = ranking_line(
         "  rebalance_weeks: []\n",
