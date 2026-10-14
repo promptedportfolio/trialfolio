@@ -132,12 +132,12 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
    - the non-affiliation notice, as the README gives it.
 
    It leaves out the theme's "Made with Zensical" link. The alternative is to keep that link.
-2. **The theme files' notices.** The theme's scripts and stylesheets carry no license headers. So the notices are on a page of their own, `third-party-notices.md`, in the navigation and linked from every footer. It holds each license's full text, or Font Awesome's attribution. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#the-user-manuals-site) records the site as a distribution form, and asks a pull request that changes Zensical's version to check the files the site serves again.
+2. **The theme files' notices.** The theme's scripts and stylesheets carry no license headers. So the notices are on a page of their own, `third-party-notices.md`, linked from every footer. Since 2026-10-14 it isn't in the navigation, whose tabs are the home page and the manual's four sections, as the owner decided that day. It holds each license's full text, or Font Awesome's attribution. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#the-user-manuals-site) records the site as a distribution form, and asks a pull request that changes Zensical's version to check the files the site serves again.
 3. **The configuration** in `zensical.toml`:
    - `strict = true`, so a broken link or anchor fails the build;
    - `font = false`, so pages use the reader's system fonts;
    - no `repo_url`, so the header has no link to the repository. With one, the theme's script would ask GitHub's API for the repository's facts from each reader's browser.
-   - the features `navigation.sections` and `content.code.copy`.
+   - the features `navigation.sections` and `content.code.copy`. On 2026-10-14 the site gained more of the theme's features, colors, a logo, and a favicon of its own, as [the site's theme](#the-sites-theme) gives.
 4. **The check of the built site** is `scripts/check_manual.py`, with its tests in `tests/manual/`.
    - pyright now checks `scripts/` too.
    - `scripts/check` removes `site/` before it builds, so a removed page can't linger and pass.
@@ -192,6 +192,21 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
 **Deferred by the owner** (2026-10-12): rewording the schema descriptions that name the specification's internals, until a later pull request. About six descriptions on the generated pages do, such as "P-13's default rebalance variant", "(R03-AC08)", and "a flag in `FLAGGING`". They come from the models' docstrings in `src/`, and rewording one behind an earlier schema version, such as the JSON summary's 1.0.0, would change a frozen schema's bytes. Until then, the generated pages give them as the schemas do.
 
 **The first deployment (UM-T02).** The docs workflow's run [38288103983](https://github.com/promptedportfolio/trialfolio/actions/runs/38288103983) deployed the site on 2026-10-12, from 4a3bd93, the squash merge of #78. It started at 18:01:15Z, and ended successfully at 18:02:50Z. **UM-AC02 checked (2026-10-12):** each of the 33 files of a local build of 4a3bd93 was fetched from the published address, and each was byte-identical to it.
+
+## The site's theme
+
+On 2026-10-14 the site gained colors, more of the theme's navigation, a logo, and a favicon of its own. It still loads nothing from another host (UM-AC07), and it serves the same theme files as before ([THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#the-user-manuals-site)). The owner decided the variant, the colors, the logo and the favicon, and the notices page's place on 2026-10-14, and that the change needs no task. In `zensical.toml`:
+
+- **The variant** is `modern`, the theme's default.
+- **The colors** are the theme's `teal`, in a light scheme and a dark one. They follow the reader's system setting, until the reader chooses one with the switch in the header. The system setting's entry names the colors too, so a page starts in teal before the theme's script runs, and stays teal without it.
+- **The navigation:**
+  - the home page and the four sections are tabs across the top (`navigation.tabs`);
+  - each page shows the path to it (`navigation.path`), links to the pages before and after it (`navigation.footer`), and has a button back to the top (`navigation.top`);
+  - a link loads the next page without reloading the whole site (`navigation.instant` and `navigation.instant.prefetch`), from this site only;
+  - the address and the list of the page's sections follow the section in view (`navigation.tracking` and `toc.follow`);
+  - search highlights the words it found on the page it opens (`search.highlight`).
+- **The logo** is Lucide's `flask-conical` icon. The favicon, `manual/assets/favicon.svg`, is the same icon, in the theme's teal primary color: `#009485`, and its light shade, `#26a699`, when the browser is dark. The file names those values itself, so a change to the primary color changes them there by hand. The theme's own favicon is still served, though no page uses it, so its notice stays.
+- **The third-party notices page** isn't in the navigation. Every page's footer links to it, as [tooling and hosting](#tooling-and-hosting) requires, and that link is now the only one to it. So `scripts/check_manual.py` also fails when a page's footer lacks the link. The review of this change added that check on 2026-10-14, and the owner confirmed it the same day.
 
 ## Open questions
 
