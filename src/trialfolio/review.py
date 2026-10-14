@@ -18,10 +18,11 @@ output).
    command reports as failed never reads as complete.
 
 A failure or an interrupt after the claim leaves no manifest, and its message says the review is
-incomplete. Labels are configuration values, which logs never hold, so the store logs each copy,
-and names it in its errors' logged messages, by its result's position, such as `plan.json of
-result 2`, and the warning names results by their positions too. Nothing here prompts, reads the
-environment, or sends anything.
+incomplete. `trialfolio.manifests` holds what a review shares here with a run and an experiment:
+writing the manifest and discarding it, and the endings without one. Labels are configuration
+values, which logs never hold, so the store logs each copy, and names it in its errors' logged
+messages, by its result's position, such as `plan.json of result 2`, and the warning names
+results by their positions too. Nothing here prompts, reads the environment, or sends anything.
 """
 
 import logging
@@ -54,7 +55,13 @@ from trialfolio.differences import (
     compare,
 )
 from trialfolio.display import series
-from trialfolio.errors import TrialFolioError, interrupted
+from trialfolio.errors import TrialFolioError
+from trialfolio.manifests import (
+    EndingWithoutManifest,
+    ManifestDetails,
+    ManifestFile,
+    configuration_source,
+)
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
 from trialfolio.report import HtmlReportRenderer, ReviewEvidence, write_review_report
 from trialfolio.review_inputs import ReviewInput
@@ -69,6 +76,19 @@ SCHEMA_VERSION: Final = "1.0.0"
 
 INPUTS_DIRECTORY: Final = "inputs"
 """The directory that holds each result's copies, under its label."""
+
+_MANIFEST: Final = ManifestDetails(
+    written="The review's manifest was written, so the review is complete.",
+    left=(
+        "The review's manifest.json was published before the failure, and couldn't be removed,"
+        " so the review reads as complete although the command failed. Remove its output"
+        " directory, and run the review again."
+    ),
+    missing=(
+        "The review has no manifest, so it's incomplete. Remove its output directory, or choose"
+        " another, and run the review again."
+    ),
+)
 
 
 class Review:
@@ -112,9 +132,7 @@ class Review:
         self._differences: Differences | None = None
         self._differences_file: StoredFile | None = None
         self._report: StoredFile | None = None
-        self._manifest: StoredFile | None = None
-        self._manifest_left = False
-        """Whether a manifest whose write failed couldn't be discarded."""
+        self._manifest = ManifestFile(store, MANIFEST_PATH, _MANIFEST)
 
     @property
     def review_id(self) -> uuid.UUID:
@@ -146,7 +164,7 @@ class Review:
     @property
     def manifest(self) -> StoredFile | None:
         """The manifest, once it's written: the review is then complete."""
-        return self._manifest
+        return self._manifest.written
 
     def write(self, *, on_claimed: Callable[[], object] | None = None) -> TrialFolioError | None:
         """Takes the steps the module lists. `on_claimed` is called once the directory is
@@ -164,7 +182,7 @@ class Review:
         configuration = self._store.claim(CONFIGURATION_PATH, self._content)
         self._claimed = True
         self._artifacts.append(self._listed_configuration(configuration))
-        try:
+        with EndingWithoutManifest() as ended:
             if on_claimed is not None:
                 on_claimed()
             self._copy()
@@ -187,30 +205,15 @@ class Review:
                 self._store, evidence, HtmlReportRenderer(self._version)
             )
             self._artifacts.append(_listed(self._report, "report", None))
-            self._write_manifest(self._build_manifest(differences, self._clock()))
-        except KeyboardInterrupt:
-            return interrupted(self.ending_detail())
-        except TrialFolioError as failure:
-            if failure.code != "storage.write_failed":
-                raise
-            return failure.with_detail(self.ending_detail())
+            self._manifest.write(self._build_manifest(differences, self._clock()))
+        if ended.error is not None:
+            return ended.error.with_detail(self.ending_detail())
         return None
 
     def ending_detail(self) -> str:
         """What the review's files say, for the message of an ending after the claim: whether
         the review has its manifest, and so whether it reads as complete."""
-        if self._manifest is not None:
-            return "The review's manifest was written, so the review is complete."
-        if self._manifest_left:
-            return (
-                "The review's manifest.json was published before the failure, and couldn't be"
-                " removed, so the review reads as complete although the command failed. Remove"
-                " its output directory, and run the review again."
-            )
-        return (
-            "The review has no manifest, so it's incomplete. Remove its output directory, or"
-            " choose another, and run the review again."
-        )
+        return self._manifest.detail
 
     def _log_fields(self, event: str) -> dict[str, str]:
         return {"event": event, "review_id": str(self._review_id)}
@@ -242,35 +245,12 @@ class Review:
         self._differences, self._differences_file = differences, stored
         self._artifacts.append(_listed(stored, "differences", TABLES_SCHEMA_VERSION))
 
-    def _write_manifest(self, manifest: ReviewManifest) -> None:
-        """Writes the manifest. A write that fails, an interrupt or an unexpected exception
-        included, discards the file if the store published it before the failure."""
-        data = (manifest.model_dump_json(indent=2) + "\n").encode("utf-8")
-        try:
-            self._manifest = self._store.write(MANIFEST_PATH, data)
-        except BaseException:
-            self._manifest = None
-            try:
-                self._store.discard(MANIFEST_PATH, data)
-            except TrialFolioError:
-                self._manifest_left = True
-            raise
-
     def _listed_configuration(self, stored: StoredFile) -> ReviewArtifact:
         version = self._configuration.schema_version
-        return _listed(
-            stored,
-            "configuration",
-            version,
-            source=SourceRecord(
-                acquired_at=self._command.started_at,
-                format=REVIEW_CONFIGURATION_FORMAT,
-                format_version=version,
-                parser_version=None,
-                provenance="user_supplied",
-                operation=None,
-            ),
+        source = configuration_source(
+            REVIEW_CONFIGURATION_FORMAT, version, self._command.started_at
         )
+        return _listed(stored, "configuration", version, source=source)
 
     def _build_manifest(self, differences: Differences, created_at: datetime) -> ReviewManifest:
         return ReviewManifest(

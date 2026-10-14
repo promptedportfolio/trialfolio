@@ -21,7 +21,9 @@ Steps 4 to 6 follow any attempt whose record was written, so a failed attempt is
 too, unless an interrupt or a storage failure decided the error code, or the attempt ended before
 `configuration.yaml` was saved, which every manifest lists, as after an unexpected exception
 writing it: the output then stays visibly incomplete, without a manifest (endings that decide the
-error code).
+error code). `trialfolio.manifests` holds what a run shares here with an experiment and a review:
+writing the manifest and discarding it, the endings without one, and the parts of the manifest
+that a run and an experiment record alike.
 
 Nothing here prompts, reads the environment, or reads secrets: the command passes the approved
 hash, and a factory for the client, which holds any credentials.
@@ -29,7 +31,7 @@ hash, and a factory for the client, which holds any credentials.
 
 import logging
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Final, Literal
 
 from trialfolio.attempts import (
@@ -48,27 +50,31 @@ from trialfolio.contracts.common import ErrorDetail
 from trialfolio.contracts.manifest import (
     ArtifactRole,
     AttemptCounts,
-    Capabilities,
     CommandRecord,
-    ExternalReference,
     ManifestArtifact,
     ManifestCounts,
-    ParserVersion,
-    Reproducibility,
     RunManifest,
     SourceRecord,
 )
 from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION
-from trialfolio.errors import TrialFolioError, interrupted
-from trialfolio.normalization import (
-    LAYOUT,
-    LAYOUT_VERSION,
-    PARSER_VERSION,
-    NormalizedTables,
-    holds_series,
-    write_tables,
+from trialfolio.errors import TrialFolioError
+from trialfolio.manifests import (
+    PROVIDER_ROLES,
+    EndingWithoutManifest,
+    ManifestDetails,
+    ManifestFile,
+    capabilities,
+    configuration_source,
+    ends_without_manifest,
+    model_json,
+    parsers,
+    provider_source,
+    reproducibility,
+    running_detail,
+    utc,
 )
+from trialfolio.normalization import NormalizedTables, holds_series, write_tables
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
 from trialfolio.planning import check_approval
 from trialfolio.provider import DecodedResponse, ScreenBacktestClient
@@ -97,6 +103,15 @@ _SCHEMA_VERSIONS: Final[dict[ArtifactRole, str]] = {
 }
 """The schema version the manifest records for each role whose files have one, apart from the
 configuration, which gives its own."""
+
+_MANIFEST: Final = ManifestDetails(
+    written="The run's manifest was written, so its output is complete.",
+    left=(
+        "The run's manifest.json was published before the failure, and couldn't be removed, so"
+        " the run reads as complete although the command failed."
+    ),
+    missing="The run has no manifest, so its output is incomplete.",
+)
 
 
 class Execution:
@@ -139,9 +154,7 @@ class Execution:
         self._configuration: StoredFile | None = None
         self._tables: NormalizedTables | None = None
         self._report: StoredFile | None = None
-        self._manifest: StoredFile | None = None
-        self._manifest_left = False
-        """Whether a manifest whose write failed couldn't be discarded."""
+        self._manifest = ManifestFile(store, MANIFEST_PATH, _MANIFEST)
         self._files: list[tuple[ArtifactRole, StoredFile]] = []
         self._configuration_version = ""
 
@@ -171,7 +184,7 @@ class Execution:
     @property
     def manifest(self) -> StoredFile | None:
         """The manifest, once it's written: the run is then complete."""
-        return self._manifest
+        return self._manifest.written
 
     def run(
         self,
@@ -197,7 +210,7 @@ class Execution:
         self._configuration_version = read_screen_configuration(
             configuration, CONFIGURATION_PATH
         ).schema_version
-        plan_file = self._store.claim(PLAN_PATH, _model_json(self._plan))
+        plan_file = self._store.claim(PLAN_PATH, model_json(self._plan))
         self._claimed = True
         self._files.append(("plan", plan_file))
         result = self._attempt_run(configuration, client, on_claimed)
@@ -205,32 +218,16 @@ class Execution:
         self._files.extend((_run_role(file.role), file.file) for file in result.files)
         error = result.error
         if (
-            not result.recorded
+            ends_without_manifest(recorded=result.recorded, error=error)
             # Every manifest lists the configuration, so without it there's none to write.
             or self._configuration is None
-            or (error is not None and error.code in ("command.interrupted", "storage.write_failed"))
         ):
             return error
-        try:
+        with EndingWithoutManifest(after="the attempt ended") as ended:
             error = self._normalize(configuration, result, error)
-            created_at = _utc(self._clock())
-            saved = SavedRun(
-                manifest=self._build_manifest(result.record, error, created_at),
-                plan=self._plan,
-                attempts=(SavedAttempt(start=self._started(), record=result.record),),
-                metrics=None if self._tables is None else self._tables.metrics_rows,
-                settings=None if self._tables is None else self._tables.settings_rows,
-            )
-            report = write_report(self._store, saved, HtmlReportRenderer(self._version))
-            self._report = report
-            self._files.append(("report", report))
-            self._write_manifest(self._build_manifest(result.record, error, created_at))
-        except KeyboardInterrupt:
-            return prevailing(interrupted(self.ending_detail(), after="the attempt ended"), error)
-        except TrialFolioError as failure:
-            if failure.code != "storage.write_failed":
-                raise
-            return prevailing(failure.with_detail(self.ending_detail()), error)
+            self._write_ending(result.record, error)
+        if ended.error is not None:
+            return prevailing(ended.error.with_detail(self.ending_detail()), error)
         _logger.log(
             logging.INFO if error is None else logging.ERROR,
             "Run ended %s: %s.",
@@ -244,7 +241,7 @@ class Execution:
         """What the run's records say, for the message of an ending after the claim that the run
         didn't record itself: whether the screen backtest request was sent and may have been
         charged, as the attempt's records read, and whether the run has its manifest."""
-        return f"{self._request_detail()} {self._manifest_detail()}"
+        return f"{self._request_detail()} {self._manifest.detail}"
 
     @property
     def _version(self) -> str:
@@ -315,6 +312,23 @@ class Execution:
         self._files.extend((("metrics", self._tables.metrics), ("settings", self._tables.settings)))
         return None
 
+    def _write_ending(self, record: AttemptRecord, error: TrialFolioError | None) -> None:
+        """Writes `report.html`, rendered from the manifest as it will be written, without the
+        report, then `manifest.json`, which lists the report too. `record` is the attempt's
+        record, and `error` the run's."""
+        created_at = utc(self._clock())
+        saved = SavedRun(
+            manifest=self._build_manifest(record, error, created_at),
+            plan=self._plan,
+            attempts=(SavedAttempt(start=self._started(), record=record),),
+            metrics=None if self._tables is None else self._tables.metrics_rows,
+            settings=None if self._tables is None else self._tables.settings_rows,
+        )
+        report = write_report(self._store, saved, HtmlReportRenderer(self._version))
+        self._report = report
+        self._files.append(("report", report))
+        self._manifest.write(self._build_manifest(record, error, created_at))
+
     def _started(self) -> StartRecord | None:
         return None if self._attempt is None else self._attempt.start_record
 
@@ -324,48 +338,14 @@ class Execution:
             record = result.record
             return request_detail(record.outcome, possibly_charged=record.possibly_charged)
         if self._attempt is not None and self._attempt.start_record is not None:
-            return (
-                "The screen backtest request may have been sent, and may have been charged: the"
-                " attempt's start record reads as running. Trial Folio never retries it"
-                " automatically."
-            )
+            return running_detail()
         return "The screen backtest request wasn't sent."
-
-    def _manifest_detail(self) -> str:
-        if self._manifest is not None:
-            return "The run's manifest was written, so its output is complete."
-        if self._manifest_left:
-            return (
-                "The run's manifest.json was published before the failure, and couldn't be"
-                " removed, so the run reads as complete although the command failed."
-            )
-        return "The run has no manifest, so its output is incomplete."
-
-    def _write_manifest(self, manifest: RunManifest) -> None:
-        """Writes the manifest. A write that fails, an interrupt or an unexpected exception
-        included, discards the file if the store published it before the failure."""
-        data = _model_json(manifest)
-        try:
-            self._manifest = self._store.write(MANIFEST_PATH, data)
-        except BaseException:
-            self._manifest = None
-            try:
-                self._store.discard(MANIFEST_PATH, data)
-            except TrialFolioError:
-                self._manifest_left = True
-            raise
 
     def _build_manifest(
         self, record: AttemptRecord, error: TrialFolioError | None, created_at: datetime
     ) -> RunManifest:
         """The manifest of the files written so far, for the attempt `record` ended: once the
         report is written, it's listed too."""
-        (case,) = self._plan.cases
-        references = tuple(
-            ExternalReference(setting=row.setting, snapshotted=False)
-            for row in case.settings
-            if "not_snapshotted" in row.flags
-        )
         saved = None if self._result is None else self._result.response
         series = isinstance(saved, DecodedResponse) and holds_series(saved.payload)
         return RunManifest(
@@ -380,24 +360,12 @@ class Execution:
             outcome="completed" if error is None else "failed",
             error=None if error is None else ErrorDetail(code=error.code, message=error.message),
             artifacts=tuple(self._listed(role, stored, record) for role, stored in self._files),
-            parsers=(
-                ParserVersion(
-                    layout=LAYOUT, layout_version=LAYOUT_VERSION, parser_version=PARSER_VERSION
-                ),
-            ),
+            # Every run lists the installed parser, which wrote its tables, if it has any.
+            parsers=parsers(),
             license_id=LICENSE_ID,
             notice_version=NOTICE_VERSION,
-            capabilities=Capabilities(
-                # The per-period series, `results.rows` and `chart`, which 0.1.0 preserves
-                # without normalizing, when the saved response holds them.
-                return_series="source_only" if series else "absent",
-                statistical_validation="not_assessed",
-                trading_readiness="not_assessed",
-            ),
-            reproducibility=Reproducibility(
-                status="incomplete" if references else "complete",
-                external_references=references,
-            ),
+            capabilities=capabilities(series=series),
+            reproducibility=reproducibility(self._plan.cases),
             counts=ManifestCounts(
                 results=0 if self._tables is None else 1,
                 cases=1,
@@ -433,27 +401,12 @@ class Execution:
         """The source record of a source artifact: the configuration, the request, and the
         response (INV-04, source artifacts). None for any other role."""
         if role == "configuration":
-            return SourceRecord(
-                acquired_at=self._command.started_at,
-                format=_SCREEN_CONFIGURATION_FORMAT,
-                format_version=self._configuration_version,
-                parser_version=None,
-                provenance="user_supplied",
-                operation=None,
+            return configuration_source(
+                _SCREEN_CONFIGURATION_FORMAT, self._configuration_version, self._command.started_at
             )
-        if role not in ("provider_request", "provider_response", "provider_response_undecoded"):
-            return None
-        decoded = role == "provider_response"
-        return SourceRecord(
-            # The request was written just before the attempt's start record, and the response
-            # was saved just before its attempt record.
-            acquired_at=record.started_at if role == "provider_request" else record.ended_at,
-            format=LAYOUT if decoded else f"{LAYOUT}-{role.removeprefix('provider_')}",
-            format_version=str(LAYOUT_VERSION),
-            parser_version=PARSER_VERSION if decoded else None,
-            provenance="verified",
-            operation="screen_backtest",
-        )
+        if role in PROVIDER_ROLES:
+            return provider_source(role, started_at=record.started_at, ended_at=record.ended_at)
+        return None
 
     def _log_fields(self, event: str) -> dict[str, str]:
         fields = {
@@ -472,13 +425,3 @@ def _run_role(role: AttemptRole) -> ArtifactRole:
     if role == "authentication_record":
         raise ValueError("a screen run's attempt writes no authentication record")
     return role
-
-
-def _model_json(model: Plan | RunManifest) -> bytes:
-    return (model.model_dump_json(indent=2) + "\n").encode("utf-8")
-
-
-def _utc(moment: datetime) -> datetime:
-    if moment.utcoffset() != timedelta(0):
-        raise ValueError("the clock must give UTC times")
-    return moment
