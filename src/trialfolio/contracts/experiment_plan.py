@@ -208,6 +208,9 @@ def _check_variant(
     changed_text = ""
     own_rows: tuple[PlanSetting | PlanSettingV1_2, ...] = case.settings
     base_rows: tuple[PlanSetting | PlanSettingV1_2, ...] = baseline.settings
+    # Each case's rows are the screen settings, in order, so only weight rows can differ in number.
+    if len(own_rows) != len(base_rows):
+        raise ValueError(f"a variant of {variant.setting} keeps the baseline's weight rows")
     for own, base in zip(own_rows, base_rows, strict=True):
         if own.setting != variant.setting:
             if own != base:

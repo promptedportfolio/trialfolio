@@ -1293,9 +1293,10 @@ PLAN_1_3_REJECTS: dict[str, Change] = {
     "version 1.1.0": lambda d: d.update(schema_version="1.1.0"),
     "no ranking_source": lambda d: d.pop("ranking_source"),
     "a case with one request": lambda d: case_of(d, 2).update(requests=[backtest()]),
-    "a case without weight rows": lambda d: case_of(d, 2).update(
-        settings=settings_rows({"max_holdings": 50}, ())
-    ),
+    "no case with weight rows": lambda d: [
+        case.update(settings=[row for row in case["settings"] if row["node"] is None])
+        for case in d["cases"]
+    ],
     "a holdings variant that changes the weights too": lambda d: weight_of(d, 0, 2).update(
         value="70"
     ),
@@ -1366,6 +1367,27 @@ PLAN_1_3_REJECTS: dict[str, Change] = {
 @pytest.mark.parametrize("change", PLAN_1_3_REJECTS.values(), ids=PLAN_1_3_REJECTS.keys())
 def test_plan_1_3_rejects(change: Change) -> None:
     rejects(PlanV1_3, changed(plan_1_3, change))
+
+
+@pytest.mark.parametrize(
+    "weights", [(*WEIGHTS, ("Quality", "10")), WEIGHTS[:1]], ids=["one more", "one fewer"]
+)
+def test_a_variant_of_another_setting_with_other_weight_rows_says_so(
+    weights: tuple[tuple[str, str], ...],
+) -> None:
+    """Its rows are the baseline's with exactly its change, so it has the baseline's weight
+    rows: the error names them."""
+    document = changed(
+        plan_1_3,
+        lambda d: case_of(d, 2).update(settings=settings_rows({"max_holdings": 50}, weights)),
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        PlanV1_3.model_validate_json(json.dumps(document))
+
+    assert caught.value.errors(include_input=False)[0]["msg"] == (
+        "Value error, a variant of max_holdings keeps the baseline's weight rows"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1916,6 +1938,10 @@ EXPERIMENT_RECORD_REJECTS: dict[str, tuple[Callable[[], Document], Change]] = {
         experiment_record,
         lambda d: planned(d, 0).update(variant=variant("ranking", set=HEAVY_SET)),
     ),
+    "the default a ranking variant": (
+        experiment_record,
+        lambda d: planned(d, 1)["variant"].update(default=True),
+    ),
     "ranking_source after case_keys": (
         source_revision,
         lambda d: last_changes(d).update(parts=["case_keys", "ranking_source"]),
@@ -2410,9 +2436,6 @@ def test_settings_row_1_0_0_refuses_a_weight_row_and_a_definition() -> None:
 DIFFERENCES_ROW_ACCEPTS: dict[str, Change] = {
     "a weight that differs, undeclared": undeclared,
     "the same weight": lambda d: d.update(value="60", classification="same", declared_reason=None),
-    "the same weight, with ranking declared": lambda d: d.update(
-        value="60", classification="same", declared_reason=None
-    ),
     "a node the result's definition lacks": lambda d: (undeclared(d), d.update(value="absent")),
     "a node the baseline lacks, declared": lambda d: d.update(baseline_value="absent"),
     "a weight against a ranking by name": lambda d: d.update(
@@ -2473,7 +2496,7 @@ DIFFERENCES_ROW_REJECTS: dict[str, Change] = {
         name="max_holdings", baseline_value="25", value="50", unit="count"
     ),
     "the same weight, with a declared reason": lambda d: d.update(
-        value="60", classification="same"
+        value="60", classification="same", flagged=True, flags=["intended_change_not_observed"]
     ),
     "a weight flagged intended_change_not_observed": lambda d: d.update(
         value="60",
