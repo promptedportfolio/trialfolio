@@ -1,16 +1,16 @@
 # Graphical prototype
 
-**Status:** Draft. **Don't build from it yet.** GP-T01 completes it, and then the owner sets it to Ready.
-**Decided by:** [D-29](spec.md#decisions), on 2026-10-07. The results workspace it serves, which D-29 calls 0.4.0, has been 0.5.0 since 2026-10-12 ([D-34](spec.md#decisions)).
-**Depends on:** the saved runs of [0.1.0](releases/0.1.0-api-execution.md). It runs alongside 0.3.0's specification work and doesn't wait for it.
+**Status:** Draft. **Don't build from it yet.** GP-T01 completes it, and then the owner sets it to Ready. Since 2026-10-14, its tasks wait until the results workspace is planned ([D-42](spec.md#decisions)): until the owner plans it as a release, with a version and an outline in [releases/](releases/), as 0.4.0 was planned on 2026-10-12.
+**Decided by:** [D-29](spec.md#decisions), on 2026-10-07. The results workspace it serves, which D-29 calls 0.4.0, was 0.5.0 from 2026-10-12 ([D-34](spec.md#decisions)). Since 2026-10-14 it follows the roadmap's reproduction workflow, without a version, and 0.5.0 is descriptive return analytics in the CLI's reports, with the equity and drawdown charts drawn into the report ([D-42](spec.md#decisions)).
+**Depends on:** the saved runs of [0.1.0](releases/0.1.0-api-execution.md), and, since 2026-10-14, the results workspace's planning, as the status line says. D-29 had it run alongside 0.3.0's specification work, without waiting for it.
 
 This is the read-only prototype that the [roadmap's graphical interface prerequisites](roadmap.md#graphical-interface-prerequisites) call for. It isn't a release: it has no version or tag, and it's never distributed. Its job is evidence:
 
 - **For the toolkit ADR** that [LIC-17](licensing-policy.md#lic-17-other-interfaces) requires before any interface ships. Two candidate toolkits are each built to the same criteria, so the ADR compares them on real builds.
-- **For 0.5.0's charts.** Whether a saved run holds the series that equity and drawdown charts need, as the roadmap's 0.5.0 target requires.
+- **For the charts.** Whether a saved run holds the series that equity and drawdown charts need. Since 2026-10-14, 0.5.0, which draws these charts into its report, comes before the prototype's tasks, so 0.5.0's specification settles this for itself ([D-42](spec.md#decisions)); the prototype's record of it serves the results workspace.
 - **For the public core.** Which core functions an interface other than the CLI calls. Those are the functions a separately distributed interface would need made public ([public contract boundary](contracts.md#public-contract-boundary)).
 
-0.5.0's specification decides whether any of the prototype's code is kept.
+The results workspace's specification decides whether any of the prototype's code is kept.
 
 ## Completing this specification
 
@@ -40,7 +40,7 @@ On a Mac, the owner launches a packaged app without a terminal and opens a saved
 - Any request to Portfolio123, any credentials, and any plan or approval.
 - Experiments, which don't exist until 0.3.0, and reviews.
 - Exporting, editing, or comparing runs.
-- Platforms other than macOS. 0.5.0's specification chooses the supported platforms.
+- Platforms other than macOS. The results workspace's specification chooses the supported platforms.
 - Distribution of any kind, including code signing and notarization. The built apps stay on the owner's Mac and are never committed or uploaded.
 - Any change to the `trialfolio` package's dependencies, CLI, or outputs.
 
@@ -88,10 +88,10 @@ The owner assigns these by ID. They aren't next items: [Doing the next item](../
 
 | ID | Task | Depends on |
 |---|---|---|
-| GP-T01 | **Complete this specification,** as [Completing this specification](#completing-this-specification) says. Then ask the owner to set the status to Ready. | None |
+| GP-T01 | **Complete this specification,** as [Completing this specification](#completing-this-specification) says. Then ask the owner to set the status to Ready. | The results workspace planned as a release, as the status line says ([D-42](spec.md#decisions)) |
 | GP-T02 | **Build the first candidate,** package it, check every criterion, and record what GP-AC08 asks for in this file. | Status Ready |
 | GP-T03 | **Build the second candidate,** in the same way. | Status Ready |
-| GP-T04 | **Draft the toolkit ADR** from GP-T02 and GP-T03's records, with the license review LIC-17 asks for, as Proposed. Record whether saved runs hold the series 0.5.0's charts need, and which core functions the prototype called. The owner decides the ADR. | GP-T02, GP-T03 |
+| GP-T04 | **Draft the toolkit ADR** from GP-T02 and GP-T03's records, with the license review LIC-17 asks for, as Proposed. Record whether saved runs hold the series the charts need, and which core functions the prototype called. The owner decides the ADR. | GP-T02, GP-T03 |
 
 ## Open questions
 
