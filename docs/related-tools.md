@@ -1,6 +1,6 @@
 # Related tools
 
-**Status:** Verified observations, checked 2026-10-13, with nine checked again, and two added, on 2026-10-14. Recheck before relying on them.
+**Status:** Verified observations, checked 2026-10-13, with nine checked again, two added, and one corrected, on 2026-10-14. Recheck before relying on them.
 **Written by:** UM-T03 ([user-manual.md](user-manual.md#tasks)), on 2026-10-13
 
 This survey holds the facts behind the user manual's claims about other tools ([rule 10](user-manual.md#rules)): the tools a Portfolio123 member could use for some of what Trial Folio does. A manual page that says what another tool does or doesn't do, or that no other tool does something, cites this file and the date its facts were checked. A fact that another document in `docs/` owns, such as one of [ADR 0001](adrs/0001-python-and-portfolio123-integration.md)'s about `p123api`, keeps citing that document rather than this survey, so the fact has one source. The sections on [DataMiner](#dataminer) and [the API](#the-api-and-its-python-wrapper-p123api) say which of their facts ADR 0001 and ADR 0005 own.
@@ -69,7 +69,7 @@ The survey was done in three parts on 2026-10-13: Portfolio123's own tools; tool
 - **Not searched:** Reddit, YouTube, X, Discord, and forums other than Portfolio123's and WealthLab's. Tools shared privately weren't searched either, and couldn't be: several forum posts offer code by direct message. So "none found" applies only to the searches listed.
 - **Facts change.** Each was true of its source on its check date. Recheck before relying on one.
 
-**Spot checks.** After the three parts, 14 of the facts that bear most on the claims were checked again against their sources, the same day. Three were corrected here: `p123api` 3.1.0's upload date, which API responses document their cost and quota, and the wording of a quote from WealthLab's extension page. The rest held. On 2026-10-14, in the review of this survey, nine facts the claims rest on were checked again against their sources, and all held: WealthLab's extension page; §17 of Portfolio123's terms; QuantConnect's optimization deployment and pricing pages; Portfolio123's API credits page, its API page for AI Factor, and its list of DataMiner operations; the Download Factors estimate post; and `p123api`'s `client.py`. The review also found a fact the survey had missed: the LEAN CLI asks the user to confirm a cloud optimization's estimated cost before starting it. [LEAN](#lean) and [QuantConnect](#quantconnect) now give it, read from QuantConnect's two optimization deployment pages that day. It found a second: Equities Lab keeps a named backtest's completed results until the user removes them. [Equities Lab](#equities-lab) now gives it, read from its Recent Backtests page that day.
+**Spot checks.** After the three parts, 14 of the facts that bear most on the claims were checked again against their sources, the same day. Three were corrected here: `p123api` 3.1.0's upload date, which API responses document their cost and quota, and the wording of a quote from WealthLab's extension page. The rest held. On 2026-10-14, in the review of this survey, nine facts the claims rest on were checked again against their sources, and all held: WealthLab's extension page; §17 of Portfolio123's terms; QuantConnect's optimization deployment and pricing pages; Portfolio123's API credits page, its API page for AI Factor, and its list of DataMiner operations; the Download Factors estimate post; and `p123api`'s `client.py`. The review also found a fact the survey had missed: the LEAN CLI asks the user to confirm a cloud optimization's estimated cost before starting it. [LEAN](#lean) and [QuantConnect](#quantconnect) now give it, read from QuantConnect's two optimization deployment pages that day. It found a second: Equities Lab keeps a named backtest's completed results until the user removes them. [Equities Lab](#equities-lab) now gives it, read from its Recent Backtests page that day. And vectorbt's license, Apache 2.0 with the Commons Clause, is source available, not open source, as the Commons Clause's FAQ says. [vectorbt](#vectorbt-and-vectorbt-pro) now says so, read from the FAQ that day.
 
 ## Summary
 
@@ -108,7 +108,7 @@ One row per tool, with short cells. "Not found" means the public sources checked
 | QuantConnect | LEAN; Morningstar fundamentals | Yes: grid | Parameters, code, version, errors | Cost estimate to confirm; stops when credit runs out | Probabilistic Sharpe ratio | Free plan; paid tiers | Not found |
 | zipline-reloaded | Its own; the user's data | Not found | Performance file | Not found | Not found | Apache-2.0 | Not found |
 | Backtrader | Its own; the user's data | Yes | Parameters and analyzers | Not found | Not found | GPL-3.0 | Not found |
-| vectorbt and VectorBT PRO | Its own; the user's data | Yes: thousands at once | Saved objects | Not found | Splitters; deflated Sharpe | Apache-2.0 with Commons Clause; PRO paid | Not found |
+| vectorbt and VectorBT PRO | Its own; the user's data | Yes: thousands at once | Saved objects | Not found | Splitters; deflated Sharpe | Source available: Apache-2.0 with Commons Clause; PRO paid | Not found |
 | backtesting.py | Its own; the user's prices | Yes: grid, SAMBO | Stats with trades | Not found | Examples only | AGPL-3.0 | Not found |
 | bt | Its own; the user's prices | Several together | Result object | Not found | Random-portfolio benchmark | MIT | Not found |
 | QuantRocket | Its own; Sharadar by subscription | Yes: parameter scans | Results CSV | Not found | Walk-forward, for ML | Free sample tier; paid | Not found |
@@ -588,12 +588,12 @@ Checked 2026-10-13.
 
 Checked 2026-10-13.
 
-- **What it is:** A vectorized Python backtesting library, "the community edition" of VectorBT PRO ([repository][vbt]). Release v1.1.2, of 2026-10-09.
+- **What it is:** A vectorized Python backtesting library. Its README calls it "the open-source community edition" of VectorBT PRO ([repository][vbt]). Release v1.1.2, of 2026-10-09.
 - **Engine and data:** Its own engine. Price adapters, such as Yahoo Finance; no fundamentals named ([features][vbt-features]). PRO lists "20+" data sources ([vectorbt.pro][vbt-pro]).
 - **Many variants:** It "packs thousands of configurations into NumPy arrays" ([repository][vbt]). PRO: "Sweep millions of parameter combinations" ([PRO optimization][vbt-pro-opt]).
 - **What it records:** Objects "can be saved to a file and retrieved back" ([features][vbt-features]).
 - **Study discipline:** Rolling and expanding walk-forward splitters, and train and test splits ([splitters][vbt-splitters]). A deflated Sharpe ratio, whose number of trials defaults to the number of columns: the variants in the run ([returns accessors][vbt-returns]). PRO adds purged splits, permutation tests, and baselines ([PRO optimization][vbt-pro-opt]). No feature for planning a study found.
-- **Access and license:** The open-source edition is Apache 2.0 with the Commons Clause, which withholds "the right to Sell the Software" ([LICENSE.md][vbt-license]). PRO is a paid membership, monthly, annual, or lifetime, with a "Private source repository" ([vectorbt.pro][vbt-pro]).
+- **Access and license:** The community edition is Apache 2.0 with the Commons Clause, which withholds "the right to Sell the Software" ([LICENSE.md][vbt-license]). So it's source available, not open source, though its README says "open-source": the Commons Clause's FAQ calls the clause a "source-available license", and answers "No" when asked whether it's open source ([Commons Clause][commons-clause], checked 2026-10-14). PRO is a paid membership, monthly, annual, or lifetime, with a "Private source repository" ([vectorbt.pro][vbt-pro]).
 - **Compared with Trial Folio:** It runs many variants as one computation, and its deflated Sharpe ratio adjusts for the number of variants tested: a step no Trial Folio release assesses yet. It runs on its own engine and data.
 
 ### backtesting.py
@@ -739,6 +739,7 @@ Checked 2026-10-13.
 [vbt-splitters]: https://vectorbt.dev/api/generic/splitters/
 [vbt-returns]: https://vectorbt.dev/api/returns/accessors/
 [vbt-license]: https://raw.githubusercontent.com/polakowo/vectorbt/master/LICENSE.md
+[commons-clause]: https://commonsclause.com/
 [vbt-pro]: https://vectorbt.pro/
 [vbt-pro-opt]: https://vectorbt.pro/features/optimization
 [btpy]: https://kernc.github.io/backtesting.py/
@@ -987,7 +988,7 @@ The owner gave three claims, in order of preference, for the page on why Trial F
 
 **Not supported in a comparative form.** The facts that bear on it:
 
-- Trial Folio runs on the engine and data a member already has through Portfolio123. Among the general products, those with point-in-time fundamentals use their own data, such as QuantConnect's Morningstar data, free in its cloud, or Equities Lab's built-in data, or a separate subscription, such as QuantRocket's Sharadar data. WealthLab's route to Portfolio123's rankings adds a WealthLab subscription, a paid extension, and a price-data provider. The open-source libraries are free, but bring no US point-in-time fundamentals.
+- Trial Folio runs on the engine and data a member already has through Portfolio123. Among the general products, those with point-in-time fundamentals use their own data, such as QuantConnect's Morningstar data, free in its cloud, or Equities Lab's built-in data, or a separate subscription, such as QuantRocket's Sharadar data. WealthLab's route to Portfolio123's rankings adds a WealthLab subscription, a paid extension, and a price-data provider. The free libraries, open source or, like vectorbt, source available, bring no US point-in-time fundamentals.
 - Research through the API spends credits on each call, 5 for a screen backtest. Unused monthly credits don't roll over, and costs can change without notice. Trial Folio gives a plan's credits before sending, and keeps the cost Portfolio123 reports. Portfolio123's own Download Factors estimate can be too low when a universe's size varied, and QuantConnect also estimates a batch's cost first.
 - Saved items on Portfolio123, such as screens, simulations, and optimizer studies, use the account's Resource Units. Records kept on the user's machine don't.
 
