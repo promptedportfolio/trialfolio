@@ -1,6 +1,6 @@
 # User manual
 
-**Status:** Ready. The owner decided its [open questions](#open-questions), accepted [ADR 0009](adrs/0009-publish-a-user-manual-on-github-pages.md), and set it to Ready on 2026-10-12. UM-T01 (2026-10-12) built the site, and moved the user guide's content into it. UM-T02 (2026-10-12) generated the reference pages from their sources. UM-T01 and UM-T02 are done, so [doing the next item](../AGENTS.md#doing-the-next-item) no longer holds 0.4.0's implementation. On 2026-10-13 the owner added UM-T03 to UM-T05: a survey of related tools, and three explanation pages. None of them holds a release. UM-T03 (2026-10-13) surveyed the related tools, in [related-tools.md](related-tools.md), and the owner decided on 2026-10-14 which claim the page on why Trial Folio exists makes. UM-T04 and UM-T05 aren't done yet.
+**Status:** Ready. The owner decided its [open questions](#open-questions), accepted [ADR 0009](adrs/0009-publish-a-user-manual-on-github-pages.md), and set it to Ready on 2026-10-12. UM-T01 (2026-10-12) built the site, and moved the user guide's content into it. UM-T02 (2026-10-12) generated the reference pages from their sources. UM-T01 and UM-T02 are done, so [doing the next item](../AGENTS.md#doing-the-next-item) no longer holds 0.4.0's implementation. On 2026-10-13 the owner added UM-T03 to UM-T05: a survey of related tools, and three explanation pages. None of them holds a release. UM-T03 (2026-10-13) surveyed the related tools, in [related-tools.md](related-tools.md), and the owner decided on 2026-10-14 which claim the page on why Trial Folio exists makes. UM-T04 (2026-10-14) wrote the pages on where Trial Folio is going and on the research method. UM-T05 isn't done yet.
 **Decided by:** [D-35](spec.md#decisions), on 2026-10-12
 **Depends on:** the [user guide](user-guide.md), as release [0.3.0](releases/0.3.0-experiments.md) left it. It runs alongside [0.4.0](releases/0.4.0-ranking-weights.md)'s specification work, R04-T02 to R04-T04. Its first two tasks, UM-T01 and UM-T02, finish before 0.4.0's implementation starts: [doing the next item](../AGENTS.md#doing-the-next-item) holds 0.4.0's implementation tasks until this file's status line says both are done. The tasks the owner added later, UM-T03 to UM-T05, hold no release.
 
@@ -38,7 +38,7 @@ Someone who has never run Trial Folio follows the first tutorial from setting up
 
 ## Layout
 
-A home page and four sections. UM-T01 wrote these pages (2026-10-12), and UM-T02 added `reference/output-fields.md` (2026-10-12). A later task that renames, merges, or adds a page updates this table.
+A home page and four sections. UM-T01 wrote these pages (2026-10-12), UM-T02 added `reference/output-fields.md` (2026-10-12), and UM-T04 added `explanation/the-research-method.md` and `explanation/where-trial-folio-is-going.md` (2026-10-14). A later task that renames, merges, or adds a page updates this table.
 
 | Section | What it's for | Pages |
 |---|---|---|
@@ -46,7 +46,7 @@ A home page and four sections. UM-T01 wrote these pages (2026-10-12), and UM-T02
 | Tutorials, `manual/tutorials/` | Learning by doing: a guided first run that works | `first-backtest.md`, `first-experiment.md` |
 | How-to guides, `manual/how-to/` | The steps for one task the reader already has | `store-credentials.md`, `re-render-a-report.md`, `compare-runs.md`, `recover-from-an-interrupt.md`, `repeat-a-case.md`, `revise-an-experiment.md`, `use-from-a-script.md` |
 | Reference, `manual/reference/` | Exact descriptions to look up | `cli.md`, `screen-configuration.md`, `review-configuration.md`, `experiment-configuration.md`, `outputs.md`, `output-fields.md`, `errors.md`, `json-summary.md` |
-| Explanation, `manual/explanation/` | Understanding: why Trial Folio works as it does | `plans-and-approval.md`, `credits-and-uncertain-charges.md`, `reproducibility.md`, `what-a-backtest-can-support.md` |
+| Explanation, `manual/explanation/` | Understanding: why Trial Folio works as it does | `plans-and-approval.md`, `credits-and-uncertain-charges.md`, `reproducibility.md`, `what-a-backtest-can-support.md`, `the-research-method.md`, `where-trial-folio-is-going.md` |
 | Third-party notices, `manual/third-party-notices.md` | The licenses of the theme's files the site serves ([tooling and hosting](#tooling-and-hosting)), linked from every page's footer | `third-party-notices.md` |
 
 ### Where the user guide's sections go
@@ -132,12 +132,12 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
    - the non-affiliation notice, as the README gives it.
 
    It leaves out the theme's "Made with Zensical" link. The alternative is to keep that link.
-2. **The theme files' notices.** The theme's scripts and stylesheets carry no license headers. So the notices are on a page of their own, `third-party-notices.md`, in the navigation and linked from every footer. It holds each license's full text, or Font Awesome's attribution. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#the-user-manuals-site) records the site as a distribution form, and asks a pull request that changes Zensical's version to check the files the site serves again.
+2. **The theme files' notices.** The theme's scripts and stylesheets carry no license headers. So the notices are on a page of their own, `third-party-notices.md`, linked from every footer. Since 2026-10-14 it isn't in the navigation, whose tabs are the home page and the manual's four sections, as the owner decided that day. It holds each license's full text, or Font Awesome's attribution. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#the-user-manuals-site) records the site as a distribution form, and asks a pull request that changes Zensical's version to check the files the site serves again.
 3. **The configuration** in `zensical.toml`:
    - `strict = true`, so a broken link or anchor fails the build;
    - `font = false`, so pages use the reader's system fonts;
    - no `repo_url`, so the header has no link to the repository. With one, the theme's script would ask GitHub's API for the repository's facts from each reader's browser.
-   - the features `navigation.sections` and `content.code.copy`.
+   - the features `navigation.sections` and `content.code.copy`. On 2026-10-14 the site gained more of the theme's features, colors, a logo, and a favicon of its own, as [the site's theme](#the-sites-theme) gives.
 4. **The check of the built site** is `scripts/check_manual.py`, with its tests in `tests/manual/`.
    - pyright now checks `scripts/` too.
    - `scripts/check` removes `site/` before it builds, so a removed page can't linger and pass.
@@ -192,6 +192,21 @@ The owner assigns these by ID. They aren't next items: [doing the next item](../
 **Deferred by the owner** (2026-10-12): rewording the schema descriptions that name the specification's internals, until a later pull request. About six descriptions on the generated pages do, such as "P-13's default rebalance variant", "(R03-AC08)", and "a flag in `FLAGGING`". They come from the models' docstrings in `src/`, and rewording one behind an earlier schema version, such as the JSON summary's 1.0.0, would change a frozen schema's bytes. Until then, the generated pages give them as the schemas do.
 
 **The first deployment (UM-T02).** The docs workflow's run [38288103983](https://github.com/promptedportfolio/trialfolio/actions/runs/38288103983) deployed the site on 2026-10-12, from 4a3bd93, the squash merge of #78. It started at 18:01:15Z, and ended successfully at 18:02:50Z. **UM-AC02 checked (2026-10-12):** each of the 33 files of a local build of 4a3bd93 was fetched from the published address, and each was byte-identical to it.
+
+## The site's theme
+
+On 2026-10-14 the site gained colors, more of the theme's navigation, a logo, and a favicon of its own. It still loads nothing from another host (UM-AC07), and it serves the same theme files as before ([THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#the-user-manuals-site)). The owner decided the variant, the colors, the logo and the favicon, and the notices page's place on 2026-10-14, and that the change needs no task. In `zensical.toml`:
+
+- **The variant** is `modern`, the theme's default.
+- **The colors** are the theme's `teal`, in a light scheme and a dark one. They follow the reader's system setting, until the reader chooses one with the switch in the header. The system setting's entry names the colors too, so a page starts in teal before the theme's script runs, and stays teal without it.
+- **The navigation:**
+  - the home page and the four sections are tabs across the top (`navigation.tabs`);
+  - each page shows the path to it (`navigation.path`), links to the pages before and after it (`navigation.footer`), and has a button back to the top (`navigation.top`);
+  - a link loads the next page without reloading the whole site (`navigation.instant` and `navigation.instant.prefetch`), from this site only;
+  - the address and the list of the page's sections follow the section in view (`navigation.tracking` and `toc.follow`);
+  - search highlights the words it found on the page it opens (`search.highlight`).
+- **The logo** is Lucide's `flask-conical` icon. The favicon, `manual/assets/favicon.svg`, is the same icon, in the theme's teal primary color: `#009485`, and its light shade, `#26a699`, when the browser is dark. The file names those values itself, so a change to the primary color changes them there by hand. The theme's own favicon is still served, though no page uses it, so its notice stays.
+- **The third-party notices page** isn't in the navigation. Every page's footer links to it, as [tooling and hosting](#tooling-and-hosting) requires, and that link is now the only one to it. So `scripts/check_manual.py` also fails when a page's footer lacks the link. The review of this change added that check on 2026-10-14, and the owner confirmed it the same day.
 
 ## Open questions
 

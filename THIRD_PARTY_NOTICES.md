@@ -68,15 +68,15 @@ Publishing any of these forms is also a reserved distribution of Trial Folio's o
 
 The user manual's site ([docs/user-manual.md](docs/user-manual.md)) is a distribution form: GitHub Pages serves it publicly, at `https://promptedportfolio.github.io/trialfolio/`. It carries the manual's pages, which are Trial Folio's own documentation, and the files of Zensical's theme. It carries no Trial Folio code and no Python package.
 
-Verified observation, checked 2026-10-12 from the site built with Zensical 0.0.69 and from that version's wheel. The theme's files, and what they include:
+Verified observation, checked 2026-10-12 from the site built with Zensical 0.0.69 and from that version's wheel, and again on 2026-10-14, after the site's colors, features, logo, and favicon changed: it serves the same theme files. The theme's files, and what they include:
 
 | Component (version) | Where the site serves it | License |
 |---|---|---|
-| Zensical's theme (0.0.69) | The page templates' markup, the scripts in `assets/javascripts/`, the stylesheets in `assets/stylesheets/`, and the favicon | MIT |
+| Zensical's theme (0.0.69) | The page templates' markup, the scripts in `assets/javascripts/`, the stylesheets in `assets/stylesheets/`, and the theme's favicon, `assets/images/favicon.png`, which the site serves though its pages use their own | MIT |
 | clipboard 2.0.11, and escape-html 1.0.3 | In the theme's scripts, as the theme's list of them, `assets/javascripts/LICENSE`, gives | MIT |
 | focus-visible 5.2.1 | In the theme's scripts | W3C Software and Document License, 2015 version |
 | rxjs 7.8.2 | In the theme's scripts | Apache-2.0. Its repository has no NOTICE file at that version. |
-| Lucide icons | In the pages, and in the stylesheets | ISC. The icons derived from Feather are MIT. |
+| Lucide icons | In the pages, in the stylesheets, and in the site's favicon, `assets/favicon.svg`, which is Lucide's `flask-conical` icon in the site's teal primary color | ISC. The icons derived from Feather are MIT. |
 | Material Design Icons, by Pictogrammers | In the stylesheets | Apache-2.0, under the Pictogrammers Free License |
 | Octicons, by GitHub | In the stylesheet of the theme's classic variant | MIT |
 | Font Awesome Free 7.3.1 | One icon in the stylesheets, with its attribution in a comment | CC BY 4.0 |
