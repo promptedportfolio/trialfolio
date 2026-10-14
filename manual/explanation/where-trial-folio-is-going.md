@@ -66,24 +66,18 @@ Studies decide the later priorities. The roadmap proposes a checkpoint: complete
 
 The order can change. On 2026-10-12 the owner planned ranking-weight variants as 0.4.0, ahead of the results workspace and the graphical experiment workflow, which the roadmap had numbered 0.4.0 and 0.5.0 ([D-34](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#decisions)).
 
-Some things wait until a study needs them ([deferred until a study needs them](https://github.com/promptedportfolio/trialfolio/blob/main/docs/roadmap.md#deferred-until-a-study-needs-them)):
-
-- comprehensive bulk downloads, every provider option, and elaborate visual editing of ranking systems;
-- parallel or scheduled execution, other providers, such as Tiingo, and other storage, such as Parquet or a SQLite index;
-- adaptive optimization, automatic generation of candidates, and LLM features at runtime, until the evaluation boundaries and research history they need are dependable.
+The roadmap also defers some things until a study needs them, and lists them in [deferred until a study needs them](https://github.com/promptedportfolio/trialfolio/blob/main/docs/roadmap.md#deferred-until-a-study-needs-them).
 
 ## What Trial Folio won't do
 
-Trial Folio leaves these out deliberately. Only a later decision, after the analysis it needs, could add one ([out of scope](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#out-of-scope), [deliberately excluded](https://github.com/promptedportfolio/trialfolio/blob/main/docs/roadmap.md#deliberately-excluded)).
+The roadmap leaves these out deliberately ([deliberately excluded](https://github.com/promptedportfolio/trialfolio/blob/main/docs/roadmap.md#deliberately-excluded)). Only a later decision could add one. The limits of the whole product are in spec.md's [out of scope](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#out-of-scope) list.
 
-- **Investment advice.** No personalized investment advice, suitability assessments, or allocations for any person.
-- **Trading.** No trade execution, custody, discretion over accounts, or connections to a broker.
+- **Trading and investment advice.** No trading, and no personalized investment advice: Trial Folio is a research tool ([purpose](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#purpose)).
 - **Picking a winner.** No unexplained overall score of a strategy's quality, no automatic choice of a winner from backtest performance alone, and no completion status presented as an endorsement to trade. Each assessment stays a separate dimension ([METH-07](https://github.com/promptedportfolio/trialfolio/blob/main/docs/methodology.md#meth-07-multidimensional-assessment-and-permitted-conclusions), [what a backtest can support](what-a-backtest-can-support.md)).
-- **DataMiner integration.** No importing results produced elsewhere, or DataMiner's exports or configurations, no converting DataMiner's configurations, and no other integration with DataMiner. Trial Folio doesn't import, vendor, bundle, or port DataMiner's or FactorMiner's code either ([REQ-02](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#enduring-requirements), [ADR 0005](https://github.com/promptedportfolio/trialfolio/blob/main/docs/adrs/0005-build-on-the-portfolio123-api-only.md)).
+- **DataMiner integration.** No importing results produced elsewhere or DataMiner's configurations, no converting DataMiner's configurations, and no other integration with DataMiner. Trial Folio doesn't import, vendor, bundle, or port DataMiner's or FactorMiner's code either ([REQ-02](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#enduring-requirements), [ADR 0005](https://github.com/promptedportfolio/trialfolio/blob/main/docs/adrs/0005-build-on-the-portfolio123-api-only.md)).
 - **Other data vendors.** FactSet is the only supported vendor. Reconsidering others, Compustat included, would take a new decision by the owner, and an account to test with ([D-16](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#decisions)).
 - **A hosted service.** No hosted service that produces results for other people. The proposed graphical application would be local, and doesn't imply one.
 - **A separate terminal interface.** No text-based interface (TUI) beside the command line and the planned graphical application: interface work goes to the graphical workflow.
-- **Autonomous strategy discovery in the first releases.** Optional discovery is one of the [later increments](#later-increments-without-versions), once evaluation and research history are dependable.
 
 ## Where it's specified
 
