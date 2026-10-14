@@ -80,6 +80,7 @@ Recorded on 2026-10-01 from public sources, without account access. These are do
 - Optional settings include `endDt`, `pitMethod`, `precision`, `transPrice`, `rebalFreq`, `slippage`, `maxPosPct`, `rankTolerance`, `carryCost`, and `riskStatsPeriod`.
 - No commission parameter is documented; slippage is the only trading-cost input.
 - The response fields are not documented.
+  - **Dated note, 2026-10-14:** Portfolio123's public [OpenAPI file](https://api.portfolio123.com/docs/api-docs.yml) now documents them. Its shared result schema holds `cost` and `quotaRemaining`, and the screen backtest's success response includes it ([related tools](../related-tools.md#the-api-and-its-python-wrapper-p123api)). The sentence above is as recorded on 2026-10-01.
 - Unverified: whether failed requests are charged.
 
 **DataMiner**
@@ -87,6 +88,7 @@ Recorded on 2026-10-01 from public sources, without account access. These are do
 - It prompts for the API ID and key. It can save them in plaintext in a local `config.ini`.
 - The [ScreenBacktest operation](https://portfolio123.customerly.help/en/articles/14056-dataminer-operation-screen-backtest) documents its configuration keys and defaults. The defaults include End Date = today, Slippage = 0, Benchmark = SPY, and Precision = 2.
 - The output file format is not documented. The pinned source suggests a multi-section CSV with `Stats`, `Results`, and `Time Series` sections and no configuration, version, cost, or timestamp. This is unverified until a real export is inspected.
+  - **Dated note, 2026-10-14:** in the public source, version 1.1.7, an auto-saved export is named `<operation>_<YYYYMMDD_HHMMSS>.csv`, so it carries a timestamp in its file name, though not in its contents ([related tools](../related-tools.md#dataminer)). The text above is as recorded on 2026-10-01.
 - Ranking definitions given as nodes or XML create or overwrite `ApiRankingSystem` in the account. The ranking-definition article writes the name `APIRankingSystem`; R04-T01 found that it's `ApiRankingSystem`, the Rank API documentation's spelling ([run record](../../reference/ranking-weights/README.md)).
 
 **Licenses:** DataMiner GPL-3.0; FactorMiner has no license, at commit `d814c5df5000dc536de65a578da6ce42c05b17bf`; `p123api` MIT.

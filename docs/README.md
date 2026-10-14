@@ -41,6 +41,7 @@ These are the specifications for Trial Folio. The implementation tasks of releas
 | [user-manual.md](user-manual.md) | The user manual, outside any release ([D-35](spec.md#decisions)): its layout, rules, tooling and hosting, criteria, and tasks (UM). The manual's pages are in `manual/`, and own no requirement. |
 | [statistics-prototype.md](statistics-prototype.md) | The offline statistics prototype, outside any release ([D-43](spec.md#decisions)): its scope, criteria, and tasks (SP), and what it found, as evidence for the methods ADR |
 | [refactoring.md](refactoring.md) | The readability refactor of `src/trialfolio`, outside any release ([D-39](spec.md#decisions)): what it doesn't change, its constraints, findings, criteria, and tasks (RF) |
+| [related-tools.md](related-tools.md) | The survey of tools related to Trial Folio (UM-T03): dated, sourced facts behind the manual's claims about other tools, and the claims they support. It owns no requirement. |
 | [written-permission-template.md](written-permission-template.md) | The form a written permission grant takes |
 | [user-guide.md](user-guide.md) | How to set up and use Trial Folio, workflow by workflow, with what to check at each step. It owns no requirement: where it disagrees with an owning document, the guide is fixed. |
 | [ai-development.md](ai-development.md) | How AI is used to build Trial Folio, in plain language |
