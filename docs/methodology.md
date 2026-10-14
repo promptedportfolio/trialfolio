@@ -7,7 +7,7 @@ This document defines what Trial Folio's scientific assessments mean, the condit
 - [spec.md](spec.md) owns the product vocabulary (study, experiment, case, candidate, attempt, artifact, assessment, report) and the invariants INV-01 to INV-14.
 - [contracts.md](contracts.md) owns the structures that record the artifacts named here. This document defines their meaning, not their fields.
 - The [release specifications](releases/) own what each increment implements and how it is accepted.
-- A methods ADR, written before the Statistical evaluation increment, owns the choice of inference method (see [Open questions](#open-questions)).
+- A methods ADR, written before the Statistical evaluation increment, owns the choice of inference method (see [Open questions](#open-questions)). The [statistics prototype](statistics-prototype.md) gathers its evidence ([D-43](spec.md#decisions)).
 
 ## Status and labels
 

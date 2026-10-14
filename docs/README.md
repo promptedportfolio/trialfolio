@@ -39,6 +39,7 @@ These are the specifications for Trial Folio. The implementation tasks of releas
 | [adrs/0009-publish-a-user-manual-on-github-pages.md](adrs/0009-publish-a-user-manual-on-github-pages.md) | The user manual: Diátaxis's four sections in `manual/`, with `docs/` unchanged, built with Zensical and published on GitHub Pages |
 | [graphical-prototype.md](graphical-prototype.md) | The read-only graphical prototype, outside any release ([D-29](spec.md#decisions)): its scope, criteria, and tasks (GP), and what each build found |
 | [user-manual.md](user-manual.md) | The user manual, outside any release ([D-35](spec.md#decisions)): its layout, rules, tooling and hosting, criteria, and tasks (UM). The manual's pages are in `manual/`, and own no requirement. |
+| [statistics-prototype.md](statistics-prototype.md) | The offline statistics prototype, outside any release ([D-43](spec.md#decisions)): its scope, criteria, and tasks (SP), and what it found, as evidence for the methods ADR |
 | [refactoring.md](refactoring.md) | The readability refactor of `src/trialfolio`, outside any release ([D-39](spec.md#decisions)): what it doesn't change, its constraints, findings, criteria, and tasks (RF) |
 | [related-tools.md](related-tools.md) | The survey of tools related to Trial Folio (UM-T03): dated, sourced facts behind the manual's claims about other tools, and the claims they support. It owns no requirement. |
 | [written-permission-template.md](written-permission-template.md) | The form a written permission grant takes |
