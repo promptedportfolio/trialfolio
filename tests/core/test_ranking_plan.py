@@ -25,7 +25,8 @@ definitions don't change, and retires the others; `ranking-method-changed.yaml` 
 case; `ranking-budget-raised.yaml` keeps them all; and `ranking-from-formula.yaml` revises
 `example.yaml`'s plan 1.1.0 into a plan 1.3.0, whose `experiment.json` is 1.1.0, with the 1.0.0
 record's entries written with `set` and `remove` null. A change of the definition's source alone
-is a change of `ranking_source`.
+is a change of `ranking_source`. The configuration that gives the current plan resumes it, as
+docs/contracts.md's running an experiment says, a plan that revises another included.
 """
 
 import hashlib
@@ -643,6 +644,25 @@ def test_the_configuration_that_gives_the_current_plan_resumes_it(name: str) -> 
     current = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
     path = EXPERIMENTS / name
     read = read_experiment_configuration_v1_1(path.read_bytes(), path.name, path)
+
+    assert plan_revision_v1_1(read, VERSIONS, current) is None
+
+
+@pytest.mark.parametrize(
+    ("first", "revised"),
+    [
+        (EXPERIMENTS / "ranking-example.yaml", REVISIONS / "ranking-definition-changed.yaml"),
+        (EXPERIMENTS / "example.yaml", REVISIONS / "ranking-from-formula.yaml"),
+    ],
+    ids=["definition-changed", "from-formula"],
+)
+def test_the_configuration_that_gave_a_revision_resumes_it(first: Path, revised: Path) -> None:
+    """The revision's plan is built again with its own `revises`, the hash of the plan it revised,
+    so the configuration that gave it gives it again, and the experiment resumes."""
+    current = revision_of(revised, plan_of(first)).plan
+    assert isinstance(current, PlanV1_3)
+    assert current.revises is not None
+    read = read_experiment_configuration_v1_1(revised.read_bytes(), revised.name, revised)
 
     assert plan_revision_v1_1(read, VERSIONS, current) is None
 
