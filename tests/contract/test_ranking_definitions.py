@@ -17,6 +17,7 @@ position. R04-T06 wrote them, with the readers' reading of the definition's file
 import os
 import re
 import shutil
+import sys
 from decimal import Decimal
 from pathlib import Path
 
@@ -353,6 +354,54 @@ def test_a_nul_character_fails_at_its_line(content: bytes, line: int) -> None:
         read_definition(content)
 
     assert caught.value.line == line
+
+
+@pytest.mark.parametrize(
+    ("content", "line", "problem"),
+    [
+        (
+            b"<!DOCTYPE\nRankingSystem>\n<RankingSystem/>\n",
+            1,
+            "it holds a document type declaration",
+        ),
+        (
+            b'\n\n<!DOCTYPE RankingSystem\n\tSYSTEM\n\t"ranking.dtd"\n>\n<RankingSystem/>\n',
+            3,
+            "it holds a document type declaration",
+        ),
+        (b"\n<!--\n\n-->\n<RankingSystem/>\n", 2, "it holds a comment"),
+        (b"\n<?note\n\n?>\n<RankingSystem/>\n", 2, "it holds a processing instruction"),
+    ],
+    ids=["doctype-name-on-line-2", "doctype-over-four-lines", "comment", "processing-instruction"],
+)
+def test_a_declaration_over_several_lines_fails_at_the_line_where_it_starts(
+    content: bytes, line: int, problem: str
+) -> None:
+    """The parser reports a document type declaration once it has read its name, or more, which
+    may be on a later line (review of R04-T06's pull request)."""
+    with pytest.raises(DefinitionProblem, match=problem) as caught:
+        read_definition(content)
+
+    assert caught.value.line == line
+
+
+def test_composites_nested_past_python_s_recursion_limit_are_read() -> None:
+    """No depth of composites raises RecursionError, which a command would report as a defect
+    rather than as `config.invalid`; the rules still apply at any depth, in order (review of
+    R04-T06's pull request)."""
+    depth = sys.getrecursionlimit() + 100
+    opened = '<Composite Name="C" Weight="1">\n' * depth
+    closed = "</Composite>\n" * depth
+    factor = '<StockFormula Name="F" Weight="1"/>\n'
+
+    read = read_definition(f"<RankingSystem>\n{opened}{factor}{closed}</RankingSystem>\n".encode())
+
+    assert len(read.nodes) == depth + 1
+    assert read.nodes[-1].path == "C/" * depth + "F"
+    assert read.node(read.nodes[-1].path) == read.nodes[-1]
+    with pytest.raises(DefinitionProblem, match="a Composite holds no node") as caught:
+        read_definition(f"<RankingSystem>\n{opened}{closed}</RankingSystem>\n".encode())
+    assert caught.value.line == depth + 1
 
 
 @pytest.mark.parametrize("line_end", [b"\r\n", b"\r"], ids=["crlf", "cr"])

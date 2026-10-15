@@ -213,9 +213,7 @@ def read_definition(content: bytes) -> RankingDefinition:
             "that the website's Text Editor shows, under Ranking System, Factors",
             root.line,
         )
-    elements: list[tuple[_Element, int | None, int]] = []
-    _check_nodes(raw, root, None, elements)
-    return RankingDefinition(content, text, _nodes(raw, elements))
+    return RankingDefinition(content, text, _nodes(raw, _check_nodes(raw, root)))
 
 
 def _line_ends(text: str) -> str:
@@ -316,10 +314,15 @@ class _Tree:
         )
 
     def _doctype(self, *_: object) -> NoReturn:
+        # Expat calls this once it has read the declaration's name, which may be on a later line
+        # than its `<!DOCTYPE`. Only white space can come before it, since a declaration, a
+        # comment, or a processing instruction before it stops the parse first, so it starts at
+        # the first byte that isn't white space.
+        start = len(self._raw) - len(self._raw.lstrip(_XML_SPACE))
         raise DefinitionProblem(
             "it holds a document type declaration, which could define entities that change the "
             "text Trial Folio reads",
-            self._here(),
+            _line_of(self._raw, start),
         )
 
     def _comment(self, _text: str) -> NoReturn:
@@ -354,26 +357,28 @@ def _line_of(raw: bytes, offset: int) -> int:
     return raw.count(b"\n", 0, offset) + 1
 
 
-def _check_nodes(
-    raw: bytes,
-    holder: _Element,
-    parent: int | None,
-    elements: list[tuple[_Element, int | None, int]],
-) -> None:
-    """Checks the nodes `holder`, the RankingSystem or a composite, holds, and what's between
-    them, in the definition's order, and adds each node, with its parent's place in `elements`
-    and its position, to `elements`."""
-    children = holder.children
-    if not children:
-        what = "its RankingSystem element" if parent is None else "a Composite"
-        raise DefinitionProblem(
-            f"{what} holds no node. A ranking system, and each composite, holds at least one",
-            holder.line,
-        )
-    gaps = [holder.tag_end, *(edge for child in children for edge in (child.start, child.end))]
-    gaps.append(holder.content_end)
-    for position, child in enumerate(children, start=1):
-        _between_nodes(raw, gaps[2 * position - 2], gaps[2 * position - 1])
+def _check_nodes(raw: bytes, root: _Element) -> list[tuple[_Element, int | None, int]]:
+    """Checks the nodes the RankingSystem element `root` holds, and the nodes each composite
+    holds, and what's between them, in the definition's order: each node, with its `Weight`,
+    before the nodes it holds. Gives each node, in that order, with its parent's place in the
+    list, None at the top level, and its position among its parent's nodes.
+
+    The composites it's in wait on a stack of their own, rather than in calls to itself, so no
+    depth of composites exhausts Python's recursion limit."""
+    elements: list[tuple[_Element, int | None, int]] = []
+    _holds_a_node(root, "its RankingSystem element")
+    # Each holder whose nodes are being checked: the RankingSystem or a composite, its place in
+    # `elements`, and the position of the node to check next.
+    holders: list[tuple[_Element, int | None, int]] = [(root, None, 1)]
+    while holders:
+        holder, parent, position = holders.pop()
+        children = holder.children
+        if position > len(children):
+            _between_nodes(raw, children[-1].end, holder.content_end)
+            continue
+        child = children[position - 1]
+        after = holder.tag_end if position == 1 else children[position - 2].end
+        _between_nodes(raw, after, child.start)
         if child.name not in NODE_KINDS:
             raise DefinitionProblem(
                 "an element where a node goes isn't a Composite, a StockFormula, or a "
@@ -384,11 +389,21 @@ def _check_nodes(
         _weight(raw, child)
         index = len(elements)
         elements.append((child, parent, position))
+        holders.append((holder, parent, position + 1))
         if child.name == "Composite":
-            _check_nodes(raw, child, index, elements)
+            _holds_a_node(child, "a Composite")
+            holders.append((child, index, 1))
         else:
             _check_factor(child)
-    _between_nodes(raw, gaps[-2], gaps[-1])
+    return elements
+
+
+def _holds_a_node(holder: _Element, what: str) -> None:
+    if not holder.children:
+        raise DefinitionProblem(
+            f"{what} holds no node. A ranking system, and each composite, holds at least one",
+            holder.line,
+        )
 
 
 def _between_nodes(raw: bytes, start: int, end: int) -> None:
