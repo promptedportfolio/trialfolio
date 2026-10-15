@@ -14,8 +14,8 @@ and `ranking-written-differently.yaml` and `ranking-positions.yaml`, which name 
 position. R04-T06 wrote them, with the readers' reading of the definition's file. The review of
 its pull request added tests of the defects it corrected, a file saved as UTF-16 without a
 byte-order mark, a definition in a folder that can't be searched, a declaration over several
-lines, and composites nested past Python's recursion limit, and of the rules whose change no
-test had caught.
+lines, composites nested past Python's recursion limit, and a position too long to read as a
+number, and of the rules whose change no test had caught.
 """
 
 import os
@@ -655,6 +655,55 @@ def test_a_path_written_wrongly_fails_before_what_its_segments_name(tmp_path: Pa
             "count from 1."
         )
     ]
+
+
+def test_a_position_too_long_to_read_as_a_number_is_past_its_parent_s_last_node(
+    tmp_path: Path,
+) -> None:
+    """By default, Python reads no whole number of more than 4,300 digits. A position of more is
+    written correctly, so a snapshot's baseline, whose definition isn't read, accepts it; against
+    a definition, it's past its parent's last node, in a `set` and in `remove`, through
+    `RankingDefinition.node` and the reader (node paths; review of R04-T06's pull request)."""
+    position = "#" + "9" * 4301
+    # YAML reads a key of more than 1,024 characters only after a `?`.
+    variants = (
+        "  ranking:\n"
+        f"    - key: tilt\n      set: {{'Value/Earnings Yield': 70, ? 'Value/{position}': 30}}\n"
+        f"    - key: removed\n      remove: '{position}'\n"
+        "      set: {'Value/Earnings Yield': 50, 'Value/Sales Yield': 50}\n"
+    )
+
+    with pytest.raises(NodePathProblem) as caught:
+        definition("value-momentum.xml").node(f"Value/{position}")
+    assert (caught.value.segment, caught.value.problem) == (
+        2,
+        "is a position past its parent's last node",
+    )
+    assert ranking_variants(tmp_path, variants) == [
+        (
+            "`variants.ranking[0].set[1]` is a node path whose segment 2 is a position past its "
+            "parent's last node."
+        ),
+        (
+            "`variants.ranking[1].remove` is a node path whose segment 1 is a position past its "
+            "parent's last node."
+        ),
+    ]
+    text = EXAMPLE.read_text(encoding="utf-8")
+    start, end = text.index("  ranking:\n    - key:"), text.index("  rebalance_weeks: []")
+    path = tmp_path / "experiment.yaml"
+    path.write_text(
+        text[:start].replace(
+            "    definition: 'ranking/value-momentum.xml'\n"
+            "    ranking_method: percentile_nas_negative\n",
+            "    snapshot: 'ranking/value-momentum/'\n",
+        )
+        + variants
+        + text[end:],
+        encoding="utf-8",
+    )
+    read = read_experiment(path)
+    assert (read.definition, read.ranking_cases) == (None, ())
 
 
 # Ranking variants.

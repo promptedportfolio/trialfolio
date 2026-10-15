@@ -21,6 +21,7 @@ and turn these problems into `config.invalid`.
 """
 
 import re
+import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -49,6 +50,11 @@ _DECIMAL: Final = re.compile(r"(0|[1-9][0-9]*)(\.[0-9]+)?")
 
 _POSITION: Final = re.compile(r"0|[1-9][0-9]*")
 """A position's number, after its `#`: a whole number without a leading zero."""
+
+_POSITION_DIGITS: Final = len(str(sys.maxsize))
+"""The most digits a position's number is read with. No parent holds more than `sys.maxsize`
+nodes, the most a sequence holds, so a number of more digits is past its parent's last node,
+whatever its digits; and Python refuses to read one of more than 4,300 digits."""
 
 _ATTRIBUTE: Final = re.compile(
     rb"[ \t\n\r]+([^ \t\n\r=/>]+)[ \t\n\r]*=[ \t\n\r]*(\"[^\"]*\"|'[^']*')"
@@ -518,9 +524,10 @@ def _escaped(name: str) -> str:
 
 def parse_node_path(path: str) -> tuple[str | int, ...]:
     """The segments of a node path (docs/contracts.md, node paths): each a node's name, with its
-    escapes read, or a position, counted from 1. Raises `NodePathProblem` for the first segment
-    written wrongly: an empty one, a `\\` that starts no escape, or one that starts with `#` and
-    isn't a valid position."""
+    escapes read, or a position, counted from 1. A position of more digits than `sys.maxsize` has
+    is read as `sys.maxsize + 1`, which is past every parent's last node, as it is. Raises
+    `NodePathProblem` for the first segment written wrongly: an empty one, a `\\` that starts no
+    escape, or one that starts with `#` and isn't a valid position."""
     pieces: list[str] = []
     piece = ""
     index = 0
@@ -548,13 +555,16 @@ def _segment(number: int, written: str) -> str | int:
             "start or end",
         )
     if written.startswith("#"):
-        if not _POSITION.fullmatch(written[1:]):
+        digits = written[1:]
+        if not _POSITION.fullmatch(digits):
             raise NodePathProblem(
                 number,
                 "starts with # but isn't a position: # and a whole number without a leading "
                 "zero, such as #2. A name that starts with # is written \\#",
             )
-        position = int(written[1:])
+        if len(digits) > _POSITION_DIGITS:
+            return sys.maxsize + 1  # past every parent's last node, as the number is
+        position = int(digits)
         if position == 0:
             raise NodePathProblem(number, "is position 0. Positions count from 1")
         return position
