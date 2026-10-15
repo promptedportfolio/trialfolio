@@ -44,17 +44,12 @@ from trialfolio.approval import (
     shown,
     write_shown,
 )
+from trialfolio.case_state import case_outcome, confirmation_used, described, repeatable
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1, PlanVariant
 from trialfolio.contracts.experiment_record import PlanChanges, RetiredCase
 from trialfolio.errors import TrialFolioError
 from trialfolio.experiment_execution import Repeat
-from trialfolio.experiment_records import (
-    CaseAttempt,
-    SavedCase,
-    SavedExperiment,
-    SavedExperimentAttempt,
-    case_outcome,
-)
+from trialfolio.experiment_records import SavedCase, SavedExperiment, SavedExperimentAttempt
 from trialfolio.planning import plan_hash, retired_cases
 
 REPEAT_ANSWER: Final = "repeat"
@@ -133,7 +128,7 @@ class ExperimentRun:
             or (
                 saved.state == "awaiting_repeat"
                 and saved.case.case_key in named
-                and not _used(saved, named[saved.case.case_key])
+                and not confirmation_used(saved.attempts, named[saved.case.case_key])
             )
         ]
 
@@ -146,13 +141,6 @@ class ExperimentRun:
         if self.authentication_calls >= budget.authentication_calls:
             return sends
         return sends[max(0, budget.provider_requests - self.provider_requests) :]
-
-
-def _used(saved: SavedCase, attempt_id: uuid.UUID | None) -> bool:
-    """Whether the confirmation that names `attempt_id` is used: a later attempt of the case may
-    have reached Portfolio123. A key alone names no attempt, so it has none to use."""
-    named = [index for index, a in enumerate(saved.attempts) if a.attempt_id == attempt_id]
-    return bool(named) and any(a.possibly_charged for a in saved.attempts[named[0] + 1 :])
 
 
 @dataclass(frozen=True)
@@ -187,20 +175,9 @@ def _option(saved: SavedCase, attempt: SavedExperimentAttempt) -> str:
     return f"--repeat {saved.case.case_key}:{attempt.attempt_id}"
 
 
-def _code(saved: SavedCase) -> str | None:
-    """The error code that gives the case's outcome: its response's `provider.response_invalid`,
-    or the error of its latest possibly charged attempt, or else of its latest attempt."""
-    if not saved.valid:
-        return "provider.response_invalid"
-    charged = [attempt for attempt in saved.attempts if attempt.possibly_charged]
-    attempts = charged or list(saved.attempts)
-    return attempts[-1].error_code if attempts else None
-
-
 def _so_far(saved: SavedCase) -> str:
     """The case's outcome so far, and what this run does with it."""
-    code = _code(saved)
-    outcome = saved.outcome if code is None else f"{saved.outcome} ({code})"
+    outcome = described(saved.attempts, valid=saved.valid)
     tried = counted(len(saved.attempts), "attempt")
     if saved.state == "complete":
         return f"{outcome}, after {tried}. It's complete, so it isn't sent again."
@@ -222,14 +199,7 @@ def _so_far(saved: SavedCase) -> str:
 
 def _retired_outcome(experiment: SavedExperiment, case_id: str) -> str:
     attempts = experiment.attempts_of(case_id)
-    outcome = case_outcome(
-        tuple(
-            CaseAttempt(
-                a.session, a.sequence, a.outcome, a.possibly_charged, experiment.valid(case_id)
-            )
-            for a in attempts
-        )
-    )
+    outcome = case_outcome(attempts, valid=experiment.valid(case_id))
     return f"{outcome.replace('_', ' ')}, after {counted(len(attempts), 'attempt')}"
 
 
@@ -620,7 +590,7 @@ def _check_repeats(run: ExperimentRun, *, asks: bool) -> _CheckedRepeats:
             to_ask.append((saved, latest))
             continue
         named = [a for a in saved.attempts if a.attempt_id == option.attempt_id]
-        if not named or not named[0].possibly_charged or named[0].outcome == "succeeded":
+        if not named or not repeatable(named[0]):
             problem = (
                 "The repeat of case {} names attempt {}, which isn't an attempt of the case whose"
                 " request may have been charged and that didn't succeed. A repeat names the"
@@ -632,7 +602,7 @@ def _check_repeats(run: ExperimentRun, *, asks: bool) -> _CheckedRepeats:
                 problem.format(case_id, option.attempt_id),
             )
         confirmed.append(Repeat(case_id, option.attempt_id))
-        if not _used(saved, option.attempt_id):
+        if not confirmation_used(saved.attempts, option.attempt_id):
             made = True
             continue
         again = (

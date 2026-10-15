@@ -36,7 +36,7 @@ its authentication record stopped before its send. `SavedExperimentAttempt` read
 resume's step 8 will record it: the first `succeeded` with a saved response and `unknown` without
 one, possibly charged either way, and the second `failed`, not possibly charged, and
 `completed_record` gives the attempt record step 8 writes. The case states, and the budget's
-counts, read them the same way.
+counts, read them the same way, by the rules in `case_state.py`, which the executor shares.
 
 The check also prepares the tables a stopped run didn't write: for each case with a succeeded
 attempt and no `settings.csv`, the rows its `metrics.csv` will hold, from the response's bytes the
@@ -72,6 +72,15 @@ from trialfolio.attempts import (
     provider_requests,
     request_detail,
 )
+from trialfolio.case_state import (
+    CaseOutcome,
+    CaseState,
+    case_outcome,
+    case_state,
+    experiment_counts,
+    latest_charged,
+    unavailable_metrics,
+)
 from trialfolio.configuration import (
     experiment_original_values,
     experiment_schema_version,
@@ -95,6 +104,7 @@ from trialfolio.contracts.experiment_manifest import (
     ExperimentArtifact,
     ExperimentArtifactRole,
     ExperimentManifest,
+    ExperimentManifestCounts,
 )
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
 from trialfolio.contracts.experiment_record import ExperimentRecord, RecordedCase, SessionRecord
@@ -120,6 +130,7 @@ from trialfolio.normalization import (
     case_metrics_rows,
     case_tables_path,
 )
+from trialfolio.planning import retired_cases
 from trialfolio.record_checks import (
     RecordChecks,
     artifact_id,
@@ -133,8 +144,6 @@ from trialfolio.record_checks import (
 from trialfolio.storage import LOCK_PATH, ArtifactStore, StoredFile
 from trialfolio.tables import metrics_csv, read_metrics_csv, read_settings_csv
 
-type CaseOutcome = Literal["succeeded", "failed", "unknown", "not_yet_run"]
-type CaseState = Literal["complete", "due", "awaiting_repeat"]
 type AttemptOutcome = Literal["succeeded", "failed", "unknown"]
 
 _ATTEMPT_FILES: Final[dict[str, AttemptRole]] = {
@@ -172,38 +181,6 @@ _READABLE: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
 }
 """The schema versions this version reads, for each kind of record, with what they're called in
 messages."""
-
-
-# Case outcomes (docs/contracts.md, the experiment manifest)
-
-
-@dataclass(frozen=True)
-class CaseAttempt:
-    """What a case's outcome reads of one of its attempts."""
-
-    session: int
-    sequence: int
-    outcome: Literal["running", "succeeded", "failed", "unknown"]
-    """`running` for a start record without an attempt record."""
-    possibly_charged: bool
-    valid: bool
-    """For a succeeded attempt, whether its response passed validation."""
-
-
-def case_outcome(attempts: Sequence[CaseAttempt]) -> CaseOutcome:
-    """A case's outcome, as the manifest counts it: `succeeded` when one of its attempts
-    succeeded with a valid response, and `failed` when that response failed validation;
-    otherwise the outcome of its latest possibly charged attempt, by session and then sequence,
-    with a `running` one counted as `unknown`; `failed` when it has attempts and none is
-    possibly charged; and `not_yet_run` when it has none."""
-    succeeded = [attempt for attempt in attempts if attempt.outcome == "succeeded"]
-    if succeeded:
-        return "succeeded" if any(attempt.valid for attempt in succeeded) else "failed"
-    charged = [attempt for attempt in attempts if attempt.possibly_charged]
-    if charged:
-        latest = max(charged, key=lambda attempt: (attempt.session, attempt.sequence))
-        return "failed" if latest.outcome == "failed" else "unknown"
-    return "failed" if attempts else "not_yet_run"
 
 
 # What a resume reads
@@ -481,30 +458,18 @@ class SavedCase:
 
     @property
     def state(self) -> CaseState:
-        """`complete` when one of its attempts succeeded; `awaiting_repeat` when one is possibly
-        charged and none succeeded, so only a confirmed repeat sends it; and `due` otherwise, so
-        a resume sends it."""
-        if any(attempt.outcome == "succeeded" for attempt in self.attempts):
-            return "complete"
-        if any(attempt.possibly_charged for attempt in self.attempts):
-            return "awaiting_repeat"
-        return "due"
+        """`complete`, `due`, or `awaiting_repeat`, by `case_state`."""
+        return case_state(self.attempts)
 
     @property
     def latest_charged(self) -> SavedExperimentAttempt | None:
         """Its latest possibly charged attempt, whose `attempt_id` confirms a repeat."""
-        charged = [attempt for attempt in self.attempts if attempt.possibly_charged]
-        return charged[-1] if charged else None
+        return latest_charged(self.attempts)
 
     @property
     def outcome(self) -> CaseOutcome:
         """As the manifest counts it."""
-        return case_outcome(
-            tuple(
-                CaseAttempt(a.session, a.sequence, a.outcome, a.possibly_charged, valid=self.valid)
-                for a in self.attempts
-            )
-        )
+        return case_outcome(self.attempts, valid=self.valid)
 
 
 @dataclass(frozen=True)
@@ -589,6 +554,20 @@ class SavedExperiment:
         response. True for a case without a succeeded attempt."""
         missing = self.missing.get(case_id)
         return missing is None or missing.invalid is None
+
+    def counts(self, plan: PlanV1_1) -> ExperimentManifestCounts:
+        """The experiment's counts over `plan`, the current plan or a revision of it, as the
+        records give them: those the manifest of a session that sent nothing under `plan` would
+        give. The executor counts its own session's attempts with the same rules."""
+        invalid = {case_id for case_id in self.missing if not self.valid(case_id)}
+        retired = len(retired_cases(self.record, plan))
+        return experiment_counts(plan, self.attempts, invalid=invalid, retired=retired)
+
+    def metrics_unavailable(self, plan: PlanV1_1) -> int:
+        """The `unavailable` rows of the `metrics.csv` files of `plan`'s cases."""
+        return unavailable_metrics(
+            plan, {case_id: tables.metrics_rows for case_id, tables in self.tables.items()}
+        )
 
     def listed(self, path: str) -> ExperimentArtifact | None:
         """The latest manifest's entry for the file at `path`, when it lists it."""
