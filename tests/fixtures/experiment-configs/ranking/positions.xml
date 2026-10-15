@@ -1,0 +1,40 @@
+<RankingSystem RankType="Higher">
+	<Composite Name="Value P/E" Weight="25" RankType="Summation">
+		<StockFormula Name="Yield" Weight="40" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+		<StockFormula Name="Yield" Weight="40" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+		<StockFormula Name="Cash Flow" Weight="20" RankType="Higher" Scope="Universe" Description="">
+			<Formula>… &lt; …</Formula>
+		</StockFormula>
+	</Composite>
+	<StockFactor Weight="10" RankType="Higher" Scope="Universe">
+		<Factor>…</Factor>
+	</StockFactor>
+	<StockFactor Weight="10" RankType="Lower" Scope="Universe">
+		<Factor>…</Factor>
+	</StockFactor>
+	<Composite Name="Price\Book" Weight="20" RankType="Summation">
+		<StockFormula Name="Book Yield" Weight="100" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+	</Composite>
+	<Composite Name="#Momentum" Weight="15" RankType="Summation">
+		<StockFormula Name="Short Return" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+		<StockFormula Name="Long Return" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+	</Composite>
+	<Composite Name="Secret Sauce" Weight="20" RankType="Summation">
+		<StockFormula Name="Margin" Weight="60" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+		<StockFormula Name="Turnover" Weight="40" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+	</Composite>
+</RankingSystem>

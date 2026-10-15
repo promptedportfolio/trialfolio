@@ -2,7 +2,7 @@
 
 Each file breaks exactly one rule of the [experiment configuration](../../../../docs/contracts.md#experiment-configuration), or of the rules for [every configuration file](../../../../docs/contracts.md#configuration-files), and is otherwise the [documented example](../../../../docs/contracts.md#experiment-example), which `../example.yaml` copies, or, for [a ranking definition](#a-ranking-definition-from-110)'s files, the [ranking example](../../../../docs/contracts.md#ranking-example). Release 0.3.0's [test pairing](../../../../docs/releases/0.3.0-experiments.md#invalid-experiment-configuration-cases) lists them by group, and release 0.4.0's [invalid ranking cases](../../../../docs/releases/0.4.0-ranking-weights.md#invalid-ranking-cases) the ranking definition's. `tests/contract/test_experiment_configuration.py` reads each one with the reader of both versions, expects `config.invalid`, and expects the message to name the key on the file's `# Key:` line, where `-` means the file as a whole. The message never holds the offending value, given on the file's `# Value:` line, or any variant's key, which is the user's text: it names a variant by its place, such as `variants.max_holdings[0]`. `-` on the `# Value:` line means there's no value to look for: the key is missing, the value is empty or blank, the problem is the file as a whole, or the value is a word the rule itself names, as `key-baseline.yaml`'s `baseline` is. A value longer than 80 characters is `-` there too: the test also checks that no value of 20 characters or more in the file appears in the message.
 
-- **Origin:** written for Trial Folio's tests by R03-T06, each from the documented example. Synthetic: the keys, descriptions, and other text are invented, and no value comes from Portfolio123 or from the owner's account.
+- **Origin:** written for Trial Folio's tests by R03-T06, each from the documented example, and for a ranking definition's files by R04-T05 and R04-T06, each from the ranking example. Synthetic: the keys, descriptions, and other text are invented, and no value comes from Portfolio123 or from the owner's account.
 - **Schema version:** experiment configuration 1.0.0, and 1.1.0 for the ranking definition's files but `baseline-definition-in-1.0.0.yaml`.
 - **Redistribution:** synthetic, so they may be committed and shared.
 - **Criteria:** the experiment configuration's rules, in release 0.3.0's [other checks in the default suite](../../../../docs/releases/0.3.0-experiments.md#test-pairing). The test pairing also runs `misspelled-key.yaml`, `variant-universe.yaml`, and `budget-below-cases.yaml` through the CLI, in `tests/interface/test_run_validation.py`, once `run` reads an experiment configuration.
@@ -147,7 +147,7 @@ A new rule needs a new file, and a row here. The test checks that these tables a
 
 ## A ranking definition, from 1.1.0
 
-R04-T05 wrote these, from the [ranking example](../../../../docs/contracts.md#ranking-example), whose definition each names by its path from this directory, `../ranking/value-momentum.xml`, which R04-T06 writes. Each fails by the rules of the configuration's keys and values, before any file is read. The ranking variants' other cases, which depend on what a path names in the definition, are R04-T06's.
+R04-T05 wrote these, from the [ranking example](../../../../docs/contracts.md#ranking-example), whose definition each names by its path from this directory, `../ranking/value-momentum.xml`, which R04-T06 wrote. Each fails by the rules of the configuration's keys and values, before any file is read. The ranking variants' other cases, which depend on what a path names in the definition, are R04-T06's, [below](#what-a-ranking-variants-paths-name).
 
 ### The baseline's ranking
 
@@ -182,3 +182,26 @@ Written ahead of R04-T06, whose row gives the ranking variants' invalid configur
 | `set-weight-string.yaml` | A variant's weight is a number, never text | `variants.ranking[0].set[0]` |
 | `set-weight-negative.yaml` | A variant's weight is written without a sign | `variants.ranking[0].set[1]` |
 | `set-weight-five-decimals.yaml` | A variant's weight has at most 4 digits after the decimal point | `variants.ranking[0].set[0]` |
+
+### What a ranking variant's paths name
+
+R04-T06 wrote these, which depend on the baseline's definition: each is the [ranking example](../../../../docs/contracts.md#ranking-example), or [`../ranking-positions.yaml`](../README.md) where the rule needs [`positions.xml`](../ranking/README.md)'s nodes, changed one way, with its definition named by its path from this directory, such as `../ranking/value-momentum.xml`. The test reads each from its own path, from whose directory the definition is read. Each message names the entry by its place, never by its path, which the `# Value:` line gives where the file writes one, and names a node left out by its position.
+
+| File | Rule it breaks | Key |
+|---|---|---|
+| `set-missing-node.yaml` | A weight variant gives the weight of every node of the parent it changes: `value-heavy` leaves out Quality, though its weights keep their nodes' sum | `variants.ranking[0].set` |
+| `set-two-parents.yaml` | A weight variant's paths name the nodes of one parent: `value-heavy` names a factor of Momentum beside two top-level nodes | `variants.ranking[0].set[1]` |
+| `set-node-twice.yaml` | A `set` names each node once: `value-heavy` names Value by its name and by its position, `#1` | `variants.ranking[0].set[3]` |
+| `set-sum-differs.yaml` | A weight variant's weights sum to what the same nodes' weights sum to in the baseline: `value-heavy`'s sum to 110, not 100 | `variants.ranking[0].set` |
+| `set-changes-nothing.yaml` | A weight variant changes at least one weight: `value-heavy` gives the baseline's | `variants.ranking[0].set` |
+| `path-no-node.yaml` | Each segment of a path names a node: Value holds no Sales Yields | `variants.ranking[1].set[1]` |
+| `path-two-nodes.yaml` | Each segment of a path names one node: `ranking-positions.yaml`'s removal names Yield, two of Value P/E's factors | `variants.ranking[1].remove` |
+| `path-empty-segment.yaml` | A path has no empty segment: `Value//Earnings Yield` | `variants.ranking[1].set[0]` |
+| `path-position-zero.yaml` | A position counts from 1: `#0` | `variants.ranking[1].set[0]` |
+| `path-position-past-end.yaml` | A position names one of its parent's nodes: Value holds two, not three | `variants.ranking[1].set[1]` |
+| `path-position-leading-zero.yaml` | A segment that starts with `#` is a position, without a leading zero: `#01` | `variants.ranking[1].set[0]` |
+| `path-position-not-a-number.yaml` | A segment that starts with `#` is a position, `#` and a whole number: `#a` | `variants.ranking[1].set[0]` |
+| `path-bad-escape.yaml` | A path's `\` starts one of its escapes, `\/`, `\\`, or `\#` at a segment's start: `\ ` starts none | `variants.ranking[1].set[0]` |
+| `remove-composite.yaml` | A variant removes a factor, never a composite: `no-sales-yield` removes Value | `variants.ranking[2].remove` |
+| `remove-only-factor.yaml` | A removal leaves its parent at least one node: `ranking-positions.yaml`'s removes the only factor of `Price\Book` | `variants.ranking[1].remove` |
+| `two-variants-one-definition.yaml` | No two variants give the same definition: a fourth variant names `value-heavy`'s nodes by their positions, with its weights, and a budget of 10 for the five cases | `variants.ranking[3]` |
