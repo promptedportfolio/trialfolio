@@ -108,6 +108,7 @@ from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, Setti
 from trialfolio.demo import SyntheticScreenBacktestClient
 from trialfolio.display import series
 from trialfolio.errors import TrialFolioError
+from trialfolio.experiment_paths import plan_path, session_path
 from trialfolio.experiment_records import (
     CaseAttempt,
     CaseOutcome,
@@ -115,8 +116,6 @@ from trialfolio.experiment_records import (
     SavedExperiment,
     SavedExperimentAttempt,
     case_outcome,
-    plan_path,
-    session_path,
 )
 from trialfolio.manifests import (
     PROVIDER_ROLES,

@@ -46,20 +46,21 @@ configuration. So the resume writes them without reading anything again.
 Nothing here writes, sends, or logs. A refusal is `input.not_a_run`, or
 `artifact.unknown_schema_version` for a record whose schema version has no reader, and its
 message names the problem and the file, by its path in the output directory, which holds no
-configuration value, never a value.
+configuration value, never a value. The checks it shares with a run's reader, `runs.py`, are in
+`record_checks.py`, and the paths of the output directory in `experiment_paths.py`.
 """
 
 import json
 import re
 import uuid
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from types import MappingProxyType
 from typing import Final, Literal, cast
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from trialfolio.attempts import (
     ATTEMPT_RECORD,
@@ -71,7 +72,6 @@ from trialfolio.attempts import (
     provider_requests,
     request_detail,
 )
-from trialfolio.canonical import sha256_hex
 from trialfolio.configuration import (
     experiment_original_values,
     experiment_schema_version,
@@ -99,40 +99,39 @@ from trialfolio.contracts.experiment_manifest import (
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
 from trialfolio.contracts.experiment_record import ExperimentRecord, RecordedCase, SessionRecord
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, SettingsRow
-from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError, reason_of
+from trialfolio.experiment_paths import (
+    CONFIGURATION,
+    EXPERIMENT_RECORD,
+    MANIFEST,
+    PLAN,
+    REPORT,
+    REQUEST,
+    RESPONSE,
+    RESPONSE_RAW,
+    SESSION_RECORD,
+    plan_path,
+    session_path,
+)
 from trialfolio.normalization import (
-    METRICS,
     METRICS_PATH,
     PARSER_VERSION,
     SETTINGS_PATH,
     case_metrics_rows,
     case_tables_path,
 )
-from trialfolio.planning import plan_hash
+from trialfolio.record_checks import (
+    RecordChecks,
+    artifact_id,
+    drawn_from,
+    holds_each_metric,
+    holds_each_setting,
+    labeled,
+    matches,
+    named,
+)
 from trialfolio.storage import LOCK_PATH, ArtifactStore, StoredFile
 from trialfolio.tables import metrics_csv, read_metrics_csv, read_settings_csv
-
-CONFIGURATION: Final = "configuration.yaml"
-PLAN: Final = "plan.json"
-EXPERIMENT_RECORD: Final = "experiment.json"
-SESSION_RECORD: Final = "session.json"
-REPORT: Final = "report.html"
-MANIFEST: Final = "manifest.json"
-REQUEST: Final = "request.json"
-RESPONSE: Final = "response.json"
-RESPONSE_RAW: Final = "response.raw"
-
-
-def plan_path(plan: int, name: str) -> str:
-    """`plans/<plan>/<name>`, relative to the output root."""
-    return f"plans/{plan}/{name}"
-
-
-def session_path(session: int, name: str) -> str:
-    """`sessions/<session>/<name>`, relative to the output root."""
-    return f"sessions/{session}/{name}"
-
 
 type CaseOutcome = Literal["succeeded", "failed", "unknown", "not_yet_run"]
 type CaseState = Literal["complete", "due", "awaiting_repeat"]
@@ -153,10 +152,11 @@ _CASE_ID: Final = re.compile(r"case-[0-9a-f]{16}")
 _ATTEMPT_ID: Final = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 )
-_METRIC_ROWS: Final = tuple((metric.subject, metric.metric_id, metric.unit) for metric in METRICS)
-"""`metrics.csv`'s rows, in order, by subject and `metric_id`, with the unit the layout fixes."""
 _TOKEN_DROPPED: Final = frozenset({401, 403})
 """The statuses after which the client drops its token, so a later request authenticates again."""
+
+type _Record = AuthenticationRecord | StartRecordV1_1 | AttemptRecordV1_1
+"""One of an attempt's records."""
 
 _READABLE: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
     "experiment_record": ("experiment records", ("1.0.0",)),
@@ -685,13 +685,13 @@ class _Reader:
             except FileNotFoundError:
                 self._contents[path] = None
             except OSError as error:
-                raise _refused(f"{_named(path)} can't be read ({reason_of(error)}).") from None
+                raise _refused(f"{named(path)} can't be read ({reason_of(error)}).") from None
         return self._contents[path]
 
     def require(self, path: str) -> bytes:
         content = self.get(path)
         if content is None:
-            raise _refused(f"{_named(path)} is missing.")
+            raise _refused(f"{named(path)} is missing.")
         return content
 
     def names(self, path: str) -> tuple[str, ...]:
@@ -703,16 +703,16 @@ class _Reader:
         except FileNotFoundError:
             return ()
         except NotADirectoryError:
-            raise _refused(f"{_named(path)} isn't a directory.") from None
+            raise _refused(f"{named(path)} isn't a directory.") from None
         except OSError as error:
-            raise _refused(f"{_named(path)} can't be read ({reason_of(error)}).") from None
+            raise _refused(f"{named(path)} can't be read ({reason_of(error)}).") from None
         return tuple(name for name in found if not name.startswith("."))
 
     def numbered(self, path: str) -> list[int]:
         """The numbers of the directories in `plans/` or `sessions/`, in order."""
         names = self.names(path)
         if any(not _NUMBER.fullmatch(name) for name in names):
-            raise _refused(f"{_named(path + '/')} holds an entry that isn't a numbered directory.")
+            raise _refused(f"{named(path + '/')} holds an entry that isn't a numbered directory.")
         return sorted(int(name) for name in names)
 
 
@@ -729,51 +729,82 @@ def _plans(reader: _Reader) -> tuple[list[SavedPlan], int]:
     for number in numbers:
         names = reader.names(f"plans/{number}")
         if set(names) - {CONFIGURATION, PLAN, EXPERIMENT_RECORD}:
-            raise _refused(f"{_named(f'plans/{number}/')} holds a file no plan has.")
+            raise _refused(f"{named(f'plans/{number}/')} holds a file no plan has.")
         if EXPERIMENT_RECORD in names:
             plans.append(_plan(reader, number, plans[-1] if plans else None))
     return plans, max(numbers) + 1
 
 
 def _plan(reader: _Reader, number: int, previous: SavedPlan | None) -> SavedPlan:
+    """`plans/<number>/`, checked, given the plan with the number before it, if there's one."""
     record_path = plan_path(number, EXPERIMENT_RECORD)
     record_content = reader.require(record_path)
-    record = _model(ExperimentRecord, record_content, record_path, "experiment_record")
+    record = _CHECKS.record(ExperimentRecord, record_content, record_path, "experiment_record")
     path = plan_path(number, PLAN)
     content = reader.require(path)
-    plan = _model(PlanV1_1, content, path, "plan")
-    try:
-        recomputed = plan_hash(plan)
-    except ValueError as error:
-        raise _refused(f"{_named(path)} can't be hashed ({error}).") from None
-    if recomputed != plan.plan_hash:
-        raise _refused(
-            f"{_named(path)} doesn't recompute to its plan_hash, so the plan changed after it was"
-            " approved."
-        )
+    plan = _CHECKS.record(PlanV1_1, content, path, "plan")
+    _CHECKS.check_plan_hash(plan, named(path))
     configuration_path = plan_path(number, CONFIGURATION)
     configuration = reader.require(configuration_path)
+    _check_entry(record, number, plan, content, configuration)
+    _check_history(record, number, plan, previous)
+    _check_declared(record, number, plan, previous)
+    return SavedPlan(
+        number=number,
+        plan=plan,
+        record=record,
+        configuration=StoredFile.of(configuration_path, configuration),
+        configuration_content=configuration,
+        files=(
+            ("configuration", StoredFile.of(configuration_path, configuration)),
+            ("plan", StoredFile.of(path, content)),
+            ("experiment_record", StoredFile.of(record_path, record_content)),
+        ),
+        configuration_version="",
+    )
+
+
+def _check_entry(
+    record: ExperimentRecord, number: int, plan: PlanV1_1, content: bytes, configuration: bytes
+) -> None:
+    """The last entry of `plans/<number>/experiment.json` is its directory's plan: by its number,
+    its hash, and the `artifact_id`s of its `plan.json`, whose bytes are `content`, and of its
+    `configuration.yaml`."""
     entry = record.plans[-1]
-    last = f"{_named(record_path)}'s last entry isn't its directory's plan"
+    last = f"{named(plan_path(number, EXPERIMENT_RECORD))}'s last entry isn't its directory's plan"
     if entry.plan != number:
         raise _refused(f"{last}: it gives another number.")
     if entry.plan_hash != plan.plan_hash:
         raise _refused(f"{last}: it gives another plan_hash than its plan.json.")
     if (entry.plan_artifact_id, entry.configuration_artifact_id) != (
-        _artifact_id(content),
-        _artifact_id(configuration),
+        artifact_id(content),
+        artifact_id(configuration),
     ):
         raise _refused(
             f"{last}: its plan.json or configuration.yaml has another artifact_id than it records."
         )
+
+
+def _check_history(
+    record: ExperimentRecord, number: int, plan: PlanV1_1, previous: SavedPlan | None
+) -> None:
+    """The entries of `plans/<number>/experiment.json` before its last are the previous plan's,
+    and its plan revises the previous plan."""
     earlier = () if previous is None else previous.record.plans
     if record.plans[:-1] != earlier:
         raise _refused(
-            f"{_named(record_path)}'s earlier entries aren't those of the previous plan's"
-            " experiment.json."
+            f"{named(plan_path(number, EXPERIMENT_RECORD))}'s earlier entries aren't those of the"
+            " previous plan's experiment.json."
         )
     if plan.revises != (None if previous is None else previous.plan.plan_hash):
-        raise _refused(f"{_named(path)} doesn't revise the previous plan.")
+        raise _refused(f"{named(plan_path(number, PLAN))} doesn't revise the previous plan.")
+
+
+def _check_declared(
+    record: ExperimentRecord, number: int, plan: PlanV1_1, previous: SavedPlan | None
+) -> None:
+    """`plans/<number>/experiment.json` records the experiment and its planned cases as its plan
+    declares them, and the plan is the previous plan's experiment's."""
     planned = tuple(
         RecordedCase(
             case_key=case.case_key,
@@ -791,24 +822,11 @@ def _plan(reader: _Reader, number: int, previous: SavedPlan | None) -> SavedPlan
         plan.prior_research,
     ):
         raise _refused(
-            f"{_named(record_path)} doesn't record the experiment and its planned cases as its"
-            " plan declares them."
+            f"{named(plan_path(number, EXPERIMENT_RECORD))} doesn't record the experiment and its"
+            " planned cases as its plan declares them."
         )
     if previous is not None and plan.experiment_id != previous.plan.experiment_id:
-        raise _refused(f"{_named(path)} is another experiment's plan.")
-    return SavedPlan(
-        number=number,
-        plan=plan,
-        record=record,
-        configuration=StoredFile.of(configuration_path, configuration),
-        configuration_content=configuration,
-        files=(
-            ("configuration", StoredFile.of(configuration_path, configuration)),
-            ("plan", StoredFile.of(path, content)),
-            ("experiment_record", StoredFile.of(record_path, record_content)),
-        ),
-        configuration_version="",
-    )
+        raise _refused(f"{named(plan_path(number, PLAN))} is another experiment's plan.")
 
 
 def _with_version(saved: SavedPlan, listed: Mapping[str, ExperimentArtifact]) -> SavedPlan:
@@ -832,8 +850,8 @@ def _with_version(saved: SavedPlan, listed: Mapping[str, ExperimentArtifact]) ->
     except TrialFolioError:
         version = None
     if isinstance(version, str):
-        _check_version(version, path, "configuration")
-    raise _refused(f"{_named(path)} isn't an experiment configuration this version reads.")
+        _CHECKS.check_version(version, path, "configuration")
+    raise _refused(f"{named(path)} isn't an experiment configuration this version reads.")
 
 
 def _sessions(reader: _Reader) -> tuple[list[SessionRecord], int | None, int]:
@@ -843,12 +861,12 @@ def _sessions(reader: _Reader) -> tuple[list[SessionRecord], int | None, int]:
     for number in numbers:
         names = reader.names(f"sessions/{number}")
         if set(names) - {SESSION_RECORD, REPORT, MANIFEST}:
-            raise _refused(f"{_named(f'sessions/{number}/')} holds a file no session has.")
+            raise _refused(f"{named(f'sessions/{number}/')} holds a file no session has.")
         if SESSION_RECORD in names:
             path = session_path(number, SESSION_RECORD)
-            record = _model(SessionRecord, reader.require(path), path, "session_record")
+            record = _CHECKS.record(SessionRecord, reader.require(path), path, "session_record")
             if record.session != number:
-                raise _refused(f"{_named(path)} names another session than its directory's.")
+                raise _refused(f"{named(path)} names another session than its directory's.")
             records.append(record)
         if MANIFEST in names:
             manifest = number
@@ -858,25 +876,24 @@ def _sessions(reader: _Reader) -> tuple[list[SessionRecord], int | None, int]:
 def _latest_manifest(reader: _Reader, session: int) -> ExperimentManifest:
     path = session_path(session, MANIFEST)
     content = reader.require(path)
-    fields = _json_object(content, path)
+    fields = _CHECKS.json_object(content, path)
     if fields.get("artifact_type") != "experiment":
-        raise _refused(f"{_named(path)} isn't an experiment's manifest.")
-    _check_version(fields.get("schema_version"), path, "manifest")
-    manifest = _validated(ExperimentManifest, content, path, "experiment manifest")
+        raise _refused(f"{named(path)} isn't an experiment's manifest.")
+    _CHECKS.check_version(fields.get("schema_version"), path, "manifest")
+    manifest = _CHECKS.validated(ExperimentManifest, content, path, "experiment manifest")
     if manifest.session != session:
-        raise _refused(f"{_named(path)} names another session than its directory's.")
+        raise _refused(f"{named(path)} names another session than its directory's.")
     for artifact in manifest.artifacts:
-        if artifact.schema_version is not None and artifact.role in _READABLE:
-            _check_version(artifact.schema_version, artifact.path, artifact.role, listed=True)
+        _CHECKS.check_version(artifact.schema_version, artifact.path, artifact.role, listed=True)
         listed = reader.get(artifact.path)
         if listed is None:
             raise _refused(
-                f"the latest manifest, {_named(path)}, lists {_named(artifact.path)}, which is"
+                f"the latest manifest, {named(path)}, lists {named(artifact.path)}, which is"
                 " missing."
             )
-        if len(listed) != artifact.size or _artifact_id(listed) != artifact.artifact_id:
+        if not matches(listed, artifact):
             raise _refused(
-                f"{_named(artifact.path)} doesn't match its artifact_id in the latest manifest,"
+                f"{named(artifact.path)} doesn't match its artifact_id in the latest manifest,"
                 " so it changed after the session wrote it."
             )
     return manifest
@@ -887,18 +904,18 @@ def _check_manifest(
 ) -> None:
     path = session_path(manifest.session, MANIFEST)
     if manifest.experiment_id != plans[0].plan.experiment_id:
-        raise _refused(f"{_named(path)} is another experiment's manifest.")
-    named = [saved for saved in plans if saved.number == manifest.plan]
-    if not named or named[0].plan.plan_hash != manifest.plan_hash:
-        raise _refused(f"{_named(path)} names a plan the experiment doesn't have.")
+        raise _refused(f"{named(path)} is another experiment's manifest.")
+    found = [saved for saved in plans if saved.number == manifest.plan]
+    if not found or found[0].plan.plan_hash != manifest.plan_hash:
+        raise _refused(f"{named(path)} names a plan the experiment doesn't have.")
     if manifest.synthetic and not synthetic:
         raise _refused(
-            f"{_named(path)} is synthetic, though the experiment's plans don't record the"
+            f"{named(path)} is synthetic, though the experiment's plans don't record the"
             " approval not_required."
         )
     if synthetic and not manifest.synthetic:
         raise _refused(
-            f"{_named(path)} isn't synthetic, though the experiment's plans record the approval"
+            f"{named(path)} isn't synthetic, though the experiment's plans record the approval"
             " not_required."
         )
 
@@ -910,14 +927,14 @@ def _attempts(
     attempts: list[SavedExperimentAttempt] = []
     for case_id in reader.names("cases"):
         if not _CASE_ID.fullmatch(case_id):
-            raise _refused(f"{_named('cases/')} holds an entry that isn't a case's directory.")
+            raise _refused(f"{named('cases/')} holds an entry that isn't a case's directory.")
         names = reader.names(f"cases/{case_id}")
         if set(names) - {"attempts", "normalized"}:
-            raise _refused(f"{_named(f'cases/{case_id}/')} holds an entry no case has.")
+            raise _refused(f"{named(f'cases/{case_id}/')} holds an entry no case has.")
         for name in reader.names(f"cases/{case_id}/attempts"):
             if not _ATTEMPT_ID.fullmatch(name):
                 raise _refused(
-                    f"{_named(f'cases/{case_id}/attempts/')} holds an entry that isn't an"
+                    f"{named(f'cases/{case_id}/attempts/')} holds an entry that isn't an"
                     " attempt's directory."
                 )
             attempt = _attempt(reader, case_id, uuid.UUID(name), by_hash, sessions)
@@ -945,41 +962,17 @@ def _attempt(
     directory = attempt_directory(case_id, attempt_id)
     names = reader.names(directory)
     if set(names) - set(_ATTEMPT_FILES):
-        raise _refused(f"{_named(directory + '/')} holds a file no attempt writes.")
-
-    def read[M: BaseModel](name: str, model: type[M], kind: str) -> M | None:
-        if name not in names:
-            return None
-        path = f"{directory}/{name}"
-        return _model(model, reader.require(path), path, kind)
-
-    authentication = read(AUTHENTICATION_RECORD, AuthenticationRecord, "authentication_record")
-    start = read(START_RECORD, StartRecordV1_1, "start_record")
-    record = read(ATTEMPT_RECORD, AttemptRecordV1_1, "attempt_record")
+        raise _refused(f"{named(directory + '/')} holds a file no attempt writes.")
+    authentication, start, record = _records(reader, directory, names)
     present = [r for r in (authentication, start, record) if r is not None]
     if not present:
         return None
-    disagree = f"the records in {_named(directory + '/')} don't agree"
-    if any((r.case_id, r.attempt_id) != (case_id, attempt_id) for r in present):
-        raise _refused(f"the records in {_named(directory + '/')} name another attempt.")
-    shared = ("trialfolio_version", "plan_hash", "session", "sequence", "repeat_of", "started_at")
-    if len({tuple(getattr(r, field) for field in shared) for r in present}) > 1:
-        raise _refused(f"{disagree}: they give it another plan, place, or start.")
-    _check_agreement(authentication, start, record, disagree)
+    _check_identity(present, case_id, attempt_id)
+    _check_agreement(
+        authentication, start, record, f"the records in {named(directory + '/')} don't agree"
+    )
     first = present[0]
-    saved = plans.get(first.plan_hash)
-    if saved is None:
-        raise _refused(
-            f"the records in {_named(directory + '/')} name a plan the experiment doesn't have."
-        )
-    if case_id not in {case.case_id for case in saved.plan.cases}:
-        raise _refused(
-            f"the records in {_named(directory + '/')} name a case their plan doesn't have."
-        )
-    if first.session not in sessions:
-        raise _refused(
-            f"the records in {_named(directory + '/')} name a session the experiment doesn't have."
-        )
+    saved = _placement(first, plans, sessions, directory)
     files = tuple(
         AttemptFile(
             role, StoredFile.of(f"{directory}/{name}", reader.require(f"{directory}/{name}"))
@@ -1004,6 +997,53 @@ def _attempt(
         response=response,
         decoded_response=decoded,
     )
+
+
+def _records(
+    reader: _Reader, directory: str, names: Sequence[str]
+) -> tuple[AuthenticationRecord | None, StartRecordV1_1 | None, AttemptRecordV1_1 | None]:
+    """The attempt's authentication record, start record, and attempt record, each checked
+    against its schema version and its model, or None for each that its directory doesn't hold.
+    `names` are its directory's."""
+
+    def read[M: BaseModel](name: str, model: type[M], kind: str) -> M | None:
+        if name not in names:
+            return None
+        path = f"{directory}/{name}"
+        return _CHECKS.record(model, reader.require(path), path, kind)
+
+    return (
+        read(AUTHENTICATION_RECORD, AuthenticationRecord, "authentication_record"),
+        read(START_RECORD, StartRecordV1_1, "start_record"),
+        read(ATTEMPT_RECORD, AttemptRecordV1_1, "attempt_record"),
+    )
+
+
+def _check_identity(present: Sequence[_Record], case_id: str, attempt_id: uuid.UUID) -> None:
+    """The attempt's records name the case and the attempt of its directory, and give it the
+    same plan, place, and start."""
+    records = f"the records in {named(attempt_directory(case_id, attempt_id) + '/')}"
+    if any((r.case_id, r.attempt_id) != (case_id, attempt_id) for r in present):
+        raise _refused(f"{records} name another attempt.")
+    shared = ("trialfolio_version", "plan_hash", "session", "sequence", "repeat_of", "started_at")
+    if len({tuple(getattr(r, field) for field in shared) for r in present}) > 1:
+        raise _refused(f"{records} don't agree: they give it another plan, place, or start.")
+
+
+def _placement(
+    first: _Record, plans: Mapping[str, SavedPlan], sessions: set[int], directory: str
+) -> SavedPlan:
+    """The plan the attempt in `directory` ran under, as its first record names it: a plan of the
+    experiment, which has the attempt's case, in a session of the experiment."""
+    records = f"the records in {named(directory + '/')}"
+    saved = plans.get(first.plan_hash)
+    if saved is None:
+        raise _refused(f"{records} name a plan the experiment doesn't have.")
+    if first.case_id not in {case.case_id for case in saved.plan.cases}:
+        raise _refused(f"{records} name a case their plan doesn't have.")
+    if first.session not in sessions:
+        raise _refused(f"{records} name a session the experiment doesn't have.")
+    return saved
 
 
 def _check_agreement(
@@ -1048,23 +1088,7 @@ def _response(
     """The saved response the attempt record references, with each file it references checked;
     or, for a `running` attempt, the one its directory holds, with its request checked."""
     if record is not None:
-        references: list[ArtifactReference] = []
-        if record.request is not None:
-            references.append(record.request)
-        if record.response is not None:
-            references.append(record.response)
-        for reference in references:
-            stored = files.get(reference.path)
-            if stored is None:
-                raise _refused(
-                    f"the attempt record in {_named(directory + '/')} references a file that isn't"
-                    " in its directory."
-                )
-            if stored.artifact_id != reference.artifact_id:
-                raise _refused(
-                    f"{_named(reference.path)} doesn't match the artifact_id its attempt record"
-                    " gives it."
-                )
+        _check_references(record, directory, files)
         if record.response is None:
             return None
         return record.response, reader.require(record.response.path)
@@ -1072,22 +1096,46 @@ def _response(
         return None
     if REQUEST not in names:
         raise _refused(
-            f"{_named(directory + '/')} has a start record, but not the request.json written"
+            f"{named(directory + '/')} has a start record, but not the request.json written"
             " before it."
         )
     saved = [name for name in (RESPONSE, RESPONSE_RAW) if name in names]
     if len(saved) > 1:
-        raise _refused(f"{_named(directory + '/')} holds two saved responses.")
+        raise _refused(f"{named(directory + '/')} holds two saved responses.")
     if not saved:
         return None
     path = f"{directory}/{saved[0]}"
     content = reader.require(path)
     response = SavedResponse(
         path=path,
-        artifact_id=_artifact_id(content),
+        artifact_id=artifact_id(content),
         form="decoded" if saved[0] == RESPONSE else "undecoded",
     )
     return response, content
+
+
+def _check_references(
+    record: AttemptRecordV1_1, directory: str, files: Mapping[str, StoredFile]
+) -> None:
+    """Each file the attempt record references is one of `files`, its directory's, with the
+    `artifact_id` it records."""
+    references: list[ArtifactReference] = []
+    if record.request is not None:
+        references.append(record.request)
+    if record.response is not None:
+        references.append(record.response)
+    for reference in references:
+        stored = files.get(reference.path)
+        if stored is None:
+            raise _refused(
+                f"the attempt record in {named(directory + '/')} references a file that isn't in"
+                " its directory."
+            )
+        if stored.artifact_id != reference.artifact_id:
+            raise _refused(
+                f"{named(reference.path)} doesn't match the artifact_id its attempt record gives"
+                " it."
+            )
 
 
 def _check_authentication(attempts: Sequence[SavedExperimentAttempt]) -> None:
@@ -1105,7 +1153,7 @@ def _check_authentication(attempts: Sequence[SavedExperimentAttempt]) -> None:
             or not _authenticated(origin)
         ):
             raise _refused(
-                f"the request of {_named(attempt.directory + '/')} was sent with a token no"
+                f"the request of {named(attempt.directory + '/')} was sent with a token no"
                 " attempt of its session obtained before it."
             )
         for earlier in attempts:
@@ -1117,7 +1165,7 @@ def _check_authentication(attempts: Sequence[SavedExperimentAttempt]) -> None:
                 and _token_dropped(earlier)
             ):
                 raise _refused(
-                    f"the request of {_named(attempt.directory + '/')} was sent with a token that"
+                    f"the request of {named(attempt.directory + '/')} was sent with a token that"
                     " a 401 or 403 to an earlier request had dropped."
                 )
 
@@ -1153,7 +1201,7 @@ def _check_repeats(attempts: Sequence[SavedExperimentAttempt]) -> None:
         latest: SavedExperimentAttempt | None = None
         succeeded = False
         for attempt in group:
-            directory = _named(attempt.directory + "/")
+            directory = named(attempt.directory + "/")
             if succeeded:
                 raise _refused(
                     f"{directory} follows its case's succeeded attempt, and a complete case is"
@@ -1187,74 +1235,100 @@ def _tables(
     for case_id in reader.names("cases"):
         names = reader.names(f"cases/{case_id}/normalized")
         if set(names) - {"metrics.csv", "settings.csv"}:
-            raise _refused(f"{_named(f'cases/{case_id}/normalized/')} holds a file no case has.")
+            raise _refused(f"{named(f'cases/{case_id}/normalized/')} holds a file no case has.")
         if not names:
             continue
-        metrics_path = case_tables_path(case_id, METRICS_PATH)
-        settings_path = case_tables_path(case_id, SETTINGS_PATH)
         if "metrics.csv" not in names:
-            raise _refused(f"{_named(settings_path)} is there without its metrics.csv.")
-        succeeded = [
-            a
-            for a in attempts
-            if a.case_id == case_id and a.record is not None and a.record.outcome == "succeeded"
-        ]
-        if not succeeded:
-            raise _refused(
-                f"{_named(f'cases/{case_id}/')} has normalized tables, but no succeeded attempt."
-            )
-        (attempt,) = succeeded
-        response = cast("tuple[SavedResponse, bytes]", attempt.response)
+            settings_path = case_tables_path(case_id, SETTINGS_PATH)
+            raise _refused(f"{named(settings_path)} is there without its metrics.csv.")
+        attempt = _succeeded(attempts, case_id)
         saved = numbered[attempt.plan]
-        case = saved.case(case_id)
-        content = reader.require(metrics_path)
-        metrics = _table_rows(read_metrics_csv, content, metrics_path)
-        if any(row.label != case_id for row in metrics):
-            raise _refused(f"{_named(metrics_path)} labels its rows with another case.")
-        if tuple((row.subject, row.metric_id, row.unit) for row in metrics) != _METRIC_ROWS:
-            raise _refused(
-                f"{_named(metrics_path)} doesn't hold one row for each of the layout's metrics, in"
-                " order, each in the metric's unit."
-            )
-        if any(row.source_artifact != response[0].artifact_id for row in metrics):
-            raise _refused(
-                f"{_named(metrics_path)} was drawn from another response than its case's"
-                " succeeded attempt's."
-            )
-        entry = listed.get(metrics_path)
-        if entry is None:
-            _check_parser(content, case, response, metrics_path, since)
-        settings: StoredFile | None = None
-        settings_rows: tuple[SettingsRow, ...] | None = None
-        if "settings.csv" in names:
-            settings_content = reader.require(settings_path)
-            rows = _table_rows(read_settings_csv, settings_content, settings_path)
-            if any(row.label != case_id for row in rows):
-                raise _refused(f"{_named(settings_path)} labels its rows with another case.")
-            if tuple(row.setting for row in rows) != tuple(s.setting for s in case.settings):
-                raise _refused(
-                    f"{_named(settings_path)} doesn't hold one row for each of its plan's"
-                    " settings, in order."
-                )
-            if any(row.source_artifact != saved.configuration.artifact_id for row in rows):
-                raise _refused(
-                    f"{_named(settings_path)} was drawn from another configuration than that of"
-                    " the plan its case's attempt ran under."
-                )
-            settings = StoredFile.of(settings_path, settings_content)
-            settings_rows = rows
+        metrics, metrics_rows, parser = _metrics(
+            reader, saved.case(case_id), attempt, listed, since
+        )
+        settings, settings_rows = (
+            _settings(reader, saved, case_id) if "settings.csv" in names else (None, None)
+        )
         tables[case_id] = SavedTables(
-            metrics=StoredFile.of(metrics_path, content),
-            metrics_rows=metrics,
+            metrics=metrics,
+            metrics_rows=metrics_rows,
             settings=settings,
             settings_rows=settings_rows,
-            # A table no manifest lists is what the installed parser writes, as checked above,
-            # whichever parser the latest manifest names for its response.
-            parser_version=(
-                PARSER_VERSION if entry is None else _parser_of(response[0].path, listed)
-            ),
+            parser_version=parser,
         )
     return tables
+
+
+def _succeeded(attempts: Sequence[SavedExperimentAttempt], case_id: str) -> SavedExperimentAttempt:
+    """The succeeded attempt of a case that has normalized tables, as only such a case does."""
+    succeeded = [
+        a
+        for a in attempts
+        if a.case_id == case_id and a.record is not None and a.record.outcome == "succeeded"
+    ]
+    if not succeeded:
+        raise _refused(
+            f"{named(f'cases/{case_id}/')} has normalized tables, but no succeeded attempt."
+        )
+    (attempt,) = succeeded
+    return attempt
+
+
+def _metrics(
+    reader: _Reader,
+    case: ExperimentPlanCase,
+    attempt: SavedExperimentAttempt,
+    listed: Mapping[str, ExperimentArtifact],
+    since: Sequence[str],
+) -> tuple[StoredFile, tuple[MetricsRow, ...], int]:
+    """The case's `metrics.csv`, its rows, and the parser that wrote it, checked: it reads back,
+    labeled with the case's `case_id`, holds the layout's metrics, and was drawn from the
+    response of `attempt`, the case's succeeded attempt; and, when the latest manifest doesn't
+    list it, it's what the installed parser writes from that response."""
+    path = case_tables_path(case.case_id, METRICS_PATH)
+    response = cast("tuple[SavedResponse, bytes]", attempt.response)
+    content = reader.require(path)
+    rows = _CHECKS.table_rows(read_metrics_csv, content, path)
+    if not labeled(rows, case.case_id):
+        raise _refused(f"{named(path)} labels its rows with another case.")
+    if not holds_each_metric(rows):
+        raise _refused(
+            f"{named(path)} doesn't hold one row for each of the layout's metrics, in order, each"
+            " in the metric's unit."
+        )
+    if not drawn_from(rows, response[0].artifact_id):
+        raise _refused(
+            f"{named(path)} was drawn from another response than its case's succeeded attempt's."
+        )
+    if path in listed:
+        return StoredFile.of(path, content), rows, _parser_of(response[0].path, listed)
+    _check_parser(content, case, response, path, since)
+    # A table no manifest lists is what the installed parser writes, as just checked, whichever
+    # parser the latest manifest names for its response.
+    return StoredFile.of(path, content), rows, PARSER_VERSION
+
+
+def _settings(
+    reader: _Reader, saved: SavedPlan, case_id: str
+) -> tuple[StoredFile, tuple[SettingsRow, ...]]:
+    """The case's `settings.csv` and its rows, checked: it reads back, labeled with the case's
+    `case_id`, holds the settings of `saved`, the plan its succeeded attempt ran under, and was
+    drawn from that plan's configuration."""
+    path = case_tables_path(case_id, SETTINGS_PATH)
+    content = reader.require(path)
+    rows = _CHECKS.table_rows(read_settings_csv, content, path)
+    if not labeled(rows, case_id):
+        raise _refused(f"{named(path)} labels its rows with another case.")
+    if not holds_each_setting(rows, saved.case(case_id).settings):
+        raise _refused(
+            f"{named(path)} doesn't hold one row for each of its plan's settings, in order."
+        )
+    if not drawn_from(rows, saved.configuration.artifact_id):
+        raise _refused(
+            f"{named(path)} was drawn from another configuration than that of the plan its case's"
+            " attempt ran under."
+        )
+    return StoredFile.of(path, content), rows
 
 
 def _parser_of(response: str, listed: Mapping[str, ExperimentArtifact]) -> int:
@@ -1282,7 +1356,7 @@ def _check_parser(
     if content != expected:
         versions = ", ".join(sorted(set(since))) or "unknown"
         raise _refused(
-            f"{_named(path)}, which no session's manifest lists, isn't what this version's parser"
+            f"{named(path)}, which no session's manifest lists, isn't what this version's parser"
             " writes from its response, as after an upgrade whose parser reads it differently."
             " Resume the experiment first with the version of Trial Folio that wrote it, one of"
             f" those the sessions since the latest manifest record ({versions}), so that a"
@@ -1322,7 +1396,7 @@ def _missing(
                 )
             except (TrialFolioError, ValueError):
                 raise _refused(
-                    f"{_named(saved.configuration.path)} isn't a configuration this version reads"
+                    f"{named(saved.configuration.path)} isn't a configuration this version reads"
                     " for its case, so the tables a stopped run didn't write can't be written."
                 ) from None
         else:
@@ -1338,69 +1412,6 @@ def _missing(
             invalid=invalid,
         )
     return missing
-
-
-# Checking a file
-
-
-def _model[M: BaseModel](model: type[M], content: bytes, path: str, kind: str) -> M:
-    """The record in `content`, checked against its schema version, then its model."""
-    _check_version(_json_object(content, path).get("schema_version"), path, kind)
-    return _validated(model, content, path, _READABLE[kind][0].removesuffix("s"))
-
-
-def _json_object(content: bytes, path: str) -> dict[str, object]:
-    try:
-        loaded: object = json.loads(content)
-    except (UnicodeDecodeError, ValueError, RecursionError):
-        raise _refused(f"{_named(path)} isn't JSON.") from None
-    if not isinstance(loaded, dict):
-        raise _refused(f"{_named(path)} isn't a JSON object.")
-    return cast("dict[str, object]", loaded)
-
-
-def _check_version(version: object, path: str, kind: str, *, listed: bool = False) -> None:
-    """Checks a schema version, from the file itself or, when `listed`, from the latest
-    manifest's entry for it."""
-    name, readable = _READABLE[kind]
-    if version in readable:
-        return
-    if not isinstance(version, str):
-        raise _refused(f"{_named(path)} has no schema version.")
-    where = "the latest manifest gives it" if listed else "it has"
-    raise TrialFolioError(
-        "artifact.unknown_schema_version",
-        f"Trial Folio can't read {_named(path)} in the output directory: {where} a schema version"
-        f" this version has no reader for. It reads {name} {' or '.join(readable)}. Resume the"
-        " experiment with a version of Trial Folio that has one. Nothing was sent or written.",
-    )
-
-
-def _validated[M: BaseModel](model: type[M], content: bytes, path: str, what: str) -> M:
-    try:
-        return model.model_validate_json(content)
-    except ValidationError as error:
-        # Only the model's own fields are named: an unexpected key is text from the file.
-        details = error.errors(include_url=False, include_input=False, include_context=False)
-        named = sorted(
-            {
-                str(detail["loc"][0])
-                for detail in details
-                if detail["loc"] and detail["loc"][0] in model.model_fields
-            }
-        )
-        check = f"check `{'`, `'.join(named)}`" if named else "check its fields"
-        raise _refused(f"{_named(path)} isn't a valid {what}: {check}.") from None
-
-
-def _table_rows[R](
-    reader: Callable[[bytes, str], tuple[R, ...]], content: bytes, path: str
-) -> tuple[R, ...]:
-    try:
-        return reader(content, f"its {_named(path)}")
-    except TrialFolioError as error:
-        # The tables' messages name the line and the column, never a value.
-        raise _refused(error.message) from None
 
 
 def _metadata(response: SavedResponse, content: bytes) -> ProviderMetadata:
@@ -1429,12 +1440,7 @@ def _authentications(exchanges: Sequence[Exchange]) -> int:
     return sum(exchange.request == AUTHENTICATION_REQUEST for exchange in exchanges)
 
 
-def _artifact_id(content: bytes) -> str:
-    return "sha256:" + sha256_hex(content)
-
-
-def _named(path: str) -> str:
-    return f"`{visible(path)}`"
+# Refusing
 
 
 def _refused(problem: str) -> TrialFolioError:
@@ -1444,3 +1450,20 @@ def _refused(problem: str) -> TrialFolioError:
         f" {problem} Nothing was sent or written. Restore the experiment's records from a"
         " complete copy, or run the configuration into a new output directory.",
     )
+
+
+def _unknown_version(path: str, problem: str) -> TrialFolioError:
+    return TrialFolioError(
+        "artifact.unknown_schema_version",
+        f"Trial Folio can't read {named(path)} in the output directory: {problem} Resume the"
+        " experiment with a version of Trial Folio that has one. Nothing was sent or written.",
+    )
+
+
+_CHECKS: Final = RecordChecks(
+    refused=_refused,
+    unknown_version=_unknown_version,
+    readable=_READABLE,
+    manifest="the latest manifest",
+)
+"""The checks `read_experiment` shares with a run's reader, which refuse as it does."""

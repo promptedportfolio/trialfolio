@@ -23,18 +23,18 @@ result's run by its label and path, and in logs by its position.
 `check_run` reads it the same way, and also gives back the bytes it checked, from which a review
 writes its copies, so a file changed after the check can't be copied.
 
+The checks it shares with an experiment's reader, `experiment_records.py`, are in
+`record_checks.py`.
+
 A `SavedRun` is also what the report renders when `run` writes it, before the manifest.
 """
 
-import json
 import re
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final, cast
-
-from pydantic import BaseModel, ValidationError
 
 from trialfolio.attempts import (
     ATTEMPT_RECORD,
@@ -43,15 +43,21 @@ from trialfolio.attempts import (
     attempt_status,
     check_records,
 )
-from trialfolio.canonical import sha256_hex
 from trialfolio.contracts.attempt import ArtifactReference, AttemptRecord, StartRecord
 from trialfolio.contracts.manifest import ArtifactRole, ManifestArtifact, RunManifest
 from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, SettingsRow
-from trialfolio.display import visible
 from trialfolio.errors import ErrorCode, TrialFolioError, reason_of
-from trialfolio.normalization import METRICS, METRICS_PATH, SETTINGS_PATH
-from trialfolio.planning import plan_hash
+from trialfolio.normalization import METRICS_PATH, SETTINGS_PATH
+from trialfolio.record_checks import (
+    RecordChecks,
+    drawn_from,
+    holds_each_metric,
+    holds_each_setting,
+    labeled,
+    matches,
+    named,
+)
 from trialfolio.storage import ArtifactStore
 from trialfolio.tables import read_metrics_csv, read_settings_csv
 
@@ -74,8 +80,6 @@ _ATTEMPT_DIRECTORY: Final = re.compile(
     r"cases/(?P<case_id>case-[0-9a-f]{16})/attempts/"
     r"(?P<attempt_id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
 )
-_METRIC_ROWS: Final = tuple((metric.subject, metric.metric_id, metric.unit) for metric in METRICS)
-"""`metrics.csv`'s rows, in order, by subject and `metric_id`, with the unit the layout fixes."""
 _RESPONSE_ROLES: Final[dict[str, ArtifactRole]] = {
     "decoded": "provider_response",
     "undecoded": "provider_response_undecoded",
@@ -188,11 +192,11 @@ def _read_manifest(store: ArtifactStore) -> bytes:
 
 
 def _manifest(content: bytes) -> RunManifest:
-    fields = _json_object(content, MANIFEST_PATH)
+    fields = _CHECKS.json_object(content, MANIFEST_PATH)
     if fields.get("artifact_type") != "run":
         raise _not_a_run("its manifest.json isn't a run's manifest.")
-    _check_version(fields.get("schema_version"), MANIFEST_PATH, "manifest")
-    return _validated(RunManifest, content, MANIFEST_PATH, "run manifest")
+    _CHECKS.check_version(fields.get("schema_version"), MANIFEST_PATH, "manifest")
+    return _CHECKS.validated(RunManifest, content, MANIFEST_PATH, "run manifest")
 
 
 def _listed(store: ArtifactStore, artifact: ManifestArtifact) -> bytes:
@@ -200,14 +204,14 @@ def _listed(store: ArtifactStore, artifact: ManifestArtifact) -> bytes:
     try:
         content = store.read(artifact.path)
     except FileNotFoundError:
-        raise _not_a_run(f"its manifest lists {_named(artifact.path)}, which is missing.") from None
+        raise _not_a_run(f"its manifest lists {named(artifact.path)}, which is missing.") from None
     except OSError as error:
         raise _not_a_run(
-            f"{_named(artifact.path)}, which its manifest lists, can't be read ({reason_of(error)})."
+            f"{named(artifact.path)}, which its manifest lists, can't be read ({reason_of(error)})."
         ) from None
-    if len(content) != artifact.size or "sha256:" + sha256_hex(content) != artifact.artifact_id:
+    if not matches(content, artifact):
         raise _not_a_run(
-            f"{_named(artifact.path)} doesn't match its artifact_id in the manifest, so it changed"
+            f"{named(artifact.path)} doesn't match its artifact_id in the manifest, so it changed"
             " after the run wrote it."
         )
     return content
@@ -216,19 +220,8 @@ def _listed(store: ArtifactStore, artifact: ManifestArtifact) -> bytes:
 def _plan(manifest: RunManifest, contents: dict[str, bytes]) -> Plan:
     _only(manifest, "plan", PLAN_PATH)
     _only(manifest, "configuration", CONFIGURATION_PATH)
-    content = contents[PLAN_PATH]
-    _check_version(_json_object(content, PLAN_PATH).get("schema_version"), PLAN_PATH, "plan")
-    plan = _validated(Plan, content, PLAN_PATH, "plan")
-    try:
-        recomputed = plan_hash(plan)
-    except ValueError as error:
-        # The message names the kind of value canonical JSON can't write, never the value.
-        raise _not_a_run(f"its plan.json can't be hashed ({error}).") from None
-    if recomputed != plan.plan_hash:
-        raise _not_a_run(
-            "its plan.json doesn't recompute to its plan_hash, so the plan changed after it was"
-            " approved."
-        )
+    plan = _CHECKS.record(Plan, contents[PLAN_PATH], PLAN_PATH, "plan")
+    _CHECKS.check_plan_hash(plan, "its plan.json")
     if manifest.plan_hash != plan.plan_hash:
         raise _not_a_run("its manifest names another plan than its plan.json.")
     return plan
@@ -238,7 +231,7 @@ def _only(manifest: RunManifest, role: ArtifactRole, path: str) -> ManifestArtif
     listed = [artifact for artifact in manifest.artifacts if artifact.role == role]
     if len(listed) != 1 or listed[0].path != path:
         raise _not_a_run(f"its manifest doesn't list {path} as the run's one {role}.")
-    _check_version(listed[0].schema_version, listed[0].path, role, listed=True)
+    _CHECKS.check_version(listed[0].schema_version, listed[0].path, role, listed=True)
     return listed[0]
 
 
@@ -255,18 +248,16 @@ def _attempts(
         expected = START_RECORD if artifact.role == "start_record" else ATTEMPT_RECORD
         if place is None or place["case_id"] != case.case_id or name != expected:
             raise _not_a_run(
-                f"its manifest lists {_named(artifact.path)} as an attempt's {expected}, but it"
+                f"its manifest lists {named(artifact.path)} as an attempt's {expected}, but it"
                 " isn't one in an attempt's directory of the plan's case."
             )
-        _check_version(artifact.schema_version, artifact.path, artifact.role, listed=True)
+        _CHECKS.check_version(artifact.schema_version, artifact.path, artifact.role, listed=True)
         content = contents[artifact.path]
-        version = _json_object(content, artifact.path).get("schema_version")
-        _check_version(version, artifact.path, artifact.role)
         start, record = records.get(directory, (None, None))
         if artifact.role == "start_record":
-            start = _validated(StartRecord, content, artifact.path, "start record")
+            start = _CHECKS.record(StartRecord, content, artifact.path, artifact.role)
         else:
-            record = _validated(AttemptRecord, content, artifact.path, "attempt record")
+            record = _CHECKS.record(AttemptRecord, content, artifact.path, artifact.role)
         records[directory] = (start, record)
     listed = {artifact.path: artifact for artifact in manifest.artifacts}
     attempts: list[SavedAttempt] = []
@@ -275,10 +266,10 @@ def _attempts(
         try:
             check_records(start, record, case.case_id, uuid.UUID(attempt_id))
         except ValueError as error:
-            raise _not_a_run(f"the records in {_named(directory)} don't agree: {error}.") from None
+            raise _not_a_run(f"the records in {named(directory)} don't agree: {error}.") from None
         for read in (start, record):
             if read is not None and read.plan_hash != plan.plan_hash:
-                raise _not_a_run(f"the records in {_named(directory)} name another plan.")
+                raise _not_a_run(f"the records in {named(directory)} name another plan.")
         if record is not None:
             _check_references(record, listed)
         attempts.append(SavedAttempt(start, record))
@@ -299,7 +290,7 @@ def _check_references(record: AttemptRecord, listed: dict[str, ManifestArtifact]
             role,
         ):
             raise _not_a_run(
-                f"an attempt record references {_named(reference.path)}, which its manifest"
+                f"an attempt record references {named(reference.path)}, which its manifest"
                 " doesn't list as that file."
             )
 
@@ -315,89 +306,33 @@ def _tables(
         return None, None
     _only(manifest, "metrics", METRICS_PATH)
     _only(manifest, "settings", SETTINGS_PATH)
-    try:
-        metrics = read_metrics_csv(contents[METRICS_PATH], f"its {_named(METRICS_PATH)}")
-        settings = read_settings_csv(contents[SETTINGS_PATH], f"its {_named(SETTINGS_PATH)}")
-    except TrialFolioError as error:
-        # The tables' messages name the line and the column, never a value.
-        raise _not_a_run(error.message) from None
+    metrics = _CHECKS.table_rows(read_metrics_csv, contents[METRICS_PATH], METRICS_PATH)
+    settings = _CHECKS.table_rows(read_settings_csv, contents[SETTINGS_PATH], SETTINGS_PATH)
     (case,) = plan.cases
-    if any(row.label != case.case_id for row in (*metrics, *settings)):
+    if not labeled((*metrics, *settings), case.case_id):
         raise _not_a_run(
             "its normalized tables label their rows with another case than the plan's."
         )
-    if tuple((row.subject, row.metric_id, row.unit) for row in metrics) != _METRIC_ROWS:
+    if not holds_each_metric(metrics):
         raise _not_a_run(
             "its metrics.csv doesn't hold one row for each of the layout's metrics, in order,"
             " each in the metric's unit."
         )
-    if tuple(row.setting for row in settings) != tuple(s.setting for s in case.settings):
+    if not holds_each_setting(settings, case.settings):
         raise _not_a_run(
             "its settings.csv doesn't hold one row for each of the plan's settings, in order."
         )
     (configuration,) = (a for a in manifest.artifacts if a.role == "configuration")
-    if any(row.source_artifact != configuration.artifact_id for row in settings):
+    if not drawn_from(settings, configuration.artifact_id):
         raise _not_a_run("its settings.csv was drawn from another configuration than the run's.")
-    responses = {
+    responses = (
         attempt.record.response.artifact_id
         for attempt in attempts
         if attempt.record is not None and attempt.record.response is not None
-    }
-    if any(row.source_artifact not in responses for row in metrics):
+    )
+    if not drawn_from(metrics, *responses):
         raise _not_a_run("its metrics.csv was drawn from another response than the run's.")
     return metrics, settings
-
-
-def _json_object(content: bytes, path: str) -> dict[str, object]:
-    try:
-        loaded: object = json.loads(content)
-    except (UnicodeDecodeError, ValueError, RecursionError):
-        raise _not_a_run(f"{_named(path)} isn't JSON.") from None
-    if not isinstance(loaded, dict):
-        raise _not_a_run(f"{_named(path)} isn't a JSON object.")
-    return cast("dict[str, object]", loaded)
-
-
-def _check_version(version: object, path: str, kind: str, *, listed: bool = False) -> None:
-    """Checks a schema version, from the file itself or, when `listed`, from its manifest entry,
-    where a file without one has none."""
-    if kind not in _SCHEMA_VERSIONS:
-        return
-    name, readable = _SCHEMA_VERSIONS[kind]
-    if (listed and version is None) or version in readable:
-        return
-    if not isinstance(version, str):
-        raise _not_a_run(f"{_named(path)} has no schema version.")
-    where = "its manifest gives it" if listed else "it has"
-    raise _Refused(
-        "artifact.unknown_schema_version",
-        lambda run: (
-            f"Trial Folio can't read {_named(path)} in {run}: {where} a schema version this"
-            f" version has no reader for. It reads {name} {' or '.join(readable)}. Read the run"
-            " with a version of Trial Folio that has one. Nothing was written."
-        ),
-    )
-
-
-def _validated[M: BaseModel](model: type[M], content: bytes, path: str, what: str) -> M:
-    try:
-        return model.model_validate_json(content)
-    except ValidationError as error:
-        # Only the model's own fields are named: an unexpected key is text from the file.
-        details = error.errors(include_url=False, include_input=False, include_context=False)
-        named = sorted(
-            {
-                str(detail["loc"][0])
-                for detail in details
-                if detail["loc"] and detail["loc"][0] in model.model_fields
-            }
-        )
-        check = f"check `{'`, `'.join(named)}`" if named else "check its fields"
-        raise _not_a_run(f"{_named(path)} isn't a valid {what}: {check}.") from None
-
-
-def _named(path: str) -> str:
-    return f"`{visible(path)}`"
 
 
 class _Refused(Exception):
@@ -422,3 +357,22 @@ def _not_a_run(problem: str) -> _Refused:
             " `trialfolio run` or `trialfolio demo` wrote it."
         ),
     )
+
+
+def _unknown_version(path: str, problem: str) -> _Refused:
+    return _Refused(
+        "artifact.unknown_schema_version",
+        lambda run: (
+            f"Trial Folio can't read {named(path)} in {run}: {problem} Read the run with a version"
+            " of Trial Folio that has one. Nothing was written."
+        ),
+    )
+
+
+_CHECKS: Final = RecordChecks(
+    refused=_not_a_run,
+    unknown_version=_unknown_version,
+    readable=_SCHEMA_VERSIONS,
+    manifest="its manifest",
+)
+"""The checks `check_run` shares with an experiment's reader, which refuse as it does."""
