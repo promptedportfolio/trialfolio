@@ -27,6 +27,9 @@ case; `ranking-budget-raised.yaml` keeps them all; and `ranking-from-formula.yam
 record's entries written with `set` and `remove` null. A change of the definition's source alone
 is a change of `ranking_source`. The configuration that gives the current plan resumes it, as
 docs/contracts.md's running an experiment says, a plan that revises another included.
+
+Also to R01-AC05: a version no release verified fails with `environment.unsupported` in both of
+0.4.0's planners.
 """
 
 import hashlib
@@ -567,10 +570,13 @@ def test_a_case_without_a_definition_keeps_the_case_id_0_3_0_gave() -> None:
         read_experiment_configuration(path.read_bytes(), path.name), VERSIONS
     )
     screen = SCREENS / "formula.yaml"
-    read = read_screen_configuration_v1_1(screen.read_bytes(), screen.name, screen)
-    assert build_plan_v1_1(read, VERSIONS) == build_plan(
-        read_screen_configuration(screen.read_bytes(), screen.name), VERSIONS
-    )
+    screen_text = screen.read_text(encoding="utf-8")
+    screen_1_1_0 = screen_text.replace("schema_version: 1.0.0\n", "schema_version: 1.1.0\n")
+    assert screen_1_1_0 != screen_text
+    screen_plan = build_plan(read_screen_configuration(screen.read_bytes(), screen.name), VERSIONS)
+    for text in (screen_text, screen_1_1_0):
+        read = read_screen_configuration_v1_1(text.encode(), screen.name, screen)
+        assert build_plan_v1_1(read, VERSIONS) == screen_plan
 
 
 def test_a_baseline_named_by_a_snapshot_isn_t_planned_until_its_definition_is_read(
@@ -594,14 +600,24 @@ def test_a_baseline_named_by_a_snapshot_isn_t_planned_until_its_definition_is_re
         build_experiment_plan_v1_1(read, VERSIONS)
 
 
-def test_a_version_no_release_verified_isn_t_planned() -> None:
-    path = EXPERIMENTS / "ranking-example.yaml"
-    read = read_experiment_configuration_v1_1(path.read_bytes(), path.name, path)
+@pytest.mark.parametrize("kind", ["screen", "experiment"])
+def test_a_version_no_release_verified_isn_t_planned(kind: str) -> None:
+    unverified = Versions("0.4.0", "3.1.0", "2.34.3", "2.8.0")
 
     with pytest.raises(TrialFolioError) as raised:
-        build_experiment_plan_v1_1(read, Versions("0.4.0", "3.1.0", "2.34.3", "2.8.0"))
+        if kind == "screen":
+            path = SCREENS / "definition.yaml"
+            build_plan_v1_1(
+                read_screen_configuration_v1_1(path.read_bytes(), path.name, path), unverified
+            )
+        else:
+            path = EXPERIMENTS / "ranking-example.yaml"
+            build_experiment_plan_v1_1(
+                read_experiment_configuration_v1_1(path.read_bytes(), path.name, path), unverified
+            )
 
     assert raised.value.code == "environment.unsupported"
+    assert "The installed requests is 2.34.3." in raised.value.message
 
 
 # Revisions
