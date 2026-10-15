@@ -1,9 +1,9 @@
 # Invalid experiment configurations
 
-Each file breaks exactly one rule of the [experiment configuration](../../../../docs/contracts.md#experiment-configuration), or of the rules for [every configuration file](../../../../docs/contracts.md#configuration-files), and is otherwise the [documented example](../../../../docs/contracts.md#experiment-example), which `../example.yaml` copies. Release 0.3.0's [test pairing](../../../../docs/releases/0.3.0-experiments.md#invalid-experiment-configuration-cases) lists them by group. `tests/contract/test_experiment_configuration.py` reads each one, expects `config.invalid`, and expects the message to name the key on the file's `# Key:` line, where `-` means the file as a whole. The message never holds the offending value, given on the file's `# Value:` line, or any variant's key, which is the user's text: it names a variant by its place, such as `variants.max_holdings[0]`. `-` on the `# Value:` line means there's no value to look for: the key is missing, the value is empty or blank, the problem is the file as a whole, or the value is a word the rule itself names, as `key-baseline.yaml`'s `baseline` is. A value longer than 80 characters is `-` there too: the test also checks that no value of 20 characters or more in the file appears in the message.
+Each file breaks exactly one rule of the [experiment configuration](../../../../docs/contracts.md#experiment-configuration), or of the rules for [every configuration file](../../../../docs/contracts.md#configuration-files), and is otherwise the [documented example](../../../../docs/contracts.md#experiment-example), which `../example.yaml` copies, or, for [a ranking definition](#a-ranking-definition-from-110)'s files, the [ranking example](../../../../docs/contracts.md#ranking-example). Release 0.3.0's [test pairing](../../../../docs/releases/0.3.0-experiments.md#invalid-experiment-configuration-cases) lists them by group, and release 0.4.0's [invalid ranking cases](../../../../docs/releases/0.4.0-ranking-weights.md#invalid-ranking-cases) the ranking definition's. `tests/contract/test_experiment_configuration.py` reads each one with the reader of both versions, expects `config.invalid`, and expects the message to name the key on the file's `# Key:` line, where `-` means the file as a whole. The message never holds the offending value, given on the file's `# Value:` line, or any variant's key, which is the user's text: it names a variant by its place, such as `variants.max_holdings[0]`. `-` on the `# Value:` line means there's no value to look for: the key is missing, the value is empty or blank, the problem is the file as a whole, or the value is a word the rule itself names, as `key-baseline.yaml`'s `baseline` is. A value longer than 80 characters is `-` there too: the test also checks that no value of 20 characters or more in the file appears in the message.
 
 - **Origin:** written for Trial Folio's tests by R03-T06, each from the documented example. Synthetic: the keys, descriptions, and other text are invented, and no value comes from Portfolio123 or from the owner's account.
-- **Schema version:** experiment configuration 1.0.0.
+- **Schema version:** experiment configuration 1.0.0, and 1.1.0 for the ranking definition's files but `baseline-definition-in-1.0.0.yaml`.
 - **Redistribution:** synthetic, so they may be committed and shared.
 - **Criteria:** the experiment configuration's rules, in release 0.3.0's [other checks in the default suite](../../../../docs/releases/0.3.0-experiments.md#test-pairing). The test pairing also runs `misspelled-key.yaml`, `variant-universe.yaml`, and `budget-below-cases.yaml` through the CLI, in `tests/interface/test_run_validation.py`, once `run` reads an experiment configuration.
 
@@ -78,7 +78,7 @@ A new rule needs a new file, and a row here. The test checks that these tables a
 | File | Rule it breaks | Key |
 |---|---|---|
 | `variant-universe.yaml` | A variant may change only `rules`, `max_holdings`, `rebalance_weeks`, and `slippage_percent`, never `universe` | `variants.universe` |
-| `variant-ranking.yaml` | A variant may change only `rules`, `max_holdings`, `rebalance_weeks`, and `slippage_percent`, never `ranking` | `variants.ranking` |
+| `variant-ranking.yaml` | In a 1.0.0 file, a variant may change only `rules`, `max_holdings`, `rebalance_weeks`, and `slippage_percent`: a ranking variant needs `schema_version` 1.1.0 | `variants.ranking` |
 | `variant-benchmark.yaml` | A variant may change only `rules`, `max_holdings`, `rebalance_weeks`, and `slippage_percent`, never `benchmark` | `variants.benchmark` |
 | `variant-start-date.yaml` | A variant may change only `rules`, `max_holdings`, `rebalance_weeks`, and `slippage_percent`, never `start_date` | `variants.start_date` |
 | `variants-empty.yaml` | `variants`, when it's given, holds at least one key | `variants` |
@@ -144,3 +144,41 @@ A new rule needs a new file, and a row here. The test checks that these tables a
 | `budget-zero.yaml` | `budget.provider_requests` is 1 or more | `budget.provider_requests` |
 | `budget-string.yaml` | `budget.provider_requests` is an integer, never text | `budget.provider_requests` |
 | `budget-float.yaml` | `budget.provider_requests` is an integer, never `6.0` | `budget.provider_requests` |
+
+## A ranking definition, from 1.1.0
+
+R04-T05 wrote these, from the [ranking example](../../../../docs/contracts.md#ranking-example), whose definition each names by its path from this directory, `../ranking/value-momentum.xml`, which R04-T06 writes. Each fails by the rules of the configuration's keys and values, before any file is read. The ranking variants' other cases, which depend on what a path names in the definition, are R04-T06's.
+
+### The baseline's ranking
+
+| File | Rule it breaks | Key |
+|---|---|---|
+| `baseline-definition-in-1.0.0.yaml` | A baseline ranked by a definition needs `schema_version` 1.1.0 | `baseline.ranking` |
+| `baseline-ranking-method-missing.yaml` | The baseline's `ranking_method` is required with `definition`, as a screen configuration's is | `baseline.ranking.ranking_method` |
+
+### A ranking variant's keys
+
+| File | Rule it breaks | Key |
+|---|---|---|
+| `ranking-variant-formula-baseline.yaml` | A ranking variant needs a baseline ranked by a definition or a snapshot: a formula has no nodes to vary | `variants.ranking` |
+| `remove-without-set.yaml` | A removal variant gives `set`, the weights of the nodes left beside the factor it removes | `variants.ranking[2].set` |
+| `set-in-max-holdings.yaml` | A variant of `max_holdings` has no `set` | `variants.max_holdings[0].set` |
+| `remove-in-rules.yaml` | A variant of `rules` has no `remove` | `variants.rules[0].remove` |
+| `value-in-ranking.yaml` | A ranking variant has no `value` | `variants.ranking[0].value` |
+| `empty-ranking-list.yaml` | A variant list holds at least one entry | `variants.ranking` |
+| `budget-below-two-per-case.yaml` | With a ranking definition, `budget.provider_requests` is at least twice the number of cases: 8 for four cases | `budget.provider_requests` |
+
+### A `set`'s paths and weights
+
+Written ahead of R04-T06, whose row gives the ranking variants' invalid configurations, because the configuration's reader applies these rules: a `set`'s paths are keys, and each weight is a decimal greater than 0. Each message names the entry by its place, never by its path, which the `# Value:` line gives.
+
+| File | Rule it breaks | Key |
+|---|---|---|
+| `set-path-twice.yaml` | A `set`'s paths are keys, so a path written twice is rejected | `variants.ranking[0].set[2]` |
+| `set-credential-path.yaml` | A `set`'s paths are keys, so one that holds a credential-like word is rejected: its node is named by its position instead | `variants.ranking[0].set[2]` |
+| `path-unquoted-key.yaml` | A node path is written in quotes, as a key too | `variants.ranking[1].set[0]` |
+| `remove-unquoted.yaml` | A node path is written in quotes | `variants.ranking[2].remove` |
+| `set-weight-zero.yaml` | A variant's weight is greater than 0: Portfolio123 reads 0 as equal weighting | `variants.ranking[0].set[1]` |
+| `set-weight-string.yaml` | A variant's weight is a number, never text | `variants.ranking[0].set[0]` |
+| `set-weight-negative.yaml` | A variant's weight is written without a sign | `variants.ranking[0].set[1]` |
+| `set-weight-five-decimals.yaml` | A variant's weight has at most 4 digits after the decimal point | `variants.ranking[0].set[0]` |

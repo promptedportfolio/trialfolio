@@ -2,6 +2,10 @@
 version 1.0.0 (docs/contracts.md, the experiment manifest). Each run that reaches its end writes
 one, last. It records the experiment as the run left it: a run's manifest, with the experiment,
 the session, the plan, and the experiment's counts.
+
+Version 1.1.0, `ExperimentManifestV1_1`, is written by each session of an experiment any of whose
+plans is plan 1.3.0: 1.0.0's fields, with the roles and source records of the files a ranking
+definition adds, each at its place in the layout.
 """
 
 import re
@@ -35,6 +39,8 @@ from trialfolio.contracts.manifest import (
     ParserVersion,
     Reproducibility,
     SourceRecord,
+    SourceRecordV1_1,
+    check_ranking_artifact,
 )
 
 ExperimentArtifactRole = Literal[
@@ -82,7 +88,9 @@ _ROLE_PATTERNS: Final[dict[ExperimentArtifactRole, str]] = {
     "report": rf"{_SESSION}report\.html",
 }
 
-ROLE_PATHS: Final = {role: re.compile(pattern) for role, pattern in _ROLE_PATTERNS.items()}
+ROLE_PATHS: Final[dict[str, re.Pattern[str]]] = {
+    role: re.compile(pattern) for role, pattern in _ROLE_PATTERNS.items()
+}
 """Where the file of each role is in the experiment's output directory (experiment output)."""
 
 _PLAN_ROLES: Final[frozenset[ExperimentArtifactRole]] = frozenset(
@@ -104,25 +112,38 @@ class ExperimentArtifact(ContractModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        if (self.source is None) == (self.role in SOURCE_ROLES):
-            raise ValueError("source must be given exactly for source artifacts")
-        if not ROLE_PATHS[self.role].fullmatch(self.path):
-            raise ValueError(f"a file of the role {self.role} isn't at this path")
-        if (
-            self.role == "configuration"
-            and self.source is not None
-            and (
-                self.source.format != EXPERIMENT_CONFIGURATION_FORMAT
-                or self.source.parser_version is not None
-                or self.source.provenance != "user_supplied"
-                or self.source.operation is not None
-            )
-        ):
-            raise ValueError(
-                "a configuration's source record gives the experiment-configuration format, "
-                "user_supplied provenance, and no parser version or provider operation"
-            )
+        _check_artifact(self, SOURCE_ROLES, ROLE_PATHS)
         return self
+
+
+def _check_artifact(
+    artifact: "ExperimentArtifact | ExperimentArtifactV1_1",
+    source_roles: frozenset[str],
+    role_paths: dict[str, re.Pattern[str]],
+) -> None:
+    """Raises `ValueError` unless the file has a source record exactly when its role is a source
+    artifact's, is at its role's place in the layout, and, for a configuration, gives the
+    experiment-configuration format, `user_supplied` provenance, and no parser version or
+    provider operation."""
+    source = artifact.source
+    if (source is None) == (artifact.role in source_roles):
+        raise ValueError("source must be given exactly for source artifacts")
+    if not role_paths[artifact.role].fullmatch(artifact.path):
+        raise ValueError(f"a file of the role {artifact.role} isn't at this path")
+    if (
+        artifact.role == "configuration"
+        and source is not None
+        and (
+            source.format != EXPERIMENT_CONFIGURATION_FORMAT
+            or source.parser_version is not None
+            or source.provenance != "user_supplied"
+            or source.operation is not None
+        )
+    ):
+        raise ValueError(
+            "a configuration's source record gives the experiment-configuration format, "
+            "user_supplied provenance, and no parser version or provider operation"
+        )
 
 
 @with_config(ConfigDict(strict=True, extra="forbid"))
@@ -251,53 +272,184 @@ class ExperimentManifest(ContractModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        outcome: CommandOutcome = self.outcome
-        check_outcome(outcome, self.error)
-        cases = self.counts.cases
-        if (outcome == "completed") != (cases.succeeded == cases.planned):
-            raise ValueError("the outcome is completed exactly when every planned case succeeded")
-        if (self.approval == "not_required") != self.synthetic:
-            raise ValueError("approval is not_required exactly for a synthetic experiment")
-        if self.synthetic and self.command is not None:
-            raise ValueError("no trialfolio command writes a synthetic experiment")
-        require_unique(tuple(artifact.path for artifact in self.artifacts), "artifact paths")
-        require_unique(
-            tuple(
-                (parser.layout, parser.layout_version, parser.parser_version)
-                for parser in self.parsers
-            ),
-            "parsers",
-        )
-        self._check_layout()
+        _check_manifest(self, ROLE_PATHS)
         return self
 
-    def _check_layout(self) -> None:
-        plans: Counter[tuple[str, ExperimentArtifactRole]] = Counter()
-        sessions: Counter[ExperimentArtifactRole] = Counter()
-        tables: Counter[tuple[str, ExperimentArtifactRole]] = Counter()
-        for artifact in self.artifacts:
-            # Each artifact checked its path against its role, so each is found.
-            found = ROLE_PATHS[artifact.role].fullmatch(artifact.path)
-            groups = found.groupdict() if found is not None else {}
-            if "plan" in groups:
-                if int(groups["plan"]) > self.plan:
-                    raise ValueError("no plan is newer than the current plan")
-                plans[(groups["plan"], artifact.role)] += 1
-            elif "session" in groups:
-                if int(groups["session"]) != self.session:
-                    raise ValueError("the manifest lists its own session's files, no other's")
-                sessions[artifact.role] += 1
-            elif "case" in groups:
-                tables[(groups["case"], artifact.role)] += 1
-        # The first plan is always recorded: a directory without it can't be resumed.
-        numbers = {number for number, _ in plans} | {"1", str(self.plan)}
-        if any(plans[(number, role)] != 1 for number in numbers for role in _PLAN_ROLES):
-            raise ValueError(
-                "each plan listed, the first and the current one included, has its "
-                "configuration, plan, and experiment record"
-            )
-        if sessions != Counter({"session_record": 1, "report": 1}):
-            raise ValueError("the manifest lists its session's record and report")
-        cases = {case for case, _ in tables}
-        if any(tables[(case, role)] != 1 for case in cases for role in ("metrics", "settings")):
-            raise ValueError("a case has both of its normalized tables, or neither")
+
+def _check_manifest(
+    manifest: "ExperimentManifest | ExperimentManifestV1_1", role_paths: dict[str, re.Pattern[str]]
+) -> None:
+    """Raises `ValueError` unless the manifest's outcome, approval, command, paths, and parsers
+    are consistent, and its files are the experiment's records' layout."""
+    outcome: CommandOutcome = manifest.outcome
+    check_outcome(outcome, manifest.error)
+    cases = manifest.counts.cases
+    if (outcome == "completed") != (cases.succeeded == cases.planned):
+        raise ValueError("the outcome is completed exactly when every planned case succeeded")
+    if (manifest.approval == "not_required") != manifest.synthetic:
+        raise ValueError("approval is not_required exactly for a synthetic experiment")
+    if manifest.synthetic and manifest.command is not None:
+        raise ValueError("no trialfolio command writes a synthetic experiment")
+    require_unique(tuple(artifact.path for artifact in manifest.artifacts), "artifact paths")
+    require_unique(
+        tuple(
+            (parser.layout, parser.layout_version, parser.parser_version)
+            for parser in manifest.parsers
+        ),
+        "parsers",
+    )
+    _check_layout(manifest, role_paths)
+
+
+def _check_layout(
+    manifest: "ExperimentManifest | ExperimentManifestV1_1", role_paths: dict[str, re.Pattern[str]]
+) -> None:
+    plans: Counter[tuple[str, str]] = Counter()
+    sessions: Counter[str] = Counter()
+    tables: Counter[tuple[str, str]] = Counter()
+    for artifact in manifest.artifacts:
+        # Each artifact checked its path against its role, so each is found.
+        found = role_paths[artifact.role].fullmatch(artifact.path)
+        groups = found.groupdict() if found is not None else {}
+        if "plan" in groups:
+            if int(groups["plan"]) > manifest.plan:
+                raise ValueError("no plan is newer than the current plan")
+            plans[(groups["plan"], artifact.role)] += 1
+        elif "session" in groups:
+            if int(groups["session"]) != manifest.session:
+                raise ValueError("the manifest lists its own session's files, no other's")
+            sessions[artifact.role] += 1
+        elif "case" in groups:
+            tables[(groups["case"], artifact.role)] += 1
+    # The first plan is always recorded: a directory without it can't be resumed.
+    numbers = {number for number, _ in plans} | {"1", str(manifest.plan)}
+    if any(plans[(number, role)] != 1 for number in numbers for role in _PLAN_ROLES):
+        raise ValueError(
+            "each plan listed, the first and the current one included, has its "
+            "configuration, plan, and experiment record"
+        )
+    for number in numbers:
+        if plans[(number, "ranking_snapshot_record")] > plans[(number, "ranking_definition")]:
+            raise ValueError("a plan's snapshot record is listed only beside its definition's copy")
+    if sessions != Counter({"session_record": 1, "report": 1}):
+        raise ValueError("the manifest lists its session's record and report")
+    cases = {case for case, _ in tables}
+    if any(tables[(case, role)] != 1 for case in cases for role in ("metrics", "settings")):
+        raise ValueError("a case has both of its normalized tables, or neither")
+
+
+# Version 1.1.0: an experiment any of whose plans is plan 1.3.0.
+
+ExperimentArtifactRoleV1_1 = Literal[
+    "configuration",
+    "plan",
+    "experiment_record",
+    "ranking_definition",
+    "ranking_snapshot_record",
+    "authentication_record",
+    "update_record",
+    "start_record",
+    "attempt_record",
+    "rank_update_request",
+    "rank_update_response",
+    "rank_update_response_undecoded",
+    "provider_request",
+    "provider_response",
+    "provider_response_undecoded",
+    "metrics",
+    "settings",
+    "session_record",
+    "report",
+]
+"""1.0.0's roles, with those a ranking definition adds: a plan's `definition.xml` and
+`snapshot.json`, and an attempt's update record and `rank_update` files."""
+
+SOURCE_ROLES_V1_1: Final[frozenset[ExperimentArtifactRoleV1_1]] = frozenset(
+    {
+        *SOURCE_ROLES,
+        "ranking_definition",
+        "rank_update_request",
+        "rank_update_response",
+        "rank_update_response_undecoded",
+    }
+)
+"""The roles of source artifacts in experiment manifest 1.1.0 (INV-04, source artifacts)."""
+
+ROLE_PATHS_V1_1: Final[dict[str, re.Pattern[str]]] = {
+    **ROLE_PATHS,
+    "ranking_definition": re.compile(rf"{_PLAN}definition\.xml"),
+    "ranking_snapshot_record": re.compile(rf"{_PLAN}snapshot\.json"),
+    "update_record": re.compile(rf"{_ATTEMPT}updating\.json"),
+    "rank_update_request": re.compile(rf"{_ATTEMPT}rank-update-request\.json"),
+    "rank_update_response": re.compile(rf"{_ATTEMPT}rank-update-response\.json"),
+    "rank_update_response_undecoded": re.compile(rf"{_ATTEMPT}rank-update-response\.raw"),
+}
+"""Where the file of each role is, with a ranking definition's (experiment output)."""
+
+
+class ExperimentArtifactV1_1(ContractModel):
+    """One file of the records of an experiment with a ranking definition, by path, content
+    address, and role."""
+
+    path: RelativePath
+    artifact_id: Sha256Digest
+    size: Count
+    role: ExperimentArtifactRoleV1_1
+    schema_version: SemanticVersion | None
+    """The file's schema version, for files that have one."""
+    source: SourceRecordV1_1 | None
+    """Given exactly for source artifacts."""
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        _check_artifact(self, SOURCE_ROLES_V1_1, ROLE_PATHS_V1_1)
+        check_ranking_artifact(self.role, self.path, self.schema_version, self.source)
+        return self
+
+
+class ExperimentManifestV1_1(ContractModel):
+    """The manifest a session of an experiment with a ranking definition writes last: 1.0.0's,
+    with the files the definition adds. Its counts' `provider_requests` count both kinds of
+    request, and `cost` sums the costs reported for both."""
+
+    schema_version: Literal["1.1.0"]
+    artifact_type: Literal["experiment"]
+    trialfolio_version: SemanticVersion
+    created_at: UtcDatetime
+    experiment_id: ExperimentKey
+    session: Ordinal
+    """The number of the session that wrote it, in whose directory it is."""
+    command: ExperimentCommandRecord | None
+    """Null when no `trialfolio` command ran the session, as when the core runs it for another
+    interface, or writes a synthetic experiment."""
+    synthetic: bool
+    """True exactly for an experiment executed with the demo's client, which sends nothing. Its
+    values, attempts, and counts are invented."""
+    plan: Ordinal
+    """The current plan's number."""
+    plan_hash: Sha256Digest
+    approval: Approval
+    """How this run approved the current plan: `not_required` exactly for a synthetic
+    experiment."""
+    outcome: Literal["completed", "partial"]
+    """`completed` when every planned case succeeded, and `partial` otherwise."""
+    error: ErrorDetail | None
+    """Null when completed, and `execution.partial` when partial."""
+    artifacts: tuple[ExperimentArtifactV1_1, ...]
+    """Every file of the experiment's records: each plan's files, a definition's copy and a
+    snapshot's record included, each attempt's files, each case's tables, and this session's
+    record and report."""
+    parsers: Annotated[tuple[ParserVersion, ...], Field(min_length=1)]
+    """Each parser version that normalized a case's response, or the installed one's when none
+    did."""
+    license_id: LicenseId
+    notice_version: NonEmptyText
+    capabilities: Capabilities
+    reproducibility: Reproducibility
+    """Over the current plan's cases."""
+    counts: ExperimentManifestCounts
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        _check_manifest(self, ROLE_PATHS_V1_1)
+        return self

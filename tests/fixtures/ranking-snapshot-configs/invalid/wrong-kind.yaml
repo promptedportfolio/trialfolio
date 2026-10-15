@@ -1,0 +1,6 @@
+# Invalid: `kind` is `ranking-snapshot`.
+# Key: kind
+# Value: -
+kind: screen
+schema_version: 1.0.0
+system: 'Value and momentum'

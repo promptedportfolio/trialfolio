@@ -1,0 +1,10 @@
+# Invalid: A file holds one YAML document.
+# Key: -
+# Value: -
+kind: ranking-snapshot
+schema_version: 1.0.0
+system: 'Value and momentum'
+---
+kind: ranking-snapshot
+schema_version: 1.0.0
+system: 'Value and momentum'

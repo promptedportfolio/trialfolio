@@ -1,0 +1,6 @@
+# Invalid: A file is a mapping of keys to values.
+# Key: -
+# Value: -
+- kind: ranking-snapshot
+- schema_version: 1.0.0
+- system: 'Value and momentum'

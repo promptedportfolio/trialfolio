@@ -9,10 +9,22 @@ fails with `config.invalid`, and the message names the offending key, or a varia
 never by its key or its value. The other tests trace to the experiment configuration's keys and
 rules, its default variant, and the order of its cases, and to the rules for every configuration
 file. R03-T06 wrote them.
+
+Experiment configuration 1.1.0's tests, at the end, trace to R04-AC02's ranking variants and
+baseline, as release 0.4.0's test pairing gives them for `test_experiment_configuration.py`: each
+invalid configuration fails with `config.invalid`, and the message names a ranking variant's
+`set` entry by its place, never by its path; a 1.0.0 file with a ranking variant, or a baseline
+ranked by a definition, says they need 1.1.0; and a budget is at least two requests a case. Also
+to the ranking example's structure, which the configuration's reader accepts. R04-T05 wrote
+them, with the reader of both versions, which the invalid files' test uses. Until R04-T12,
+`trialfolio run` reads with the 1.0.0 reader, which refuses 1.1.0, so that reader's messages for
+such a file stay 0.3.0's, as the R04-T05 details in release 0.4.0's changes after sign-off give
+them. What a path names in the definition, and the example's cases, are R04-T06's.
 """
 
 import json
 import re
+from collections.abc import Callable
 from copy import deepcopy
 from datetime import date
 from decimal import Decimal
@@ -22,11 +34,19 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from trialfolio.configuration import read_experiment_configuration, read_screen_configuration
+from trialfolio.configuration import (
+    read_experiment_configuration,
+    read_experiment_configuration_v1_1,
+    read_run_configuration,
+    read_screen_configuration,
+)
 from trialfolio.contracts.common import WINDOWS_DEVICE_NAMES
 from trialfolio.contracts.experiment_configuration import (
     ExperimentConfiguration,
+    ExperimentConfigurationV1_1,
+    RankingVariant,
     configured_variants,
+    configured_variants_v1_1,
 )
 from trialfolio.contracts.plan import screen_backtest_params
 from trialfolio.contracts.screen_configuration import ScreenFields
@@ -55,12 +75,16 @@ def example() -> str:
     return documented_examples()[0]
 
 
-def rejection(content: bytes | str, source_name: str = "experiment.yaml") -> str:
+def rejection(
+    content: bytes | str,
+    source_name: str = "experiment.yaml",
+    reader: Callable[[bytes, str], object] = read_experiment_configuration,
+) -> str:
     """Reads `content`, expects `config.invalid`, and returns the message."""
     if isinstance(content, str):
         content = content.encode()
     with pytest.raises(TrialFolioError) as caught:
-        read_experiment_configuration(content, source_name)
+        reader(content, source_name)
     assert caught.value.code == "config.invalid"
     assert caught.value.log_message == caught.value.message
     return caught.value.message
@@ -169,7 +193,7 @@ def test_invalid_configuration_is_rejected_naming_its_key_never_its_value(path: 
     content = path.read_text(encoding="utf-8")
     key, value = header(content, "Key"), header(content, "Value")
 
-    message = rejection(path.read_bytes(), path.name)
+    message = rejection(path.read_bytes(), path.name, read_experiment_configuration_v1_1)
 
     assert message.startswith(f"{path.name} isn't a valid configuration:")
     if key != "-":
@@ -186,7 +210,7 @@ def test_invalid_configuration_is_rejected_naming_its_key_never_its_value(path: 
 
 def test_every_invalid_case_is_in_its_readme() -> None:
     readme = (INVALID / "README.md").read_text(encoding="utf-8")
-    listed = set(re.findall(r"^\| `([a-z0-9-]+)\.yaml` \|", readme, re.MULTILINE))
+    listed = set(re.findall(r"^\| `([a-z0-9.-]+)\.yaml` \|", readme, re.MULTILINE))
 
     assert listed == {path.stem for path in INVALID.glob("*.yaml")}
 
@@ -746,3 +770,360 @@ def test_model_rejects_what_the_contract_calls_invalid(path: str, value: object)
     ExperimentConfiguration.model_validate(VALID)
     with pytest.raises(ValidationError):
         ExperimentConfiguration.model_validate(changed(path, value))
+
+
+# Experiment configuration 1.1.0, from 0.4.0: a baseline ranked by a definition or a snapshot,
+# and ranking variants.
+
+
+def ranking_example() -> str:
+    """docs/contracts.md's ranking example: the experiment on `ranking/value-momentum.xml`."""
+    contracts = (REPO_ROOT / "docs" / "contracts.md").read_text(encoding="utf-8")
+    section = contracts[contracts.index("#### Ranking example") :]
+    return re.findall(r"```yaml\n(.*?)```", section, re.DOTALL)[0]
+
+
+def read_v1_1(content: str) -> ExperimentConfiguration | ExperimentConfigurationV1_1:
+    return read_experiment_configuration_v1_1(content.encode(), "experiment.yaml")
+
+
+def read_ranked(content: str) -> ExperimentConfigurationV1_1:
+    configuration = read_v1_1(content)
+    assert isinstance(configuration, ExperimentConfigurationV1_1)
+    return configuration
+
+
+def ranking_rejection(content: str) -> str:
+    return rejection(content, reader=read_experiment_configuration_v1_1)
+
+
+def ranking_line(old: str, new: str) -> str:
+    return with_line(old, new, ranking_example())
+
+
+VALUE_HEAVY = "      set: {'Value': 60, 'Momentum': 20, 'Quality': 20}"
+
+
+def test_the_ranking_example_reads_as_documented() -> None:
+    """Its structure: the baseline ranked by a definition file, with its ranking method, three
+    ranking variants, no default, and a budget of two requests a case. The definition, and the
+    cases it gives, are read with it (release 0.4.0's R04-T06)."""
+    configuration = read_v1_1(ranking_example())
+
+    assert isinstance(configuration, ExperimentConfigurationV1_1)
+    assert configuration.baseline.ranking.model_dump() == {
+        "definition": "ranking/value-momentum.xml",
+        "ranking_method": "percentile_nas_negative",
+    }
+    variants = configured_variants_v1_1(configuration)
+    assert [(variant.key, variant.setting, variant.place) for variant in variants] == [
+        ("value-heavy", "ranking", "variants.ranking[0]"),
+        ("tilt-earnings-yield", "ranking", "variants.ranking[1]"),
+        ("no-sales-yield", "ranking", "variants.ranking[2]"),
+    ]
+    changes = [variant.variant for variant in variants]
+    assert all(isinstance(change, RankingVariant) for change in changes)
+    assert [
+        (change.set, change.remove) for change in changes if isinstance(change, RankingVariant)
+    ] == [
+        ({"Value": Decimal(60), "Momentum": Decimal(20), "Quality": Decimal(20)}, None),
+        ({"Value/Earnings Yield": Decimal(70), "Value/Sales Yield": Decimal(30)}, None),
+        ({"Value/Earnings Yield": Decimal(100)}, "Value/Sales Yield"),
+    ]
+    assert all(variant.screen is None for variant in variants)
+    assert configuration.budget.provider_requests == 8
+
+
+def test_a_baseline_may_name_a_snapshot_instead() -> None:
+    """The example's second form: the snapshot's directory, and no `ranking_method`, which the
+    snapshot records."""
+    content = ranking_line(
+        "    definition: 'ranking/value-momentum.xml'\n    ranking_method: percentile_nas_negative",
+        "    snapshot: 'ranking/value-momentum/'",
+    )
+
+    configuration = read_v1_1(content)
+
+    assert configuration.baseline.ranking.model_dump() == {"snapshot": "ranking/value-momentum/"}
+
+
+def test_a_weight_is_read_as_a_normalized_decimal() -> None:
+    content = ranking_line(
+        VALUE_HEAVY, "      set: {'Value': 60.0, 'Momentum': 20.000, 'Quality': 20}"
+    )
+
+    variant = configured_variants_v1_1(read_ranked(content))[0].variant
+
+    assert isinstance(variant, RankingVariant)
+    assert [str(weight) for weight in variant.set.values()] == ["60", "20", "20"]
+
+
+def test_ranking_variants_come_after_rules_and_before_holdings() -> None:
+    """The order of cases: the variants of rules, ranking, max_holdings, rebalance_weeks, and
+    slippage_percent, the default in rebalance_weeks' place."""
+    content = ranking_line(
+        "  rebalance_weeks: []\n",
+        "  slippage_percent:\n    - key: slippage-050\n      value: 0.5\n"
+        "  max_holdings:\n    - key: holdings-50\n      value: 50\n"
+        "  rules:\n    - key: no-microcaps\n      add: 'MktCap > 300'\n",
+    )
+    content = with_line("provider_requests: 8", "provider_requests: 16", content)
+
+    variants = configured_variants_v1_1(read_ranked(content))
+
+    assert [variant.key for variant in variants] == [
+        "no-microcaps",
+        "value-heavy",
+        "tilt-earnings-yield",
+        "no-sales-yield",
+        "holdings-50",
+        "rebalance-weeks-1",
+        "slippage-050",
+    ]
+    assert [variant.default for variant in variants] == [False] * 5 + [True, False]
+    # A variant of another setting keeps the baseline's definition: its case's ranking is the
+    # baseline's.
+    holdings = variants[4].screen
+    assert holdings is not None and holdings.max_holdings == 50
+    assert holdings.ranking == read_v1_1(content).baseline.ranking
+
+
+def test_the_default_variant_counts_two_requests_with_a_definition() -> None:
+    """Without `rebalance_weeks`, the default is a fifth case, so the budget needs 10."""
+    content = ranking_line("  rebalance_weeks: []\n", "")
+
+    assert "less than the 10 requests the experiment's 5 cases need" in ranking_rejection(content)
+    assert read_v1_1(with_line("provider_requests: 8", "provider_requests: 10", content))
+
+
+def test_a_budget_of_two_requests_a_case_is_accepted() -> None:
+    assert read_v1_1(ranking_example()).budget.provider_requests == 8
+
+
+def test_a_1_1_0_baseline_ranked_by_a_formula_needs_one_request_a_case() -> None:
+    """Version 1.1.0 changes nothing for a baseline that isn't ranked by a definition."""
+    content = example().replace("schema_version: 1.0.0", "schema_version: 1.1.0", 1)
+
+    configuration = read_v1_1(content)
+
+    assert isinstance(configuration, ExperimentConfigurationV1_1)
+    assert [variant.key for variant in configured_variants_v1_1(configuration)] == [
+        variant.key for variant in configured_variants(read(example()))
+    ]
+    assert read_v1_1(with_line("provider_requests: 6", "provider_requests: 5", content))
+    budget = with_line("provider_requests: 6", "provider_requests: 4", content)
+    assert ranking_rejection(budget).endswith(
+        "`budget.provider_requests` is less than the experiment's 5 cases. It must be at least "
+        "the number of cases, so that each can be sent once."
+    )
+
+
+def test_a_ranking_variant_s_key_is_unique_among_the_cases() -> None:
+    content = ranking_line(
+        "  rebalance_weeks: []\n",
+        "  max_holdings:\n    - key: value-heavy\n      value: 50\n  rebalance_weeks: []\n",
+    )
+    content = with_line("provider_requests: 8", "provider_requests: 10", content)
+
+    assert "`variants.max_holdings[0].key` repeats the key of `variants.ranking[0]`" in (
+        ranking_rejection(content)
+    )
+
+
+def test_a_set_entry_is_named_by_its_place_never_by_its_path() -> None:
+    """A node path holds node names, the user's strategy definition, so no message holds one,
+    whatever rule the entry breaks (node paths)."""
+    paths = ["Momentum/Secret Price", "Value #2", "Quality"]
+    content = ranking_line(
+        VALUE_HEAVY,
+        f"      set: {{'{paths[0]}': 60, '{paths[1]}': '20', '{paths[2]}': 0, '{paths[1]}': 1}}",
+    )
+
+    message = ranking_rejection(content)
+
+    assert "`variants.ranking[0].set[0]`" in message
+    for path in paths:
+        assert path not in message
+    for path in ("Momentum", "Secret Price", "Value #2"):
+        assert path not in message
+
+
+def test_each_weight_problem_names_its_entry() -> None:
+    content = ranking_line(VALUE_HEAVY, "      set: {'Value': '60', 'Momentum': 0, 'Quality': 20}")
+
+    message = ranking_rejection(content)
+
+    assert "`variants.ranking[0].set[0]` must be a number written without quotes" in message
+    assert "`variants.ranking[0].set[1]` must be greater than 0" in message
+    assert "Value" not in message and "Momentum" not in message
+
+
+@pytest.mark.parametrize("weight", ["sixty", "60%"])
+def test_a_weight_written_as_plain_text_is_reported_as_a_weight(weight: str) -> None:
+    """A weight is never text, so a plain one is a weight written wrongly, not a node path
+    written without quotes: the entry's key, `'Value'`, is quoted."""
+    content = ranking_line(
+        VALUE_HEAVY, f"      set: {{'Value': {weight}, 'Momentum': 20, 'Quality': 20}}"
+    )
+
+    message = ranking_rejection(content)
+
+    assert message == (
+        "experiment.yaml isn't a valid configuration:\n"
+        "- `variants.ranking[0].set[0]` must be a number written without quotes, such as 0.25."
+    )
+
+
+def test_a_plain_path_with_a_plain_weight_is_reported_once_for_each() -> None:
+    content = ranking_line(VALUE_HEAVY, "      set: {Value: sixty, 'Momentum': 20, 'Quality': 20}")
+
+    message = ranking_rejection(content)
+
+    assert message.count("`variants.ranking[0].set[0]` is a node path written without quotes") == 1
+    assert (
+        message.count("`variants.ranking[0].set[0]` must be a number written without quotes") == 1
+    )
+
+
+def test_an_empty_set_names_its_variant() -> None:
+    message = ranking_rejection(ranking_line(VALUE_HEAVY, "      set: {}"))
+
+    assert "`variants.ranking[0].set` must hold at least 1 item." in message
+
+
+def test_a_set_s_paths_and_remove_may_be_in_double_quotes() -> None:
+    content = ranking_line(VALUE_HEAVY, '      set: {"Value": 60, "Momentum": 20, "Quality": 20}')
+    content = with_line(
+        "      remove: 'Value/Sales Yield'", '      remove: "Value/Sales Yield"', content
+    )
+
+    variants = configured_variants_v1_1(read_ranked(content))
+
+    assert [variant.key for variant in variants][-1] == "no-sales-yield"
+
+
+def test_a_1_0_0_file_can_t_vary_the_ranking() -> None:
+    path = INVALID / "variant-ranking.yaml"
+
+    message = rejection(path.read_bytes(), path.name, read_experiment_configuration_v1_1)
+
+    assert (
+        "`variants.ranking` needs schema_version 1.1.0, with a baseline ranked by a definition "
+        "or a snapshot. In 1.0.0, a variant may change rules, max_holdings, rebalance_weeks, or "
+        "slippage_percent." in message
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "problem"),
+    [
+        (
+            "variant-ranking.yaml",
+            (
+                "`variants.ranking` isn't a setting a variant may change. A variant may change "
+                "rules, max_holdings, rebalance_weeks, or slippage_percent."
+            ),
+        ),
+        (
+            "baseline-definition-in-1.0.0.yaml",
+            (
+                "`baseline.ranking` must hold exactly one of formula, name, or id. The supported "
+                "forms are {formula, lower_is_better}, {name}, and {id}."
+            ),
+        ),
+    ],
+    ids=["ranking-variant", "baseline-definition"],
+)
+@pytest.mark.parametrize(
+    "reader", [read_experiment_configuration, read_run_configuration], ids=["experiment", "run"]
+)
+def test_run_s_reader_gives_a_1_0_0_file_0_3_0_s_message(
+    name: str, problem: str, reader: Callable[[bytes, str], object]
+) -> None:
+    """`trialfolio run` refuses a 1.1.0 file until R04-T12, so it doesn't send a 1.0.0 file to
+    1.1.0: its message is the one 0.3.0 gave."""
+    path = INVALID / name
+
+    message = rejection(path.read_bytes(), path.name, reader)
+
+    assert message == f"{name} isn't a valid configuration:\n- {problem}"
+
+
+RANKED_BY_SALES = (
+    "  ranking:\n"
+    "    - key: ranked-by-sales\n"
+    "      value:\n"
+    "        formula: 'SalesGr%TTM'\n"
+    "        lower_is_better: false\n"
+)
+
+NOT_A_VARIANT_SETTING = (
+    "`variants.ranking` isn't a setting a variant may change. A variant may change rules, "
+    "max_holdings, rebalance_weeks, or slippage_percent."
+)
+
+
+@pytest.mark.parametrize(
+    ("variant", "problem"),
+    [
+        ("      set:\n        Value: 100\n", NOT_A_VARIANT_SETTING),
+        ("      remove: Value\n", NOT_A_VARIANT_SETTING),
+        (
+            "      set:\n        'Value': 1\n        'Value': 2\n",
+            "`variants.ranking[0].set.Value` appears more than once.",
+        ),
+        (
+            "      set:\n        'api_key': 1\n",
+            (
+                "`variants.ranking[0].set.api_key` looks like a credential. A configuration never "
+                "holds credentials: the CLI reads them from TRIALFOLIO_P123_API_ID and "
+                "TRIALFOLIO_P123_API_KEY."
+            ),
+        ),
+    ],
+    ids=["unquoted-path", "unquoted-remove", "path-twice", "credential-word"],
+)
+@pytest.mark.parametrize(
+    "reader", [read_experiment_configuration, read_run_configuration], ids=["experiment", "run"]
+)
+def test_run_s_reader_reads_a_1_0_0_ranking_variant_s_keys_as_0_3_0_did(
+    variant: str, problem: str, reader: Callable[[bytes, str], object]
+) -> None:
+    """`trialfolio run` refuses a 1.1.0 file until R04-T12, so its reader has no node paths: it
+    reads a ranking variant's keys as any other, as 0.3.0 did, and asks for no quotes a 1.0.0
+    file can't use. Its message is the one 0.3.0 gave."""
+    path = INVALID / "variant-ranking.yaml"
+    content = path.read_text(encoding="utf-8")
+    assert content.count(RANKED_BY_SALES) == 1
+    content = content.replace(RANKED_BY_SALES, f"  ranking:\n    - key: weights\n{variant}")
+
+    message = rejection(content, path.name, reader)
+
+    assert message == f"{path.name} isn't a valid configuration:\n- {problem}"
+
+
+def test_a_1_1_0_variant_of_another_setting_names_the_ranking_among_those_it_can() -> None:
+    content = ranking_line(
+        "  rebalance_weeks: []\n",
+        "  universe:\n    - key: russell\n      value: 'Russell 1000'\n  rebalance_weeks: []\n",
+    )
+
+    assert (
+        "`variants.universe` isn't a setting a variant may change. A variant may change rules, "
+        "ranking, max_holdings, rebalance_weeks, or slippage_percent."
+    ) in ranking_rejection(content)
+
+
+def test_the_readers_name_the_versions_they_read() -> None:
+    """`trialfolio run` reads with the 1.0.0 reader until R04-T12 builds its path for a
+    definition, so a 1.1.0 file is a version it doesn't read yet."""
+    assert "Supported versions: 1.0.0." in rejection(ranking_example())
+    unsupported = with_line("schema_version: 1.0.0", "schema_version: 2.0.0")
+    assert "Supported versions: 1.0.0, 1.1.0." in ranking_rejection(unsupported)
+
+
+def test_the_reader_of_both_versions_reads_1_0_0_as_before() -> None:
+    configuration = read_v1_1(example())
+
+    assert type(configuration) is ExperimentConfiguration
+    assert configuration == read(example())

@@ -1,11 +1,11 @@
 # Invalid screen configurations
 
-Each file breaks exactly one rule of the [screen configuration](../../../../docs/contracts.md#screen-configuration), and is otherwise the [documented example](../../../../docs/contracts.md#example), which `../formula.yaml` copies. `tests/contract/test_screen_configuration.py` reads each one, expects `config.invalid`, and expects the message to name the key on the file's `# Key:` line, where `-` means the file as a whole.
+Each file breaks exactly one rule of the [screen configuration](../../../../docs/contracts.md#screen-configuration), and is otherwise the [documented example](../../../../docs/contracts.md#example), which `../formula.yaml` copies, or, for the [ranking forms](#ranking-forms-from-110) of version 1.1.0, the example as version 1.1.0, ranked as its row says. `tests/contract/test_screen_configuration.py` reads each one with the reader of both versions, expects `config.invalid`, and expects the message to name the key on the file's `# Key:` line, where `-` means the file as a whole.
 
 - **Origin:** written for Trial Folio's tests. Synthetic: no value comes from Portfolio123.
-- **Schema version:** screen configuration 1.0.0.
+- **Schema version:** screen configuration 1.0.0, and 1.1.0 for the ranking forms' files.
 - **Redistribution:** synthetic, so it may be committed and shared.
-- **Criteria:** R01-AC02, R01-AC09, and R01-AC11 ([0.1.0's test pairing](../../../../docs/releases/0.1.0-api-execution.md#test-pairing)).
+- **Criteria:** R01-AC02, R01-AC09, and R01-AC11 ([0.1.0's test pairing](../../../../docs/releases/0.1.0-api-execution.md#test-pairing)); the ranking forms', R04-AC02 ([0.4.0's invalid ranking cases](../../../../docs/releases/0.4.0-ranking-weights.md#invalid-ranking-cases)).
 
 A new rule needs a new file, and a row here. The test checks that this table and the directory list the same files.
 
@@ -67,13 +67,29 @@ A new rule needs a new file, and a row here. The test checks that this table and
 | `ranking-empty.yaml` | `ranking` holds exactly one form | `ranking` |
 | `two-ranking-forms.yaml` | `ranking` holds exactly one form | `ranking` |
 | `ranking-method-override.yaml` | A ranking method override isn't supported | `ranking` |
-| `ranking-nodes.yaml` | A ranking given as nodes or XML isn't supported | `ranking` |
+| `ranking-nodes.yaml` | A ranking given as nodes or XML in the configuration itself isn't supported | `ranking` |
 | `formula-without-lower-is-better.yaml` | `lower_is_better` is required with `formula` | `ranking.lower_is_better` |
 | `lower-is-better-without-formula.yaml` | `lower_is_better` is allowed only with `formula` | `ranking` |
 | `lower-is-better-yes.yaml` | Booleans are `true` or `false` only | `ranking.lower_is_better` |
 | `lower-is-better-number.yaml` | A number is never a boolean | `ranking.lower_is_better` |
 | `ranking-id-zero.yaml` | A ranking ID is a positive integer | `ranking.id` |
 | `ranking-id-too-large.yaml` | An integer is at most 2^53 − 1 | `ranking.id` |
+
+## Ranking forms, from 1.1.0
+
+R04-T05 wrote these. A definition is named by its file's path, `../../experiment-configs/ranking/value-momentum.xml`, the [ranking example](../../../../docs/contracts.md#ranking-example)'s definition, and a snapshot by a directory's, `../ranking-snapshots/value-momentum/`. Each fails by the rules of its ranking's keys, before any file is read. `definition-not-a-file.yaml`, the [ranking forms](../../../../docs/releases/0.4.0-ranking-weights.md#invalid-ranking-cases)' last case, reads the file, which R04-T06 writes with it.
+
+| File | Rule it breaks | Key |
+|---|---|---|
+| `definition-in-1.0.0.yaml` | A ranking given as a definition needs `schema_version` 1.1.0 | `ranking` |
+| `snapshot-in-1.0.0.yaml` | A ranking given as a snapshot needs `schema_version` 1.1.0 | `ranking` |
+| `definition-without-ranking-method.yaml` | `ranking_method` is required with `definition` | `ranking.ranking_method` |
+| `ranking-method-with-formula.yaml` | `ranking_method` is allowed only with `definition` | `ranking` |
+| `ranking-method-with-snapshot.yaml` | `ranking_method` is allowed only with `definition`: a snapshot records its system's ranking method | `ranking` |
+| `ranking-method-normal-distribution.yaml` | `ranking_method` is `percentile_nas_negative` or `percentile_nas_neutral`; Normal Distribution isn't one | `ranking.ranking_method` |
+| `ranking-method-number.yaml` | `ranking_method` is one of its words, never the number `rank_update` sends | `ranking.ranking_method` |
+| `lower-is-better-with-definition.yaml` | `lower_is_better` is allowed only with `formula` | `ranking` |
+| `definition-and-snapshot.yaml` | `ranking` holds exactly one form | `ranking` |
 
 ## Unverified values
 

@@ -1,5 +1,7 @@
 """Rows of the normalized tables `metrics.csv`, `settings.csv`, and `differences.csv`, schema
-version 1.0.0 (docs/contracts.md, normalized tables).
+version 1.0.0 (docs/contracts.md, normalized tables), and the rows of `settings.csv` 1.1.0 and
+`differences.csv` 1.1.0, which append one column, `node`, for the weight rows of a ranking given
+as a definition (weight rows).
 
 Each model is one row, after a CSV adapter step has read its cells: an empty cell is `None`,
 `critical` and `flagged` are booleans, `source_decimals` and `difference_decimals` integers, the
@@ -21,6 +23,7 @@ from trialfolio.contracts.common import (
     FlagCode,
     Interpretation,
     MetricUnit,
+    NodePathText,
     NonEmptyText,
     Provenance,
     ResultLabel,
@@ -34,17 +37,29 @@ from trialfolio.contracts.common import (
     require_unique,
     valid_date_text,
 )
-from trialfolio.contracts.screen_configuration import IdRanking, NameRanking, read_ranking
+from trialfolio.contracts.screen_configuration import IdRanking, NameRanking
 from trialfolio.contracts.screen_settings import (
+    RANKING_WEIGHT,
     SCREEN_SETTINGS_BY_NAME,
+    SETTINGS_WITH_WEIGHTS_BY_NAME,
+    RankingValues,
     ScreenSetting,
     check_flags,
     check_row,
     check_value_text,
+    read_ranking_setting,
 )
 
 TABLES_SCHEMA_VERSION: Final = "1.0.0"
 """The schema version of both tables. The manifest records it, because a CSV can't."""
+
+TABLES_SCHEMA_VERSION_V1_1: Final = "1.1.0"
+"""The schema version of `settings.csv` and `differences.csv` with weight rows, and the column
+`node`."""
+
+ABSENT: Final = "absent"
+"""A weight row's value in `differences.csv` for a node one run's definition doesn't have, or
+for a run ranked by a formula, which has no nodes (differences between screen runs)."""
 
 _DECIMAL = re.compile(r"-?(0|[1-9][0-9]*)(\.(?P<fraction>[0-9]+))?")
 _COUNT = re.compile(INTEGER_PATTERN)
@@ -133,21 +148,31 @@ class SettingsRow(ContractModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        setting = check_row(
-            self.setting,
-            self.category,
-            self.critical,
-            self.unit,
-            self.interpretation,
-            self.provenance,
-            self.inference_rule,
-        )
-        value = check_value_text(setting, self.value)
-        if (self.original_key is None) != (self.original_value is None):
-            raise ValueError("original_key and original_value must be given together")
-        require_unique(self.flags, "flags")
-        check_flags(setting, value, self.flags, executed=True)
+        _check_settings_row(self, SCREEN_SETTINGS_BY_NAME, "forms")
         return self
+
+
+def _check_settings_row(
+    row: "SettingsRow | SettingsRowV1_1",
+    settings: dict[str, ScreenSetting],
+    rankings: RankingValues,
+) -> ScreenSetting:
+    setting = check_row(
+        row.setting,
+        row.category,
+        row.critical,
+        row.unit,
+        row.interpretation,
+        row.provenance,
+        row.inference_rule,
+        settings=settings,
+    )
+    value = check_value_text(setting, row.value, rankings)
+    if (row.original_key is None) != (row.original_value is None):
+        raise ValueError("original_key and original_value must be given together")
+    require_unique(row.flags, "flags")
+    check_flags(setting, value, row.flags, executed=True, rankings=rankings)
+    return setting
 
 
 METRICS_COLUMNS: Final = tuple(MetricsRow.model_fields)
@@ -233,134 +258,167 @@ class DifferencesRow(ContractModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        if self.label == self.baseline_label:
-            raise ValueError("a row compares a result with the baseline, so the labels differ")
-        require_unique(self.flags, "flags")
-        if self.kind == "setting":
-            self._check_setting()
-        else:
-            self._check_metric()
-        if self.flagged != bool(FLAGGING.intersection(self.flags)):
-            raise ValueError(
-                "flagged must be true exactly when a row carries a flag that needs attention"
-            )
+        _check_differences_row(self)
         return self
 
-    def _check_setting(self) -> None:
-        setting = SCREEN_SETTINGS_BY_NAME.get(self.name)
-        if setting is None:
-            raise ValueError(f"{self.name} isn't one of the screen settings")
-        if (self.category, self.unit) != (setting.category, setting.unit):
-            raise ValueError(f"{self.name} must have its documented category and unit")
-        if self.critical != (setting.category in CRITICAL_CATEGORIES):
-            raise ValueError("critical must be true exactly for the critical categories")
-        if self.subject is not None or self.reason is not None:
-            raise ValueError("subject and reason are given only for metrics")
-        if (self.difference, self.difference_unit, self.difference_decimals) != (None,) * 3:
-            raise ValueError("a setting row has no difference")
-        if self.classification not in (
-            "same",
-            "intended_change",
-            "unexplained_mismatch",
-            "unknown",
-        ):
-            raise ValueError(
-                "a setting row is same, intended_change, unexplained_mismatch, or unknown"
-            )
-        values = (self.baseline_value, self.value)
-        read = [None if text is None else check_value_text(setting, text) for text in values]
-        # A value that can't be interpreted can't be written, so an unknown one is missing.
-        if (None in values) != (self.classification == "unknown"):
-            raise ValueError("a setting is unknown exactly when one of its values is missing")
-        if self.classification != "unknown":
-            same = read[0] == read[1]
-            if same != (self.classification == "same"):
-                raise ValueError("a setting is same exactly when its two values are the same")
-        if self.declared_reason is not None and not setting.declarable:
-            raise ValueError(f"{self.name} isn't a setting a review can declare")
-        if (self.classification == "intended_change") and self.declared_reason is None:
-            raise ValueError("an intended change gives its declared_reason")
-        if self.classification == "unexplained_mismatch" and self.declared_reason is not None:
-            raise ValueError("a declared change isn't unexplained")
-        self._check_setting_flags(setting, read)
 
-    def _check_setting_flags(self, setting: ScreenSetting, read: list[object]) -> None:
-        flags = set[str](self.flags)
-        critical = bool(self.critical)
-        expected = {
-            "critical_unexplained_mismatch": critical
-            and self.classification == "unexplained_mismatch",
-            # Only in a critical category, even for a declared change that can't be confirmed
-            # (owner's decision, 2026-10-05): no flag covers precision, the one declarable
-            # setting outside them.
-            "critical_unknown": critical and self.classification == "unknown",
-            "intended_change_not_observed": self.classification == "same"
-            and self.declared_reason is not None,
-        }
-        for flag, applies in expected.items():
-            if (flag in flags) != applies:
-                raise ValueError(f"{flag} must be given exactly when it applies")
-        # The rest come from the two runs' rows, as check_flags allows them.
-        external = setting.kind == "ranking" and any(
-            isinstance(read_ranking(value), NameRanking | IdRanking)
-            for value in read
-            if value is not None
+def _check_differences_row(row: "DifferencesRow | DifferencesRowV1_1") -> None:
+    if row.label == row.baseline_label:
+        raise ValueError("a row compares a result with the baseline, so the labels differ")
+    require_unique(row.flags, "flags")
+    if row.kind == "setting":
+        _check_setting(row)
+    else:
+        _check_metric(row)
+    if row.flagged != bool(FLAGGING.intersection(row.flags)):
+        raise ValueError(
+            "flagged must be true exactly when a row carries a flag that needs attention"
         )
-        required = set[str](setting.flags) | ({"not_snapshotted"} if external else set[str]())
-        optional = {"coverage_mismatch"} if setting.kind == "date" else set[str]()
-        if not required <= flags - _COMPARISON_FLAGS <= required | optional:
-            raise ValueError(f"{self.name}'s flags must be those its runs' rows carry")
 
-    def _check_metric(self) -> None:
-        if self.subject is None:
-            raise ValueError("a metric row gives its subject")
-        if (self.category, self.critical, self.declared_reason) != (None,) * 3:
-            raise ValueError("category, critical, and declared_reason are given only for settings")
-        unit = self.unit
-        if unit is None or not _METRIC_UNIT.fullmatch(unit):
-            raise ValueError("a metric row gives a metric's unit")
-        if not set[str](self.flags) <= {"identical_source"}:
-            raise ValueError("a metric row's only flag is identical_source")
-        for text in (self.baseline_value, self.value):
-            if text is not None:
-                _check_metric_value(text, unit)
-        given = (self.difference, self.difference_unit, self.difference_decimals)
-        if self.classification != "differenced" and given != (None,) * 3:
-            raise ValueError("only a differenced row has a difference, its unit, and its decimals")
-        match self.classification:
-            case "differenced":
-                self._check_difference(unit)
-            case "not_comparable":
-                if None in (self.baseline_value, self.value):
-                    raise ValueError("a row that isn't comparable shows both values")
-                if self.reason in (None, "input_unavailable"):
-                    raise ValueError("a row that isn't comparable gives why")
-            case "unavailable":
-                if None not in (self.baseline_value, self.value):
-                    raise ValueError("a row is unavailable only when a value is")
-                if self.reason != "input_unavailable":
-                    raise ValueError("an unavailable row's reason is input_unavailable")
-            case _:
-                raise ValueError("a metric row is differenced, not_comparable, or unavailable")
 
-    def _check_difference(self, unit: str) -> None:
-        baseline, value, difference = self.baseline_value, self.value, self.difference
-        if baseline is None or value is None or difference is None:
-            raise ValueError("a differenced row has both values and their difference")
-        if self.reason is not None:
-            raise ValueError("a differenced row has no reason")
-        expected_unit = {"percent": "pp", "date": "days"}.get(unit, unit)
-        if self.difference_unit != expected_unit:
-            raise ValueError("difference_unit is pp for percent, days for dates, else the unit")
-        decimals = 0 if unit in ("date", "count") else min(_decimals(baseline), _decimals(value))
-        if self.difference_decimals != decimals:
+def _check_setting(row: "DifferencesRow | DifferencesRowV1_1") -> None:
+    weights = isinstance(row, DifferencesRowV1_1)
+    settings = SETTINGS_WITH_WEIGHTS_BY_NAME if weights else SCREEN_SETTINGS_BY_NAME
+    setting = settings.get(row.name)
+    if setting is None:
+        raise ValueError(f"{row.name} isn't one of the screen settings")
+    if (row.category, row.unit) != (setting.category, setting.unit):
+        raise ValueError(f"{row.name} must have its documented category and unit")
+    if row.critical != (setting.category in CRITICAL_CATEGORIES):
+        raise ValueError("critical must be true exactly for the critical categories")
+    if row.subject is not None or row.reason is not None:
+        raise ValueError("subject and reason are given only for metrics")
+    if (row.difference, row.difference_unit, row.difference_decimals) != (None,) * 3:
+        raise ValueError("a setting row has no difference")
+    if row.classification not in ("same", "intended_change", "unexplained_mismatch", "unknown"):
+        raise ValueError("a setting row is same, intended_change, unexplained_mismatch, or unknown")
+    values = (row.baseline_value, row.value)
+    if setting is RANKING_WEIGHT and values == (ABSENT, ABSENT):
+        raise ValueError("a weight row's node is a node of one run's definition, at least")
+    rankings: RankingValues = "any" if weights else "forms"
+    read = [_read_compared(setting, text, rankings) for text in values]
+    # A value that can't be interpreted can't be written, so an unknown one is missing.
+    if (None in values) != (row.classification == "unknown"):
+        raise ValueError("a setting is unknown exactly when one of its values is missing")
+    if row.classification != "unknown":
+        same = read[0] == read[1]
+        if same != (row.classification == "same"):
+            raise ValueError("a setting is same exactly when its two values are the same")
+    _check_declared(row, setting)
+    _check_setting_flags(row, setting, read, rankings)
+
+
+def _read_compared(setting: ScreenSetting, text: str | None, rankings: RankingValues) -> object:
+    """A compared value, as its table writes it: None when it's missing, and for a weight row,
+    `absent` for a node the run doesn't have."""
+    if text is None:
+        return None
+    if setting is RANKING_WEIGHT and text == ABSENT:
+        return ABSENT
+    return check_value_text(setting, text, rankings)
+
+
+def _check_declared(row: "DifferencesRow | DifferencesRowV1_1", setting: ScreenSetting) -> None:
+    """Raises `ValueError` unless the row's declared reason follows its classification. A weight
+    row takes its reason from `ranking`'s declaration: only one that differs gives it, as an
+    intended change."""
+    if setting is RANKING_WEIGHT:
+        if (row.classification == "intended_change") != (row.declared_reason is not None):
             raise ValueError(
-                "difference_decimals is the smaller source decimals, 0 for dates and counts"
+                "a weight row gives ranking's declared reason exactly when it's an intended change"
             )
-        if not _DECIMAL.fullmatch(difference) or _decimals(difference) != decimals:
-            raise ValueError("a difference has exactly difference_decimals digits after the point")
-        if difference.startswith("-") and Decimal(difference).is_zero():
-            raise ValueError("a difference of zero is written without a sign")
+        return
+    if row.declared_reason is not None and not setting.declarable:
+        raise ValueError(f"{row.name} isn't a setting a review can declare")
+    if (row.classification == "intended_change") and row.declared_reason is None:
+        raise ValueError("an intended change gives its declared_reason")
+    if row.classification == "unexplained_mismatch" and row.declared_reason is not None:
+        raise ValueError("a declared change isn't unexplained")
+
+
+def _check_setting_flags(
+    row: "DifferencesRow | DifferencesRowV1_1",
+    setting: ScreenSetting,
+    read: list[object],
+    rankings: RankingValues,
+) -> None:
+    flags = set[str](row.flags)
+    critical = bool(row.critical)
+    expected = {
+        "critical_unexplained_mismatch": critical and row.classification == "unexplained_mismatch",
+        # Only in a critical category, even for a declared change that can't be confirmed
+        # (owner's decision, 2026-10-05): no flag covers precision, the one declarable
+        # setting outside them.
+        "critical_unknown": critical and row.classification == "unknown",
+        "intended_change_not_observed": row.classification == "same"
+        and row.declared_reason is not None,
+    }
+    for flag, applies in expected.items():
+        if (flag in flags) != applies:
+            raise ValueError(f"{flag} must be given exactly when it applies")
+    # The rest come from the two runs' rows, as check_flags allows them.
+    external = setting.kind == "ranking" and any(
+        isinstance(read_ranking_setting(value, rankings), NameRanking | IdRanking)
+        for value in read
+        if value is not None
+    )
+    required = set[str](setting.flags) | ({"not_snapshotted"} if external else set[str]())
+    optional = {"coverage_mismatch"} if setting.kind == "date" else set[str]()
+    if not required <= flags - _COMPARISON_FLAGS <= required | optional:
+        raise ValueError(f"{row.name}'s flags must be those its runs' rows carry")
+
+
+def _check_metric(row: "DifferencesRow | DifferencesRowV1_1") -> None:
+    if row.subject is None:
+        raise ValueError("a metric row gives its subject")
+    if (row.category, row.critical, row.declared_reason) != (None,) * 3:
+        raise ValueError("category, critical, and declared_reason are given only for settings")
+    unit = row.unit
+    if unit is None or not _METRIC_UNIT.fullmatch(unit):
+        raise ValueError("a metric row gives a metric's unit")
+    if not set[str](row.flags) <= {"identical_source"}:
+        raise ValueError("a metric row's only flag is identical_source")
+    for text in (row.baseline_value, row.value):
+        if text is not None:
+            _check_metric_value(text, unit)
+    given = (row.difference, row.difference_unit, row.difference_decimals)
+    if row.classification != "differenced" and given != (None,) * 3:
+        raise ValueError("only a differenced row has a difference, its unit, and its decimals")
+    match row.classification:
+        case "differenced":
+            _check_difference(row, unit)
+        case "not_comparable":
+            if None in (row.baseline_value, row.value):
+                raise ValueError("a row that isn't comparable shows both values")
+            if row.reason in (None, "input_unavailable"):
+                raise ValueError("a row that isn't comparable gives why")
+        case "unavailable":
+            if None not in (row.baseline_value, row.value):
+                raise ValueError("a row is unavailable only when a value is")
+            if row.reason != "input_unavailable":
+                raise ValueError("an unavailable row's reason is input_unavailable")
+        case _:
+            raise ValueError("a metric row is differenced, not_comparable, or unavailable")
+
+
+def _check_difference(row: "DifferencesRow | DifferencesRowV1_1", unit: str) -> None:
+    baseline, value, difference = row.baseline_value, row.value, row.difference
+    if baseline is None or value is None or difference is None:
+        raise ValueError("a differenced row has both values and their difference")
+    if row.reason is not None:
+        raise ValueError("a differenced row has no reason")
+    expected_unit = {"percent": "pp", "date": "days"}.get(unit, unit)
+    if row.difference_unit != expected_unit:
+        raise ValueError("difference_unit is pp for percent, days for dates, else the unit")
+    decimals = 0 if unit in ("date", "count") else min(_decimals(baseline), _decimals(value))
+    if row.difference_decimals != decimals:
+        raise ValueError(
+            "difference_decimals is the smaller source decimals, 0 for dates and counts"
+        )
+    if not _DECIMAL.fullmatch(difference) or _decimals(difference) != decimals:
+        raise ValueError("a difference has exactly difference_decimals digits after the point")
+    if difference.startswith("-") and Decimal(difference).is_zero():
+        raise ValueError("a difference of zero is written without a sign")
 
 
 def _check_metric_value(text: str, unit: str) -> None:
@@ -375,3 +433,95 @@ def _check_metric_value(text: str, unit: str) -> None:
 
 DIFFERENCES_COLUMNS: Final = tuple(DifferencesRow.model_fields)
 """`differences.csv`'s columns, in order."""
+
+
+# Version 1.1.0 of settings.csv and differences.csv: the weight rows, and `node`.
+
+
+class SettingsRowV1_1(ContractModel):
+    """One row of `settings.csv` 1.1.0, a run's or a case's whose ranking is a definition: 1.0.0's
+    columns, then `node`, the canonical path of a weight row's node, and empty on every other row
+    (weight rows)."""
+
+    label: ResultLabel
+    setting: SettingName
+    category: SettingCategory
+    critical: bool
+    value: NonEmptyText
+    """The normalized value, as text: lists and mappings as JSON, a weight as its normalized
+    decimal, and `not_sent` or `not_modeled` when the request gives none. Never empty."""
+    unit: SettingUnit | None
+    interpretation: Interpretation
+    provenance: Provenance
+    inference_rule: NonEmptyText | None
+    original_key: NonEmptyText | None
+    original_value: Annotated[str, Field(min_length=1)] | None
+    """The value exactly as written in its source: the configuration, or for a weight the
+    definition gives, the definition's `Weight` attribute; null when absent."""
+    source_artifact: Sha256Digest
+    """The `artifact_id` of the saved configuration, or of the saved definition, `definition.xml`,
+    for a weight row whose value the definition gives."""
+    flags: tuple[FlagCode, ...]
+    node: NodePathText | None
+    """A weight row's node, by its canonical path; null on every other row."""
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        setting = _check_settings_row(self, SETTINGS_WITH_WEIGHTS_BY_NAME, "definition")
+        if (self.node is None) == (setting is RANKING_WEIGHT):
+            raise ValueError("node is given on a weight row, and only there")
+        return self
+
+
+SETTINGS_COLUMNS_V1_1: Final = tuple(SettingsRowV1_1.model_fields)
+"""`settings.csv` 1.1.0's columns, in order."""
+
+
+class DifferencesRowV1_1(ContractModel):
+    """One row of `differences.csv` 1.1.0, a review's in which any result has weight rows: 1.0.0's
+    columns, then `node`, which names a weight's setting row with `name`, and is empty on every
+    other row (differences between screen runs, weight rows)."""
+
+    label: ReviewLabel
+    baseline_label: ReviewLabel
+    kind: Literal["setting", "metric"]
+    name: SettingName
+    """The setting, `ranking_weight` for a weight, or the `metric_id`."""
+    subject: Literal["strategy", "benchmark"] | None
+    """For metrics. Null for settings."""
+    category: SettingCategory | None
+    """For settings, as in `settings.csv`. Null for metrics."""
+    critical: bool | None
+    """For settings, as in `settings.csv`. Null for metrics."""
+    baseline_value: NonEmptyText | None
+    value: NonEmptyText | None
+    """The two values compared, as their tables write them, or `absent` for a node a run's
+    definition doesn't have. Null when unavailable, or unknown."""
+    unit: MetricUnit | SettingUnit | None
+    classification: SettingClassification | MetricClassification
+    difference: NonEmptyText | None
+    """For `differenced` metrics, `value - baseline_value`, with exactly `difference_decimals`
+    digits after the decimal point, and never a signed zero. Null otherwise."""
+    difference_unit: DifferenceUnit | None
+    difference_decimals: Annotated[int, Field(ge=0)] | None
+    reason: DifferenceReason | None
+    """For `not_comparable` and `unavailable` metrics. Null otherwise."""
+    declared_reason: ShortText | None
+    """For a setting declared as an intended change, its reason, whatever the classification;
+    for a weight that differs, `ranking`'s."""
+    flagged: bool
+    """True exactly when a flag in `FLAGGING` applies."""
+    flags: tuple[FlagCode, ...]
+    node: NodePathText | None
+    """A weight's node, by its canonical path; null on every other row."""
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        _check_differences_row(self)
+        if (self.node is None) == (self.kind == "setting" and self.name == RANKING_WEIGHT.name):
+            raise ValueError("node is given on a weight's setting row, and only there")
+        return self
+
+
+DIFFERENCES_COLUMNS_V1_1: Final = tuple(DifferencesRowV1_1.model_fields)
+"""`differences.csv` 1.1.0's columns, in order."""
