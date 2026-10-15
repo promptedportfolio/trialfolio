@@ -91,6 +91,12 @@ R04-T05 wrote these. A definition is named by its file's path, `../../experiment
 | `lower-is-better-with-definition.yaml` | `lower_is_better` is allowed only with `formula` | `ranking` |
 | `definition-and-snapshot.yaml` | `ranking` holds exactly one form | `ranking` |
 
+R04-T06 wrote this one, which reads the file a definition names, from the configuration's directory: the test gives the reader the file's own path.
+
+| File | Rule it breaks | Key |
+|---|---|---|
+| `definition-not-a-file.yaml` | `definition` names a file: something other than a file, here the directory `../../experiment-configs/ranking`, fails with `config.invalid` | `ranking.definition` |
+
 ## Unverified values
 
 | File | Rule it breaks | Key |

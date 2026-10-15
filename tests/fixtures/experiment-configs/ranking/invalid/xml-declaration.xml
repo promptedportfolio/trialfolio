@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RankingSystem RankType="Higher">
+	<Composite Name="Value" Weight="40" RankType="Summation">
+		<StockFormula Name="Earnings Yield" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+		<StockFormula Name="Sales Yield" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+	</Composite>
+	<Composite Name="Momentum" Weight="30" RankType="Summation">
+		<StockFormula Name="Six-Month Return" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+		<StockFormula Name="Year Return" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+	</Composite>
+	<Composite Name="Quality" Weight="30" RankType="Summation">
+		<StockFormula Name="Return on Equity" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+		<StockFormula Name="Gross Margin" Weight="50" RankType="Higher" Scope="Universe" Description="">
+			<Formula>…</Formula>
+		</StockFormula>
+	</Composite>
+</RankingSystem>

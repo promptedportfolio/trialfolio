@@ -1,0 +1,12 @@
+<RankingSystem RankType="Higher">
+	<Composite Name="Earnings" Weight="50" RankType="Summation">
+		<StockFormula Name="Earnings Yield" Weight="100" RankType="Higher" Scope="Universe" Description="">
+			<Formula>EarnYield</Formula>
+		</StockFormula>
+	</Composite>
+	<Composite Name="Liquidity" Weight="50" RankType="Summation">
+		<StockFormula Name="Dollar Volume" Weight="100" RankType="Higher" Scope="Universe" Description="">
+			<Formula>AvgDailyTot(30)</Formula>
+		</StockFormula>
+	</Composite>
+</RankingSystem>

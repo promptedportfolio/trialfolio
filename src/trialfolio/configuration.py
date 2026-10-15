@@ -13,6 +13,16 @@ definition or a ranking snapshot, and ranking variants. Until the CLI's path for
 give 0.3.0's messages: only 0.4.0's readers tell a 1.0.0 file that a key it gives needs 1.1.0,
 since `run` refuses 1.1.0 until then, and only they read a ranking variant's node paths, below.
 
+0.4.0's readers of a screen and an experiment take the configuration file's path too, and read
+the definition file its `ranking.definition`, or its baseline's, names, from the configuration's
+directory, once, in step 2, by the rules of `trialfolio.ranking_definitions` (docs/contracts.md,
+ranking definitions). An experiment's reader then applies each ranking variant to it, which
+gives each ranking variant's case its definition (ranking variants). They give the configuration
+with what they read: `ScreenConfigurationRead` and `ExperimentConfigurationRead`. A snapshot's
+directory isn't read here: release 0.4.0's R04-T10 reads it, so until then a baseline named by a
+snapshot has no definition here, and its ranking variants' paths are checked only for how
+they're written.
+
 Reading is a named adapter step before model validation (ADR 0002). It builds plain values from
 PyYAML's parse events, never through PyYAML's constructors, so it decides what each scalar means:
 
@@ -50,10 +60,13 @@ Error messages name the offending key and never include its value, so they're sa
 key's control and formatting characters and lone surrogates are written as escapes.
 """
 
+import os
 import re
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from typing import Final, NoReturn, Protocol, cast
 
 import yaml
@@ -101,12 +114,24 @@ from trialfolio.contracts.screen_configuration import (
     LATER_VERSIONS,
     SCREEN_SCHEMA_VERSIONS,
     SCREEN_SCHEMA_VERSIONS_V1_1,
+    DefinitionRanking,
+    RankingV1_1,
     ScreenConfiguration,
     ScreenConfigurationV1_1,
 )
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS
 from trialfolio.display import visible
-from trialfolio.errors import TrialFolioError
+from trialfolio.errors import TrialFolioError, reason_of
+from trialfolio.paths import existing_path
+from trialfolio.ranking_definitions import (
+    DefinitionProblem,
+    RankingCase,
+    RankingDefinition,
+    VariantProblem,
+    apply_ranking_variant,
+    check_node_paths,
+    read_definition,
+)
 
 type KeyPath = tuple[str | int, ...]
 
@@ -163,24 +188,58 @@ def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfigu
     return _validated(ScreenConfiguration, document, source_name, _unquoted(plain, _is_sent_text))
 
 
-def read_screen_configuration_v1_1(
-    content: bytes, source_name: str
-) -> ScreenConfiguration | ScreenConfigurationV1_1:
-    """Reads a screen configuration of a version release 0.4.0 reads, 1.0.0 or 1.1.0, by its
-    `schema_version`, from the bytes of a file named `source_name` in messages. Version 1.1.0's
-    `ranking` may also be a definition, named by its file's path, with its `ranking_method`, or
-    a snapshot, named by its directory's path.
+@dataclass(frozen=True)
+class ScreenConfigurationRead:
+    """A screen configuration, as 0.4.0's reader reads it in step 2: its model, and the
+    definition its ranking names."""
 
-    Raises `TrialFolioError` with `config.invalid` as `read_screen_configuration` does. A 1.0.0
-    file that gives `definition` or `snapshot` is told they need `schema_version` 1.1.0.
+    configuration: ScreenConfiguration | ScreenConfigurationV1_1
+    definition: RankingDefinition | None
+    """The definition `ranking.definition` names, read and checked, with the bytes it was read
+    from, which a plan's `definition.xml` copies; None for every other ranking form, and, until
+    release 0.4.0's R04-T10 reads it, for a snapshot."""
+
+
+@dataclass(frozen=True)
+class ExperimentConfigurationRead:
+    """An experiment configuration, as 0.4.0's reader reads it in step 2: its model, the
+    definition its baseline's ranking names, and each ranking variant's case."""
+
+    configuration: ExperimentConfiguration | ExperimentConfigurationV1_1
+    definition: RankingDefinition | None
+    """The baseline's definition, as `ScreenConfigurationRead.definition` gives a screen's."""
+    ranking_cases: tuple[RankingCase, ...]
+    """Each ranking variant's case, in the order of `variants.ranking`, with its definition:
+    the baseline's, with the variant's change. Empty without a definition, a snapshot's
+    included, until R04-T10 reads it."""
+
+
+def read_screen_configuration_v1_1(
+    content: bytes, source_name: str, path: str | os.PathLike[str]
+) -> ScreenConfigurationRead:
+    """Reads a screen configuration of a version release 0.4.0 reads, 1.0.0 or 1.1.0, by its
+    `schema_version`, from the bytes of the file at `path`, named `source_name` in messages.
+    Version 1.1.0's `ranking` may also be a definition, named by its file's path, with its
+    `ranking_method`, or a snapshot, named by its directory's path. A definition's file is read
+    from `path`'s directory, unless its path is absolute, and checked (ranking definitions).
+
+    Raises `TrialFolioError` with `config.invalid` as `read_screen_configuration` does, and
+    for a definition that breaks a rule, or a path that names something other than a file; and
+    with `input.not_found` when nothing exists where the definition's path leads, or the file
+    there can't be read. A 1.0.0 file that gives `definition` or `snapshot` is told they need
+    `schema_version` 1.1.0.
     """
     document, plain = _read_document(
         content, source_name, "screen", SCREEN_SCHEMA_VERSIONS_V1_1, node_paths=True
     )
     unquoted = _unquoted(plain, _is_sent_text)
     if document["schema_version"] == "1.0.0":
-        return _validated(ScreenConfiguration, document, source_name, unquoted, later_versions=True)
-    return _validated(ScreenConfigurationV1_1, document, source_name, unquoted)
+        configuration = _validated(
+            ScreenConfiguration, document, source_name, unquoted, later_versions=True
+        )
+        return ScreenConfigurationRead(configuration, None)
+    read = _validated(ScreenConfigurationV1_1, document, source_name, unquoted)
+    return ScreenConfigurationRead(read, _definition(read.ranking, "ranking", source_name, path))
 
 
 def read_review_configuration(content: bytes, source_name: str) -> ReviewConfiguration:
@@ -211,33 +270,128 @@ def read_experiment_configuration(content: bytes, source_name: str) -> Experimen
 
 
 def read_experiment_configuration_v1_1(
-    content: bytes, source_name: str
-) -> ExperimentConfiguration | ExperimentConfigurationV1_1:
+    content: bytes, source_name: str, path: str | os.PathLike[str]
+) -> ExperimentConfigurationRead:
     """Reads an experiment configuration of a version release 0.4.0 reads, 1.0.0 or 1.1.0, by its
-    `schema_version`, from the bytes of a file named `source_name` in messages. Version 1.1.0's
-    baseline may be ranked by a definition or a snapshot, and then its `variants` may hold
-    ranking variants, and its budget is at least two requests a case.
+    `schema_version`, from the bytes of the file at `path`, named `source_name` in messages.
+    Version 1.1.0's baseline may be ranked by a definition or a snapshot, and then its
+    `variants` may hold ranking variants, and its budget is at least two requests a case. The
+    baseline's definition is read as `read_screen_configuration_v1_1` reads a screen's, and each
+    ranking variant is applied to it (ranking variants).
 
-    Raises `TrialFolioError` with `config.invalid` as `read_experiment_configuration` does. Every
-    message names a ranking variant's `set` entry by its place, such as
-    `variants.ranking[0].set[1]`, never by its path. A 1.0.0 file with a ranking variant, or a
-    baseline ranked by a definition or a snapshot, is told they need `schema_version` 1.1.0.
+    Raises `TrialFolioError` as `read_screen_configuration_v1_1` does, and with `config.invalid`
+    for each ranking variant that breaks a rule. Every message names a ranking variant's `set`
+    entry by its place, such as `variants.ranking[0].set[1]`, never by its path. A 1.0.0 file
+    with a ranking variant, or a baseline ranked by a definition or a snapshot, is told they need
+    `schema_version` 1.1.0.
     """
     document, plain = _read_document(
         content, source_name, "experiment", EXPERIMENT_SCHEMA_VERSIONS_V1_1, node_paths=True
     )
     unquoted = _unquoted(plain, _is_sent_experiment_text_v1_1)
     if document["schema_version"] == "1.0.0":
-        return _validated(
+        configuration = _validated(
             ExperimentConfiguration, document, source_name, unquoted, later_versions=True
         )
-    return _validated(
+        return ExperimentConfigurationRead(configuration, None, ())
+    read = _validated(
         ExperimentConfigurationV1_1,
         document,
         source_name,
         unquoted,
         variant_settings=VARIANT_SETTINGS_V1_1,
     )
+    definition = _definition(read.baseline.ranking, "baseline.ranking", source_name, path)
+    return ExperimentConfigurationRead(
+        read, definition, _ranking_cases(read, definition, source_name)
+    )
+
+
+def _definition(
+    ranking: RankingV1_1, key: str, source_name: str, path: str | os.PathLike[str]
+) -> RankingDefinition | None:
+    """The definition a ranking given as a definition names, read once from its file, at the
+    one path the file system resolves, from the configuration's directory unless the path is
+    absolute, and checked (docs/contracts.md, ranking definitions). None for any other form."""
+    if not isinstance(ranking, DefinitionRanking):
+        return None
+    where = f"{key}.definition"
+    given = visible(ranking.definition)
+    resolved = existing_path(Path(path).parent / ranking.definition)
+    if resolved is None:
+        raise TrialFolioError(
+            "input.not_found",
+            f"{source_name}: the file `{where}` names (`{given}`) doesn't exist. "
+            f"{_DEFINITION_PATH}",
+            f"{source_name}: the file `{where}` names doesn't exist. {_DEFINITION_PATH}",
+        )
+    if not os.path.isfile(resolved):
+        _fail(
+            source_name,
+            [
+                f"`{where}` names something that isn't a file, such as a directory. {_DEFINITION_PATH}"
+            ],
+        )
+    try:
+        definition = Path(resolved).read_bytes()
+    except OSError as error:
+        reason = reason_of(error)
+        raise TrialFolioError(
+            "input.not_found",
+            f"{source_name}: couldn't read the file `{where}` names (`{given}`): {reason}.",
+            f"{source_name}: couldn't read the file `{where}` names: {reason}.",
+        ) from None
+    try:
+        return read_definition(definition)
+    except DefinitionProblem as problem:
+        at = "" if problem.line is None else f", at line {problem.line}"
+        _fail(
+            source_name,
+            [f"`{where}` names a definition Trial Folio can't read{at}: {problem.problem}."],
+        )
+
+
+_DEFINITION_PATH: Final = (
+    "A definition's path is read from the configuration's directory, unless it's absolute: give "
+    "the path of the file that holds the ranking system's definition, the XML the website's Text "
+    "Editor shows."
+)
+
+
+def _ranking_cases(
+    configuration: ExperimentConfigurationV1_1,
+    definition: RankingDefinition | None,
+    source_name: str,
+) -> tuple[RankingCase, ...]:
+    """Each ranking variant's case, by the rules of ranking variants, from the baseline's
+    definition. Without one, as for a snapshot until R04-T10 reads it, only how each variant's
+    paths are written is checked, and there's no case. Raises `TrialFolioError` with
+    `config.invalid` listing the first problem of each variant that breaks a rule, and each
+    variant whose definition another's gives already, byte for byte."""
+    variants = configuration.variants
+    listed = () if variants is None or variants.ranking is None else variants.ranking
+    problems: list[str] = []
+    cases: list[RankingCase] = []
+    for number, variant in enumerate(listed):
+        place = f"variants.ranking[{number}]"
+        try:
+            if definition is None:
+                check_node_paths(variant, place)
+            else:
+                cases.append(apply_ranking_variant(definition, variant, place))
+        except VariantProblem as problem:
+            problems.append(f"`{problem.where}` {problem.problem}.")
+    first: dict[str, RankingCase] = {}
+    for case in cases:
+        earlier = first.setdefault(case.definition.text, case)
+        if earlier is not case:
+            problems.append(
+                f"`{case.place}` gives the same definition as `{earlier.place}`, so the two "
+                "would be one case. Each case has settings of its own."
+            )
+    if problems:
+        _fail(source_name, problems)
+    return tuple(cases)
 
 
 def read_ranking_snapshot_configuration(

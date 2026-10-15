@@ -3,7 +3,7 @@
 Synthetic screen configurations for Trial Folio's tests ([fixtures](../../../docs/contracts.md#fixtures)). Each one is the [documented example](../../../docs/contracts.md#example), changed as its row says. [`invalid/`](invalid/README.md) holds one file for each rejection rule.
 
 - **Origin:** written for Trial Folio's tests. The ranking system name and ID are invented, and so are the canary values. No value comes from Portfolio123 or from the owner's account.
-- **Schema version:** [screen configuration](../../../docs/contracts.md#screen-configuration) 1.0.0.
+- **Schema version:** [screen configuration](../../../docs/contracts.md#screen-configuration) 1.0.0, and 1.1.0 for `definition.yaml`.
 - **Redistribution:** synthetic, so they may be committed and shared.
 
 | File | Contents | Criteria |
@@ -18,5 +18,6 @@ Synthetic screen configurations for Trial Folio's tests ([fixtures](../../../doc
 | `canaries.yaml` | The example with a distinct canary string in the title, the purpose, the universe, each of two rules, the ranking formula, and the benchmark | R01-AC01, R01-AC17, R02-AC12 |
 | `holdings-50.yaml` | The example with `max_holdings: 50` | R02-AC01, R02-AC02, R02-AC05, R02-AC07, R02-AC08, R02-AC09, R02-AC10, R02-AC13, R02-AC16, R02-AC17, R02-AC18, R02-AC19; R03-AC18, as the screen run whose rows `holdings-50`'s case's equal |
 | `benchmark-other.yaml` | The example with another benchmark symbol, `'IWM'` | R02-AC03, R02-AC07, R02-AC08, R02-AC13, R02-AC18 |
+| `definition.yaml` | The example's settings, as schema version 1.1.0, ranked by the [ranking example](../../../docs/contracts.md#ranking-example)'s definition, [`../experiment-configs/ranking/value-momentum.xml`](../experiment-configs/ranking/README.md), with `percentile_nas_negative`: the case of [`ranking-example.yaml`](../experiment-configs/README.md)'s baseline, as a screen run. Its title and purpose say so. | R04-AC02, in `tests/contract/test_ranking_definitions.py`, which reads each [invalid definition](../experiment-configs/ranking/invalid/README.md) through it; and, in the modules release 0.4.0's [test pairing](../../../docs/releases/0.4.0-ranking-weights.md#test-pairing) names, R04-AC01, R04-AC02, R04-AC03, R04-AC04, R04-AC05, R04-AC06, R04-AC08, R04-AC11, R04-AC12, and R04-AC13 |
 
-R02-T06 added `holdings-50.yaml` and `benchmark-other.yaml` ahead of R02-T09, for the comparison core's tests.
+R02-T06 added `holdings-50.yaml` and `benchmark-other.yaml` ahead of R02-T09, for the comparison core's tests. R04-T06 added `definition.yaml`.
