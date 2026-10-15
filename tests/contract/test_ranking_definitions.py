@@ -214,15 +214,25 @@ def test_a_definition_path_that_names_a_directory_is_invalid(tmp_path: Path) -> 
 @pytest.mark.skipif(
     not hasattr(os, "geteuid") or os.geteuid() == 0, reason="needs file permissions that bind"
 )
-def test_a_definition_that_can_t_be_read_is_not_found(tmp_path: Path) -> None:
-    """As a configuration file that can't be read is: the error says why."""
+@pytest.mark.parametrize(
+    ("blocked", "mode"),
+    [("ranking/value-momentum.xml", 0o000), ("ranking", 0o600)],
+    ids=["unreadable-file", "unsearchable-folder"],
+)
+def test_a_definition_that_can_t_be_read_is_not_found(
+    tmp_path: Path, blocked: str, mode: int
+) -> None:
+    """As a configuration file that can't be read is: the error says why. So does a file in a
+    folder the user may not search, which may exist, rather than saying it doesn't (review of
+    R04-T06's pull request)."""
     screen, _ = laid_out(tmp_path, (RANKING / "value-momentum.xml").read_bytes())
-    xml = tmp_path / "experiment-configs" / "ranking" / "value-momentum.xml"
-    xml.chmod(0)
+    path = tmp_path / "experiment-configs" / blocked
+    restored = path.stat().st_mode
+    path.chmod(mode)
     try:
         error = rejection(screen, "input.not_found")
     finally:
-        xml.chmod(0o644)
+        path.chmod(restored)
 
     assert error.message.startswith(
         f"{screen.name}: couldn't read the file `ranking.definition` names "
@@ -306,6 +316,43 @@ def test_the_example_s_definition_reads_as_its_nodes() -> None:
         "Six-Month Return",
         "Year Return",
     ]
+
+
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16-be"])
+def test_a_file_saved_as_utf_16_without_a_byte_order_mark_is_invalid(
+    tmp_path: Path, encoding: str
+) -> None:
+    """Its bytes are UTF-8 text, NULs included, but XML 1.0 allows no NUL character, and expat
+    would read the file as UTF-16, whatever encoding it's told (review of R04-T06's pull
+    request)."""
+    text = (RANKING / "value-momentum.xml").read_text(encoding="utf-8")
+    screen, experiment = laid_out(tmp_path, text.encode(encoding))
+
+    for path, key in ((screen, "ranking.definition"), (experiment, "baseline.ranking.definition")):
+        assert problems(path) == [
+            (
+                f"`{key}` names a definition Trial Folio can't read, at line 1: the file holds a "
+                "NUL character, which XML 1.0 doesn't allow. A file saved as UTF-16 holds them: "
+                "save it as UTF-8, without a byte-order mark."
+            )
+        ]
+
+
+@pytest.mark.parametrize(
+    ("content", "line"),
+    [
+        ("<RankingSystem/>".encode("utf-16-le"), 1),
+        ((RANKING / "value-momentum.xml").read_bytes().replace(b"\t\t\t<Formula>", b"\0", 1), 4),
+    ],
+    ids=["utf-16-element", "nul-in-a-formula"],
+)
+def test_a_nul_character_fails_at_its_line(content: bytes, line: int) -> None:
+    """Never another exception, which a command would report as a defect, and never another
+    rule (review of R04-T06's pull request)."""
+    with pytest.raises(DefinitionProblem, match="the file holds a NUL character") as caught:
+        read_definition(content)
+
+    assert caught.value.line == line
 
 
 @pytest.mark.parametrize("line_end", [b"\r\n", b"\r"], ids=["crlf", "cr"])

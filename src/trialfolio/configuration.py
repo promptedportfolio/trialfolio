@@ -122,7 +122,7 @@ from trialfolio.contracts.screen_configuration import (
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS
 from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError, reason_of
-from trialfolio.paths import existing_path
+from trialfolio.paths import resolve_existing
 from trialfolio.ranking_definitions import (
     DefinitionProblem,
     RankingCase,
@@ -317,7 +317,12 @@ def _definition(
         return None
     where = f"{key}.definition"
     given = visible(ranking.definition)
-    resolved = existing_path(Path(path).parent / ranking.definition)
+    try:
+        resolved = resolve_existing(Path(path).parent / ranking.definition)
+    except OSError as error:
+        # The file system can't follow the path, such as through a folder the user may not
+        # search, so a file there, if there is one, can't be read.
+        raise _unreadable(source_name, where, given, error) from None
     if resolved is None:
         raise TrialFolioError(
             "input.not_found",
@@ -335,12 +340,7 @@ def _definition(
     try:
         definition = Path(resolved).read_bytes()
     except OSError as error:
-        reason = reason_of(error)
-        raise TrialFolioError(
-            "input.not_found",
-            f"{source_name}: couldn't read the file `{where}` names (`{given}`): {reason}.",
-            f"{source_name}: couldn't read the file `{where}` names: {reason}.",
-        ) from None
+        raise _unreadable(source_name, where, given, error) from None
     try:
         return read_definition(definition)
     except DefinitionProblem as problem:
@@ -356,6 +356,17 @@ _DEFINITION_PATH: Final = (
     "the path of the file that holds the ranking system's definition, the XML the website's Text "
     "Editor shows."
 )
+
+
+def _unreadable(source_name: str, where: str, given: str, error: OSError) -> TrialFolioError:
+    """`input.not_found` for a definition's file that can't be read, with the reason, as a
+    configuration file that can't be read gives it; the logged message leaves out the path."""
+    reason = reason_of(error)
+    return TrialFolioError(
+        "input.not_found",
+        f"{source_name}: couldn't read the file `{where}` names (`{given}`): {reason}.",
+        f"{source_name}: couldn't read the file `{where}` names: {reason}.",
+    )
 
 
 def _ranking_cases(

@@ -2,8 +2,10 @@
 in a directory.
 
 `existing_path` resolves a path the user gave as opening it would, for a run that
-`trialfolio report` reads, or that a review configuration names. `is_within` tells whether a
-path is in a directory, for `trialfolio init`'s workspace, which its log file stays out of.
+`trialfolio report` reads, or that a review configuration names. `resolve_existing` resolves one
+the same way, for a ranking definition's file, and tells why when the file system can't follow
+it. `is_within` tells whether a path is in a directory, for `trialfolio init`'s workspace, which
+its log file stays out of.
 """
 
 import os
@@ -23,6 +25,18 @@ def existing_path(path: str | os.PathLike[str]) -> str | None:
     except (OSError, ValueError):
         # Nothing exists there: a link leads to nothing, a part can't be read or is a file, or the
         # path holds a NUL, which no path can.
+        return None
+
+
+def resolve_existing(path: str | os.PathLike[str]) -> str | None:
+    """`path` where the file system resolves it, as `existing_path` resolves it, or None when
+    nothing exists there: a link leads to nothing, a part is a file, or the path holds a NUL.
+    Raises `OSError` when the file system can't follow it for another reason, such as a folder
+    on the way that can't be searched, for which `existing_path` gives None."""
+    try:
+        os.stat(path)
+        return os.path.realpath(path, strict=True)
+    except (FileNotFoundError, NotADirectoryError, ValueError):
         return None
 
 

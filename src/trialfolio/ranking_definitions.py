@@ -196,6 +196,15 @@ def read_definition(content: bytes) -> RankingDefinition:
             _line_ends(valid).count("\n") + 1,
         ) from None
     text = _line_ends(decoded)
+    # Before the parse: expat reads a file that starts with `<` and a NUL, or a NUL and `<`, as
+    # UTF-16, whatever encoding it's told, and the elements' places would then be wrong.
+    nul = text.find("\0")
+    if nul >= 0:
+        raise DefinitionProblem(
+            "the file holds a NUL character, which XML 1.0 doesn't allow. A file saved as "
+            "UTF-16 holds them: save it as UTF-8, without a byte-order mark",
+            text.count("\n", 0, nul) + 1,
+        )
     raw = text.encode("utf-8")
     root = _Tree(raw).root()
     if root.name != "RankingSystem":
