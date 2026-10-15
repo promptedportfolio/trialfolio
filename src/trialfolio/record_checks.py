@@ -51,7 +51,7 @@ class RecordChecks:
     "`plan.json` isn't JSON."."""
     unknown_version: Callable[[str, str], Exception]
     """Makes the reader's `artifact.unknown_schema_version` for the file at a path, from a sentence
-    that says which version it has, and which this version reads."""
+    that names the versions this version reads, never the file's own, which is text from a file."""
     readable: Mapping[str, tuple[str, tuple[str, ...]]]
     """The schema versions the reader reads, for each kind of file whose version it checks, with
     what they're called in messages, such as "plans"."""
