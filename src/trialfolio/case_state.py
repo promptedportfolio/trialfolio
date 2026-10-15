@@ -162,7 +162,8 @@ def experiment_counts(
     outcome, with `invalid` holding the `case_id` of each whose response failed validation;
     `retired`, how many cases revisions retired; every attempt of the experiment, a retired
     case's included, by its outcome, and the repeats; the sends and authentication calls the
-    budget counts, beside the plan's budget; and the credits Portfolio123 reported."""
+    budget counts, `counted_requests` and `counted_authentications`, beside the plan's budget;
+    and the credits Portfolio123 reported."""
     outcomes = [
         case_outcome(
             [attempt for attempt in attempts if attempt.case_id == case.case_id],
@@ -191,14 +192,27 @@ def experiment_counts(
             repeats=sum(a.repeat_of is not None for a in made),
         ),
         retries=0,
-        provider_requests=sum(attempt.provider_requests for attempt in attempts),
-        authentication_calls=sum(attempt.authentication_calls for attempt in attempts),
+        provider_requests=counted_requests(attempts),
+        authentication_calls=counted_authentications(attempts),
         budget=BudgetLimits(
             provider_requests=plan.budget.provider_requests,
             authentication_calls=plan.budget.authentication_calls,
         ),
         cost=sum(costs) if costs else None,
     )
+
+
+def counted_requests(attempts: Sequence[_CountedAttempt]) -> int:
+    """The sends the budget counts, across `attempts`: each that may have reached Portfolio123.
+    The manifest's counts, the executor's stop before the budget, and the plan display's
+    remaining budget each read this sum."""
+    return sum(attempt.provider_requests for attempt in attempts)
+
+
+def counted_authentications(attempts: Sequence[_CountedAttempt]) -> int:
+    """Trial Folio's own authentication calls the budget counts, across `attempts`, whatever
+    their result: an attempt's `POST /auth` exchange, or its authentication record alone."""
+    return sum(attempt.authentication_calls for attempt in attempts)
 
 
 def unavailable_metrics(plan: PlanV1_1, metrics: Mapping[str, Sequence[MetricsRow]]) -> int:

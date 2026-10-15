@@ -77,6 +77,8 @@ from trialfolio.case_state import (
     CaseState,
     case_outcome,
     case_state,
+    counted_authentications,
+    counted_requests,
     experiment_counts,
     latest_charged,
     unavailable_metrics,
@@ -522,12 +524,12 @@ class SavedExperiment:
     @property
     def provider_requests(self) -> int:
         """The sends counted against the budget, across every attempt of the experiment."""
-        return sum(attempt.provider_requests for attempt in self.attempts)
+        return counted_requests(self.attempts)
 
     @property
     def authentication_calls(self) -> int:
         """Trial Folio's own authentication calls counted against the budget."""
-        return sum(attempt.authentication_calls for attempt in self.attempts)
+        return counted_authentications(self.attempts)
 
     def saved_plan(self, number: int) -> SavedPlan:
         """The plan with this number. Raises `KeyError` when there's none."""

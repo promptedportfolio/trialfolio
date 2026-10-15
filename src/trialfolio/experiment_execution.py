@@ -87,6 +87,8 @@ from trialfolio.case_state import (
     case_outcome,
     case_state,
     confirmation_used,
+    counted_authentications,
+    counted_requests,
     described,
     described_by,
     experiment_counts,
@@ -1007,10 +1009,10 @@ class ExperimentExecution:
         The budget counts every attempt of the experiment, earlier sessions' included."""
         if self._cancellation is not None and self._cancellation.requested:
             return "cancelled"
-        budget = self._plan.budget
-        if self._provider_requests() + 1 > budget.provider_requests:
+        budget, attempts = self._plan.budget, self._attempts
+        if counted_requests(attempts) + 1 > budget.provider_requests:
             return "budget"
-        if authenticates and self._authentication_calls() + 1 > budget.authentication_calls:
+        if authenticates and counted_authentications(attempts) + 1 > budget.authentication_calls:
             return "authentication_budget"
         return None
 
@@ -1293,16 +1295,6 @@ class ExperimentExecution:
         if record is None:  # a new experiment's, before its first plan is recorded
             return 0
         return len(retired_cases(record, self._plan))
-
-    def _provider_requests(self) -> int:
-        """The sends counted against the budget: each that may have reached Portfolio123, of
-        every attempt of the experiment."""
-        return sum(attempt.provider_requests for attempt in self._attempts)
-
-    def _authentication_calls(self) -> int:
-        """Trial Folio's own authentication calls counted against the budget, whatever their
-        result: an attempt's `POST /auth` exchange, or its authentication record alone."""
-        return sum(attempt.authentication_calls for attempt in self._attempts)
 
     def _experiment_record(self) -> ExperimentRecord:
         if self._record is None:  # written before any case runs
