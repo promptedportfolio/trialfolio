@@ -1,0 +1,33 @@
+kind: experiment
+schema_version: 1.1.0
+experiment_id: value-momentum-mixed
+title: Value weights, holdings, and rebalancing
+purpose: Does the screen's result depend more on how its ranking weighs value than on its holdings or how often it rebalances?
+prior_research:
+  status: unknown
+baseline:
+  universe: 'SP500'
+  rules:
+    - 'AvgDailyTot(30) > 1000000'
+  ranking:
+    definition: 'ranking/value-momentum.xml'
+    ranking_method: percentile_nas_negative
+  max_holdings: 25
+  benchmark: 'SPY'
+  start_date: 2016-01-01
+  end_date: 2025-12-31
+  rebalance_weeks: 4
+  transaction_price: open
+  slippage_percent: 0.25
+  pit_method: complete
+  precision: 4
+variants:
+  ranking:
+    - key: value-heavy
+      description: More weight on value, taken equally from momentum and quality.
+      set: {'Value': 60, 'Momentum': 20, 'Quality': 20}
+  max_holdings:
+    - key: holdings-50
+      value: 50
+budget:
+  provider_requests: 8
