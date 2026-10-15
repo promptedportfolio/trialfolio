@@ -11,7 +11,11 @@ definition fails by its own rule, naming its entry by its place. The other tests
 rules of those three sections that R04-AC01's plan builds on: a definition's text, its line ends
 and its references, the canonical paths, each ranking variant's case, made by the text rules,
 and `ranking-written-differently.yaml` and `ranking-positions.yaml`, which name nodes by
-position. R04-T06 wrote them, with the readers' reading of the definition's file.
+position. R04-T06 wrote them, with the readers' reading of the definition's file. The review of
+its pull request added tests of the defects it corrected, a file saved as UTF-16 without a
+byte-order mark, a definition in a folder that can't be searched, a declaration over several
+lines, and composites nested past Python's recursion limit, and of the rules whose change no
+test had caught.
 """
 
 import os
@@ -356,6 +360,18 @@ def test_a_nul_character_fails_at_its_line(content: bytes, line: int) -> None:
     assert caught.value.line == line
 
 
+@pytest.mark.parametrize("line_end", [b"\r\n", b"\r"], ids=["crlf", "cr"])
+def test_a_file_that_isn_t_utf_8_names_its_line_with_any_line_ends(line_end: bytes) -> None:
+    """Its line ends are read as XML 1.0 reads them, so the first byte that isn't UTF-8 is on line
+    4 however the file ends its lines (review of R04-T06's pull request)."""
+    content = (INVALID_DEFINITIONS / "not-utf-8.xml").read_bytes().replace(b"\n", line_end)
+
+    with pytest.raises(DefinitionProblem, match="the file isn't UTF-8 text") as caught:
+        read_definition(content)
+
+    assert caught.value.line == 4
+
+
 @pytest.mark.parametrize(
     ("content", "line", "problem"),
     [
@@ -383,6 +399,40 @@ def test_a_declaration_over_several_lines_fails_at_the_line_where_it_starts(
         read_definition(content)
 
     assert caught.value.line == line
+
+
+@pytest.mark.parametrize(
+    ("before", "line"),
+    [("\t</Composite>", 9), ("</RankingSystem>", 26)],
+    ids=["composite", "ranking-system"],
+)
+def test_text_after_the_last_node_is_text_between_nodes(before: str, line: int) -> None:
+    """After a composite's last node, or the RankingSystem's, as before its first and between
+    two (review of R04-T06's pull request)."""
+    text = (RANKING / "value-momentum.xml").read_text(encoding="utf-8")
+    content = text.replace(before, f"\t\tStray.\n{before}", 1).encode()
+
+    with pytest.raises(DefinitionProblem, match="it holds text between nodes") as caught:
+        read_definition(content)
+
+    assert caught.value.line == line
+
+
+def test_a_node_s_weight_is_checked_before_the_nodes_it_holds() -> None:
+    """A composite's weight of 0 fails before its factor without a weight (ranking definitions,
+    messages; review of R04-T06's pull request)."""
+    content = (
+        b"<RankingSystem>\n"
+        b'\t<Composite Name="A" Weight="0">\n'
+        b'\t\t<StockFormula Name="B"/>\n'
+        b"\t</Composite>\n"
+        b"</RankingSystem>\n"
+    )
+
+    with pytest.raises(DefinitionProblem, match="a node's Weight is 0") as caught:
+        read_definition(content)
+
+    assert caught.value.line == 2
 
 
 def test_composites_nested_past_python_s_recursion_limit_are_read() -> None:
@@ -568,6 +618,43 @@ def test_positions_xml_s_canonical_paths() -> None:
     assert [node.kind for node in read.nodes][4:6] == ["StockFactor", "StockFactor"]
     # Every node's canonical path names it.
     assert all(read.node(node.path) == node for node in read.nodes)
+
+
+def test_a_name_that_nodes_of_two_parents_share_names_each_of_them() -> None:
+    """A canonical path names a node by its name when no other node of its parent has it,
+    whatever other parents hold (review of R04-T06's pull request)."""
+    content = (
+        b"<RankingSystem>\n"
+        b'\t<Composite Name="A" Weight="50"><StockFormula Name="Yield" Weight="100"/></Composite>\n'
+        b'\t<Composite Name="B" Weight="50"><StockFormula Name="Yield" Weight="100"/></Composite>\n'
+        b"</RankingSystem>\n"
+    )
+
+    read = read_definition(content)
+
+    assert [node.path for node in read.nodes] == ["A", "A/Yield", "B", "B/Yield"]
+    assert read.node("B/Yield") == read.nodes[3]
+
+
+def test_a_path_written_wrongly_fails_before_what_its_segments_name(tmp_path: Path) -> None:
+    """Its first segment names no node, and its second is position 0: the second fails, since a
+    path is read for how it's written first (node paths, two passes; review of R04-T06's pull
+    request)."""
+    with pytest.raises(NodePathProblem) as caught:
+        definition("value-momentum.xml").node("Valu/#0")
+
+    assert (caught.value.segment, caught.value.problem) == (
+        2,
+        "is position 0. Positions count from 1",
+    )
+    assert ranking_variants(
+        tmp_path, "  ranking:\n    - key: misnamed\n      set: {'Valu/#0': 100}\n"
+    ) == [
+        (
+            "`variants.ranking[0].set[0]` is a node path whose segment 2 is position 0. Positions "
+            "count from 1."
+        )
+    ]
 
 
 # Ranking variants.
@@ -912,6 +999,18 @@ def test_a_removal_s_set_names_only_the_nodes_left_beside_it(tmp_path: Path) -> 
     ) == [
         (
             "`variants.ranking[0].set[1]` names a node of another parent than the factor the variant "
+            "removes. A removal's set gives the weights of the nodes left beside it."
+        )
+    ]
+    # The parent is the removed factor's, even when the first entry names another's, whose
+    # weights would otherwise sum to the factor's parent's (review of R04-T06's pull request).
+    assert ranking_variants(
+        tmp_path,
+        "  ranking:\n    - key: removed\n      remove: 'Value/Sales Yield'\n"
+        "      set: {'Momentum/Six-Month Return': 100, 'Momentum/Year Return': 50}\n",
+    ) == [
+        (
+            "`variants.ranking[0].set[0]` names a node of another parent than the factor the variant "
             "removes. A removal's set gives the weights of the nodes left beside it."
         )
     ]
