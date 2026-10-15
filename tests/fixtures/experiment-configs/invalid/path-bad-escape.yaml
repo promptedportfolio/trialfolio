@@ -1,0 +1,39 @@
+# Invalid: A path's \ starts one of its escapes: \/, \\, or \# at a segment's start.
+# Key: variants.ranking[1].set[0]
+# Value: Value/Earnings\ Yield
+kind: experiment
+schema_version: 1.1.0
+experiment_id: value-momentum-weights
+title: Value, momentum, and quality weights
+purpose: Does the screen's result depend on how its ranking weighs value, or on the sales-yield factor?
+prior_research:
+  status: unknown
+baseline:
+  universe: 'SP500'
+  rules:
+    - 'AvgDailyTot(30) > 1000000'
+  ranking:
+    definition: '../ranking/value-momentum.xml'
+    ranking_method: percentile_nas_negative
+  max_holdings: 25
+  benchmark: 'SPY'
+  start_date: 2016-01-01
+  end_date: 2025-12-31
+  rebalance_weeks: 4
+  transaction_price: open
+  slippage_percent: 0.25
+  pit_method: complete
+  precision: 4
+variants:
+  ranking:
+    - key: value-heavy
+      description: More weight on value, taken equally from momentum and quality.
+      set: {'Value': 60, 'Momentum': 20, 'Quality': 20}
+    - key: tilt-earnings-yield
+      set: {'Value/Earnings\ Yield': 70, 'Value/Sales Yield': 30}
+    - key: no-sales-yield
+      remove: 'Value/Sales Yield'
+      set: {'Value/Earnings Yield': 100}
+  rebalance_weeks: []
+budget:
+  provider_requests: 8

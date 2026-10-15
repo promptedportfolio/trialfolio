@@ -16,8 +16,10 @@ looks for them, and the scans that look.
 
 R01-T09 created the credential and token values; R01-T15 added the fixtures' values and the
 scans, R02-T09 the review configuration's, R03-T13 the experiment configuration's, and R03-T11
-the revision's reason and Portfolio123's message. Each value is ASCII without characters JSON
-escapes, so a scan of the bytes finds it however a file encodes it.
+the revision's reason and Portfolio123's message. Release 0.4.0's R04-T06 listed
+`experiment-configs/ranking/canaries.xml`'s, which it wrote: R04-T13 adds them to the scans,
+with its other canaries (release 0.4.0, test pairing, canaries). Each value is ASCII without
+characters JSON escapes, so a scan of the bytes finds it however a file encodes it.
 """
 
 from collections.abc import Iterable
@@ -94,6 +96,43 @@ EXPERIMENT: Final = (
 the title, the purpose, and the prior-research description; the universe, the baseline's rule,
 the formula a variant puts in its place, the ranking formula, and the benchmark; and each
 variant's key, also a canary-like slug, and its description."""
+
+RANKING_DEFINITION: Final = (
+    "canary-node-one-86f2100d",
+    "canary-node-two-d7ace873",
+    "canary-node-three-83b2c3ff",
+    "canary-node-four-5f2f6c75",
+    "canary-node-five-817d6442",
+    "canary-node-six-991acb71",
+    "canary-node-seven-d426dda9",
+    "canary-node-eight-bf8abb5d",
+    "canary-node-nine-f9db236d",
+    "canary-definition-formula-one-98286c85",
+    "canary-definition-formula-two-3d5ce32f",
+    "canary-definition-formula-three-f4e3a28e",
+    "canary-definition-formula-four-bf57d868",
+    "canary-definition-formula-five-1434d680",
+    "canary-definition-formula-six-67e7e38c",
+    "canary-description-one-1a6a175b",
+    "canary-description-two-99cd4488",
+    "canary-description-three-e4a0b8a2",
+    "canary-description-four-11bc6d97",
+    "canary-description-five-e54db84b",
+    "canary-description-six-03e5a08a",
+    "38.2917",
+    "52.7381",
+    "47.2619",
+    "30.8541",
+    "51.9046",
+    "48.0954",
+    "30.8542",
+    "53.6172",
+    "46.3828",
+)
+"""Every canary in `experiment-configs/ranking/canaries.xml`: each node's name, in the
+definition's order; each `StockFormula`'s formula and `Description`; and each node's weight,
+with distinctive digits. A definition is the user's strategy definition, which logs never hold
+(release 0.4.0, R04-AC11)."""
 
 REVISION_REASON: Final = "canary-revision-reason-5f024a69"
 """A revision's reason, given with `--revision-reason`: the user's text, which logs never hold

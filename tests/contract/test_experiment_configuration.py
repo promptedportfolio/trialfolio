@@ -19,7 +19,14 @@ to the ranking example's structure, which the configuration's reader accepts. R0
 them, with the reader of both versions, which the invalid files' test uses. Until R04-T12,
 `trialfolio run` reads with the 1.0.0 reader, which refuses 1.1.0, so that reader's messages for
 such a file stay 0.3.0's, as the R04-T05 details in release 0.4.0's changes after sign-off give
-them. What a path names in the definition, and the example's cases, are R04-T06's.
+them. What a path names in the definition, and the example's cases, are R04-T06's: since then,
+the reader of both versions reads the baseline's definition file, from the configuration's
+directory, so it's given the configuration's path, and applies each ranking variant, and the
+invalid files' test reads the ranking variants' cases that depend on the definition too.
+`test_documented_ranking_example_compiles_to_its_cases` repeats the ranking example's
+validation, which R04-T02 left for R04-T04's test pairing to give R04-T06. What the reader reads
+in the definition, and each variant's case, are tested in
+tests/contract/test_ranking_definitions.py.
 """
 
 import json
@@ -193,7 +200,11 @@ def test_invalid_configuration_is_rejected_naming_its_key_never_its_value(path: 
     content = path.read_text(encoding="utf-8")
     key, value = header(content, "Key"), header(content, "Value")
 
-    message = rejection(path.read_bytes(), path.name, read_experiment_configuration_v1_1)
+    message = rejection(
+        path.read_bytes(),
+        path.name,
+        lambda content, name: read_experiment_configuration_v1_1(content, name, path),
+    )
 
     assert message.startswith(f"{path.name} isn't a valid configuration:")
     if key != "-":
@@ -783,8 +794,16 @@ def ranking_example() -> str:
     return re.findall(r"```yaml\n(.*?)```", section, re.DOTALL)[0]
 
 
-def read_v1_1(content: str) -> ExperimentConfiguration | ExperimentConfigurationV1_1:
-    return read_experiment_configuration_v1_1(content.encode(), "experiment.yaml")
+def read_v1_1(
+    content: str | bytes, source_name: str = "experiment.yaml"
+) -> ExperimentConfiguration | ExperimentConfigurationV1_1:
+    """Reads with the reader of both versions, as if the file were in the fixtures' directory,
+    from which the baseline's definition path is read."""
+    if isinstance(content, str):
+        content = content.encode()
+    return read_experiment_configuration_v1_1(
+        content, source_name, FIXTURES / source_name
+    ).configuration
 
 
 def read_ranked(content: str) -> ExperimentConfigurationV1_1:
@@ -794,7 +813,7 @@ def read_ranked(content: str) -> ExperimentConfigurationV1_1:
 
 
 def ranking_rejection(content: str) -> str:
-    return rejection(content, reader=read_experiment_configuration_v1_1)
+    return rejection(content, reader=read_v1_1)
 
 
 def ranking_line(old: str, new: str) -> str:
@@ -802,6 +821,175 @@ def ranking_line(old: str, new: str) -> str:
 
 
 VALUE_HEAVY = "      set: {'Value': 60, 'Momentum': 20, 'Quality': 20}"
+
+
+def ranking_example_xml() -> str:
+    """docs/contracts.md's ranking example's definition: the XML of `ranking/value-momentum.xml`."""
+    contracts = (REPO_ROOT / "docs" / "contracts.md").read_text(encoding="utf-8")
+    section = contracts[contracts.index("#### Ranking example") :]
+    return re.findall(r"```xml\n(.*?)```", section, re.DOTALL)[0]
+
+
+def snapshot_example() -> str:
+    """docs/contracts.md's ranking snapshot configuration example."""
+    contracts = (REPO_ROOT / "docs" / "contracts.md").read_text(encoding="utf-8")
+    section = contracts[contracts.index("### Ranking snapshot configuration") :]
+    return re.findall(r"```yaml\n(.*?)```", section, re.DOTALL)[0]
+
+
+def ranking_problems(tmp_path: Path, content: str, definition: bytes) -> list[str]:
+    """The problems of the experiment `content`, read with `definition` as the file its baseline
+    names, `ranking/value-momentum.xml`, beside it."""
+    path = tmp_path / "experiment.yaml"
+    path.write_text(content, encoding="utf-8")
+    (tmp_path / "ranking").mkdir(exist_ok=True)
+    (tmp_path / "ranking" / "value-momentum.xml").write_bytes(definition)
+    with pytest.raises(TrialFolioError) as caught:
+        read_experiment_configuration_v1_1(path.read_bytes(), path.name, path)
+    assert caught.value.code == "config.invalid"
+    return caught.value.message.split("\n")[1:]
+
+
+ALTERED_DEFINITIONS = {
+    "weight-zero": "a node's Weight is 0",
+    "weight-percent": "a node's Weight isn't a decimal in plain notation",
+    "xml-declaration": "it holds an XML declaration",
+    "doctype": "it holds a document type declaration",
+    "comment": "it holds a comment",
+    "conditional-node": "an element where a node goes isn't a Composite",
+    "root-not-ranking-system": "its root element isn't RankingSystem",
+    "not-well-formed": "it isn't well-formed XML 1.0",
+    "byte-order-mark": "the file starts with a byte-order mark",
+    "empty-composite": "a Composite holds no node",
+}
+"""The alterations of the example's definition that its validation lists, each one of the
+invalid definitions in `ranking/invalid/`, with the rule its message gives."""
+
+VALUE_HEAVY_SET = "{'Value': 60, 'Momentum': 20, 'Quality': 20}"
+
+ALTERED_VARIANTS = [
+    (
+        "{'Value': 60, 'Momentum': 20, 'Qualty': 20}",
+        "set[2]` is a node path whose segment 1 names none",
+    ),
+    ("{'Value': 50, 'Momentum': 20}", "set` leaves out its parent's node at position 3."),
+    ("{'Value': 60, 'Momentum/Year Return': 20, 'Quality': 20}", "set[1]` names a node of another"),
+    ("{'Value': 60, '#1': 60, 'Momentum': 20, 'Quality': 20}", "set[1]` names the same node as"),
+    ("{'Value': 60, 'Momentum': 20, 'Quality': 30}", "set` gives weights that don't sum to"),
+    ("{'Value': 40, 'Momentum': 30, 'Quality': 30}", "set` gives every node the weight it has"),
+]
+"""The alterations of the example's `value-heavy` variant that its validation lists, with the
+start of the problem its message gives, after `variants.ranking[0].`."""
+
+
+def test_documented_ranking_example_compiles_to_its_cases(tmp_path: Path) -> None:
+    """Repeats the ranking example's validation, which R04-T02 left for R04-T04 (release 0.4.0's
+    other checks in the default suite). Its XML and YAML are the fixtures, byte for byte, and so
+    is the snapshot example; the experiment gives the four cases the example describes, each with
+    the definition it describes; each alteration the validation lists fails; and a path with `\\/`
+    in single quotes names the node a path with `\\\\/` in double quotes names. The plan these
+    cases compile to is release 0.4.0's R04-T07's."""
+    xml = ranking_example_xml()
+    assert (FIXTURES / "ranking" / "value-momentum.xml").read_bytes() == xml.encode()
+    assert (FIXTURES / "ranking-example.yaml").read_bytes() == ranking_example().encode()
+    snapshot = REPO_ROOT / "tests" / "fixtures" / "ranking-snapshot-configs" / "example.yaml"
+    assert snapshot.read_bytes() == snapshot_example().encode()
+
+    path = FIXTURES / "ranking-example.yaml"
+    read = read_experiment_configuration_v1_1(path.read_bytes(), path.name, path)
+
+    assert read.definition is not None and read.definition.text == xml
+    keys = [
+        "baseline",
+        *(variant.key for variant in configured_variants_v1_1(read_ranked(ranking_example()))),
+    ]
+    assert keys == ["baseline", "value-heavy", "tilt-earnings-yield", "no-sales-yield"]
+    heavy, tilt, no_sales = (case.definition.text for case in read.ranking_cases)
+
+    def weights(text: str, *changes: tuple[str, str, str]) -> str:
+        for name, old, new in changes:
+            written = f'Name="{name}" Weight="{old}"'
+            assert text.count(written) == 1
+            text = text.replace(written, f'Name="{name}" Weight="{new}"')
+        return text
+
+    assert heavy == weights(
+        xml, ("Value", "40", "60"), ("Momentum", "30", "20"), ("Quality", "30", "20")
+    )
+    assert tilt == weights(xml, ("Earnings Yield", "50", "70"), ("Sales Yield", "50", "30"))
+    lines = xml.split("\n")
+    assert lines[5:8] == [
+        (
+            '\t\t<StockFormula Name="Sales Yield" Weight="50" RankType="Higher" Scope="Universe" '
+            'Description="">'
+        ),
+        "\t\t\t<Formula>…</Formula>",
+        "\t\t</StockFormula>",
+    ]
+    removed = "\n".join(lines[:5] + lines[8:])
+    assert no_sales == weights(removed, ("Earnings Yield", "50", "100"))
+    assert len({xml, heavy, tilt, no_sales}) == 4
+
+    content = ranking_example()
+    for name, rule in ALTERED_DEFINITIONS.items():
+        definition = (FIXTURES / "ranking" / "invalid" / f"{name}.xml").read_bytes()
+        (problem,) = ranking_problems(tmp_path, content, definition)
+        assert problem.startswith("- `baseline.ranking.definition` names a definition"), name
+        assert rule in problem, name
+    for altered, problem in ALTERED_VARIANTS:
+        found = ranking_problems(
+            tmp_path, with_line(VALUE_HEAVY_SET, altered, content), xml.encode()
+        )
+        assert found == [found[0]] and found[0].startswith(f"- `variants.ranking[0].{problem}")
+    # Two nodes that share a name, which the path names.
+    shared = xml.replace('Name="Sales Yield"', 'Name="Earnings Yield"').encode()
+    assert any(
+        "`variants.ranking[1].set[0]` is a node path whose segment 2 names more than one" in found
+        for found in ranking_problems(tmp_path, content, shared)
+    )
+    # The removal of a composite, and of a composite's only factor.
+    composite = with_line("      remove: 'Value/Sales Yield'", "      remove: 'Value'", content)
+    composite = with_line(
+        "      set: {'Value/Earnings Yield': 100}",
+        "      set: {'Momentum': 50, 'Quality': 50}",
+        composite,
+    )
+    assert ranking_problems(tmp_path, composite, xml.encode())[0].startswith(
+        "- `variants.ranking[2].remove` names a composite."
+    )
+    only = xml.encode().replace("\n".join(lines[5:8]).encode() + b"\n", b"")
+    only = only.replace(b'Name="Earnings Yield" Weight="50"', b'Name="Earnings Yield" Weight="100"')
+    alone = with_line(
+        "      remove: 'Value/Sales Yield'", "      remove: 'Value/Earnings Yield'", content
+    )
+    assert any(
+        problem.startswith("- `variants.ranking[2].remove` names its parent's only node")
+        for problem in ranking_problems(tmp_path, alone, only)
+    )
+    # An escaped / in single quotes, and in double quotes, where YAML reads its own escapes first.
+    slashed = xml.replace('Name="Sales Yield"', 'Name="P/E"').encode()
+    single = with_line(
+        "      set: {'Value/Earnings Yield': 70, 'Value/Sales Yield': 30}",
+        "      set: {'Value/Earnings Yield': 70, 'Value/P\\/E': 30}",
+        content,
+    )
+    single = with_line("      remove: 'Value/Sales Yield'", "      remove: 'Value/P\\/E'", single)
+    double = single.replace("'Value/P\\/E'", '"Value/P\\\\/E"')
+    cases = []
+    for written in (single, double):
+        path = tmp_path / "experiment.yaml"
+        path.write_text(written, encoding="utf-8")
+        (tmp_path / "ranking" / "value-momentum.xml").write_bytes(slashed)
+        cases.append(
+            [
+                (case.definition.text, case.remove and case.remove.path)
+                for case in read_experiment_configuration_v1_1(
+                    path.read_bytes(), path.name, path
+                ).ranking_cases
+            ]
+        )
+    assert cases[0] == cases[1]
+    assert cases[0][2][1] == "Value/P\\/E"
 
 
 def test_the_ranking_example_reads_as_documented() -> None:
@@ -1005,7 +1193,7 @@ def test_a_set_s_paths_and_remove_may_be_in_double_quotes() -> None:
 def test_a_1_0_0_file_can_t_vary_the_ranking() -> None:
     path = INVALID / "variant-ranking.yaml"
 
-    message = rejection(path.read_bytes(), path.name, read_experiment_configuration_v1_1)
+    message = rejection(path.read_bytes(), path.name, read_v1_1)
 
     assert (
         "`variants.ranking` needs schema_version 1.1.0, with a baseline ranked by a definition "

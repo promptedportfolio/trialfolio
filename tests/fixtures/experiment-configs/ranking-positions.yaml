@@ -1,0 +1,34 @@
+kind: experiment
+schema_version: 1.1.0
+experiment_id: positions-weights
+title: Weights of nodes named by their positions
+purpose: Does the screen's result depend on the weights of factors that only a position names?
+prior_research:
+  status: unknown
+baseline:
+  universe: 'SP500'
+  rules:
+    - 'AvgDailyTot(30) > 1000000'
+  ranking:
+    definition: 'ranking/positions.xml'
+    ranking_method: percentile_nas_negative
+  max_holdings: 25
+  benchmark: 'SPY'
+  start_date: 2016-01-01
+  end_date: 2025-12-31
+  rebalance_weeks: 4
+  transaction_price: open
+  slippage_percent: 0.25
+  pit_method: complete
+  precision: 4
+variants:
+  ranking:
+    - key: positions-heavy
+      description: More weight on value and on price to book, taken from the two factors without a name.
+      set: {'Value P\/E': 30, '#2': 5, '#3': 5, 'Price\\Book': 25, '\#Momentum': 15, '#6': 20}
+    - key: no-first-yield
+      remove: 'Value P\/E/#1'
+      set: {'Value P\/E/#2': 60, 'Value P\/E/Cash Flow': 40}
+  rebalance_weeks: []
+budget:
+  provider_requests: 6
