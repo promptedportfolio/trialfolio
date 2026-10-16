@@ -11,17 +11,21 @@ caller gives it the file, which `ranking_lock_path` gives from the environment t
   empty, and otherwise in a directory every user of the machine can write: `/tmp` on Linux and
   macOS, and the one `%ProgramData%` names on Windows. Trial Folio creates no directory for it.
 - **Opening it.** It's opened only for reading, never through a symbolic link (`O_NOFOLLOW`), and
-  created only when it doesn't exist, exclusively, and opened again when another process created
-  it first. So a file another user created is opened, not created, which Linux's
-  `protected_regular` allows. A file it creates gets the mode `0644`, whatever the umask, on Linux
-  and macOS. It's never written, truncated, or removed: it stays empty.
+  without waiting (`O_NONBLOCK`), and created only when it doesn't exist, exclusively, and opened
+  again when another process created it first. So a file another user created is opened, not
+  created, which Linux's `protected_regular` allows. A file it creates gets the mode `0644`,
+  whatever the umask, on Linux and macOS. It's never written, truncated, or removed: it stays
+  empty. Once it's open, anything but a regular file, such as a FIFO or a directory, is refused,
+  and so is a symbolic link at the path, which Windows's open follows, before it's locked.
 - **The lock** is the experiment lock's kind: `fcntl.flock` with `LOCK_EX | LOCK_NB` on Linux and
   macOS, and `msvcrt.locking` with `LK_NBLCK` on the file's first byte on Windows, which
   Microsoft's documentation allows on a handle with read access, beyond the end of the file. The
   Windows parts come from that documentation, not from a check on Windows.
-- **A file replaced before it's locked.** On Linux and macOS, once it holds the lock, it checks
-  that the path still names the file it locked, by its device and inode, and otherwise opens the
-  path again. A file removed while a run holds its lock is a limit the lock states.
+- **A file replaced before it's locked.** Once it holds the lock, it checks that the path still
+  names the file it locked, by its device and inode, and otherwise opens the path again; on
+  Windows, by the volume and file ID that CPython's `os.stat` and `os.fstat` both give, which comes
+  from CPython's source, not from a check on Windows. A file removed while a run holds its lock is
+  a limit the lock states.
 - **Errors.** Another process's lock gives `experiment.locked`, exit 4, and any other failure to
   open or lock the file `storage.write_failed`, exit 4, whose message names the file, with its
   control and formatting characters written as escapes, and the system's reason, and says that
@@ -64,10 +68,14 @@ _MODE: Final = 0o644
 _OPEN: Final[int] = (
     os.O_RDONLY
     | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
     | getattr(os, "O_CLOEXEC", 0)
     | getattr(os, "O_BINARY", 0)
 )
-"""Only for reading, never through a symbolic link, and closed in a program it runs."""
+"""Only for reading, never through a symbolic link on Linux and macOS, without waiting, as opening
+a FIFO for reading would until a writer opens it, and closed in a program it runs. Windows has
+neither `O_NOFOLLOW` nor `O_NONBLOCK`: `_checked` refuses a symbolic link there, and its open of a
+regular file doesn't wait."""
 
 _ATTEMPTS: Final = 8
 """How many times it opens the path again, when the file it opened or locked was replaced, before
@@ -137,8 +145,9 @@ class RankingLock:
         """Takes the lock, without waiting.
 
         Raises `TrialFolioError` with `experiment.locked` when another process holds it, and with
-        `storage.write_failed` when the file can't be opened, created, or locked, or keeps being
-        replaced. Raises `RuntimeError` if this lock is held already.
+        `storage.write_failed` when the file can't be opened, created, or locked, isn't a regular
+        file, is a symbolic link, or keeps being replaced. Raises `RuntimeError` if this lock is
+        held already.
         """
         if self._descriptor is not None:
             raise RuntimeError("the ranking lock is taken once")
@@ -177,10 +186,11 @@ class RankingLock:
 
     def _open(self) -> int:
         """Opens the file, only for reading, or creates it, exclusively, when it doesn't exist,
-        and opens it again when another process created it first."""
+        and opens it again when another process created it first. Either way, `_checked` checks
+        what it opened."""
         for _ in range(_ATTEMPTS):
             try:
-                return os.open(self._path, _OPEN)
+                return _checked(self._path, os.open(self._path, _OPEN))
             except FileNotFoundError:
                 pass
             except OSError as error:
@@ -192,8 +202,31 @@ class RankingLock:
             except OSError as error:
                 raise _unavailable(self._path, reason_of(error)) from error
             _set_mode(self._path, descriptor)
-            return descriptor
+            return _checked(self._path, descriptor)
         raise _unavailable(self._path, "another program kept removing the file")
+
+
+def _checked(path: Path, descriptor: int) -> int:
+    """`descriptor`, once it's checked to be a regular file that the path doesn't name through a
+    symbolic link. Otherwise it's closed, and taking the lock fails at once with
+    `storage.write_failed`, before anything is locked: a FIFO, a directory, or a device isn't a lock
+    file, and on Windows, whose `os.open` has no `O_NOFOLLOW`, a symbolic link at the path would
+    lead it to lock the link's target. On Linux and macOS, `O_NOFOLLOW` refuses a link first. A
+    path removed meanwhile is left to `_still_named`, once the file is locked."""
+    reason: str | None = None
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            reason = "it isn't a regular file"
+        elif stat.S_ISLNK(os.stat(path, follow_symlinks=False).st_mode):
+            reason = "it's a symbolic link, which Trial Folio doesn't follow to its lock file"
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        reason = reason_of(error)
+    if reason is None:
+        return descriptor
+    os.close(descriptor)
+    raise _unavailable(path, reason)
 
 
 def _set_mode(path: Path, descriptor: int) -> None:
@@ -230,11 +263,13 @@ def _lock(path: Path, descriptor: int) -> None:
 
 
 def _still_named(path: Path, descriptor: int) -> bool:
-    """Whether the path still names the file `descriptor` locked, by its device and inode, on
-    Linux and macOS. Another program may have removed the file after this process opened it, and
-    a third process may have created and locked a new one meanwhile."""
-    if sys.platform == "win32":
-        return True
+    """Whether the path still names the file `descriptor` locked, by its device and inode. On
+    Linux and macOS, another program may have removed the file after this process opened it, and
+    a third process may have created and locked a new one meanwhile. On Windows, where a file this
+    process holds open can't be removed or renamed, a symbolic link at the path may have been
+    replaced by a file after this process opened the link's target: CPython's `os.stat` and
+    `os.fstat` both give a file's volume serial number and its file ID there, which this compares,
+    as its source shows, not a check on Windows."""
     try:
         named = os.stat(path, follow_symlinks=False)
     except FileNotFoundError:

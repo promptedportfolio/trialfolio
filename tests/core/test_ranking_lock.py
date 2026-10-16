@@ -10,14 +10,16 @@ core; and to R04-AC05, at the core: an execution through the core, without the C
 `TRIALFOLIO_` variable unset, takes the lock its caller names. Another descriptor of this process
 stands for another process, since `flock` locks an open file, whatever process holds it; the
 interface tests, with the test launcher, take it from two processes (release 0.4.0's R04-T12).
-The executors run with the demo's client, which sends nothing, or over the fake server.
+The executors run with the demo's client, which sends nothing, or over the fake server. Each test
+that takes the lock with `flock` runs on Linux and macOS; on Windows, which has no `fcntl`, only
+the others run, and the test of a symbolic link there.
 """
 
 import errno
-import fcntl
 import os
 import stat
 import sys
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -49,7 +51,10 @@ from trialfolio.provider import Credentials, P123ScreenBacktestClient, ScreenBac
 from trialfolio.ranking_lock import LOCK_FILE, RankingLock, ranking_lock_path
 from trialfolio.storage import LocalArtifactStore, StoredFile
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="flock is Linux's and macOS's")
+if sys.platform != "win32":
+    import fcntl
+
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="flock is Linux's and macOS's")
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 SCREEN = FIXTURES / "screen-configs" / "definition.yaml"
@@ -144,6 +149,7 @@ def experiment() -> tuple[bytes, bytes, PlanV1_3]:
     return content, read.definition.content, plan
 
 
+@posix_only
 def test_the_file_is_created_0644_opened_only_for_reading_and_never_written(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -182,6 +188,7 @@ def test_the_file_is_created_0644_opened_only_for_reading_and_never_written(
     assert opened[1] & os.O_EXCL
 
 
+@posix_only
 def test_an_existing_file_is_opened_as_it_is(tmp_path: Path) -> None:
     path = tmp_path / LOCK_FILE
     path.touch()
@@ -196,6 +203,7 @@ def test_an_existing_file_is_opened_as_it_is(tmp_path: Path) -> None:
     assert path.stat().st_size == 0
 
 
+@posix_only
 def test_a_symbolic_link_at_its_path_isnt_followed(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.touch()
@@ -213,6 +221,99 @@ def test_a_symbolic_link_at_its_path_isnt_followed(tmp_path: Path) -> None:
     assert not locked_elsewhere(target)
 
 
+@posix_only
+def test_a_symbolic_link_that_the_open_follows_is_refused_before_its_target_is_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Windows's open has no `O_NOFOLLOW`, so it follows a link at the path: here, an open without
+    # the flag stands for it. A defect found by the review of R04-T08's pull request: on Windows,
+    # the link's target was locked.
+    target = tmp_path / "target"
+    target.touch()
+    path = tmp_path / LOCK_FILE
+    path.symlink_to(target)
+    real_open, real_flock = os.open, fcntl.flock
+    locked: list[int] = []
+
+    def following(file: str | os.PathLike[str], flags: int, *args: int, **kwargs: int) -> int:
+        if Path(file) == path:
+            flags &= ~os.O_NOFOLLOW
+        return real_open(file, flags, *args, **kwargs)
+
+    def recording(descriptor: int, operation: int) -> None:
+        locked.append(descriptor)
+        real_flock(descriptor, operation)
+
+    monkeypatch.setattr(os, "open", following)
+    monkeypatch.setattr(fcntl, "flock", recording)
+    with pytest.raises(TrialFolioError) as raised:
+        RankingLock(path).acquire()
+    monkeypatch.undo()
+
+    assert raised.value.code == "storage.write_failed"
+    assert "symbolic link" in raised.value.message
+    assert locked == []
+    assert not locked_elsewhere(target)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows behavior")
+def test_windows_refuses_a_symbolic_link_at_its_path(tmp_path: Path) -> None:
+    # Windows's open follows a symbolic link: the lock refuses one before it locks its target.
+    target = tmp_path / "target"
+    target.touch()
+    path = tmp_path / LOCK_FILE
+    try:
+        path.symlink_to(target)
+    except OSError:
+        pytest.skip("creating a symbolic link needs a privilege on Windows")
+
+    lock = RankingLock(path)
+    with pytest.raises(TrialFolioError) as raised:
+        lock.acquire()
+
+    assert raised.value.code == "storage.write_failed"
+    assert "symbolic link" in raised.value.message
+    assert not lock.held
+
+
+@posix_only
+@pytest.mark.parametrize("kind", ["FIFO", "directory"])
+def test_a_path_that_isnt_a_regular_file_fails_at_once(tmp_path: Path, kind: str) -> None:
+    # A defect found by the review of R04-T08's pull request: opening a FIFO for reading waited
+    # for a writer, so a FIFO at the path, which any user can make in `/tmp`, hung every run with
+    # a definition; and a directory failed only after 8 opens, as a file replaced each time.
+    path = tmp_path / LOCK_FILE
+    if kind == "FIFO":
+        os.mkfifo(path)
+    else:
+        path.mkdir()
+    lock = RankingLock(path)
+    ended: list[BaseException] = []
+
+    def acquire() -> None:
+        try:
+            lock.acquire()
+        except BaseException as error:  # noqa: BLE001 - the test reads it.
+            ended.append(error)
+
+    thread = threading.Thread(target=acquire, daemon=True)
+    thread.start()
+    thread.join(10)
+    if thread.is_alive():
+        # A writer lets the waiting open go on, so the test fails rather than hangs.
+        os.close(os.open(path, os.O_WRONLY | os.O_NONBLOCK))
+        thread.join(10)
+        pytest.fail("taking the lock waited at the path")
+
+    (error,) = ended
+    assert isinstance(error, TrialFolioError)
+    assert error.code == "storage.write_failed"
+    assert "it isn't a regular file" in error.message
+    assert str(path) in error.message
+    assert not lock.held
+
+
+@posix_only
 def test_another_descriptors_lock_gives_experiment_locked(tmp_path: Path) -> None:
     path = tmp_path / LOCK_FILE
     lock = RankingLock(path)
@@ -244,6 +345,7 @@ def test_any_other_error_gives_storage_write_failed_naming_the_file_and_the_vari
     assert not path.parent.exists()
 
 
+@posix_only
 def test_a_file_replaced_before_the_lock_is_taken_is_opened_again(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -289,6 +391,7 @@ def test_the_default_directories_are_checked_as_paths(
     assert ranking_lock_path(environ, platform) == expected
 
 
+@posix_only
 def test_a_screen_run_holds_the_lock_from_before_its_first_write_until_it_ends(
     tmp_path: Path,
 ) -> None:
@@ -310,6 +413,7 @@ def test_a_screen_run_holds_the_lock_from_before_its_first_write_until_it_ends(
     assert not locked_elsewhere(lock)
 
 
+@posix_only
 def test_a_new_experiment_holds_the_lock_from_before_its_claim_until_it_ends(
     tmp_path: Path,
 ) -> None:
@@ -335,6 +439,7 @@ def test_a_new_experiment_holds_the_lock_from_before_its_claim_until_it_ends(
     assert not locked_elsewhere(lock)
 
 
+@posix_only
 def test_a_held_lock_fails_a_screen_run_before_anything_is_sent_or_written(
     tmp_path: Path,
 ) -> None:
@@ -359,6 +464,7 @@ def test_a_held_lock_fails_a_screen_run_before_anything_is_sent_or_written(
     assert made == []
 
 
+@posix_only
 def test_a_held_lock_fails_a_new_experiment_before_anything_is_sent_or_written(
     tmp_path: Path,
 ) -> None:
@@ -386,6 +492,7 @@ def test_a_held_lock_fails_a_new_experiment_before_anything_is_sent_or_written(
     assert server.requests() == []
 
 
+@posix_only
 def test_a_run_without_a_definition_takes_no_lock(tmp_path: Path) -> None:
     formula = FIXTURES / "screen-configs" / "formula.yaml"
     content = formula.read_bytes()
