@@ -300,12 +300,15 @@ def check_records(
 
 
 def attempt_status(
-    start: StartRecord | StartRecordV1_2 | None, record: AttemptRecord | AttemptRecordV1_2 | None
+    start: StartRecord | StartRecordV1_2 | None,
+    record: AttemptRecord | AttemptRecordV1_2 | None,
+    update: StartRecordV1_2 | None = None,
 ) -> AttemptStatus | None:
     """How an attempt with these records reads: from its attempt record, or, without one, from its
     start record, as `running`, possibly charged, with one provider request, or, for a backtest's
-    start record 1.2.0, two, since its update record came before it. None when it has
-    neither."""
+    start record 1.2.0, two, since its update record came before it. An attempt with only its
+    update record, `update`, reads as `running` too, with one: its `rank_update` may have been
+    sent (counting the requests). None when it has none of them."""
     if record is not None:
         return AttemptStatus(
             attempt_id=record.attempt_id,
@@ -313,16 +316,17 @@ def attempt_status(
             possibly_charged=record.possibly_charged,
             provider_requests=provider_requests(record),
         )
-    if start is not None:
-        # The request is sent at most once, so a start record is one possible send, and an
-        # attempt that sends a definition wrote its update record before it (counting the
-        # requests).
-        update = isinstance(start, StartRecordV1_2) and start.operation == "screen_backtest"
+    latest = start if start is not None else update
+    if latest is not None:
+        # Each request is sent at most once, so each start record is one possible send, and an
+        # attempt that sends a definition wrote its update record before its backtest's
+        # (counting the requests).
+        updated = isinstance(latest, StartRecordV1_2) and latest.operation == "screen_backtest"
         return AttemptStatus(
-            attempt_id=start.attempt_id,
+            attempt_id=latest.attempt_id,
             outcome="running",
             possibly_charged=True,
-            provider_requests=2 if update else 1,
+            provider_requests=2 if updated else 1,
         )
     return None
 

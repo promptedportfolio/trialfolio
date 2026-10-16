@@ -9,7 +9,10 @@ for a resume (docs/contracts.md, a complete run, and checking the records).
 - **A case's normalized tables.** Each reads back as a valid table, its rows are labeled with the
   case's `case_id`, `metrics.csv` holds one row for each of the layout's metrics, in order, each in
   the metric's unit, `settings.csv` one for each of the plan's settings, in order, and each row was
-  drawn from the file it should be.
+  drawn from the file it should be. From 0.4.0, a weight row of `settings.csv` 1.1.0 is its plan's
+  weight row, by its node and its value.
+- **A definition's copy.** From 0.4.0, a plan's `definition.xml`, read as a definition's file is
+  read, has the hash its plan's `ranking_source` gives (a complete run, and checking the records).
 
 The two readers refuse differently: a run's error names the run as its reader is told to, once
 the check has failed, and an experiment's names the output directory. So `RecordChecks` takes the
@@ -28,18 +31,27 @@ from typing import Final, cast
 from pydantic import BaseModel, ValidationError
 
 from trialfolio.canonical import sha256_hex
-from trialfolio.contracts.experiment_manifest import ExperimentArtifact
-from trialfolio.contracts.experiment_plan import PlanV1_1
-from trialfolio.contracts.manifest import ManifestArtifact
-from trialfolio.contracts.plan import Plan, PlanSetting
-from trialfolio.contracts.tables import MetricsRow, SettingsRow
+from trialfolio.contracts.experiment_manifest import ExperimentArtifact, ExperimentArtifactV1_1
+from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
+from trialfolio.contracts.manifest import ManifestArtifact, ManifestArtifactV1_1
+from trialfolio.contracts.plan import Plan, PlanSetting, PlanSettingV1_2, PlanV1_2
+from trialfolio.contracts.tables import MetricsRow, SettingsRow, SettingsRowV1_1
 from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError
-from trialfolio.normalization import METRICS
+from trialfolio.normalization import METRICS, setting_text
 from trialfolio.planning import plan_hash
+from trialfolio.ranking_definitions import DefinitionProblem, read_definition
 
 _METRIC_ROWS: Final = tuple((metric.subject, metric.metric_id, metric.unit) for metric in METRICS)
 """`metrics.csv`'s rows, in order, by subject and `metric_id`, with the unit the layout fixes."""
+
+type AnySettingsRow = SettingsRow | SettingsRowV1_1
+"""A row of `settings.csv` 1.0.0, or of 1.1.0, a run's or a case's whose ranking is a definition."""
+
+type AnyArtifact = (
+    ManifestArtifact | ManifestArtifactV1_1 | ExperimentArtifact | ExperimentArtifactV1_1
+)
+"""A manifest's entry for a file: a run's or an experiment's, of either version."""
 
 
 @dataclass(frozen=True)
@@ -111,7 +123,7 @@ class RecordChecks:
             check = f"check `{'`, `'.join(named_fields)}`" if named_fields else "check its fields"
             raise self.refused(f"{named(path)} isn't a valid {what}: {check}.") from None
 
-    def check_plan_hash(self, plan: Plan | PlanV1_1, file: str) -> None:
+    def check_plan_hash(self, plan: Plan | PlanV1_1 | PlanV1_2 | PlanV1_3, file: str) -> None:
         """Checks that `plan` recomputes to its `plan_hash`. `file` names its file in the
         messages, such as "its plan.json"."""
         try:
@@ -148,12 +160,12 @@ def artifact_id(content: bytes) -> str:
     return "sha256:" + sha256_hex(content)
 
 
-def matches(content: bytes, artifact: ManifestArtifact | ExperimentArtifact) -> bool:
+def matches(content: bytes, artifact: AnyArtifact) -> bool:
     """Whether `content` has the size and `artifact_id` the manifest's entry records."""
     return len(content) == artifact.size and artifact_id(content) == artifact.artifact_id
 
 
-def labeled(rows: Iterable[MetricsRow | SettingsRow], case_id: str) -> bool:
+def labeled(rows: Iterable[MetricsRow | AnySettingsRow], case_id: str) -> bool:
     """Whether each row of a case's tables is labeled with its `case_id`."""
     return all(row.label == case_id for row in rows)
 
@@ -164,11 +176,38 @@ def holds_each_metric(rows: Sequence[MetricsRow]) -> bool:
     return tuple((row.subject, row.metric_id, row.unit) for row in rows) == _METRIC_ROWS
 
 
-def holds_each_setting(rows: Sequence[SettingsRow], planned: Sequence[PlanSetting]) -> bool:
-    """Whether `settings.csv`'s rows are one for each of the plan's settings, in order."""
+def holds_each_setting(
+    rows: Sequence[SettingsRow] | Sequence[SettingsRowV1_1],
+    planned: Sequence[PlanSetting] | Sequence[PlanSettingV1_2],
+) -> bool:
+    """Whether `settings.csv`'s rows are one for each of the plan's settings, in order. The
+    weight rows share one name, so `holds_each_weight` tells them apart by their nodes."""
     return tuple(row.setting for row in rows) == tuple(setting.setting for setting in planned)
 
 
-def drawn_from(rows: Iterable[MetricsRow | SettingsRow], *sources: str) -> bool:
+def holds_each_weight(rows: Sequence[SettingsRowV1_1], planned: Sequence[PlanSettingV1_2]) -> bool:
+    """Whether the weight rows of `settings.csv` 1.1.0 give the weights their plan's weight rows
+    give, node for node: the weights of the case's definition, which the plan's models check
+    (weight rows)."""
+    weights = tuple((row.node, row.value) for row in rows if row.node is not None)
+    return weights == tuple(
+        (setting.node, setting_text(setting.value))
+        for setting in planned
+        if setting.node is not None
+    )
+
+
+def drawn_from(rows: Iterable[MetricsRow | AnySettingsRow], *sources: str) -> bool:
     """Whether each row was drawn from one of `sources`, by its `artifact_id`."""
     return all(row.source_artifact in sources for row in rows)
+
+
+def definition_hash(content: bytes) -> str | None:
+    """The hash of the definition a plan's `definition.xml`, whose bytes are `content`, holds,
+    read as a definition's file is read, each carriage return and line feed, and each carriage
+    return alone, read as a line feed (ranking definitions): the `definition` its plan's
+    `ranking_source` gives. None when it isn't a definition Trial Folio reads."""
+    try:
+        return read_definition(content).hash
+    except DefinitionProblem:
+        return None

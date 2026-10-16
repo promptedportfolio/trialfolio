@@ -281,7 +281,8 @@ type Json = dict[str, object]
 
 
 def newer(content: Json) -> None:
-    content["schema_version"] = "1.1.0"
+    # Not 1.1.0, which release 0.4.0's R04-T09 gave run manifests a reader for.
+    content["schema_version"] = "9.9.9"
 
 
 def newer_entry(role: str) -> Callable[[Json], None]:
@@ -316,7 +317,7 @@ def test_a_schema_version_without_a_reader_is_unknown(
     error = refused(complete.out, tmp_path / "report")
 
     assert error.code == "artifact.unknown_schema_version"
-    assert "1.1.0" not in error.message
+    assert "9.9.9" not in error.message
     assert error.message.startswith("Trial Folio can't read `")
     assert "` in the run directory: " in error.message
 
