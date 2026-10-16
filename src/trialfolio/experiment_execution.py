@@ -1716,7 +1716,8 @@ class ExperimentExecution:
     def _attempt_detail(self) -> str:
         current = self._current
         if current is not None and current.start_record is not None:
-            return running_detail("the attempt under way")
+            ranking = isinstance(current, RankingExperimentAttempt)
+            return running_detail("the attempt under way", ranking=ranking)
         if isinstance(current, RankingExperimentAttempt) and current.update_record is not None:
             return updating_detail("the attempt under way")
         if self._results:
@@ -1724,7 +1725,7 @@ class ExperimentExecution:
             record = last.record
             if not last.recorded:
                 if last.start is not None:
-                    return running_detail("the last attempt")
+                    return running_detail("the last attempt", ranking=last.update is not None)
                 if last.update is not None:
                     return updating_detail("the last attempt")
                 return "The last attempt's request wasn't sent."

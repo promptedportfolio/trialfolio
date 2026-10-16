@@ -308,15 +308,24 @@ def updating_detail(attempt: str | None = None) -> str:
     )
 
 
-def running_detail(attempt: str | None = None) -> str:
+def running_detail(attempt: str | None = None, *, ranking: bool = False) -> str:
     """What the start record of an attempt without its attempt record says of its request, for
     an ending's message: it may have been sent and charged. `attempt` names the attempt, such as
     "the attempt under way", where the output has several; without it, it's a run's one
-    attempt."""
+    attempt. With `ranking`, for an attempt that sends a definition, it says what each of its two
+    requests did: its backtest's start record follows only its `rank_update`'s 200, so the
+    `rank_update` reached Portfolio123 (sending a definition)."""
     of, record = ("", "the attempt's") if attempt is None else (f" of {attempt}", "its")
+    if not ranking:
+        return (
+            f"The screen backtest request{of} may have been sent, and may have been charged:"
+            f" {record} start record reads as running. Trial Folio never retries it automatically."
+        )
     return (
-        f"The screen backtest request{of} may have been sent, and may have been charged:"
-        f" {record} start record reads as running. Trial Folio never retries it automatically."
+        f"The rank_update request{of}, which writes the case's ranking definition into"
+        " ApiRankingSystem, reached Portfolio123, and may have been charged. Its screen backtest"
+        f" request may have been sent, and may have been charged: {record} start record reads as"
+        " running. Trial Folio never retries either automatically."
     )
 
 

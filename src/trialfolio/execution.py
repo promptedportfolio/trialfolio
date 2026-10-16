@@ -518,7 +518,7 @@ class Execution:
             return record_detail(result.record)
         attempt = self._attempt
         if attempt is not None and attempt.start_record is not None:
-            return running_detail()
+            return running_detail(ranking=isinstance(attempt, RankingAttempt))
         if isinstance(attempt, RankingAttempt) and attempt.update_record is not None:
             return updating_detail()
         if self._ranking:

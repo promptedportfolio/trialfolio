@@ -19,7 +19,7 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -132,6 +132,7 @@ class Ran:
     error: TrialFolioError | None
     received: tuple[str, ...]
     published: tuple[str, ...]
+    execution: ExperimentExecution | None = None
 
     def json(self, path: str) -> dict[str, object]:
         return json.loads((self.out / path).read_bytes())
@@ -187,16 +188,24 @@ def run_experiment(
     name: str = "ranking-example.yaml",
     *,
     cancellation: Cancellation | None = None,
+    faults: tuple[pytest.MonkeyPatch, Callable[[StorageFaults], object]] | None = None,
 ) -> Ran:
+    """Runs the experiment over the fake server. `faults` sets the storage faults, which wrap the
+    real store."""
     content, definition, plan = experiment(name)
     out = tmp_path / "out"
     credentials = Credentials(canaries.API_ID, canaries.API_KEY)
     before = len(server.received)
     with (
         P123ScreenBacktestClient(credentials, endpoint=server.endpoint) as client,
-        LocalArtifactStore(out) as store,
+        LocalArtifactStore(out) as real,
     ):
-        error = ExperimentExecution(
+        store: LocalArtifactStore | StorageFaults = real
+        if faults is not None:
+            monkeypatch, set_faults = faults
+            store = StorageFaults(real, monkeypatch)
+            set_faults(store)
+        execution = ExperimentExecution(
             plan,
             plan.plan_hash,
             "option",
@@ -206,9 +215,11 @@ def run_experiment(
             clock=FixedClock(),
             cancellation=cancellation,
             ranking_lock=tmp_path / LOCK_FILE,
-        ).run(content, definition=definition)
+        )
+        error = execution.run(content, definition=definition)
     received = tuple(r.request for r in server.received[before:])
-    return Ran(out, error, received, ())
+    published = tuple(store.published) if isinstance(store, StorageFaults) else ()
+    return Ran(out, error, received, published, execution)
 
 
 # A screen run
@@ -468,6 +479,78 @@ def test_an_interrupt_after_the_rank_updates_response_sends_no_backtest(
     assert record.ranking_update is not None
     assert record.ranking_update.response is not None
     assert not (ran.out / "manifest.json").exists()
+
+
+RAN_UPDATE: tuple[str, ...] = (
+    (
+        "The rank_update request{of}, which writes the case's ranking definition into"
+        " ApiRankingSystem, reached Portfolio123, and may have been charged."
+    ),
+    (
+        "screen backtest request may have been sent, and may have been charged: {record} start"
+        " record reads as running."
+    ),
+)
+"""What an ending's message says of an attempt with a definition whose start record,
+`started.json`, was written, and its attempt record wasn't: its `rank_update` reached
+Portfolio123, since that start record follows only its 200, and its backtest may have been sent."""
+
+UPDATING: tuple[str, ...] = (
+    (
+        "The rank_update request{of}, which writes the case's ranking definition into"
+        " ApiRankingSystem, may have been sent, and may have been charged: {record} update record"
+        " was written, and its screen backtest request wasn't sent."
+    ),
+)
+"""The same, for an attempt whose latest record is its update record, `updating.json`."""
+
+
+@pytest.mark.parametrize(
+    ("interrupted", "said"),
+    [("attempt.json", RAN_UPDATE), ("request.json", UPDATING)],
+    ids=["after its start record", "after its update record"],
+)
+def test_a_second_interrupt_at_the_attempt_record_says_what_each_request_did(
+    tmp_path: Path,
+    server: FakePortfolio123,
+    monkeypatch: pytest.MonkeyPatch,
+    interrupted: str,
+    said: tuple[str, ...],
+) -> None:
+    # Interrupted, the attempt writes its record once more, and a second interrupt there ends the
+    # run without it. A defect found by the review of R04-T08's pull request: the message said
+    # only that the backtest may have been sent, though the rank_update had reached Portfolio123.
+    content, definition, plan = screen()
+    (case,) = plan.cases
+    server.reply("/auth", authenticated())
+    server.reply("/rank", updated(), method="POST")
+    server.reply("/screen/backtest", complete())
+    out = tmp_path / "out"
+    real = LocalArtifactStore(out)
+    store = StorageFaults(real, monkeypatch)
+    if interrupted != "attempt.json":
+        store.fail_before(interrupted, KeyboardInterrupt())
+    store.fail_before(f"{case.case_id}/attempt.json", KeyboardInterrupt())
+    store.fail_before("attempt.json", KeyboardInterrupt())
+    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
+    execution = Execution(
+        plan, plan.plan_hash, "option", store, COMMAND, ranking_lock=tmp_path / LOCK_FILE
+    )
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            execution.run(
+                content,
+                lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint),
+                definition=definition,
+            )
+    finally:
+        real.close()
+
+    attempt = next((out / "cases" / case.case_id / "attempts").iterdir())
+    assert not (attempt / "attempt.json").exists()
+    detail = execution.ending_detail()
+    for part in said:
+        assert part.format(of="", record="the attempt's") in detail
 
 
 def test_the_core_writes_a_synthetic_run_with_the_demos_client(tmp_path: Path) -> None:
@@ -750,6 +833,170 @@ def test_a_cancellation_never_falls_between_a_cases_two_calls(
         (done.out / "sessions/1/manifest.json").read_bytes()
     )
     assert manifest.outcome == "partial"
+
+
+@pytest.mark.parametrize(
+    ("faults", "received", "outcome", "requests", "said"),
+    [
+        (
+            {"attempt.json": RuntimeError()},
+            (AUTH, RANK, BACKTEST),
+            "running",
+            2,
+            RAN_UPDATE,
+        ),
+        (
+            {"request.json": RuntimeError(), "attempt.json": RuntimeError()},
+            (AUTH, RANK),
+            "failed",
+            1,
+            UPDATING,
+        ),
+        (
+            {"rank-update-response.json": None, "attempt.json": RuntimeError()},
+            (AUTH, RANK),
+            "unknown",
+            1,
+            UPDATING,
+        ),
+    ],
+    ids=[
+        "after its start record",
+        "after its update record, with its response saved",
+        "after its update record, without its response",
+    ],
+)
+def test_an_attempt_without_its_record_counts_as_its_records_read(
+    tmp_path: Path,
+    server: FakePortfolio123,
+    monkeypatch: pytest.MonkeyPatch,
+    faults: dict[str, BaseException | None],
+    received: tuple[str, ...],
+    outcome: str,
+    requests: int,
+    said: tuple[str, ...],
+) -> None:
+    # A storage fault, or an unexpected one (None), leaves the first case's attempt without its
+    # attempt record, which ends the session without its manifest. Its records say what a resume
+    # will record (counting the requests; an attempt stopped after its update record): `running`,
+    # with both requests counted, after `started.json`; and with only `updating.json`, one
+    # request, `failed` with the rank_update's saved response, and `unknown` without it.
+    script_experiment(server, 4)
+
+    def set_faults(store: StorageFaults) -> None:
+        for name, error in faults.items():
+            if error is None:
+                store.fail_os(name)
+            else:
+                store.fail_before(name, error)
+
+    ran = run_experiment(tmp_path, server, faults=(monkeypatch, set_faults))
+
+    assert ran.received == received
+    assert ran.error is not None
+    assert not (ran.out / "sessions/1/manifest.json").exists()
+    execution = ran.execution
+    assert execution is not None
+    counts = execution.counts
+    assert counts.provider_requests == requests
+    attempts = counts.attempts
+    assert (attempts.running, attempts.failed, attempts.unknown) == (
+        int(outcome == "running"),
+        int(outcome == "failed"),
+        int(outcome == "unknown"),
+    )
+    first = execution.outcomes[0][1]
+    assert first == ("failed" if outcome == "failed" else "unknown")
+    # Every such attempt may have been charged, so its case awaits a repeat.
+    assert list(execution.repeat_attempts) == [execution.outcomes[0][0].case_id]
+    for part in said:
+        assert part.format(of=" of the last attempt", record="its") in ran.error.message
+
+
+@pytest.mark.parametrize(
+    ("interrupted", "said"),
+    [("attempt.json", RAN_UPDATE), ("request.json", UPDATING)],
+    ids=["after its start record", "after its update record"],
+)
+def test_a_second_interrupt_at_an_experiments_attempt_record_says_what_each_request_did(
+    tmp_path: Path,
+    server: FakePortfolio123,
+    monkeypatch: pytest.MonkeyPatch,
+    interrupted: str,
+    said: tuple[str, ...],
+) -> None:
+    _, _, plan = experiment("ranking-example.yaml")
+    first = plan.cases[0].case_id
+    script_experiment(server, 4)
+
+    def set_faults(store: StorageFaults) -> None:
+        if interrupted != "attempt.json":
+            store.fail_before(interrupted, KeyboardInterrupt())
+        store.fail_before(f"{first}/attempt.json", KeyboardInterrupt())
+        store.fail_before("attempt.json", KeyboardInterrupt())
+
+    ran = run_experiment(tmp_path, server, faults=(monkeypatch, set_faults))
+
+    assert ran.error is not None
+    assert ran.error.code == "command.interrupted"
+    for part in said:
+        assert part.format(of=" of the attempt under way", record="its") in ran.error.message
+
+
+def test_an_update_record_published_before_its_write_failed_counts_as_written(
+    tmp_path: Path, server: FakePortfolio123, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Its rank_update isn't sent, and its attempt record agrees with the update record the store
+    # published, as for any start record: the attempt authenticated, and its token is its own.
+    _, _, plan = experiment("ranking-example.yaml")
+    first = plan.cases[0].case_id
+    script_experiment(server, 4)
+
+    def set_faults(store: StorageFaults) -> None:
+        store.fail_after(f"{first}/updating.json", RuntimeError())
+
+    ran = run_experiment(tmp_path, server, faults=(monkeypatch, set_faults))
+
+    assert ran.received == (AUTH, *(RANK, BACKTEST) * 3)
+    attempt = ran.attempt(first)
+    update = StartRecordV1_3.model_validate_json((attempt / "updating.json").read_bytes())
+    record = AttemptRecordV1_3.model_validate_json((attempt / "attempt.json").read_bytes())
+    assert (record.outcome, record.possibly_charged) == ("failed", False)
+    assert record.authenticated_by == update.authenticated_by == record.attempt_id
+    manifest = ExperimentManifestV1_1.model_validate_json(
+        (ran.out / "sessions/1/manifest.json").read_bytes()
+    )
+    listed = {artifact.path: artifact.role for artifact in manifest.artifacts}
+    directory = attempt.relative_to(ran.out).as_posix()
+    assert listed[f"{directory}/updating.json"] == "update_record"
+
+
+def test_a_rank_update_response_published_before_its_write_failed_is_listed(
+    tmp_path: Path, server: FakePortfolio123, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The manifest lists every file the attempt wrote, and its attempt record references only a
+    # completed write, as for a backtest's response.
+    _, _, plan = experiment("ranking-example.yaml")
+    first = plan.cases[0].case_id
+    script_experiment(server, 4)
+
+    def set_faults(store: StorageFaults) -> None:
+        store.fail_after(f"{first}/rank-update-response.json", RuntimeError())
+
+    ran = run_experiment(tmp_path, server, faults=(monkeypatch, set_faults))
+
+    assert ran.received == (AUTH, RANK, *(RANK, BACKTEST) * 3)
+    attempt = ran.attempt(first)
+    record = AttemptRecordV1_3.model_validate_json((attempt / "attempt.json").read_bytes())
+    assert (record.outcome, record.possibly_charged) == ("failed", True)
+    assert record.ranking_update is not None
+    assert record.ranking_update.response is None
+    manifest = ExperimentManifestV1_1.model_validate_json(
+        (ran.out / "sessions/1/manifest.json").read_bytes()
+    )
+    listed = {artifact.path: artifact.role for artifact in manifest.artifacts}
+    directory = attempt.relative_to(ran.out).as_posix()
+    assert listed[f"{directory}/rank-update-response.json"] == "rank_update_response"
 
 
 def test_the_core_writes_a_synthetic_experiment_with_the_demos_client(tmp_path: Path) -> None:
