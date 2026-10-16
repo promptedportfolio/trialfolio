@@ -59,7 +59,7 @@ At the repository root:
 - **Meanings and structures.** The product spec defines enduring obligations, and methodology defines what scientific assessments mean. Release specs define each increment, and contract prose defines interface meaning. Pydantic models define structure, and the JSON Schemas generated from them publish it.
 - **Evidence and history.** Tests provide conformance evidence, and ADRs record decisions and their history.
 - **Legal documents.** LICENSE, version 1.1, adopted on 2026-10-07, controls the legal grant. Other documents summarize it and never expand it.
-- **Release status.** Each release file's **Status** line is the only progress record: Draft, Ready, Implemented, or Released. Implemented means the release works and is used privately. Released means it is distributed through the chosen channel under the adopted license ([D-08](spec.md#decisions), [D-22](spec.md#decisions)). The public repository isn't a release.
+- **Release and track status.** Each release file's **Status** line is the only progress record: Draft, Ready, Implemented, or Released. Implemented means the release works and is used privately. Released means it is distributed through the chosen channel under the adopted license ([D-08](spec.md#decisions), [D-22](spec.md#decisions)). The public repository isn't a release. The status line of each other track's plan, such as [refactoring.md](refactoring.md) or [user-manual.md](user-manual.md), is likewise the only record of that track's progress ([D-44](spec.md#decisions)).
 
 ## Labels
 
