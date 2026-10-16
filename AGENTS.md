@@ -43,7 +43,7 @@ When proposing or completing a release specification, follow [Product direction 
 
 ## Development commands
 
-R01-T06 set these up. Each release's verification commands say what each one checks for that release, and its verification record, `docs/releases/<version>-verification.md`, says when each ran and with what outcome.
+R01-T06 set these up, apart from `scripts/schemas`, which R01-T07 added, and the user manual's two, which UM-T01 and UM-T02 added. Each release's verification commands say what each one checks for that release, and its verification record, `docs/releases/<version>-verification.md`, says when each ran and with what outcome. For the user manual's two, [what UM-T02 settled](docs/user-manual.md#what-um-t02-settled) records when they were first verified.
 
 | Command | Purpose |
 |---|---|
@@ -56,7 +56,7 @@ R01-T06 set these up. Each release's verification commands say what each one che
 | `uv run python scripts/manual_reference.py` | Rewrite the user manual's generated reference tables, in `manual/reference/`, from the CLI's parser, the committed schemas, and contracts.md's errors, keeping each hand-written cell; `--check` writes nothing and is the drift check, which `scripts/check` runs ([docs/user-manual.md](docs/user-manual.md#what-um-t02-settled)) |
 | `uv run pytest -m packaging` | Build the wheel, inspect it, and run the installed commands offline from a clean install, as each release's verification commands give |
 | `TRIALFOLIO_REFERENCE_DIR=reference uv run pytest -m reference` | Opt-in checks against the owner's local reference data, as each release's verification commands give. A worktree reads the main checkout's `reference/`. |
-| `uv run pytest -m live` | Live Portfolio123 checks (opt-in, with credentials and a budget in `TRIALFOLIO_LIVE_BUDGET_CREDITS`). It refuses to start without credentials or a budget. Each live test reads the whole budget, so each refuses to start when the command selects another: name the test's path to run one, as each release's verification commands do. |
+| `uv run pytest -m live` | Live Portfolio123 checks (opt-in, with credentials and a budget in `TRIALFOLIO_LIVE_BUDGET_CREDITS`). It refuses to start without credentials or a budget. Each live test reads the whole budget, so each refuses to start when the command selects another: name the test's path to run one, as [0.3.0's](docs/releases/0.3.0-experiments.md#verification-commands-and-expected-evidence) and [0.4.0's](docs/releases/0.4.0-ranking-weights.md#verification-commands-and-expected-evidence) verification commands do. 0.1.0's command predates this, so add its test's path, `tests/live/test_screen_backtest.py`, to run it. |
 
 Tooling: Python 3.12 or later, with `uv` for environments and dependencies ([D-02](docs/spec.md#decisions)). Add dependencies with `uv add`, and record each one in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), together with every package it brings in. A test checks that the file's "The locked runtime set" paragraph names every locked runtime package.
 
