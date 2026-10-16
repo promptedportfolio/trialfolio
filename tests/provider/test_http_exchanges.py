@@ -519,13 +519,14 @@ def test_the_adapter_holds_only_the_body_of_a_200_on_the_requests_exchange(
     adapter = ExchangeRecordingAdapter()
     session = requests.Session()
     session.mount("http://", adapter)
-    server.reply("/path", Reply(status, b"body"))
+    # A path Trial Folio sends: the fake server refuses any other (R04-AC09).
+    server.reply("/screen/backtest", Reply(status, b"body"))
 
     with adapter.call(kind) as call:
-        session.post(f"{server.endpoint}/path")
+        session.post(f"{server.endpoint}/screen/backtest")
 
     assert call.body == (b"body" if held else None)
-    assert adapter.exchanges == (response("POST /path", status),)
+    assert adapter.exchanges == (response("POST /screen/backtest", status),)
 
 
 def test_an_exchange_outside_a_call_is_refused() -> None:
@@ -720,6 +721,9 @@ class BeforeTheRequest:
     def screen_backtest(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
         self._action()
         return self._client.screen_backtest(params)
+
+    def rank_update(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
+        return self._client.rank_update(params)
 
     def close(self) -> None:
         self._client.close()

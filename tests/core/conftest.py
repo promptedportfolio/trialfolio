@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast, get_args
 
 import pytest
 
@@ -399,10 +400,11 @@ def listed(role: ArtifactRole, stored: StoredFile) -> ManifestArtifact:
 
 
 def run_role(role: AttemptRole) -> ArtifactRole:
-    """The role of a file a screen run's attempt wrote: never an authentication record, which
-    only an experiment's attempts write."""
-    assert role != "authentication_record"
-    return role
+    """The role of a file a screen run's attempt wrote, without a ranking definition: never an
+    authentication record, which only an experiment's attempts write, or a `rank_update`'s
+    file."""
+    assert role in get_args(ArtifactRole)
+    return cast("ArtifactRole", role)
 
 
 def manifest_json(manifest: RunManifest) -> bytes:

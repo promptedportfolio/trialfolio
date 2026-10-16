@@ -1052,6 +1052,9 @@ class _NothingToSend:
     def screen_backtest(self, params: object) -> NoReturn:
         raise RuntimeError("a session with nothing to send sent a request")
 
+    def rank_update(self, params: object) -> NoReturn:
+        raise RuntimeError("a session with nothing to send sent a request")
+
     def close(self) -> None:
         pass
 

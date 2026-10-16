@@ -121,6 +121,9 @@ class Interposed:
         self._action()
         return self._client.screen_backtest(params)
 
+    def rank_update(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
+        return self._client.rank_update(params)
+
     def close(self) -> None:
         self._client.close()
 

@@ -5,7 +5,10 @@ code, and interrupts).
 - **The manifest's parts.** The source records of a configuration, and of Portfolio123's request
   and response (INV-04), and the parsers, the capabilities, and the reproducibility, which a
   run's manifest and an experiment's record the same way. Each kind keeps its own model of an
-  artifact's entry, whose schema definitions differ.
+  artifact's entry, whose schema definitions differ. From 0.4.0, a manifest with a ranking
+  definition, run manifest 1.1.0 and experiment manifest 1.1.0, also gives the source records
+  of the definition's copy and of the `rank_update`'s request and response (a run with a
+  ranking definition), in the source record of version 1.1.0.
 - **Writing the manifest.** `ManifestFile` writes it last, and discards it when its write fails,
   an interrupt included, if the store had published it already, so an output whose command
   failed never reads as complete. It says which of three states the manifest is in, in the
@@ -30,21 +33,42 @@ from typing import Final, Literal, Self
 
 from pydantic import BaseModel
 
-from trialfolio.contracts.experiment_plan import ExperimentPlanCase
+from trialfolio.contracts.experiment_plan import ExperimentPlanCase, ExperimentPlanCaseV1_3
 from trialfolio.contracts.manifest import (
     Capabilities,
     ExternalReference,
     ParserVersion,
     Reproducibility,
     SourceRecord,
+    SourceRecordV1_1,
 )
-from trialfolio.contracts.plan import PlanCase
+from trialfolio.contracts.plan import PlanCase, PlanCaseV1_2
 from trialfolio.errors import ErrorCode, TrialFolioError, interrupted
 from trialfolio.normalization import LAYOUT, LAYOUT_VERSION, PARSER_VERSION
 from trialfolio.storage import ArtifactStore, StoredFile
 
 type ProviderRole = Literal["provider_request", "provider_response", "provider_response_undecoded"]
 """The role of a file of Portfolio123's that an attempt saves: its request or its response."""
+
+type RankUpdateRole = Literal[
+    "rank_update_request", "rank_update_response", "rank_update_response_undecoded"
+]
+"""The role of a `rank_update`'s file that an attempt saves: its request or its response."""
+
+RANK_UPDATE_ROLES: Final[tuple[RankUpdateRole, ...]] = (
+    "rank_update_request",
+    "rank_update_response",
+    "rank_update_response_undecoded",
+)
+
+RANKING_DEFINITION_FORMAT: Final = "ranking-definition"
+"""The source format of a definition's copy, `definition.xml`, at version 1 (artifact storage)."""
+
+_RANK_UPDATE_FORMATS: Final[dict[RankUpdateRole, str]] = {
+    "rank_update_request": "p123api-rank-update-request",
+    "rank_update_response": "p123api-rank-update",
+    "rank_update_response_undecoded": "p123api-rank-update-response_undecoded",
+}
 
 PROVIDER_ROLES: Final[tuple[ProviderRole, ...]] = (
     "provider_request",
@@ -91,6 +115,41 @@ def provider_source(
     )
 
 
+def source_v1_1(source: SourceRecord) -> SourceRecordV1_1:
+    """A source record of 1.0.0's, as a manifest with a ranking definition holds it."""
+    return SourceRecordV1_1.model_validate(source.model_dump())
+
+
+def definition_source(acquired_at: datetime) -> SourceRecordV1_1:
+    """The source record of a definition's copy, `definition.xml`, from a file the configuration
+    names, which the user supplied: the format `ranking-definition`, version 1, which no parser
+    reads, acquired with the configuration, at `acquired_at`."""
+    return SourceRecordV1_1(
+        acquired_at=acquired_at,
+        format=RANKING_DEFINITION_FORMAT,
+        format_version="1",
+        parser_version=None,
+        provenance="user_supplied",
+        operation=None,
+    )
+
+
+def rank_update_source(
+    role: RankUpdateRole, *, started_at: datetime, ended_at: datetime
+) -> SourceRecordV1_1:
+    """The source record of a `rank_update`'s file that an attempt saved, dated as a backtest's
+    is by the attempt's times: its request when the attempt started, and its response when it
+    ended. No parser reads either (`p123api-rank-update` version 1)."""
+    return SourceRecordV1_1(
+        acquired_at=started_at if role == "rank_update_request" else ended_at,
+        format=_RANK_UPDATE_FORMATS[role],
+        format_version="1",
+        parser_version=None,
+        provenance="verified",
+        operation="rank_update",
+    )
+
+
 def parsers(versions: Iterable[int] = ()) -> tuple[ParserVersion, ...]:
     """The parsers a manifest lists, for the response layout: each of `versions`, the parsers
     that wrote the output's tables, once, in order; or the installed parser, when none is
@@ -112,7 +171,9 @@ def capabilities(*, series: bool) -> Capabilities:
     )
 
 
-def reproducibility(cases: Iterable[PlanCase | ExperimentPlanCase]) -> Reproducibility:
+def reproducibility(
+    cases: Iterable[PlanCase | ExperimentPlanCase | PlanCaseV1_2 | ExperimentPlanCaseV1_3],
+) -> Reproducibility:
     """Whether the cases can be reproduced from what the output holds: each setting of theirs
     that refers to something in the account that no snapshot records, once, in the order the
     cases first give it, and `incomplete` when there's any."""
@@ -233,15 +294,38 @@ def ends_without_manifest(*, recorded: bool, error: TrialFolioError | None) -> b
     return not recorded or (error is not None and error.code in _WITHOUT_MANIFEST)
 
 
-def running_detail(attempt: str | None = None) -> str:
+def updating_detail(attempt: str | None = None) -> str:
+    """What the update record of an attempt that sends a definition, without its backtest's start
+    record or its attempt record, says of its two requests, for an ending's message: the
+    `rank_update` may have been sent and charged, and the backtest wasn't. `attempt` is as for
+    `running_detail`."""
+    of, record = ("", "the attempt's") if attempt is None else (f" of {attempt}", "its")
+    return (
+        f"The rank_update request{of}, which writes the case's ranking definition into"
+        f" ApiRankingSystem, may have been sent, and may have been charged: {record} update record"
+        " was written, and its screen backtest request wasn't sent. Trial Folio never retries it"
+        " automatically."
+    )
+
+
+def running_detail(attempt: str | None = None, *, ranking: bool = False) -> str:
     """What the start record of an attempt without its attempt record says of its request, for
     an ending's message: it may have been sent and charged. `attempt` names the attempt, such as
     "the attempt under way", where the output has several; without it, it's a run's one
-    attempt."""
+    attempt. With `ranking`, for an attempt that sends a definition, it says what each of its two
+    requests did: its backtest's start record follows only its `rank_update`'s 200, so the
+    `rank_update` reached Portfolio123 (sending a definition)."""
     of, record = ("", "the attempt's") if attempt is None else (f" of {attempt}", "its")
+    if not ranking:
+        return (
+            f"The screen backtest request{of} may have been sent, and may have been charged:"
+            f" {record} start record reads as running. Trial Folio never retries it automatically."
+        )
     return (
-        f"The screen backtest request{of} may have been sent, and may have been charged:"
-        f" {record} start record reads as running. Trial Folio never retries it automatically."
+        f"The rank_update request{of}, which writes the case's ranking definition into"
+        " ApiRankingSystem, reached Portfolio123, and may have been charged. Its screen backtest"
+        f" request may have been sent, and may have been charged: {record} start record reads as"
+        " running. Trial Folio never retries either automatically."
     )
 
 

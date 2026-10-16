@@ -19,6 +19,7 @@ R01-T12 created the first five ahead of R01-T15, for the normalization tests. R0
 | `canaries.json` | `complete.json`, with canary strings in an extra key, `canaryExtra.note`, and in `chart.label`, and canary numbers as `stats.port.total_return` and the newest period's `Ret%`. `tests/support/canaries.py` lists them. | R01-AC17, R02-AC12, R03-AC15 |
 | `changed-metrics.json` | `complete.json` with the strategy's metrics changed, as the table below gives them. Its coverage, its periods, its chart, and the benchmark's own metrics are `complete.json`'s. | R02-AC01, R02-AC02, R02-AC03, R02-AC05, R02-AC07, R02-AC08, R02-AC09, R02-AC10, R02-AC11, R02-AC13, R02-AC16, R02-AC17, R02-AC18, R02-AC19, R03-AC11, R03-AC18 |
 | `same-metrics.json` | `complete.json` with `quotaRemaining` 4316, as a second backtest of the same settings could return: its metrics and coverage are `complete.json`'s, but its bytes aren't | R02-AC03, R02-AC07, R02-AC13, R02-AC17, R02-AC18 |
+| `rank-update.json` | A synthetic `rank_update` response, in the layout of [`p123api-rank-update` version 1](../../../docs/contracts.md#p123api-rank-update-version-1): an invented `cost` of 1 and `quotaRemaining`, the only keys R04-T01 saw. R04-T08 added it, for the tests of sending a definition. | R04-AC03, R04-AC09 |
 
 ## `changed-metrics.json`'s differences
 

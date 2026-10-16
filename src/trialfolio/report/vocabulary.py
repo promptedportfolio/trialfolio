@@ -6,11 +6,11 @@ shows it, unless more than one shows it the same way: the run report's tables co
 review and the experiment report share most of them, then the review's, then the experiment's.
 """
 
-from typing import Final
+from typing import Final, Literal
 
 from trialfolio.contracts.common import Approval, PriorResearchStatus, UnavailableReason
-from trialfolio.contracts.experiment_manifest import ExperimentArtifactRole
-from trialfolio.contracts.manifest import ArtifactRole
+from trialfolio.contracts.experiment_manifest import ExperimentArtifactRoleV1_1
+from trialfolio.contracts.manifest import ArtifactRoleV1_1
 from trialfolio.contracts.review_manifest import ReviewArtifactRole
 from trialfolio.contracts.tables import DifferenceReason
 
@@ -138,9 +138,29 @@ APPROVALS: Final[dict[str, str]] = {
 }
 """How the plan was approved, as HTML."""
 
-ROLES: Final[dict[ArtifactRole, str]] = {
+type _RankingRole = Literal[
+    "ranking_definition",
+    "ranking_snapshot_record",
+    "update_record",
+    "rank_update_request",
+    "rank_update_response",
+    "rank_update_response_undecoded",
+]
+
+_RANKING_ROLES: Final[dict[_RankingRole, str]] = {
+    "ranking_definition": "Ranking definition, byte for byte",
+    "ranking_snapshot_record": "Ranking snapshot record, copied",
+    "update_record": "Update record, before the rank_update",
+    "rank_update_request": "rank_update request",
+    "rank_update_response": "rank_update response, decoded",
+    "rank_update_response_undecoded": "rank_update response, undecoded",
+}
+"""The files a ranking definition adds, in either kind of manifest's words."""
+
+ROLES: Final[dict[ArtifactRoleV1_1, str]] = {
     "plan": "Plan",
     "configuration": "Screen configuration, byte for byte",
+    **_RANKING_ROLES,
     "start_record": "Start record",
     "attempt_record": "Attempt record",
     "provider_request": "Request, redacted",
@@ -240,11 +260,12 @@ EXPERIMENT_APPROVALS: Final[dict[Approval, str]] = {
 }
 """How a plan was approved, as HTML."""
 
-EXPERIMENT_ROLES: Final[dict[ExperimentArtifactRole, str]] = {
+EXPERIMENT_ROLES: Final[dict[ExperimentArtifactRoleV1_1, str]] = {
     "configuration": "Experiment configuration, byte for byte",
     "plan": "Plan",
     "experiment_record": "Experiment record",
     "authentication_record": "Authentication record",
+    **_RANKING_ROLES,
     "start_record": "Start record",
     "attempt_record": "Attempt record",
     "provider_request": "Request, redacted",

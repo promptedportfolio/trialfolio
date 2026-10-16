@@ -9,8 +9,9 @@ repeats it; each retired case; every attempt, by case; and the versions. `varian
 
 from collections.abc import Sequence
 
-from trialfolio.contracts.attempt import AttemptRecordV1_1, Exchange
-from trialfolio.contracts.experiment_plan import PlanVariant
+from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3, Exchange
+from trialfolio.contracts.experiment_plan import PlanVariant, PlanVariantV1_3
+from trialfolio.display import series
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
 from trialfolio.report.evidence import CaseView, ExperimentContext, RetiredCaseView
 from trialfolio.report.fragments import (
@@ -53,15 +54,26 @@ def ledger(experiment: ExperimentContext) -> list[str]:
     ]
 
 
-def variant_change(variant: PlanVariant | None) -> str:
+def variant_change(variant: PlanVariant | PlanVariantV1_3 | None) -> str:
     if variant is None:
         return "The baseline"
+    if isinstance(variant, PlanVariantV1_3) and variant.setting == "ranking":
+        return _ranking_change(variant)
     if variant.value is not None:
         default = ", the default rebalance variant" if variant.default else ""
         return f"{code(variant.setting)} set to {code(str(variant.value))}{default}"
     if variant.add is not None:
         return f"Adds the rule {code(variant.add)}"
     return f"Replaces the rule {code(variant.replace or '')} with {code(variant.with_ or '')}"
+
+
+def _ranking_change(variant: PlanVariantV1_3) -> str:
+    """A ranking variant's change: the factor it removes, if any, and the weights it sets, each
+    node by its canonical path."""
+    weights = series([f"{code(entry.node)} to {code(entry.weight)}" for entry in variant.set or ()])
+    if variant.remove is None:
+        return f"Sets the ranking's weights: {weights}"
+    return f"Removes the ranking's factor {code(variant.remove)}, and sets {weights}"
 
 
 def case_description(description: str | None) -> str:
@@ -164,7 +176,7 @@ def _outcome_code(view: CaseView) -> str | None:
     return None if latest.error is None else latest.error.code
 
 
-def _attempt_count(attempts: Sequence[AttemptRecordV1_1]) -> str:
+def _attempt_count(attempts: Sequence[AttemptRecordV1_1 | AttemptRecordV1_3]) -> str:
     repeats = sum(attempt.repeat_of is not None for attempt in attempts)
     if not repeats:
         return str(len(attempts))
@@ -214,7 +226,7 @@ def _awaiting(experiment: ExperimentContext) -> list[str]:
 
 
 def _awaiting_item(
-    experiment: ExperimentContext, view: CaseView, attempt: AttemptRecordV1_1
+    experiment: ExperimentContext, view: CaseView, attempt: AttemptRecordV1_1 | AttemptRecordV1_3
 ) -> str:
     """A case awaiting a repeat, with its latest possibly charged attempt, and, unless the
     experiment is synthetic, the option that repeats it."""
@@ -289,7 +301,9 @@ def _attempts(experiment: ExperimentContext) -> list[str]:
     return parts
 
 
-def _attempt_row(experiment: ExperimentContext, attempt: AttemptRecordV1_1) -> str:
+def _attempt_row(
+    experiment: ExperimentContext, attempt: AttemptRecordV1_1 | AttemptRecordV1_3
+) -> str:
     plan = experiment.plan_numbers.get(attempt.plan_hash)
     error = (
         ""

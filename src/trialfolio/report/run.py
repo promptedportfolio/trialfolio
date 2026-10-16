@@ -464,7 +464,9 @@ def _case_facts(run: RunContext) -> list[tuple[str, str]]:
         (
             "Budget",
             (
-                f"{budget.provider_requests} provider request, {budget_limit(budget)}, and at most"
+                f"{budget.provider_requests} provider"
+                f" {'request' if budget.provider_requests == 1 else 'requests'},"
+                f" {budget_limit(budget)}, and at most"
                 f" {budget.authentication_calls} authentication call."
             ),
         ),

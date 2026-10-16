@@ -7,10 +7,23 @@ the connection, or break its body off. A request with no reply left gets a 404 w
 The server records every complete request it receives, so a test can show how many times each one
 arrived.
 
+From 0.4.0, `POST /rank` and `GET /rank` share a path, so a reply can be scripted for a method and
+a path, which takes precedence over one scripted for the path alone. A request's path is matched
+without its query, which the server records, so a test can check the `name` a `rank_get` sends
+(release 0.4.0, test pairing).
+
+It checks every request it received when it closes, at the end of each test that uses it, and the
+test fails there when a request went to a path Trial Folio doesn't send, such as `/rank/create`
+or `/rank/<id>/touch`, or when the body of a `POST /rank` isn't exactly
+`{"type": "stock", "nodes": …, "rankingMethod": …, "currency": "USD"}`, in that order, with a
+method of 2 or 4 (R04-AC09). So every test that sends a definition checks that Trial Folio writes
+only `ApiRankingSystem`: a body with an `id` would write another system.
+
 It answers with HTTP/1.0, so each connection carries one exchange, and the client opens a new one
 for the next.
 """
 
+import json
 import socket
 import struct
 import threading
@@ -19,7 +32,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import MappingProxyType
-from typing import Literal, override
+from typing import Final, Literal, override
+from urllib.parse import urlsplit
+
+SENT: Final = frozenset({"POST /auth", "POST /screen/backtest", "POST /rank", "GET /rank"})
+"""Every request Trial Folio sends, by its method and its path without the query."""
+
+RANK_UPDATE_KEYS: Final = ("type", "nodes", "rankingMethod", "currency")
+"""The params of a `rank_update`, in the order Trial Folio sends them (sending a definition)."""
 
 
 @dataclass(frozen=True)
@@ -41,19 +61,57 @@ class Reply:
 
 @dataclass(frozen=True)
 class Received:
-    """One complete request the server received. Header names are lowercase."""
+    """One complete request the server received. Header names are lowercase, and `path` holds
+    any query the request sent."""
 
     method: str
     path: str
     headers: Mapping[str, str]
     body: bytes
 
+    @property
+    def request(self) -> str:
+        """Its method and path, without the query, as an exchange names it."""
+        return f"{self.method} {urlsplit(self.path).path}"
+
+
+class _Pairs(list[tuple[str, object]]):
+    """A JSON object's members, in the order its text gives them."""
+
+
+def problems_of(received: Received) -> list[str]:
+    """What's wrong with a request Trial Folio sent, by R04-AC09: a path it doesn't send, or a
+    `POST /rank` whose body isn't exactly a `rank_update`'s params, in their order, compared as
+    the JSON text gives them, never as a parsed mapping."""
+    if received.request not in SENT:
+        return [f"{received.request} is a request Trial Folio doesn't send"]
+    if received.request != "POST /rank":
+        return []
+    try:
+        body: object = json.loads(received.body, object_pairs_hook=_Pairs)
+    except ValueError:
+        return ["a POST /rank body isn't JSON"]
+    if not isinstance(body, _Pairs) or [key for key, _ in body] != list(RANK_UPDATE_KEYS):
+        return [f"a POST /rank body's keys aren't exactly {', '.join(RANK_UPDATE_KEYS)}, in order"]
+    params = dict(body)
+    method = params["rankingMethod"]
+    found: list[str] = []
+    if params["type"] != "stock":
+        found.append("a POST /rank body's type isn't stock")
+    if not isinstance(params["nodes"], str):
+        found.append("a POST /rank body's nodes isn't text")
+    if type(method) is not int or method not in (2, 4):
+        found.append("a POST /rank body's rankingMethod isn't 2 or 4")
+    if params["currency"] != "USD":
+        found.append("a POST /rank body's currency isn't USD")
+    return found
+
 
 class FakePortfolio123:
     """The server, listening on 127.0.0.1 until `close`."""
 
     def __init__(self) -> None:
-        self._replies: dict[str, deque[Reply]] = {}
+        self._replies: dict[tuple[str | None, str], deque[Reply]] = {}
         self._received: list[Received] = []
         self._lock = threading.Lock()
         self._stopping = threading.Event()
@@ -67,10 +125,12 @@ class FakePortfolio123:
         self.endpoint = f"http://{host!s}:{port}"
         """The URL to pass as the wrapper's endpoint."""
 
-    def reply(self, path: str, *replies: Reply) -> None:
-        """Adds replies for requests to `path`, used in order."""
+    def reply(self, path: str, *replies: Reply, method: str | None = None) -> None:
+        """Adds replies for requests to `path`, used in order: requests of `method` only, when
+        it's given, and of any method otherwise. A request takes a reply scripted for its method
+        first."""
         with self._lock:
-            self._replies.setdefault(path, deque()).extend(replies)
+            self._replies.setdefault((method, path), deque()).extend(replies)
 
     @property
     def received(self) -> tuple[Received, ...]:
@@ -82,17 +142,33 @@ class FakePortfolio123:
         """Each request received, as its method and path, in order."""
         return [f"{r.method} {r.path}" for r in self.received]
 
+    def problems(self) -> list[str]:
+        """What's wrong with the requests received, by R04-AC09, each once, in order."""
+        found: list[str] = []
+        for received in self.received:
+            found.extend(problem for problem in problems_of(received) if problem not in found)
+        return found
+
     def close(self) -> None:
-        """Stops listening, and cuts every reply's wait short. A later connection is refused."""
+        """Stops listening, and cuts every reply's wait short. A later connection is refused.
+        Then it checks every request it received: an `AssertionError` lists what's wrong, which
+        fails the test whose fixture closes it."""
         self._stopping.set()
         self._server.shutdown()
         self._server.server_close()
         self._thread.join()
+        problems = self.problems()
+        if problems:
+            raise AssertionError(
+                "The fake Portfolio123 server received requests Trial Folio doesn't send: "
+                + "; ".join(problems)
+            )
 
     def _take(self, request: Received) -> Reply:
+        path = urlsplit(request.path).path
         with self._lock:
             self._received.append(request)
-            replies = self._replies.get(request.path)
+            replies = self._replies.get((request.method, path)) or self._replies.get((None, path))
             return replies.popleft() if replies else Reply(status=404)
 
 

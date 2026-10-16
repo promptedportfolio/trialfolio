@@ -11,8 +11,8 @@ value.
 from collections.abc import Sequence
 from typing import Final
 
-from trialfolio.contracts.experiment_plan import ExperimentPlanCase
-from trialfolio.contracts.experiment_record import PlanChanges
+from trialfolio.contracts.experiment_plan import ExperimentPlanCase, ExperimentPlanCaseV1_3
+from trialfolio.contracts.experiment_record import PlanChanges, PlanChangesV1_1
 from trialfolio.contracts.tables import MetricsRow
 from trialfolio.display import series
 from trialfolio.normalization import LAYOUT, METRICS, setting_text
@@ -198,7 +198,7 @@ def _plans(experiment: ExperimentContext) -> list[str]:
     ]
 
 
-def _plan_changes(changes: PlanChanges | None) -> str:
+def _plan_changes(changes: PlanChanges | PlanChangesV1_1 | None) -> str:
     """What a revision changed from the plan before it, one kind of change to a line."""
     if changes is None:
         return "The first plan"
@@ -263,7 +263,7 @@ def _baseline_table(experiment: ExperimentContext) -> list[str]:
             "As the baseline's settings.csv records them. <em>As written</em> is the value's"
             " text in the experiment configuration."
         )
-    settings = experiment.baseline_settings.values()
+    settings = experiment.baseline_settings
     return [
         f"<p>{intro}</p>",
         *settings_table(settings, expected=expected, notes=experiment.tokens),
@@ -292,7 +292,7 @@ def _data(experiment: ExperimentContext) -> list[str]:
     meanings = PROVENANCE | {"verified": verified}
     return [
         "<h3>Sources</h3>",
-        *data_facts(source, layouts, experiment.baseline_settings),
+        *data_facts(source, layouts, experiment.baseline_by_name),
         "<h3>Coverage</h3>",
         *_coverage(experiment),
         *provenance(meanings, _provenances(experiment)),
@@ -532,7 +532,7 @@ def _metric_value(row: MetricsRow) -> str:
 def _settings_across(experiment: ExperimentContext, names: Sequence[str]) -> list[str]:
     rows: list[str] = []
     for name in names:
-        setting = experiment.baseline_settings.get(name)
+        setting = experiment.baseline_by_name.get(name)
         if setting is None:
             continue
         changed = [
@@ -549,7 +549,7 @@ def _settings_across(experiment: ExperimentContext, names: Sequence[str]) -> lis
     return table(("Setting", "The baseline's", "Unit", "Changed by", "Notes"), rows)
 
 
-def _plan_value(case: ExperimentPlanCase, name: str) -> str:
+def _plan_value(case: ExperimentPlanCase | ExperimentPlanCaseV1_3, name: str) -> str:
     """The case's resolved value of a setting, as `settings.csv` writes it."""
     return next(setting_text(row.value) for row in case.settings if row.setting == name)
 
@@ -605,13 +605,11 @@ def _evidence(experiment: ExperimentContext) -> list[str]:
 
 def _feasibility(experiment: ExperimentContext) -> list[str]:
     missing = ["<li>Actual trades: none.</li>"]
-    commission = experiment.baseline_settings.get("commission")
+    commission = experiment.baseline_by_name.get("commission")
     if commission is not None and commission.value == "not_modeled":
         missing.append(f"<li>Commission: {TOKENS['not_modeled']}</li>")
     unsent = [
-        setting.name
-        for setting in experiment.baseline_settings.values()
-        if setting.value == "not_sent"
+        setting.name for setting in experiment.baseline_settings if setting.value == "not_sent"
     ]
     if unsent:
         missing.append(
@@ -676,7 +674,7 @@ def _limitations(experiment: ExperimentContext) -> list[str]:
             " give different results. A repeat is a new attempt, never a replacement."
         )
     items.append(_prior_research(experiment))
-    items.extend(inferred_defaults(experiment.baseline_settings.values()))
+    items.extend(inferred_defaults(experiment.baseline_settings))
     items.extend(_case_limitations(experiment))
     items.append(
         "Only summary statistics are reported: no return series, drawdown history, or"

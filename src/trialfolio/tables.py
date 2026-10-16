@@ -30,9 +30,11 @@ from trialfolio.contracts.tables import (
     DIFFERENCES_COLUMNS,
     METRICS_COLUMNS,
     SETTINGS_COLUMNS,
+    SETTINGS_COLUMNS_V1_1,
     DifferencesRow,
     MetricsRow,
     SettingsRow,
+    SettingsRowV1_1,
 )
 from trialfolio.errors import TrialFolioError
 
@@ -53,6 +55,12 @@ def metrics_csv(rows: Sequence[MetricsRow]) -> bytes:
 def settings_csv(rows: Sequence[SettingsRow]) -> bytes:
     """`settings.csv`, with `rows` in the order given."""
     return _write(SETTINGS_COLUMNS, rows)
+
+
+def settings_csv_v1_1(rows: Sequence[SettingsRowV1_1]) -> bytes:
+    """`settings.csv` 1.1.0, a run's or a case's whose ranking is a definition: 1.0.0's columns,
+    then `node`, with `rows` in the order given (weight rows)."""
+    return _write(SETTINGS_COLUMNS_V1_1, rows)
 
 
 def differences_csv(rows: Sequence[DifferencesRow]) -> bytes:
@@ -97,6 +105,11 @@ def read_metrics_csv(content: bytes, source_name: str) -> tuple[MetricsRow, ...]
 def read_settings_csv(content: bytes, source_name: str) -> tuple[SettingsRow, ...]:
     """Reads `settings.csv` from its bytes, as `read_metrics_csv` reads `metrics.csv`."""
     return _read(content, source_name, SETTINGS_COLUMNS, SettingsRow)
+
+
+def read_settings_csv_v1_1(content: bytes, source_name: str) -> tuple[SettingsRowV1_1, ...]:
+    """Reads `settings.csv` 1.1.0 from its bytes, as `read_metrics_csv` reads `metrics.csv`."""
+    return _read(content, source_name, SETTINGS_COLUMNS_V1_1, SettingsRowV1_1)
 
 
 def read_differences_csv(content: bytes, source_name: str) -> tuple[DifferencesRow, ...]:

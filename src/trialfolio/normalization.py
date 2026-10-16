@@ -18,6 +18,13 @@ version 1).
 - `holds_series` says whether a decoded response holds the per-period series that 0.1.0 preserves
   without interpreting, for the manifest's `return_series`.
 
+From 0.4.0, a run or a case whose ranking is a definition writes `settings.csv` 1.1.0 (weight
+rows): 1.0.0's rows, with a row for each node's weight right after `ranking`, as its plan holds
+them, and the column `node`. Each weight row's `original_key` and `original_value` come from the
+definition, whose copy, `definition.xml`, is its `source_artifact`, or from the ranking variant's
+`set` entry that changes it, whose source is the configuration, as the configuration's reader
+gives them (`RankingOriginals`).
+
 The tables are written only from a decoded response with the required structure. For any other
 response, the normalized result is unavailable: `write_tables` raises
 `provider.response_invalid` and writes neither table.
@@ -31,17 +38,36 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from typing import Final, Literal, cast
+from typing import Final, Literal, TypedDict, cast
 
+from trialfolio.configuration import WeightOriginal
 from trialfolio.contracts.attempt import SavedResponse
-from trialfolio.contracts.common import DATE_PATTERN, FlagCode, UnavailableReason
-from trialfolio.contracts.experiment_plan import ExperimentPlanCase
-from trialfolio.contracts.plan import Plan, PlanCase, SettingValue
+from trialfolio.contracts.common import (
+    DATE_PATTERN,
+    FlagCode,
+    Interpretation,
+    Provenance,
+    SettingCategory,
+    SettingUnit,
+    UnavailableReason,
+)
+from trialfolio.contracts.experiment_plan import ExperimentPlanCase, ExperimentPlanCaseV1_3
+from trialfolio.contracts.plan import (
+    Plan,
+    PlanCase,
+    PlanCaseV1_2,
+    PlanSetting,
+    PlanSettingV1_2,
+    PlanV1_2,
+    SettingValue,
+    SettingValueV1_2,
+)
 from trialfolio.contracts.screen_configuration import FormulaRanking, IdRanking, NameRanking
-from trialfolio.contracts.tables import MetricsRow, SettingsRow
+from trialfolio.contracts.screen_settings import DefinitionRankingSetting
+from trialfolio.contracts.tables import MetricsRow, SettingsRow, SettingsRowV1_1
 from trialfolio.errors import TrialFolioError
 from trialfolio.storage import ArtifactStore, StoredFile
-from trialfolio.tables import metrics_csv, settings_csv
+from trialfolio.tables import metrics_csv, settings_csv, settings_csv_v1_1
 
 LAYOUT: Final = "p123api-screen-backtest"
 LAYOUT_VERSION: Final = 1
@@ -136,6 +162,25 @@ class ScreenBacktestResult:
     """Each reported metric's value, by JSON path."""
 
 
+type AnySettingsRows = tuple[SettingsRow, ...] | tuple[SettingsRowV1_1, ...]
+"""`settings.csv`'s rows: 1.0.0's, or 1.1.0's, for a run or a case whose ranking is a
+definition."""
+
+type AnyPlanCase = PlanCase | ExperimentPlanCase | PlanCaseV1_2 | ExperimentPlanCaseV1_3
+
+
+@dataclass(frozen=True)
+class RankingOriginals:
+    """Where the weight rows of a run or a case whose ranking is a definition take their
+    `original_key`, `original_value`, and `source_artifact` from (weight rows)."""
+
+    weights: Mapping[str, WeightOriginal]
+    """Each node's, by its canonical path in the case's definition."""
+    definition: StoredFile
+    """The copy of the definition, `definition.xml`, beside the configuration the plan was built
+    from: the `source_artifact` of each weight the definition gives."""
+
+
 @dataclass(frozen=True)
 class NormalizedTables:
     """The tables `write_tables` wrote, and their rows."""
@@ -143,7 +188,7 @@ class NormalizedTables:
     metrics: StoredFile
     settings: StoredFile
     metrics_rows: tuple[MetricsRow, ...]
-    settings_rows: tuple[SettingsRow, ...]
+    settings_rows: AnySettingsRows
 
     @property
     def metrics_unavailable(self) -> int:
@@ -366,41 +411,108 @@ def settings_rows(
     compared = {"start_date": coverage.start.text, "end_date": coverage.end.text}
     rows: list[SettingsRow] = []
     for setting in case.settings:
-        flags: tuple[FlagCode, ...] = setting.flags
-        covered = compared.get(setting.setting)
-        if covered is not None and covered != setting.value:
-            flags = (*flags, "coverage_mismatch")
         original = originals.get(setting.setting)
         key = setting.setting if original_keys is None else original_keys.get(setting.setting)
         rows.append(
             SettingsRow(
-                label=label,
-                setting=setting.setting,
-                category=setting.category,
-                critical=setting.critical,
-                value=setting_text(setting.value),
-                unit=setting.unit,
-                interpretation=setting.interpretation,
-                provenance=setting.expected_provenance,
-                inference_rule=setting.inference_rule,
+                **_row_fields(setting, label=label, compared=compared),
                 original_key=None if original is None else key,
                 original_value=original,
                 source_artifact=source_artifact,
-                flags=flags,
             )
         )
     return tuple(rows)
 
 
-def setting_text(value: SettingValue) -> str:
+def settings_rows_v1_1(
+    case: PlanCaseV1_2 | ExperimentPlanCaseV1_3,
+    originals: Mapping[str, str],
+    ranking: RankingOriginals,
+    *,
+    label: str,
+    source_artifact: str,
+    coverage: Coverage,
+    original_keys: Mapping[str, str] | None = None,
+) -> tuple[SettingsRowV1_1, ...]:
+    """`settings.csv` 1.1.0's rows for a run or a case whose ranking is a definition, in order,
+    as `settings_rows` gives 1.0.0's, with `node`, and a weight row for each node of the case's
+    definition, whose original comes from `ranking` (weight rows)."""
+    compared = {"start_date": coverage.start.text, "end_date": coverage.end.text}
+    rows: list[SettingsRowV1_1] = []
+    for setting in case.settings:
+        fields = _row_fields(setting, label=label, compared=compared)
+        if setting.node is not None:
+            weight = ranking.weights.get(setting.node)
+            source = source_artifact
+            if weight is not None and weight.in_definition:
+                source = ranking.definition.artifact_id
+            key, text = (None, None) if weight is None else (weight.key, weight.text)
+        else:
+            text = originals.get(setting.setting)
+            key = setting.setting if original_keys is None else original_keys.get(setting.setting)
+            key, source = (None if text is None else key), source_artifact
+        rows.append(
+            SettingsRowV1_1(
+                **fields,
+                original_key=key,
+                original_value=text,
+                source_artifact=source,
+                node=setting.node,
+            )
+        )
+    return tuple(rows)
+
+
+class _RowFields(TypedDict):
+    """The columns of a row of `settings.csv` that the plan gives."""
+
+    label: str
+    setting: str
+    category: SettingCategory
+    critical: bool
+    value: str
+    unit: SettingUnit | None
+    interpretation: Interpretation
+    provenance: Provenance
+    inference_rule: str | None
+    flags: tuple[FlagCode, ...]
+
+
+def _row_fields(
+    setting: PlanSetting | PlanSettingV1_2, *, label: str, compared: Mapping[str, str | None]
+) -> _RowFields:
+    """The columns of a row of `settings.csv`, of either version, that the plan gives: all but
+    the original key and value, the source, and `node`. The request was sent, so each value has
+    the provenance the plan expected, and a date is flagged `coverage_mismatch` when its
+    coverage date is available and differs from it."""
+    flags: tuple[FlagCode, ...] = setting.flags
+    covered = compared.get(setting.setting)
+    if covered is not None and covered != setting.value:
+        flags = (*flags, "coverage_mismatch")
+    return _RowFields(
+        label=label,
+        setting=setting.setting,
+        category=setting.category,
+        critical=setting.critical,
+        value=setting_text(setting.value),
+        unit=setting.unit,
+        interpretation=setting.interpretation,
+        provenance=setting.expected_provenance,
+        inference_rule=setting.inference_rule,
+        flags=flags,
+    )
+
+
+def setting_text(value: SettingValue | SettingValueV1_2) -> str:
     """A resolved value as `settings.csv` writes it: an integer in decimal digits, a list or a
-    ranking as JSON with the configuration's keys, and text as it is."""
+    ranking as JSON with the configuration's keys, or a definition's hash and ranking method,
+    and text as it is, a weight's normalized decimal included."""
     match value:
         case int():
             return str(value)
         case str():
             return value
-        case FormulaRanking() | NameRanking() | IdRanking():
+        case FormulaRanking() | NameRanking() | IdRanking() | DefinitionRankingSetting():
             return json.dumps(value.model_dump(mode="json"), ensure_ascii=False)
         case _:
             return json.dumps(list(value), ensure_ascii=False)
@@ -408,18 +520,21 @@ def setting_text(value: SettingValue) -> str:
 
 def write_tables(
     store: ArtifactStore,
-    plan: Plan,
+    plan: Plan | PlanV1_2,
     originals: Mapping[str, str],
     *,
     configuration: StoredFile,
     response: SavedResponse,
+    ranking: RankingOriginals | None = None,
 ) -> NormalizedTables:
     """Normalizes an attempt's saved response, and writes `normalized/metrics.csv`, then
     `normalized/settings.csv`.
 
     `configuration` is the saved `configuration.yaml`, and `originals` its top-level values as
     `original_values` reads them. `response` is the attempt record's reference to the saved
-    response, which this reads from the store. Each row's label is the case's `case_id`.
+    response, which this reads from the store. Each row's label is the case's `case_id`. A plan
+    1.2.0's run writes `settings.csv` 1.1.0, whose weight rows take their originals from
+    `ranking`, which it requires.
 
     Raises `TrialFolioError` with `provider.response_invalid`, writing nothing, when the response
     was saved undecoded or doesn't have the layout's required structure; and with
@@ -429,8 +544,7 @@ def write_tables(
     return _write(
         store,
         case,
-        originals,
-        None,
+        _Originals(originals, None, ranking),
         "",
         configuration=configuration,
         response=response,
@@ -445,12 +559,13 @@ def case_tables_path(case_id: str, path: str) -> str:
 
 def write_case_tables(
     store: ArtifactStore,
-    case: ExperimentPlanCase,
+    case: ExperimentPlanCase | ExperimentPlanCaseV1_3,
     originals: Mapping[str, tuple[str, str]],
     *,
     configuration: StoredFile,
     response: SavedResponse,
     content: bytes | None = None,
+    ranking: RankingOriginals | None = None,
 ) -> NormalizedTables:
     """Normalizes the saved response of an experiment's case, and writes
     `cases/<case_id>/normalized/metrics.csv`, then `settings.csv`, as `write_tables` writes a
@@ -460,14 +575,14 @@ def write_case_tables(
     `configuration` is the saved `configuration.yaml` of the plan the attempt ran under, and
     `originals` each setting's key path and text in it, as `experiment_original_values` reads
     them. `content` is the response's bytes, when the caller read them already, as a resume's
-    records check did: the response is then never read again. Raises as `write_tables` does.
+    records check did: the response is then never read again. A case of a plan 1.3.0 writes
+    `settings.csv` 1.1.0, with `ranking`, as `write_tables` does. Raises as `write_tables` does.
     """
     original_values, original_keys = _split(originals)
     return _write(
         store,
         case,
-        original_values,
-        original_keys,
+        _Originals(original_values, original_keys, ranking),
         f"cases/{case.case_id}/",
         configuration=configuration,
         response=response,
@@ -545,7 +660,7 @@ def _metrics(
     return metrics_rows(
         read_response(content, response.path),
         label=case.case_id,
-        benchmark=case.requests[0].params.screen.benchmark,
+        benchmark=case.requests[-1].params.screen.benchmark,
         source_artifact=response.artifact_id,
     )
 
@@ -560,11 +675,20 @@ def _check_decoded(response: SavedResponse) -> None:
         )
 
 
+@dataclass(frozen=True)
+class _Originals:
+    """A run's or a case's original values: each setting's text, by its name, and its key, when
+    it isn't the setting's name, and the weight rows', for a ranking given as a definition."""
+
+    values: Mapping[str, str]
+    keys: Mapping[str, str] | None
+    ranking: RankingOriginals | None
+
+
 def _write(
     store: ArtifactStore,
-    case: PlanCase | ExperimentPlanCase,
-    originals: Mapping[str, str],
-    original_keys: Mapping[str, str] | None,
+    case: AnyPlanCase,
+    originals: _Originals,
     prefix: str,
     *,
     configuration: StoredFile,
@@ -577,20 +701,36 @@ def _write(
     metrics = metrics_rows(
         result,
         label=label,
-        benchmark=case.requests[0].params.screen.benchmark,
+        benchmark=case.requests[-1].params.screen.benchmark,
         source_artifact=response.artifact_id,
     )
-    settings = settings_rows(
-        case,
-        originals,
-        label=label,
-        source_artifact=configuration.artifact_id,
-        coverage=result.coverage,
-        original_keys=original_keys,
-    )
+    settings: AnySettingsRows
+    if isinstance(case, PlanCaseV1_2 | ExperimentPlanCaseV1_3):
+        if originals.ranking is None:
+            raise ValueError("a case whose ranking is a definition needs its weights' originals")
+        settings = settings_rows_v1_1(
+            case,
+            originals.values,
+            originals.ranking,
+            label=label,
+            source_artifact=configuration.artifact_id,
+            coverage=result.coverage,
+            original_keys=originals.keys,
+        )
+        table = settings_csv_v1_1(settings)
+    else:
+        settings = settings_rows(
+            case,
+            originals.values,
+            label=label,
+            source_artifact=configuration.artifact_id,
+            coverage=result.coverage,
+            original_keys=originals.keys,
+        )
+        table = settings_csv(settings)
     return NormalizedTables(
         metrics=store.write(prefix + METRICS_PATH, metrics_csv(metrics)),
-        settings=store.write(prefix + SETTINGS_PATH, settings_csv(settings)),
+        settings=store.write(prefix + SETTINGS_PATH, table),
         metrics_rows=metrics,
         settings_rows=settings,
     )

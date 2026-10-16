@@ -3,8 +3,10 @@ adapter that records each HTTP exchange the wrapper makes (docs/contracts.md, HT
 credentials; ADR 0001, decisions 6 and 7; ADR 0006).
 
 `P123ScreenBacktestClient` drives the wrapper in two calls: Trial Folio's own authentication call,
-and the request's call. The caller writes the start record between them. The client configures
-the wrapper's session, a private attribute (`Client._session` in 3.1.0):
+and the request's call. The caller writes the start record between them. From 0.4.0, a case whose
+ranking is a definition makes a request's call before its backtest's too: the `rank_update`, which
+writes the definition into `ApiRankingSystem` (sending a definition). The client configures the
+wrapper's session, a private attribute (`Client._session` in 3.1.0):
 
 - **One HTTP attempt per call.** `set_max_request_retries(1)`, for authentication and the request.
 - **The timeout.** `set_timeout(300)`, the wrapper's own default, set explicitly. Tests may pass a
@@ -41,7 +43,7 @@ import logging
 import re
 import time
 import unicodedata
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import TracebackType
@@ -172,12 +174,14 @@ type ScreenBacktestResponse = DecodedResponse | UndecodedResponse
 
 
 class ScreenBacktestClient(Protocol):
-    """Executes the one supported screen-backtest request, and returns the captured provider
-    evidence (docs/contracts.md, protocols).
+    """Executes the one supported screen-backtest request, and, from 0.4.0, the `rank_update`
+    that writes a case's ranking definition before it, and returns the captured provider evidence
+    (docs/contracts.md, protocols).
 
     The caller authenticates with `authenticate`, writes the start record, and only then calls
-    `screen_backtest`, at most once for each approved send. `exchanges` gives every exchange so
-    far, in order, at any time, including after an interrupt. Neither call retries anything.
+    `screen_backtest`, or `rank_update`, at most once for each approved send. `exchanges` gives
+    every exchange so far, in order, at any time, including after an interrupt. No call retries
+    anything.
     """
 
     @property
@@ -206,6 +210,15 @@ class ScreenBacktestClient(Protocol):
         Raises `ProviderError` with the code the request's exchange gives it, and `RuntimeError`,
         before sending anything, unless the client is `authenticated`. A user interrupt
         propagates unchanged.
+        """
+        ...
+
+    def rank_update(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
+        """Sends `POST /rank` with `params` as its JSON body, at most once: `p123api`'s
+        `rank_update`, which writes a case's ranking definition into `ApiRankingSystem`, since
+        `params` carries no `id` (sending a definition).
+
+        Returns and raises as `screen_backtest` does, with the code its exchange gives it.
         """
         ...
 
@@ -364,6 +377,7 @@ class _Wrapper(Protocol):
     def get_token(self) -> str | None: ...
     def auth(self) -> None: ...
     def screen_backtest(self, params: dict[str, object], to_pandas: bool = False) -> object: ...
+    def rank_update(self, params: dict[str, object]) -> object: ...
     def close(self) -> None: ...
 
 
@@ -430,13 +444,33 @@ class P123ScreenBacktestClient:
         raise failure
 
     def screen_backtest(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
+        sent = self._request(
+            lambda: self._wrapper.screen_backtest(dict(params), to_pandas=False), _BACKTEST
+        )
+        # Raised here, outside the handler, so it carries no reference to the wrapper's
+        # exception.
+        if isinstance(sent, ProviderError):
+            raise sent
+        return sent
+
+    def rank_update(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
+        sent = self._request(lambda: self._wrapper.rank_update(dict(params)), _RANK_UPDATE)
+        if isinstance(sent, ProviderError):
+            raise sent
+        return sent
+
+    def _request(
+        self, send: Callable[[], object], request: "_Request"
+    ) -> ScreenBacktestResponse | ProviderError:
+        """Makes the request's call, `send`, and returns its decoded response, or the undecoded
+        body of a 200, or its failure, classified from its exchange, for the caller to raise."""
         if not self.authenticated:
             # Otherwise the wrapper would authenticate inside the request's call, and the adapter
             # would refuse the request as its second exchange.
             raise RuntimeError("Trial Folio authenticates with its own call before a request")
         with self._adapter.call("request") as call:
             try:
-                payload = self._wrapper.screen_backtest(dict(params), to_pandas=False)
+                payload = send()
             except Exception as error:  # noqa: BLE001 (classified, as above)
                 body = call.body
                 if body is not None:
@@ -444,11 +478,11 @@ class P123ScreenBacktestClient:
                     # response, so the body is kept undecoded (HTTP exchanges).
                     return UndecodedResponse(body)
                 failure = _request_failure(
-                    call, self._provider_message(error, "API request failed: "), error
+                    call, self._provider_message(error, "API request failed: "), error, request
                 )
             else:
                 return DecodedResponse(payload)
-        raise failure
+        return failure
 
     def close(self) -> None:
         self._wrapper.close()
@@ -563,57 +597,104 @@ def _authentication_failure(
             )
 
 
-def _request_failure(call: _Call, provider_message: str | None, error: Exception) -> ProviderError:
-    """The failure of the request's call, from 0.1.0's failure table."""
+@dataclass(frozen=True)
+class _Request:
+    """How a failure's message names the request whose call failed, and what it adds about it."""
+
+    name: str
+    """The request, as in "the screen backtest request"."""
+    rejected: str
+    """What a 400 or a 409 says Portfolio123 doesn't accept in it."""
+    check: str
+    """What to check before running the command again after a 400 or a 409."""
+    after: str = ""
+    """What follows the request's own ending: for a `rank_update`, that its backtest wasn't
+    sent."""
+
+
+_BACKTEST: Final = _Request(
+    name="screen backtest request",
+    rejected="it doesn't support a setting or value in it",
+    check="the configuration",
+)
+_RANK_UPDATE: Final = _Request(
+    name="rank_update request",
+    rejected="it doesn't accept the ranking definition, or a value sent with it",
+    check="the configuration's ranking definition",
+    after=(
+        " That request writes the case's ranking definition into ApiRankingSystem, so the"
+        " case's screen backtest wasn't sent."
+    ),
+)
+
+
+def _request_failure(
+    call: _Call, provider_message: str | None, error: Exception, request: _Request
+) -> ProviderError:
+    """The failure of the request's call, from 0.1.0's failure table, which a `rank_update`'s
+    follows too (sending a definition)."""
     exchange = call.recorded.exchange() if call.recorded is not None else None
+    name, after = request.name, request.after
     if exchange is None:
         return ProviderError(
             "internal.unexpected",
-            f"The screen backtest call failed unexpectedly ({type(error).__name__}) before"
-            " sending anything, so the request wasn't sent. This is a defect in Trial Folio;"
-            " please report it.",
+            f"The {name.removesuffix(' request')} call failed unexpectedly"
+            f" ({type(error).__name__}) before sending anything, so the request wasn't"
+            f" sent.{after} This is a defect in Trial Folio; please report it.",
         )
     if exchange.result == "not_connected":
         return ProviderError(
             "provider.unavailable",
             "Couldn't connect to Portfolio123: the connection was never established, so the"
-            " screen backtest request wasn't sent, and wasn't charged. Check the network"
-            " connection, and run the command again.",
+            f" {name} wasn't sent, and wasn't charged.{after} Check the network connection, and"
+            " run the command again.",
         )
+    if exchange.status is None or exchange.status >= 500:
+        return _outcome_unknown(exchange.status, request)
+    return _rejected(call, exchange.status, provider_message, request)
+
+
+def _outcome_unknown(status: int | None, request: _Request) -> ProviderError:
+    """A request whose exchange got no complete response, or a 5xx: it may have been charged."""
     unknown = (
         "Its outcome is unknown, and Trial Folio never retries it automatically: check the"
         " account's API credits on Portfolio123's website before running the command again."
     )
-    status = exchange.status
+    name, after = request.name, request.after
     if status is None:
         return ProviderError(
             "provider.outcome_unknown",
-            "The connection to Portfolio123 broke before the screen backtest request got a"
-            f" complete response, for example after a timeout or a reset. {_MAY_BE_CHARGED}"
-            f" {unknown}",
+            f"The connection to Portfolio123 broke before the {name} got a complete response,"
+            f" for example after a timeout or a reset. {_MAY_BE_CHARGED}{after} {unknown}",
         )
-    if status >= 500:
-        return ProviderError(
-            "provider.outcome_unknown",
-            f"Portfolio123 answered the screen backtest request with HTTP {status}, a server"
-            f" error. {_MAY_BE_CHARGED} {unknown}",
-        )
+    return ProviderError(
+        "provider.outcome_unknown",
+        f"Portfolio123 answered the {name} with HTTP {status}, a server error."
+        f" {_MAY_BE_CHARGED}{after} {unknown}",
+    )
+
+
+def _rejected(
+    call: _Call, status: int, provider_message: str | None, request: _Request
+) -> ProviderError:
+    """A request whose exchange got a complete response other than a 200 or a 5xx."""
+    name, after = request.name, request.after
     again = "Running the command again is a new attempt."
     # Portfolio123 answered a rule that names no factor with a 409 (D-38).
     if status in _REJECTS_A_SETTING:
         return ProviderError(
             "provider.unsupported_capability",
-            f"Portfolio123 rejected the screen backtest request (HTTP {status}): it doesn't"
-            f" support a setting or value in it. {_MAY_BE_CHARGED} Check the configuration"
-            " before running the command again, which is a new attempt.",
+            f"Portfolio123 rejected the {name} (HTTP {status}): {request.rejected}."
+            f" {_MAY_BE_CHARGED}{after} Check {request.check} before running the command again,"
+            " which is a new attempt.",
             provider_message,
         )
     if status == 402:
         return ProviderError(
             "provider.quota_exceeded",
-            "Portfolio123 refused the screen backtest request because the account's API quota or"
-            f" credits are exhausted (HTTP 402). {_MAY_BE_CHARGED} Check the account's API"
-            " credits on Portfolio123's website before running the command again.",
+            f"Portfolio123 refused the {name} because the account's API quota or credits are"
+            f" exhausted (HTTP 402). {_MAY_BE_CHARGED}{after} Check the account's API credits on"
+            " Portfolio123's website before running the command again.",
         )
     if status in _REAUTHENTICATES:
         refusal = (
@@ -624,20 +705,20 @@ def _request_failure(call: _Call, provider_message: str | None, error: Exception
         )
         return ProviderError(
             "provider.auth_failed",
-            f"Portfolio123 refused the screen backtest request's authorization (HTTP {status}),"
-            f" right after Trial Folio authenticated.{refusal} {_MAY_BE_CHARGED} Check the API"
-            f" key's status on Portfolio123's website. {again}",
+            f"Portfolio123 refused the {name}'s authorization (HTTP {status}), right after Trial"
+            f" Folio authenticated.{refusal} {_MAY_BE_CHARGED}{after} Check the API key's status"
+            f" on Portfolio123's website. {again}",
         )
     if call.refused and status in _REDIRECTS:
         return ProviderError(
             "provider.request_rejected",
-            "Portfolio123 answered the screen backtest request with a redirect (HTTP"
-            f" {status}). Trial Folio doesn't follow redirects, so it refused the next exchange,"
-            f" and the request wasn't sent again. {_MAY_BE_CHARGED} {again}",
+            f"Portfolio123 answered the {name} with a redirect (HTTP {status}). Trial Folio"
+            " doesn't follow redirects, so it refused the next exchange, and the request wasn't"
+            f" sent again. {_MAY_BE_CHARGED}{after} {again}",
         )
     return ProviderError(
         "provider.request_rejected",
-        f"Portfolio123 rejected the screen backtest request with HTTP {status}."
-        f" {_MAY_BE_CHARGED} Wait before running the command again, which is a new attempt.",
+        f"Portfolio123 rejected the {name} with HTTP {status}. {_MAY_BE_CHARGED}{after} Wait"
+        " before running the command again, which is a new attempt.",
         provider_message,
     )
