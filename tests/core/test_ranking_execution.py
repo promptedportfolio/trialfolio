@@ -746,6 +746,14 @@ def test_the_core_writes_a_synthetic_experiment_with_the_demos_client(tmp_path: 
         None,
     )
     assert manifest.counts.cases.succeeded == len(plan.cases)
+    # The baseline's settings table names every weight row's node beside its setting. A defect
+    # found by the review of R04-T08's pull request: the report kept only the last weight row.
+    report = (out / "sessions/1/report.html").read_text(encoding="utf-8")
+    (baseline, *_) = plan.cases
+    nodes = [row.node for row in baseline.settings if row.node is not None]
+    assert len(nodes) == 9
+    for node in nodes:
+        assert f"<code>ranking_weight</code> <code>{node}</code>" in report
 
 
 def test_an_experiment_with_a_definition_takes_the_ranking_lock(tmp_path: Path) -> None:

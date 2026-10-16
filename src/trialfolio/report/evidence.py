@@ -303,8 +303,12 @@ class ExperimentContext:
     evidence: ExperimentEvidence
     version: str
     """The Trial Folio version rendering the report."""
-    baseline_settings: Mapping[str, Setting]
-    """The baseline's resolved settings, by name. The baseline is the plan's first case."""
+    baseline_settings: tuple[Setting, ...]
+    """The baseline's resolved settings, in their order, each weight row of a ranking definition
+    included. The baseline is the plan's first case."""
+    baseline_by_name: Mapping[str, Setting]
+    """The baseline's resolved settings but its weight rows, by name: each weight row has the
+    name `ranking_weight`, so only its node tells it apart."""
     plan_numbers: Mapping[str, int]
     """Each plan's number, by its hash."""
     tokens: Mapping[str, str]
@@ -314,13 +318,12 @@ class ExperimentContext:
     @classmethod
     def of(cls, evidence: ExperimentEvidence, version: str) -> Self:
         (baseline, *_) = evidence.cases
+        settings = resolved_settings(baseline.settings, baseline.case.settings)
         return cls(
             evidence,
             version,
-            {
-                setting.name: setting
-                for setting in resolved_settings(baseline.settings, baseline.case.settings)
-            },
+            settings,
+            {setting.name: setting for setting in settings if setting.node is None},
             {entry.plan_hash: entry.plan for entry in evidence.record.plans},
             TOKENS | ({"not_sent": SYNTHETIC_NOT_SENT} if evidence.synthetic else {}),
         )
@@ -342,4 +345,4 @@ class ExperimentContext:
         return self.evidence.cases[0]
 
     def baseline_value(self, name: str) -> str:
-        return self.baseline_settings[name].value
+        return self.baseline_by_name[name].value
