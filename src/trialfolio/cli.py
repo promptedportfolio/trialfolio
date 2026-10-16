@@ -72,7 +72,10 @@ from trialfolio.contracts.experiment_configuration import (
     ExperimentConfiguration,
     configured_variants,
 )
-from trialfolio.contracts.experiment_manifest import ExperimentCommandRecord
+from trialfolio.contracts.experiment_manifest import (
+    ExperimentCommandRecord,
+    ExperimentManifestCounts,
+)
 from trialfolio.contracts.experiment_plan import PlanV1_1
 from trialfolio.contracts.manifest import CommandRecord
 from trialfolio.contracts.plan import Plan
@@ -96,10 +99,11 @@ from trialfolio.starter import CONFIGURATION, starter_files
 from trialfolio.storage import LOCK_PATH, ArtifactStore, LocalArtifactStore
 
 if TYPE_CHECKING:
+    from trialfolio.case_state import CaseOutcome
     from trialfolio.execution import Execution
     from trialfolio.experiment_approval import ExperimentRun
     from trialfolio.experiment_execution import ExperimentExecution
-    from trialfolio.experiment_records import CaseOutcome, SavedExperiment
+    from trialfolio.experiment_records import SavedExperiment
     from trialfolio.provider import Credentials, ScreenBacktestClient
     from trialfolio.review import Review
 
@@ -669,30 +673,7 @@ class _Invocation:
         warnings = self.log.warnings
         execution = experiment.execution
         if execution is not None:
-            counts = execution.counts
-            return ExperimentCounts(
-                cases_planned=counts.cases.planned,
-                cases_succeeded=counts.cases.succeeded,
-                cases_failed=counts.cases.failed,
-                cases_skipped=counts.cases.skipped,
-                cases_unknown=counts.cases.unknown,
-                cases_not_yet_run=counts.cases.not_yet_run,
-                cases_retired=counts.retired_cases,
-                attempts=sum(
-                    (
-                        counts.attempts.succeeded,
-                        counts.attempts.failed,
-                        counts.attempts.unknown,
-                        counts.attempts.running,
-                    )
-                ),
-                repeats=counts.attempts.repeats,
-                provider_requests=counts.provider_requests,
-                authentication_calls=counts.authentication_calls,
-                cost=counts.cost,
-                metrics_unavailable=execution.metrics_unavailable,
-                warnings=warnings,
-            )
+            return _flattened(execution.counts, execution.metrics_unavailable, warnings)
         saved = experiment.experiment
         if saved is None:  # a new experiment's, before anything is sent
             plan = experiment.plan
@@ -717,34 +698,8 @@ class _Invocation:
                 metrics_unavailable=0,
                 warnings=warnings,
             )
-        from trialfolio.planning import retired_cases
-
         plan = saved.plan if experiment.plan is None else experiment.plan
-        outcomes = [case.outcome for case in saved.cases(plan)]
-        records = [attempt.record for attempt in saved.attempts if attempt.record is not None]
-        costs = [r.provider_metadata.cost for r in records if r.provider_metadata.cost is not None]
-        planned_ids = {case.case_id for case in plan.cases}
-        return ExperimentCounts(
-            cases_planned=len(outcomes),
-            cases_succeeded=outcomes.count("succeeded"),
-            cases_failed=outcomes.count("failed"),
-            cases_skipped=0,
-            cases_unknown=outcomes.count("unknown"),
-            cases_not_yet_run=outcomes.count("not_yet_run"),
-            cases_retired=len(retired_cases(saved.record, plan)),
-            attempts=len(saved.attempts),
-            repeats=sum(attempt.repeat_of is not None for attempt in saved.attempts),
-            provider_requests=saved.provider_requests,
-            authentication_calls=saved.authentication_calls,
-            cost=sum(costs) if costs else None,
-            metrics_unavailable=sum(
-                row.availability == "unavailable"
-                for case_id, tables in saved.tables.items()
-                if case_id in planned_ids
-                for row in tables.metrics_rows
-            ),
-            warnings=warnings,
-        )
+        return _flattened(saved.counts(plan), saved.metrics_unavailable(plan), warnings)
 
     def _linked_ids(self) -> dict[str, str]:
         ids = self._ids()
@@ -809,6 +764,31 @@ class _Invocation:
 def _event(name: str, terminal: bool) -> dict[str, object]:
     """A log event's name, and whether stderr shows it."""
     return {"event": name, "terminal": terminal}
+
+
+def _flattened(
+    counts: ExperimentManifestCounts, metrics_unavailable: int, warnings: int
+) -> ExperimentCounts:
+    """The JSON summary's counts of an experiment, from the counts its manifest gives, as the
+    core counts them, the `unavailable` rows of its planned cases' `metrics.csv`, and the
+    warnings this command logged."""
+    attempts = counts.attempts
+    return ExperimentCounts(
+        cases_planned=counts.cases.planned,
+        cases_succeeded=counts.cases.succeeded,
+        cases_failed=counts.cases.failed,
+        cases_skipped=counts.cases.skipped,
+        cases_unknown=counts.cases.unknown,
+        cases_not_yet_run=counts.cases.not_yet_run,
+        cases_retired=counts.retired_cases,
+        attempts=sum((attempts.succeeded, attempts.failed, attempts.unknown, attempts.running)),
+        repeats=attempts.repeats,
+        provider_requests=counts.provider_requests,
+        authentication_calls=counts.authentication_calls,
+        cost=counts.cost,
+        metrics_unavailable=metrics_unavailable,
+        warnings=warnings,
+    )
 
 
 # Commands
