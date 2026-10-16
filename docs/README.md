@@ -1,10 +1,10 @@
 # Trial Folio documentation
 
-These are the specifications for Trial Folio. The implementation tasks of releases 0.1.0, 0.2.0, and 0.3.0 are done; [AGENTS.md](../AGENTS.md) gives its current state. Each document owns one kind of requirement. The other documents reference it instead of copying it, and a contradiction between documents is a defect to fix.
+These are the specifications for Trial Folio. Each release file's **Status** line, and the status line of each other track's plan, records its progress. Each document owns one kind of requirement. The other documents reference it instead of copying it, and a contradiction between documents is a defect to fix.
 
 ## Where to start
 
-- **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release. [0.1.0 API execution](releases/0.1.0-api-execution.md) is Implemented: built, verified, and used privately, but not yet released. [0.2.0 Review](releases/0.2.0-review.md) is Implemented too: built, verified, and used privately, but not yet released. [0.2.1 License version 1.1](releases/0.2.1-license.md) changes only the license. The owner signed it off on 2026-10-07, and it's tagged, with every release requirement met. [0.3.0 Experiments](releases/0.3.0-experiments.md) is Implemented too: built, verified, and used privately. It's tagged, with every release requirement met, but not yet released. [0.4.0 Ranking-weight variants](releases/0.4.0-ranking-weights.md) is Ready: planned by the owner on 2026-10-12 ([D-34](spec.md#decisions)), and signed off on 2026-10-13 ([D-41](spec.md#decisions)), so its implementation, from R04-T05, is next.
+- **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release, whose **Status** line says where it stands.
 - **Using Trial Folio:** read the [user manual](https://promptedportfolio.github.io/trialfolio/), whose pages are in `manual/` at the repository's root ([user-manual.md](user-manual.md)), or the [user guide](user-guide.md), which the manual replaces at 0.4.0's documentation task. Until then, a change to behavior both describe updates both.
 - **Understanding the product:** read [spec.md](spec.md), then [roadmap.md](roadmap.md).
 - **Planning a release:** follow [Product direction (D-23)](spec.md#product-direction) and the [release planning requirements](roadmap.md#release-planning-requirements), then write or complete its release specification. Roadmap targets are not implementation assignments.
@@ -59,7 +59,7 @@ At the repository root:
 - **Meanings and structures.** The product spec defines enduring obligations, and methodology defines what scientific assessments mean. Release specs define each increment, and contract prose defines interface meaning. Pydantic models define structure, and the JSON Schemas generated from them publish it.
 - **Evidence and history.** Tests provide conformance evidence, and ADRs record decisions and their history.
 - **Legal documents.** LICENSE, version 1.1, adopted on 2026-10-07, controls the legal grant. Other documents summarize it and never expand it.
-- **Release status.** Each release file's **Status** line is the only progress record: Draft, Ready, Implemented, or Released. Implemented means the release works and is used privately. Released means it is distributed through the chosen channel under the adopted license ([D-08](spec.md#decisions), [D-22](spec.md#decisions)). The public repository isn't a release.
+- **Release and track status.** Each release file's **Status** line is the only progress record: Draft, Ready, Implemented, or Released. Implemented means the release works and is used privately. Released means it is distributed through the chosen channel under the adopted license ([D-08](spec.md#decisions), [D-22](spec.md#decisions)). The public repository isn't a release. The status line of each other track's plan, such as [refactoring.md](refactoring.md) or [user-manual.md](user-manual.md), is likewise the only record of that track's progress ([D-44](spec.md#decisions)).
 
 ## Labels
 
