@@ -82,6 +82,21 @@ from trialfolio.attempts import (
     request_detail,
     utc_now,
 )
+from trialfolio.case_state import (
+    CaseOutcome,
+    case_outcome,
+    case_state,
+    confirmation_used,
+    counted_authentications,
+    counted_requests,
+    described,
+    described_by,
+    experiment_counts,
+    latest_charged,
+    outcome_code,
+    repeatable,
+    unavailable_metrics,
+)
 from trialfolio.configuration import experiment_original_values, read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1
 from trialfolio.contracts.common import (
@@ -92,11 +107,8 @@ from trialfolio.contracts.common import (
 )
 from trialfolio.contracts.experiment_manifest import (
     EXPERIMENT_CONFIGURATION_FORMAT,
-    BudgetLimits,
-    CaseCounts,
     ExperimentArtifact,
     ExperimentArtifactRole,
-    ExperimentAttemptCounts,
     ExperimentCommandRecord,
     ExperimentManifest,
     ExperimentManifestCounts,
@@ -109,14 +121,7 @@ from trialfolio.demo import SyntheticScreenBacktestClient
 from trialfolio.display import series
 from trialfolio.errors import TrialFolioError
 from trialfolio.experiment_paths import plan_path, session_path
-from trialfolio.experiment_records import (
-    CaseAttempt,
-    CaseOutcome,
-    MissingTables,
-    SavedExperiment,
-    SavedExperimentAttempt,
-    case_outcome,
-)
+from trialfolio.experiment_records import MissingTables, SavedExperiment, SavedExperimentAttempt
 from trialfolio.manifests import (
     PROVIDER_ROLES,
     EndingWithoutManifest,
@@ -278,7 +283,7 @@ class Repeat:
 @dataclass(frozen=True)
 class _Attempt:
     """An attempt of the experiment, an earlier session's or this one's, as the session's counts,
-    budget, and manifest read it."""
+    budget, and manifest read it, and the rules of its case's state (`case_state.py`)."""
 
     case_id: str
     attempt_id: uuid.UUID
@@ -291,18 +296,13 @@ class _Attempt:
     possibly_charged: bool
     error_code: str | None
     repeat_of: uuid.UUID | None
-    requests: int
+    provider_requests: int
     """The sends the budget counts."""
-    authentications: int
+    authentication_calls: int
     """Trial Folio's own authentication calls the budget counts."""
     record: AttemptRecordV1_1 | None
     """Its attempt record, once it's written."""
     files: tuple[AttemptFile, ...]
-
-    def read(self, *, valid: bool) -> CaseAttempt | None:
-        if self.outcome is None:
-            return None
-        return CaseAttempt(self.session, self.sequence, self.outcome, self.possibly_charged, valid)
 
 
 def _saved(attempt: SavedExperimentAttempt) -> _Attempt:
@@ -315,8 +315,8 @@ def _saved(attempt: SavedExperimentAttempt) -> _Attempt:
         possibly_charged=attempt.possibly_charged,
         error_code=attempt.error_code,
         repeat_of=attempt.repeat_of,
-        requests=attempt.provider_requests,
-        authentications=attempt.authentication_calls,
+        provider_requests=attempt.provider_requests,
+        authentication_calls=attempt.authentication_calls,
         record=attempt.record,
         files=attempt.files,
     )
@@ -332,8 +332,8 @@ def _recorded(record: AttemptRecordV1_1, files: tuple[AttemptFile, ...]) -> _Att
         possibly_charged=record.possibly_charged,
         error_code=None if record.error is None else record.error.code,
         repeat_of=record.repeat_of,
-        requests=provider_requests(record),
-        authentications=sum(e.request == AUTHENTICATION_REQUEST for e in record.exchanges),
+        provider_requests=provider_requests(record),
+        authentication_calls=sum(e.request == AUTHENTICATION_REQUEST for e in record.exchanges),
         record=record,
         files=files,
     )
@@ -362,8 +362,8 @@ def _ended(result: ExperimentAttemptResult) -> _Attempt:
         possibly_charged=charged,
         error_code=None if record.error is None else record.error.code,
         repeat_of=record.repeat_of,
-        requests=requests,
-        authentications=int(result.authenticated),
+        provider_requests=requests,
+        authentication_calls=int(result.authenticated),
         record=None,
         files=result.files,
     )
@@ -619,11 +619,13 @@ class ExperimentExecution:
     def repeat_attempts(self) -> dict[str, uuid.UUID]:
         """Each planned case awaiting a repeat, by its `case_id`, with its latest possibly
         charged attempt's `attempt_id`, which confirms a repeat of it (repeating a case)."""
-        return {
-            case.case_id: [a for a in self._of(case.case_id) if a.possibly_charged][-1].attempt_id
-            for case in self._plan.cases
-            if self._awaiting_repeat(case.case_id)
-        }
+        repeats: dict[str, uuid.UUID] = {}
+        for case in self._plan.cases:
+            attempts = self._of(case.case_id)
+            latest = latest_charged(attempts)
+            if case_state(attempts) == "awaiting_repeat" and latest is not None:
+                repeats[case.case_id] = latest.attempt_id
+        return repeats
 
     @property
     def counts(self) -> ExperimentManifestCounts:
@@ -645,11 +647,7 @@ class ExperimentExecution:
         if self._experiment is not None:
             for case_id, saved in self._experiment.tables.items():
                 rows.setdefault(case_id, saved.metrics_rows)
-        return sum(
-            row.availability == "unavailable"
-            for case in self._plan.cases
-            for row in rows.get(case.case_id, ())
-        )
+        return unavailable_metrics(self._plan, rows)
 
     @property
     def manifest(self) -> ExperimentManifest | None:
@@ -1011,10 +1009,10 @@ class ExperimentExecution:
         The budget counts every attempt of the experiment, earlier sessions' included."""
         if self._cancellation is not None and self._cancellation.requested:
             return "cancelled"
-        budget = self._plan.budget
-        if self._provider_requests() + 1 > budget.provider_requests:
+        budget, attempts = self._plan.budget, self._attempts
+        if counted_requests(attempts) + 1 > budget.provider_requests:
             return "budget"
-        if authenticates and self._authentication_calls() + 1 > budget.authentication_calls:
+        if authenticates and counted_authentications(attempts) + 1 > budget.authentication_calls:
             return "authentication_budget"
         return None
 
@@ -1091,44 +1089,19 @@ class ExperimentExecution:
         return [attempt for attempt in self._attempts if attempt.case_id == case_id]
 
     def _outcome(self, case_id: str) -> CaseOutcome:
-        valid = case_id not in self._invalid
-        reads = (attempt.read(valid=valid) for attempt in self._of(case_id))
-        return case_outcome(tuple(read for read in reads if read is not None))
+        return case_outcome(self._of(case_id), valid=case_id not in self._invalid)
 
     def _described(self, case_id: str) -> str:
-        """The case's outcome, with the error code of the attempt that gives it."""
-        outcome = self._outcome(case_id)
-        if outcome == "not_yet_run":
-            return "not yet run"
-        invalid = self._invalid.get(case_id)
-        if invalid is not None:
-            return f"failed ({invalid.code})"
-        giving = self._giving(case_id)
-        code = None if giving is None else giving.error_code
-        return outcome if code is None else f"{outcome} ({code})"
-
-    def _giving(self, case_id: str) -> _Attempt | None:
-        """The attempt whose error a case that didn't succeed is described by: its latest
-        possibly charged attempt, or else its latest attempt."""
-        attempts = [attempt for attempt in self._of(case_id) if attempt.outcome is not None]
-        charged = [attempt for attempt in attempts if attempt.possibly_charged]
-        return (charged or attempts)[-1] if attempts else None
+        """The case's outcome, with the error code that gives it."""
+        return described(self._of(case_id), valid=case_id not in self._invalid)
 
     def _provider_said(self, case_id: str) -> str | None:
         """Portfolio123's own message in the error a case that didn't succeed is described by,
         when it has one."""
-        giving = self._giving(case_id)
+        giving = described_by(self._of(case_id))
         if giving is None or giving.record is None or giving.record.error is None:
             return None
         return provider_message_of(giving.record.error.message)
-
-    def _awaiting_repeat(self, case_id: str) -> bool:
-        """Whether the case awaits a repeat: one of its attempts may have reached Portfolio123,
-        and none succeeded. One whose response failed validation succeeded, so it's complete."""
-        attempts = self._of(case_id)
-        return not any(a.outcome == "succeeded" for a in attempts) and any(
-            a.possibly_charged for a in attempts
-        )
 
     # The end of the session
 
@@ -1226,7 +1199,7 @@ class ExperimentExecution:
         charged = (
             " A case whose request may have reached Portfolio123 is never sent again"
             " automatically: a confirmed repeat sends it."
-            if any(self._awaiting_repeat(case.case_id) for case in missed)
+            if any(case_state(self._of(case.case_id)) == "awaiting_repeat" for case in missed)
             else ""
         )
         # Portfolio123's own text can repeat configuration values, so logs never hold it. The
@@ -1239,9 +1212,8 @@ class ExperimentExecution:
         rejected = [
             f"`{case.case_key}`"
             for case in missed
-            if case.case_id not in self._invalid
-            and (giving := self._giving(case.case_id)) is not None
-            and giving.error_code == "provider.unsupported_capability"
+            if outcome_code(self._of(case.case_id), valid=case.case_id not in self._invalid)
+            == "provider.unsupported_capability"
         ]
         revise = (
             f" Portfolio123 rejected a setting of {series(rejected)}: a repeat sends the same"
@@ -1312,36 +1284,8 @@ class ExperimentExecution:
         return False
 
     def _counts(self) -> ExperimentManifestCounts:
-        outcomes = [self._outcome(case.case_id) for case in self._plan.cases]
-        attempts = [attempt for attempt in self._attempts if attempt.outcome is not None]
-        records = [attempt.record for attempt in attempts if attempt.record is not None]
-        costs = [r.provider_metadata.cost for r in records if r.provider_metadata.cost is not None]
-        budget = self._plan.budget
-        return ExperimentManifestCounts(
-            cases=CaseCounts(
-                planned=len(outcomes),
-                succeeded=outcomes.count("succeeded"),
-                failed=outcomes.count("failed"),
-                skipped=0,
-                unknown=outcomes.count("unknown"),
-                not_yet_run=outcomes.count("not_yet_run"),
-            ),
-            retired_cases=self._retired(),
-            attempts=ExperimentAttemptCounts(
-                succeeded=sum(a.outcome == "succeeded" for a in attempts),
-                failed=sum(a.outcome == "failed" for a in attempts),
-                unknown=sum(a.outcome == "unknown" for a in attempts),
-                running=sum(a.outcome == "running" for a in attempts),
-                repeats=sum(a.repeat_of is not None for a in attempts),
-            ),
-            retries=0,
-            provider_requests=self._provider_requests(),
-            authentication_calls=self._authentication_calls(),
-            budget=BudgetLimits(
-                provider_requests=budget.provider_requests,
-                authentication_calls=budget.authentication_calls,
-            ),
-            cost=sum(costs) if costs else None,
+        return experiment_counts(
+            self._plan, self._attempts, invalid=self._invalid, retired=self._retired()
         )
 
     def _retired(self) -> int:
@@ -1351,16 +1295,6 @@ class ExperimentExecution:
         if record is None:  # a new experiment's, before its first plan is recorded
             return 0
         return len(retired_cases(record, self._plan))
-
-    def _provider_requests(self) -> int:
-        """The sends counted against the budget: each that may have reached Portfolio123, of
-        every attempt of the experiment."""
-        return sum(attempt.requests for attempt in self._attempts)
-
-    def _authentication_calls(self) -> int:
-        """Trial Folio's own authentication calls counted against the budget, whatever their
-        result: an attempt's `POST /auth` exchange, or its authentication record alone."""
-        return sum(attempt.authentications for attempt in self._attempts)
 
     def _experiment_record(self) -> ExperimentRecord:
         if self._record is None:  # written before any case runs
@@ -1532,15 +1466,14 @@ def _confirmed(
             )
             raise _not_repeated(message.format(key), message.format(saved.case.case_id))
         named = [a for a in saved.attempts if a.attempt_id == repeat.attempt_id]
-        if not named or not named[0].possibly_charged or named[0].outcome == "succeeded":
+        if not named or not repeatable(named[0]):
             message = (
                 f"A repeat of case {{}} names attempt {repeat.attempt_id}, which isn't an attempt"
                 " of the case whose request may have been charged and that didn't succeed. A"
                 " repeat names the case's latest attempt whose request may have been charged."
             )
             raise _not_repeated(message.format(key), message.format(saved.case.case_id))
-        later = saved.attempts[saved.attempts.index(named[0]) + 1 :]
-        if any(attempt.possibly_charged for attempt in later):
+        if confirmation_used(saved.attempts, repeat.attempt_id):
             used.append(repeat)
         else:
             to_make[repeat.case_id] = repeat
