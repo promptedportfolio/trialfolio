@@ -131,10 +131,11 @@ class Cli:
         monkeypatch.setenv("HOME", str(self.home))
         for name in VARIABLES:
             monkeypatch.delenv(name, raising=False)
-        # The ranking lock's file is in the test's own directory, so tests that run at once don't
-        # exclude each other, and none takes the machine's lock.
-        self.locks = tmp_path / "locks"
-        self.locks.mkdir()
+        # The ranking lock's file is in a directory of the test's own, beside its temporary
+        # directory, whose contents tests compare, so tests that run at once don't exclude each
+        # other, and none takes the machine's lock.
+        self.locks = tmp_path.with_name(f"{tmp_path.name}-locks")
+        self.locks.mkdir(exist_ok=True)
         monkeypatch.setenv(LOCK_DIRECTORY_VARIABLE, str(self.locks))
 
     def accept_license(self) -> None:
