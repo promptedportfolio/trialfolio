@@ -389,7 +389,7 @@ RF-T04 moves no code that logs, and neither new module logs, so contracts.md's [
 
 Since 2026-10-16, as [decision 17](#the-owners-decisions) gives, `scripts/check`'s lint step enforces Ruff's `C901`, a function's complexity over 10, and `PLR0915`, its statements over 50, in `src/` only: `pyproject.toml`'s `[tool.ruff.lint]` selects both, and its per-file ignores leave out every path outside `src/`. Neither rule counts a function's lines, so the plan's limit of about 50 lines stays a criterion of each task, not of the check.
 
-Each function over a limit when they were enabled carries a `noqa` on its `def` line that names the task that shortens it, as below. That task removes the `noqa`, and `scripts/check` then holds the function to the limits. A new function in `src/` over a limit fails the check. There were 16 findings in 15 functions of 11 modules: the 15 RF-T05 counted, and `_check_ranking_variant`, which R04-T07 added.
+Each function over a limit when they were enabled carries a `noqa` on its `def` line that names the task that shortens it, as below. That task removes the `noqa`, and `scripts/check` then holds the function to the limits. A new function in `src/` over a limit fails the check, and the task that writes it splits it rather than adding an exemption: only the owner adds one. There were 16 findings in 15 functions of 11 modules: the 15 RF-T05 counted, and `_check_ranking_variant`, which R04-T07 added.
 
 | Function | Rule | Task |
 |---|---|---|
