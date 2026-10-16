@@ -559,6 +559,18 @@ class _AttemptFiles:
         stored = self.write(name, data, role, list_published=True)
         self.rank_response = (stored, response)
 
+    @property
+    def rank_update_saved(self) -> bool:
+        """Whether the `rank_update`'s response is in the attempt's directory, whole: saved, or
+        published by the store before its write failed, as when the directory's sync fails, which
+        `files` lists all the same. A resume reads either as saved, since the store publishes a
+        file atomically (an attempt stopped after its update record), though `ranking_update`
+        references only a completed write."""
+        return any(
+            file.role in ("rank_update_response", "rank_update_response_undecoded")
+            for file in self._files
+        )
+
     def ranking_update(self) -> RankingUpdate:
         """The attempt record's `ranking_update`: the `rank_update`'s request and its saved
         response, when each was written, and the `cost` and `quotaRemaining` of its decoded
@@ -909,8 +921,9 @@ class ExperimentAttemptResult:
     """The update record, `updating.json`, of an attempt that sends a definition, when it was
     written."""
     update_saved: bool = False
-    """Whether the `rank_update`'s response was saved, so an attempt whose latest record is its
-    update record reads as a resume records it: `failed`, and otherwise `unknown`."""
+    """Whether the `rank_update`'s response is in the attempt's directory, saved or published
+    before its write failed, so an attempt whose latest record is its update record reads as a
+    resume records it: `failed`, and otherwise `unknown`."""
 
 
 class ExperimentAttempt:
@@ -1586,7 +1599,7 @@ class RankingExperimentAttempt:
             authenticated=self._authenticated,
             authentication_failed=self._authentication_failed,
             update=self._update,
-            update_saved=self._files.rank_response is not None,
+            update_saved=self._files.rank_update_saved,
         )
 
     def _log_fields(self, event: str) -> dict[str, str]:

@@ -942,23 +942,30 @@ def test_a_cancellation_never_falls_between_a_cases_two_calls(
     ("faults", "received", "outcome", "requests", "said"),
     [
         (
-            {"attempt.json": RuntimeError()},
+            {"attempt.json": "unexpected"},
             (AUTH, RANK, BACKTEST),
             "running",
             2,
             RAN_UPDATE,
         ),
         (
-            {"request.json": RuntimeError(), "attempt.json": RuntimeError()},
+            {"request.json": "unexpected", "attempt.json": "unexpected"},
             (AUTH, RANK),
             "failed",
             1,
             UPDATING,
         ),
         (
-            {"rank-update-response.json": None, "attempt.json": RuntimeError()},
+            {"rank-update-response.json": "full disk", "attempt.json": "unexpected"},
             (AUTH, RANK),
             "unknown",
+            1,
+            UPDATING,
+        ),
+        (
+            {"rank-update-response.json": "published", "attempt.json": "full disk"},
+            (AUTH, RANK),
+            "failed",
             1,
             UPDATING,
         ),
@@ -967,31 +974,39 @@ def test_a_cancellation_never_falls_between_a_cases_two_calls(
         "after its start record",
         "after its update record, with its response saved",
         "after its update record, without its response",
+        "after its update record, with its response published before its write failed",
     ],
 )
 def test_an_attempt_without_its_record_counts_as_its_records_read(
     tmp_path: Path,
     server: FakePortfolio123,
     monkeypatch: pytest.MonkeyPatch,
-    faults: dict[str, BaseException | None],
+    faults: dict[str, str],
     received: tuple[str, ...],
     outcome: str,
     requests: int,
     said: tuple[str, ...],
 ) -> None:
-    # A storage fault, or an unexpected one (None), leaves the first case's attempt without its
-    # attempt record, which ends the session without its manifest. Its records say what a resume
-    # will record (counting the requests; an attempt stopped after its update record): `running`,
+    # A storage fault, or an unexpected one, leaves the first case's attempt without its attempt
+    # record, which ends the session without its manifest. Its records say what a resume will
+    # record (counting the requests; an attempt stopped after its update record): `running`,
     # with both requests counted, after `started.json`; and with only `updating.json`, one
-    # request, `failed` with the rank_update's saved response, and `unknown` without it.
+    # request, `failed` with the rank_update's response in its directory, and `unknown` without
+    # it. A response the store published before its write failed, as when the directory's sync
+    # fails, is in the directory whole, so a resume reads it as saved (uncertain completion),
+    # though the attempt record would reference only a completed write.
     script_experiment(server, 4)
 
     def set_faults(store: StorageFaults) -> None:
-        for name, error in faults.items():
-            if error is None:
-                store.fail_os(name)
-            else:
-                store.fail_before(name, error)
+        for name, fault in faults.items():
+            match fault:
+                case "full disk":
+                    store.fail_os(name)
+                case "published":
+                    sync = TrialFolioError("storage.write_failed", "Couldn't sync the directory.")
+                    store.fail_after(name, sync)
+                case _:
+                    store.fail_before(name, RuntimeError())
 
     ran = run_experiment(tmp_path, server, faults=(monkeypatch, set_faults))
 

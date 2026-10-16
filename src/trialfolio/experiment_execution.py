@@ -448,8 +448,9 @@ def _ended(result: ExperimentAttemptResult) -> _Attempt:
     resume writes, it reads as the resume will count it: `running` with its start record, and
     `failed`, not possibly charged, with only its authentication record. An attempt that sends a
     definition counts one request for each start record it wrote, and with only its update
-    record, reads as `failed` with its `rank_update`'s saved response, and `unknown` without one,
-    possibly charged either way (sending a definition)."""
+    record, reads as `failed` with its `rank_update`'s response in its directory, saved or
+    published before its write failed, and `unknown` without one, possibly charged either way
+    (sending a definition)."""
     record = result.record
     if result.recorded:
         return _recorded(record, result.files)
