@@ -32,6 +32,7 @@ from tests.support.storage_faults import StorageFaults
 from trialfolio.configuration import (
     read_experiment_configuration,
     read_experiment_configuration_v1_1,
+    read_screen_configuration,
     read_screen_configuration_v1_1,
 )
 from trialfolio.contracts.attempt import (
@@ -42,7 +43,7 @@ from trialfolio.contracts.attempt import (
     StartRecordV1_3,
 )
 from trialfolio.contracts.experiment_manifest import ExperimentManifestV1_1
-from trialfolio.contracts.experiment_plan import PlanV1_3
+from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
 from trialfolio.contracts.experiment_record import ExperimentRecordV1_1
 from trialfolio.contracts.manifest import CommandRecord, RunManifestV1_1
 from trialfolio.contracts.plan import PlanV1_2
@@ -55,6 +56,7 @@ from trialfolio.experiment_records import open_experiment
 from trialfolio.planning import (
     build_experiment_plan,
     build_experiment_plan_v1_1,
+    build_plan,
     build_plan_v1_1,
     installed_versions,
 )
@@ -309,6 +311,15 @@ def test_a_screen_runs_records_are_1_2_0(
         source = roles[role].source
         assert source is not None
         assert (source.operation, source.provenance) == ("rank_update", "verified")
+    # Each is acquired when it was: the definition with the configuration, when the command
+    # started; the rank_update's request when the attempt started, and its response when it ended.
+    acquired = {
+        role: artifact.source.acquired_at for role, artifact in roles.items() if artifact.source
+    }
+    assert record.started_at < record.ended_at
+    assert acquired["ranking_definition"] == acquired["configuration"] == COMMAND.started_at
+    assert acquired["rank_update_request"] == record.started_at
+    assert acquired["rank_update_response"] == record.ended_at
 
 
 def test_a_screen_runs_settings_csv_has_a_weight_row_for_each_node(
@@ -645,6 +656,33 @@ def test_a_screen_run_is_given_its_definition_as_the_plan_has_it(tmp_path: Path)
     assert not (tmp_path / "out").exists()
 
 
+def test_a_screen_run_with_a_definition_is_refused_without_the_ranking_lock(
+    tmp_path: Path,
+) -> None:
+    # So the core never executes a definition without the lock (R04-AC05).
+    _, _, plan = screen()
+
+    with pytest.raises(ValueError, match="ranking lock"):
+        Execution(plan, plan.plan_hash, "option", LocalArtifactStore(tmp_path / "out"), COMMAND)
+
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_screen_run_without_a_definition_is_refused_one(tmp_path: Path) -> None:
+    formula = FIXTURES / "screen-configs" / "formula.yaml"
+    content = formula.read_bytes()
+    plan = build_plan(read_screen_configuration(content, formula.name), installed_versions())
+    _, definition, _ = screen()
+    execution = Execution(
+        plan, plan.plan_hash, "option", LocalArtifactStore(tmp_path / "out"), COMMAND
+    )
+
+    with pytest.raises(ValueError, match="only a run with a ranking definition"):
+        execution.run(content, lambda: SyntheticScreenBacktestClient(b"{}"), definition=definition)
+
+    assert not (tmp_path / "out").exists()
+
+
 # A new experiment
 
 
@@ -713,6 +751,19 @@ def test_an_experiments_records_are_1_3_0(tmp_path: Path, server: FakePortfolio1
     roles = {artifact.role for artifact in manifest.artifacts}
     assert {"ranking_definition", "update_record", "rank_update_request"} <= roles
     assert "rank_update_response" in roles
+    # The definition's copy is acquired with its configuration, when the plan was recorded; each
+    # rank_update's request when its attempt started, and its response when it ended.
+    acquired = {a.path: a.source.acquired_at for a in manifest.artifacts if a.source is not None}
+    recorded = ExperimentRecordV1_1.model_validate_json(
+        (ran.out / "plans/1/experiment.json").read_bytes()
+    )
+    assert acquired["plans/1/definition.xml"] == recorded.created_at
+    assert acquired["plans/1/configuration.yaml"] == recorded.created_at
+    for case, record in zip(plan.cases, records, strict=True):
+        directory = ran.attempt(case.case_id).relative_to(ran.out).as_posix()
+        assert record.started_at < record.ended_at
+        assert acquired[f"{directory}/rank-update-request.json"] == record.started_at
+        assert acquired[f"{directory}/rank-update-response.json"] == record.ended_at
 
 
 def test_an_experiments_cases_settings_csv_takes_each_weights_original(
@@ -745,6 +796,58 @@ def test_an_experiments_cases_settings_csv_takes_each_weights_original(
     assert "Value/Sales Yield" not in {row.node for row in no_sales_yield}
     removal = {row.node: row for row in no_sales_yield}
     assert removal["Value/Earnings Yield"].original_value == "100"
+
+
+def test_only_a_weight_a_variant_changes_takes_its_original_from_the_variant(
+    tmp_path: Path, server: FakePortfolio123
+) -> None:
+    # Weight rows (what a variant changes), as R04-T08 settled it: a `set` entry gives a row's
+    # original only when it changes the baseline's weight, compared as decimals; and a removal's
+    # rows are named by the case's own canonical paths, where a position the removal changes
+    # becomes a name. ranking-example.yaml's entries all change their weights, and its removal
+    # renames nothing, so neither rule had a test (the review of R04-T08's pull request).
+    _, _, plan = experiment("ranking-positions.yaml")
+    script_experiment(server, len(plan.cases))
+
+    ran = run_experiment(tmp_path, server, "ranking-positions.yaml")
+
+    assert ran.error is None
+    manifest = ExperimentManifestV1_1.model_validate_json(
+        (ran.out / "sessions/1/manifest.json").read_bytes()
+    )
+    ids = {a.path: a.artifact_id for a in manifest.artifacts}
+    definition, configuration = ids["plans/1/definition.xml"], ids["plans/1/configuration.yaml"]
+
+    def rows(key: str) -> dict[str, SettingsRowV1_1]:
+        (case,) = [case for case in plan.cases if case.case_key == key]
+        path = ran.out / "cases" / case.case_id / "normalized/settings.csv"
+        read = read_settings_csv_v1_1(path.read_bytes(), path.name)
+        return {row.node: row for row in read if row.node is not None}
+
+    # `'\#Momentum': 15` keeps the baseline's weight, so its row keeps the definition's original.
+    kept = rows("positions-heavy")["\\#Momentum"]
+    assert (kept.original_key, kept.original_value, kept.source_artifact) == (
+        "baseline.ranking.definition",
+        "15",
+        definition,
+    )
+    changed = rows("positions-heavy")["Value P\\/E"]
+    assert (changed.original_key, changed.original_value, changed.source_artifact) == (
+        "variants.ranking[0].set[0]",
+        "30",
+        configuration,
+    )
+    # Removing `#1` leaves one `Yield`, so the node the variant sets as `#2` is `Yield` in the
+    # case's definition, and its row takes the variant's original.
+    removal = rows("no-first-yield")
+    assert "Value P\\/E/#2" not in removal
+    renamed = removal["Value P\\/E/Yield"]
+    assert (renamed.value, renamed.original_key, renamed.original_value) == (
+        "60",
+        "variants.ranking[1].set[0]",
+        "60",
+    )
+    assert renamed.source_artifact == configuration
 
 
 def test_a_variant_of_another_setting_sends_the_baselines_definition(
@@ -1032,6 +1135,18 @@ def test_the_core_writes_a_synthetic_experiment_with_the_demos_client(tmp_path: 
     assert len(nodes) == 9
     for node in nodes:
         assert f"<code>ranking_weight</code> <code>{node}</code>" in report
+    # Each ranking variant's change, and the budget's cost of each operation.
+    (removal,) = [case for case in plan.cases if case.case_key == "no-sales-yield"]
+    assert removal.variant is not None
+    assert removal.variant.remove == "Value/Sales Yield"
+    assert (
+        "Removes the ranking's factor <code>Value/Sales Yield</code>, and sets"
+        " <code>Value/Earnings Yield</code> to <code>100</code>" in report
+    )
+    assert "Sets the ranking's weights: <code>Value</code> to <code>60</code>" in report
+    assert {cost.operation for cost in plan.budget.costs} == {"rank_update", "screen_backtest"}
+    for cost in plan.budget.costs:
+        assert f"<code>{cost.operation}</code>, {cost.credits_per_request} each" in report
 
 
 def test_an_experiment_with_a_definition_takes_the_ranking_lock(tmp_path: Path) -> None:
@@ -1050,16 +1165,73 @@ def test_an_experiment_with_a_definition_takes_the_ranking_lock(tmp_path: Path) 
         )
 
 
+def synthetic_plan_1_1_0() -> tuple[bytes, PlanV1_1]:
+    """`synthetic.yaml`'s content and plan 1.1.0, an experiment without a ranking definition."""
+    example = CONFIGS / "synthetic.yaml"
+    content = example.read_bytes()
+    plan = build_experiment_plan(
+        read_experiment_configuration(content, example.name), installed_versions()
+    )
+    return content, plan
+
+
+def test_an_experiment_is_given_its_definition_as_the_plan_has_it(tmp_path: Path) -> None:
+    # So `plans/1/definition.xml` holds the definition the plan sends (R04-AC03).
+    content, definition, plan = experiment("ranking-example.yaml")
+    out = tmp_path / "out"
+
+    def execution() -> ExperimentExecution:
+        return ExperimentExecution(
+            plan,
+            plan.plan_hash,
+            "not_required",
+            LocalArtifactStore(out),
+            SyntheticScreenBacktestClient(response_bytes()),
+            command=None,
+            ranking_lock=tmp_path / LOCK_FILE,
+        )
+
+    # Another formula, so the weights' rules still hold, and only its plan differs.
+    other = definition.replace("<Formula>…</Formula>".encode(), b"<Formula>Close(0)</Formula>", 1)
+    with pytest.raises(ValueError, match="doesn't give the plan"):
+        execution().run(content, definition=other)
+    with pytest.raises(ValueError, match="given its bytes"):
+        execution().run(content)
+    assert not out.exists()
+    assert not (tmp_path / LOCK_FILE).exists()
+
+
+def test_an_experiment_without_a_definition_is_refused_one_and_the_ranking_lock(
+    tmp_path: Path,
+) -> None:
+    content, plan = synthetic_plan_1_1_0()
+    _, definition, _ = experiment("ranking-example.yaml")
+    out = tmp_path / "out"
+
+    def execution(lock: Path | None = None) -> ExperimentExecution:
+        return ExperimentExecution(
+            plan,
+            plan.plan_hash,
+            "not_required",
+            LocalArtifactStore(out),
+            SyntheticScreenBacktestClient(response_bytes()),
+            command=None,
+            ranking_lock=lock,
+        )
+
+    with pytest.raises(ValueError, match="only an experiment with a ranking definition"):
+        execution().run(content, definition=definition)
+    with pytest.raises(ValueError, match="takes the lock"):
+        execution(tmp_path / LOCK_FILE)
+    assert not out.exists()
+
+
 def test_an_experiment_with_a_definition_isnt_resumed_by_this_executor_yet(
     tmp_path: Path,
 ) -> None:
     # Resuming or revising one is release 0.4.0's R04-T09: until then, the executor refuses a
     # plan 1.3.0 given an experiment's records, here a synthetic one's of plan 1.1.0.
-    example = CONFIGS / "synthetic.yaml"
-    content = example.read_bytes()
-    earlier = build_experiment_plan(
-        read_experiment_configuration(content, example.name), installed_versions()
-    )
+    content, earlier = synthetic_plan_1_1_0()
     out = tmp_path / "out"
     with LocalArtifactStore(out) as store:
         ExperimentExecution(
