@@ -30,6 +30,18 @@ call. Its records name its session, its place in it, the attempt whose authentic
 token, and the attempt a repeat repeats. Both kinds of attempt write their files, and end, the
 same way.
 
+From 0.4.0, a case whose ranking is a definition sends two requests in each attempt (sending a
+definition): `RankingAttempt`, a screen run's, with start and attempt records 1.2.0, and
+`RankingExperimentAttempt`, an experiment's, with records 1.3.0. After authenticating, each writes
+the `rank_update`'s request, `rank-update-request.json`, and its start record, the update record
+`updating.json`, sends the `rank_update`, and saves its response, `rank-update-response.json`, or
+`.raw` for a 200 the wrapper couldn't decode. Only after a 200 the wrapper decoded, and saved, does
+it write the backtest's `request.json` and `started.json`, and send the backtest, as 0.3.0's
+attempts do. Any other ending of the `rank_update` ends the attempt there, so no backtest ranks by
+whatever `ApiRankingSystem` held before. The backtest's exchange gives the outcome; without one,
+the `rank_update`'s does, and the attempt is possibly charged when either may have reached
+Portfolio123.
+
 No file is written twice, and none is replaced. The outcome follows the request's exchange and
 whether the response was saved. An interrupt or a storage failure decides only the error code.
 A file before the attempt record that the store published before its write failed, whatever the
@@ -71,21 +83,34 @@ from trialfolio.contracts.attempt import (
     ArtifactReference,
     AttemptRecord,
     AttemptRecordV1_1,
+    AttemptRecordV1_2,
+    AttemptRecordV1_3,
     AuthenticationRecord,
     Exchange,
     ProviderMetadata,
+    RankingUpdate,
+    RankUpdateResponse,
     SavedResponse,
     StartRecord,
     StartRecordV1_1,
+    StartRecordV1_2,
+    StartRecordV1_3,
 )
 from trialfolio.contracts.common import (
     AUTHENTICATION_REQUEST,
+    RANK_UPDATE_REQUEST,
+    SCREEN_BACKTEST_REQUEST,
     ErrorDetail,
     TransportVersions,
     WrapperVersions,
 )
-from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
-from trialfolio.contracts.plan import Plan
+from trialfolio.contracts.experiment_plan import (
+    ExperimentPlanCase,
+    ExperimentPlanCaseV1_3,
+    PlanV1_1,
+    PlanV1_3,
+)
+from trialfolio.contracts.plan import Plan, PlanV1_2
 from trialfolio.errors import TrialFolioError, interrupted
 from trialfolio.manifests import model_json, utc
 from trialfolio.planning import check_approval
@@ -107,6 +132,10 @@ type Outcome = Literal["succeeded", "failed", "unknown"]
 
 type AttemptRole = Literal[
     "authentication_record",
+    "rank_update_request",
+    "update_record",
+    "rank_update_response",
+    "rank_update_response_undecoded",
     "start_record",
     "attempt_record",
     "provider_request",
@@ -114,7 +143,12 @@ type AttemptRole = Literal[
     "provider_response_undecoded",
 ]
 """The role of each file an attempt writes, as a manifest lists it. Only an experiment's attempts
-write an authentication record."""
+write an authentication record, and only an attempt that sends a definition the `rank_update`'s
+files."""
+
+type AnyAttemptRecord = AttemptRecord | AttemptRecordV1_1 | AttemptRecordV1_2 | AttemptRecordV1_3
+"""An attempt record of any version: a screen run's, 1.0.0, or 1.2.0 with a definition, and an
+experiment's, 1.1.0, or 1.3.0 with a definition."""
 
 SCHEMA_VERSION: Final = "1.0.0"
 """The schema version of a screen run's start records and attempt records."""
@@ -122,12 +156,24 @@ SCHEMA_VERSION: Final = "1.0.0"
 EXPERIMENT_SCHEMA_VERSION: Final = "1.1.0"
 """The schema version of an experiment's start records and attempt records."""
 
+RANKING_SCHEMA_VERSION: Final = "1.2.0"
+"""The schema version of the start records and attempt records of a screen run's attempt that
+sends a definition."""
+
+RANKING_EXPERIMENT_SCHEMA_VERSION: Final = "1.3.0"
+"""The schema version of the start records and attempt records of an experiment's attempt that
+sends a definition."""
+
 AUTHENTICATION_SCHEMA_VERSION: Final = "1.0.0"
 """The schema version of the authentication records an experiment's attempts write."""
 
 AUTHENTICATION_RECORD: Final = "authenticating.json"
+UPDATE_RECORD: Final = "updating.json"
 START_RECORD: Final = "started.json"
 ATTEMPT_RECORD: Final = "attempt.json"
+RANK_UPDATE_REQUEST_FILE: Final = "rank-update-request.json"
+RANK_UPDATE_RESPONSE_FILE: Final = "rank-update-response.json"
+RANK_UPDATE_RESPONSE_RAW: Final = "rank-update-response.raw"
 
 
 def utc_now() -> datetime:
@@ -152,8 +198,9 @@ class AttemptFile:
 class AttemptResult:
     """How an attempt ended."""
 
-    record: AttemptRecord
-    """The attempt record: as written, or, when `recorded` is false, as it would have been."""
+    record: AttemptRecord | AttemptRecordV1_2
+    """The attempt record: as written, or, when `recorded` is false, as it would have been. It's
+    version 1.2.0 for an attempt that sends a definition."""
     recorded: bool
     """Whether `attempt.json` was written, or published whole before its write failed. If it
     wasn't, an attempt with a start record reads as `running`."""
@@ -179,14 +226,41 @@ class AttemptStatus:
     """The sends of the request that may have reached Portfolio123, never authentication."""
 
 
-def provider_requests(record: AttemptRecord | AttemptRecordV1_1) -> int:
+def provider_requests(record: AnyAttemptRecord) -> int:
     """The sends of the request that may have reached Portfolio123: its exchanges other than
     authentication that aren't `not_connected`. An attempt restarted without a saved response is
-    `unknown` with only its start record's exchange, and counts as one (uncertain completion)."""
+    `unknown` with only its start record's exchange, and counts as one (uncertain completion).
+
+    An attempt that sends a definition counts each of its two requests so, the `rank_update` and
+    the backtest, and its backtest as one when a resume recorded it from `started.json` without a
+    saved response: `unknown`, with the backtest's request and no backtest exchange (sending a
+    definition, counting the requests)."""
     sends = [e for e in record.exchanges if e.request != AUTHENTICATION_REQUEST]
+    counted = sum(1 for e in sends if e.result != "not_connected")
+    if (
+        isinstance(record, AttemptRecordV1_2 | AttemptRecordV1_3)
+        and record.ranking_update is not None
+    ):
+        restarted = record.outcome == "unknown" and record.request is not None
+        backtest = any(e.request == SCREEN_BACKTEST_REQUEST for e in sends)
+        return counted + int(restarted and not backtest)
     if not sends and record.outcome == "unknown":
         return 1
-    return sum(1 for e in sends if e.result != "not_connected")
+    return counted
+
+
+def reported_cost(record: AnyAttemptRecord) -> int | None:
+    """The credits Portfolio123 reported charging for the attempt's requests: its backtest's
+    `cost`, and its `rank_update`'s, for an attempt that sends a definition, summed; None when it
+    reported none (sending a definition, the counts)."""
+    costs = [record.provider_metadata.cost]
+    if (
+        isinstance(record, AttemptRecordV1_2 | AttemptRecordV1_3)
+        and record.ranking_update is not None
+    ):
+        costs.append(record.ranking_update.provider_metadata.cost)
+    reported = [cost for cost in costs if cost is not None]
+    return sum(reported) if reported else None
 
 
 def read_attempt(store: ArtifactStore, case_id: str, attempt_id: uuid.UUID) -> AttemptStatus | None:
@@ -225,9 +299,12 @@ def check_records(
             raise ValueError("the attempt record doesn't hold its start record's contents")
 
 
-def attempt_status(start: StartRecord | None, record: AttemptRecord | None) -> AttemptStatus | None:
+def attempt_status(
+    start: StartRecord | StartRecordV1_2 | None, record: AttemptRecord | AttemptRecordV1_2 | None
+) -> AttemptStatus | None:
     """How an attempt with these records reads: from its attempt record, or, without one, from its
-    start record, as `running`, possibly charged, with one provider request. None when it has
+    start record, as `running`, possibly charged, with one provider request, or, for a backtest's
+    start record 1.2.0, two, since its update record came before it. None when it has
     neither."""
     if record is not None:
         return AttemptStatus(
@@ -237,12 +314,15 @@ def attempt_status(start: StartRecord | None, record: AttemptRecord | None) -> A
             provider_requests=provider_requests(record),
         )
     if start is not None:
-        # The request is sent at most once, so a start record is one possible send.
+        # The request is sent at most once, so a start record is one possible send, and an
+        # attempt that sends a definition wrote its update record before it (counting the
+        # requests).
+        update = isinstance(start, StartRecordV1_2) and start.operation == "screen_backtest"
         return AttemptStatus(
             attempt_id=start.attempt_id,
             outcome="running",
             possibly_charged=True,
-            provider_requests=1,
+            provider_requests=2 if update else 1,
         )
     return None
 
@@ -266,11 +346,94 @@ class _Ending:
 
     outcome: Outcome
     possibly_charged: bool
+    detail: str
+    """What it says about the request, or an attempt with a definition's two, for a message."""
 
-    @property
-    def detail(self) -> str:
-        """What it says about the request, for a message."""
-        return request_detail(self.outcome, possibly_charged=self.possibly_charged)
+
+def _ending(exchanges: tuple[Exchange, ...], *, saved: bool) -> _Ending:
+    """How an attempt with one request ended: as its exchange gives it (execution outcomes)."""
+    sends = [e for e in exchanges if e.request != AUTHENTICATION_REQUEST]
+    outcome = _outcome(sends[0] if sends else None, saved=saved)
+    charged = outcome == "unknown" or any(e.result != "not_connected" for e in sends)
+    return _Ending(outcome, charged, request_detail(outcome, possibly_charged=charged))
+
+
+def _ranking_ending(exchanges: tuple[Exchange, ...], *, saved: bool) -> _Ending:
+    """How an attempt that sends a definition ended (sending a definition, the outcome): as its
+    backtest's exchange gives it; without one, the backtest wasn't sent, and the attempt is
+    `unknown` when its `rank_update`'s exchange is `interrupted` or got a 5xx, since the write may
+    or may not have taken effect, and `failed` otherwise, after a 200 included."""
+    rank = _first(exchanges, RANK_UPDATE_REQUEST)
+    backtest = _first(exchanges, SCREEN_BACKTEST_REQUEST)
+    if backtest is not None:
+        outcome = _outcome(backtest, saved=saved)
+    elif rank is not None and rank.result == "response" and rank.status is not None:
+        outcome = "unknown" if rank.status >= 500 else "failed"
+    else:
+        outcome = "unknown" if rank is not None and rank.result == "interrupted" else "failed"
+    sends = [e for e in (rank, backtest) if e is not None]
+    charged = outcome == "unknown" or any(e.result != "not_connected" for e in sends)
+    sent = backtest is not None and backtest.result != "not_connected"
+    detail = ranking_detail(outcome, possibly_charged=charged, backtest_sent=sent)
+    return _Ending(outcome, charged, detail)
+
+
+def _first(exchanges: tuple[Exchange, ...], request: str) -> Exchange | None:
+    return next((e for e in exchanges if e.request == request), None)
+
+
+def ranking_detail(outcome: Outcome, *, possibly_charged: bool, backtest_sent: bool) -> str:
+    """What an attempt that sends a definition says about its two requests, for a message:
+    whether each was sent, and whether it may have been charged, as its attempt record does.
+    `backtest_sent` is whether its backtest may have reached Portfolio123."""
+    update = (
+        "The rank_update request, which writes the case's ranking definition into ApiRankingSystem,"
+    )
+    never = (
+        "Trial Folio never retries it automatically: check the account's API credits on"
+        " Portfolio123's website before running the command again."
+    )
+    if outcome == "succeeded":
+        return (
+            f"{update} and the screen backtest request succeeded, and their responses were saved."
+        )
+    if backtest_sent and outcome == "unknown":
+        return (
+            f"{update} succeeded. The screen backtest request may have been charged, and its"
+            f" outcome is unknown: no response was saved. {never}"
+        )
+    if backtest_sent:
+        return f"{update} and the screen backtest request reached Portfolio123, and may have been charged."
+    if outcome == "unknown":
+        return (
+            f"{update} may have been charged, and its outcome is unknown: no response was saved."
+            f" The screen backtest request wasn't sent. {never}"
+        )
+    if possibly_charged:
+        return (
+            f"{update} reached Portfolio123, and may have been charged. The screen backtest"
+            " request wasn't sent."
+        )
+    return "Neither the rank_update request nor the screen backtest request was sent."
+
+
+def record_detail(record: AnyAttemptRecord) -> str:
+    """What an attempt record says about its request, or an attempt with a definition's two, for
+    a message, as `request_detail` and `ranking_detail` give it."""
+    if (
+        not isinstance(record, AttemptRecordV1_2 | AttemptRecordV1_3)
+        or record.ranking_update is None
+    ):
+        return request_detail(record.outcome, possibly_charged=record.possibly_charged)
+    backtest = _first(record.exchanges, SCREEN_BACKTEST_REQUEST)
+    # A resume records an attempt from `started.json` without a saved response as `unknown`,
+    # with no backtest exchange: its backtest may have been sent (uncertain completion).
+    sent = (backtest is not None and backtest.result != "not_connected") or (
+        backtest is None and record.outcome == "unknown" and record.request is not None
+    )
+    return ranking_detail(
+        record.outcome, possibly_charged=record.possibly_charged, backtest_sent=sent
+    )
 
 
 def request_detail(outcome: Outcome, *, possibly_charged: bool) -> str:
@@ -316,6 +479,10 @@ class _AttemptFiles:
         self.published_response: ScreenBacktestResponse | None = None
         """A response whose write failed after the store published it, with `list_published`:
         it's listed, but `response` stays None, so no record references it."""
+        self.rank_request: StoredFile | None = None
+        """The `rank_update`'s request, once it's written, for an attempt that sends one."""
+        self.rank_response: tuple[StoredFile, ScreenBacktestResponse] | None = None
+        """The `rank_update`'s response, once it's saved."""
 
     @property
     def files(self) -> tuple[AttemptFile, ...]:
@@ -366,6 +533,52 @@ class _AttemptFiles:
             raise
         self.response = (stored, response)
 
+    def write_rank_update_request(self, params: dict[str, object]) -> None:
+        """Writes `rank-update-request.json`, as `request.json` is written, and lists it even when
+        the store published it before its write failed."""
+        self.rank_request = self.write(
+            RANK_UPDATE_REQUEST_FILE,
+            _request_json(params),
+            "rank_update_request",
+            list_published=True,
+        )
+
+    def save_rank_update(self, response: ScreenBacktestResponse) -> None:
+        """Saves the `rank_update`'s response: `rank-update-response.json`, or `.raw` for a 200
+        the wrapper couldn't decode, listed even when the store published it before its write
+        failed. Only a completed write is referenced."""
+        match response:
+            case DecodedResponse(payload=payload):
+                name, data, role = (
+                    RANK_UPDATE_RESPONSE_FILE,
+                    _response_json(payload),
+                    "rank_update_response",
+                )
+            case UndecodedResponse(body=body):
+                name, data, role = RANK_UPDATE_RESPONSE_RAW, body, "rank_update_response_undecoded"
+        stored = self.write(name, data, role, list_published=True)
+        self.rank_response = (stored, response)
+
+    def ranking_update(self) -> RankingUpdate:
+        """The attempt record's `ranking_update`: the `rank_update`'s request and its saved
+        response, when each was written, and the `cost` and `quotaRemaining` of its decoded
+        response."""
+        response = None
+        if self.rank_response is not None:
+            stored, saved = self.rank_response
+            response = RankUpdateResponse(
+                path=stored.path,
+                artifact_id=stored.artifact_id,
+                form="decoded" if isinstance(saved, DecodedResponse) else "undecoded",
+            )
+        return RankingUpdate(
+            request=None if self.rank_request is None else _reference(self.rank_request),
+            response=response,
+            provider_metadata=_metadata(
+                None if self.rank_response is None else self.rank_response[1]
+            ),
+        )
+
     def published(self, name: str, data: bytes, role: AttemptRole) -> bool:
         """Whether an interrupted write of `name` published it whole. If it did, it's listed."""
         stored = published(self._store, f"{self._directory}/{name}", data)
@@ -373,22 +586,20 @@ class _AttemptFiles:
             self._files.append(AttemptFile(role, stored))
         return stored is not None
 
-    def end[R: (AttemptRecord, AttemptRecordV1_1)](
+    def end[R: (AttemptRecord, AttemptRecordV1_1, AttemptRecordV1_2, AttemptRecordV1_3)](
         self,
         exchanges: tuple[Exchange, ...],
         ending: BaseException | None,
         record: Callable[["_Ending", TrialFolioError | None], R],
+        *,
+        ranking: bool = False,
     ) -> tuple[R, bool, TrialFolioError | None]:
         """Classifies the attempt from its exchanges, and whether its response was saved, and
         writes the attempt record `record` builds from that and the command's error. Returns the
-        record, whether it was written, and the command's error."""
-        sends = [e for e in exchanges if e.request != AUTHENTICATION_REQUEST]
-        outcome = _outcome(sends[0] if sends else None, saved=self.response is not None)
-        end = _Ending(
-            outcome=outcome,
-            possibly_charged=outcome == "unknown"
-            or any(e.result != "not_connected" for e in sends),
-        )
+        record, whether it was written, and the command's error. `ranking` is for an attempt that
+        sends a definition, which its backtest's exchange classifies, or its `rank_update`'s."""
+        classify = _ranking_ending if ranking else _ending
+        end = classify(exchanges, saved=self.response is not None)
         if ending is not None and not isinstance(ending, KeyboardInterrupt | TrialFolioError):
             self.log_unexpected(ending)
         error = _error(ending, end)
@@ -442,7 +653,7 @@ class _AttemptFiles:
             provider_metadata=_metadata(None if saved is None else saved[1]),
         )
 
-    def _write_record[R: (AttemptRecord, AttemptRecordV1_1)](
+    def _write_record[R: (AttemptRecord, AttemptRecordV1_1, AttemptRecordV1_2, AttemptRecordV1_3)](
         self, record: R, error: TrialFolioError | None, end: "_Ending"
     ) -> tuple[bool, TrialFolioError | None, R]:
         """Writes the attempt record. Returns whether it was written, the command's error, and the
@@ -669,14 +880,16 @@ class Attempt:
 class ExperimentAttemptResult:
     """How an experiment's attempt ended."""
 
-    record: AttemptRecordV1_1
-    """The attempt record: as written, or, when `recorded` is false, as it would have been."""
+    record: AttemptRecordV1_1 | AttemptRecordV1_3
+    """The attempt record: as written, or, when `recorded` is false, as it would have been. It's
+    version 1.3.0 for an attempt that sends a definition."""
     recorded: bool
     """Whether `attempt.json` was written, or published whole before its write failed. If it
-    wasn't, an attempt with a start record reads as `running`, and one with only its
-    authentication record stopped before its send."""
-    start: StartRecordV1_1 | None
-    """The start record, when it was written."""
+    wasn't, an attempt with a start record reads as `running`, one with only its update record
+    stopped during or after its `rank_update`, and one with only its authentication record
+    stopped before its send."""
+    start: StartRecordV1_1 | StartRecordV1_3 | None
+    """The start record, `started.json`, when it was written."""
     files: tuple[AttemptFile, ...]
     """Every file the attempt wrote, in order."""
     response: ScreenBacktestResponse | None
@@ -692,6 +905,12 @@ class ExperimentAttemptResult:
     """Whether the attempt made Trial Folio's own authentication call, so the budget counts it."""
     authentication_failed: bool
     """Whether that call failed, whatever its result, which stops the session (D-32)."""
+    update: StartRecordV1_3 | None = None
+    """The update record, `updating.json`, of an attempt that sends a definition, when it was
+    written."""
+    update_saved: bool = False
+    """Whether the `rank_update`'s response was saved, so an attempt whose latest record is its
+    update record reads as a resume records it: `failed`, and otherwise `unknown`."""
 
 
 class ExperimentAttempt:
@@ -916,6 +1135,474 @@ class _Placed(TypedDict):
     `authenticated_by`: the attempt, its plan, and its place in its session."""
 
     schema_version: Literal["1.1.0"]
+    trialfolio_version: str
+    attempt_id: uuid.UUID
+    case_id: str
+    plan_hash: str
+    session: int
+    sequence: int
+
+
+# An attempt that sends a definition (sending a definition)
+
+
+def _undecoded_update() -> ProviderError:
+    """The ending of a `rank_update` that got a 200 the wrapper couldn't decode: its body is saved
+    as it came, and the backtest isn't sent (sending a definition)."""
+    return ProviderError(
+        "provider.response_invalid",
+        "Portfolio123 answered the rank_update request with a 200 whose body couldn't be decoded"
+        f" as JSON, so it was saved as it came, as {RANK_UPDATE_RESPONSE_RAW}. The request may"
+        " have been charged. That request writes the case's ranking definition into"
+        " ApiRankingSystem, and Trial Folio sends the case's screen backtest only after one whose"
+        " response it could read, so the backtest wasn't sent. Report the problem if it persists.",
+    )
+
+
+type RankingOperation = Literal["rank_update", "screen_backtest"]
+
+
+def _send_definition(
+    files: _AttemptFiles,
+    client: ScreenBacktestClient,
+    params: tuple[dict[str, object], dict[str, object]],
+    write_start: Callable[[RankingOperation], None],
+    log_fields: Callable[[str], dict[str, str]],
+) -> None:
+    """An authenticated attempt's sends of a definition (sending a definition): writes the
+    `rank_update`'s request and its update record, sends it, and saves its response; then, only
+    after a 200 the wrapper decoded, whose response was saved, writes the backtest's request and
+    start record, sends it, and saves its response. `write_start` writes the start record of
+    the operation it's given, the last write before its send. `params` are the two requests'."""
+    update, backtest = params
+    files.write_rank_update_request(update)
+    write_start("rank_update")
+    _logger.info(
+        "Writing the case's ranking definition into ApiRankingSystem with rank_update.",
+        extra=log_fields("attempt.rank_update.started"),
+    )
+    response = client.rank_update(update)
+    files.save_rank_update(response)
+    if isinstance(response, UndecodedResponse):
+        raise _undecoded_update()
+    files.write_request(backtest, list_published=True)
+    write_start("screen_backtest")
+    files.save(client.screen_backtest(backtest), list_published=True)
+
+
+def _write_start_record(
+    files: _AttemptFiles, operation: RankingOperation, record: BaseModel, keep: Callable[[], None]
+) -> None:
+    """Writes the start record of `operation`: the update record, `updating.json`, before the
+    `rank_update`, and `started.json` before the backtest. `keep` records it as written: after a
+    failure while it's written, whatever the failure, a record the store published counts as
+    written, so the attempt record agrees with it."""
+    name, role = (
+        (UPDATE_RECORD, "update_record")
+        if operation == "rank_update"
+        else (START_RECORD, "start_record")
+    )
+    data = model_json(record)
+    try:
+        files.write(name, data, role)
+    except BaseException:
+        if files.published(name, data, role):
+            keep()
+        raise
+    keep()
+
+
+class _RankingIdentity(TypedDict):
+    """The fields a screen run's start records 1.2.0 and its attempt record share, but
+    `operation` and `exchanges`."""
+
+    schema_version: Literal["1.2.0"]
+    trialfolio_version: str
+    attempt_id: uuid.UUID
+    case_id: str
+    plan_hash: str
+    started_at: datetime
+    provider_wrapper: WrapperVersions
+    transport: TransportVersions
+
+
+class RankingAttempt:
+    """One attempt of the case of an approved plan 1.2.0, a screen run's whose ranking is a
+    definition, writing into a claimed output directory. It sends the `rank_update` that writes
+    the case's definition into `ApiRankingSystem`, then the backtest, as the module says, with
+    start and attempt records 1.2.0, and ends as an `Attempt` does. The run holds the ranking lock
+    meanwhile."""
+
+    def __init__(
+        self,
+        plan: PlanV1_2,
+        approved_hash: str,
+        store: ArtifactStore,
+        *,
+        clock: Clock = utc_now,
+        synthetic: bool = False,
+    ) -> None:
+        """Starts the attempt: gives it an ID and its start time. Writes nothing.
+
+        `synthetic` is for a run the core writes with the demo's client, which sends nothing.
+        Raises as `Attempt` does.
+        """
+        plan_hash = check_approval(plan, approved_hash)
+        (case,) = plan.cases
+        update, backtest = case.requests
+        self._attempt_id = uuid.uuid4()
+        self._identity = _RankingIdentity(
+            schema_version=RANKING_SCHEMA_VERSION,
+            trialfolio_version=plan.trialfolio_version,
+            attempt_id=self._attempt_id,
+            case_id=case.case_id,
+            plan_hash=plan_hash,
+            started_at=utc(clock()),
+            provider_wrapper=plan.provider_wrapper,
+            transport=plan.transport,
+        )
+        self._params = (
+            update.params.model_dump(mode="json"),
+            backtest.params.model_dump(mode="json"),
+        )
+        self._clock = clock
+        self._directory = attempt_directory(case.case_id, self._attempt_id)
+        self._files = _AttemptFiles(store, self._directory, self._log_fields, synthetic=synthetic)
+        self._update: StartRecordV1_2 | None = None
+        self._start: StartRecordV1_2 | None = None
+        self._ended = False
+        _logger.info("Attempt started.", extra=self._log_fields("attempt.started"))
+
+    @property
+    def attempt_id(self) -> uuid.UUID:
+        return self._attempt_id
+
+    @property
+    def case_id(self) -> str:
+        return self._identity["case_id"]
+
+    @property
+    def plan_hash(self) -> str:
+        return self._identity["plan_hash"]
+
+    @property
+    def started_at(self) -> datetime:
+        return self._identity["started_at"]
+
+    @property
+    def directory(self) -> str:
+        """`cases/<case_id>/attempts/<attempt_id>`, relative to the output root."""
+        return self._directory
+
+    @property
+    def files(self) -> tuple[AttemptFile, ...]:
+        """Every file written so far, in order."""
+        return self._files.files
+
+    @property
+    def update_record(self) -> StartRecordV1_2 | None:
+        """The update record, `updating.json`, once it's written."""
+        return self._update
+
+    @property
+    def start_record(self) -> StartRecordV1_2 | None:
+        """The backtest's start record, `started.json`, once it's written."""
+        return self._start
+
+    def run(self, client: ScreenBacktestClient) -> AttemptResult:
+        """Authenticates, and sends the `rank_update`, then the backtest, each once, with their
+        files, as the module says, and writes the attempt record. Raises as `Attempt.run`
+        does."""
+        if client.exchanges:
+            raise RuntimeError("an attempt needs a new client: its exchanges are the attempt's")
+        self._end_once()
+        ending: BaseException | None = None
+        try:
+            client.authenticate()
+            _send_definition(
+                self._files,
+                client,
+                self._params,
+                lambda operation: self._write_start(operation, client.exchanges),
+                self._log_fields,
+            )
+        except KeyboardInterrupt as interrupt:
+            ending = interrupt
+        # Every ending is recorded. An unexpected one is classified, and logged by its frames.
+        except Exception as error:  # noqa: BLE001
+            ending = error
+        return self._end(client.exchanges, ending)
+
+    def end_before_authenticating(self, ending: BaseException) -> AttemptResult:
+        """Writes the attempt record of an attempt that ended after the claim and before it
+        authenticated, as `Attempt.end_before_authenticating` does."""
+        self._end_once()
+        return self._end((), ending)
+
+    def _end_once(self) -> None:
+        if self._ended:
+            raise RuntimeError("an attempt ends once")
+        self._ended = True
+
+    def _write_start(self, operation: RankingOperation, exchanges: tuple[Exchange, ...]) -> None:
+        record = StartRecordV1_2(**self._identity, operation=operation, exchanges=exchanges)
+
+        def keep() -> None:
+            if operation == "rank_update":
+                self._update = record
+            else:
+                self._start = record
+
+        _write_start_record(self._files, operation, record, keep)
+
+    def _end(self, exchanges: tuple[Exchange, ...], ending: BaseException | None) -> AttemptResult:
+        def record(end: _Ending, error: TrialFolioError | None) -> AttemptRecordV1_2:
+            fields = self._files.ending_fields(end, error, _ended(self._clock, self.started_at))
+            return AttemptRecordV1_2(
+                **self._identity,
+                operation="screen_backtest",
+                **fields,
+                exchanges=exchanges,
+                ranking_update=self._files.ranking_update(),
+            )
+
+        written, recorded, error = self._files.end(exchanges, ending, record, ranking=True)
+        saved = self._files.response if written.outcome == "succeeded" else None
+        return AttemptResult(
+            record=written,
+            recorded=recorded,
+            files=self.files,
+            response=None if saved is None else saved[1],
+            error=error,
+        )
+
+    def _log_fields(self, event: str) -> dict[str, str]:
+        return {
+            "event": event,
+            "plan_hash": self._identity["plan_hash"],
+            "case_id": self._identity["case_id"],
+            "attempt_id": str(self._attempt_id),
+        }
+
+
+class RankingExperimentAttempt:
+    """One attempt of an experiment's case whose ranking is a definition, under a plan 1.3.0, in
+    a session that holds the experiment lock and the ranking lock. It authenticates, or sends with
+    its session's token, as an `ExperimentAttempt` does, then sends the `rank_update` that writes
+    the case's definition into `ApiRankingSystem`, then the backtest, as the module says, with
+    start and attempt records 1.3.0. The properties stay readable whatever happens."""
+
+    def __init__(
+        self,
+        plan: PlanV1_3,
+        case: ExperimentPlanCaseV1_3,
+        store: ArtifactStore,
+        *,
+        session: int,
+        sequence: int,
+        repeat_of: uuid.UUID | None = None,
+        clock: Clock = utc_now,
+        synthetic: bool = False,
+    ) -> None:
+        """Starts the attempt, as an `ExperimentAttempt` does. Writes nothing. Raises as it
+        does."""
+        if case not in plan.cases:
+            raise ValueError("the attempt's case is one of the plan's")
+        update, backtest = case.requests
+        self._attempt_id = uuid.uuid4()
+        self._case_id = case.case_id
+        self._plan_hash = plan.plan_hash
+        self._version = plan.trialfolio_version
+        self._session = session
+        self._sequence = sequence
+        self._repeat_of = repeat_of
+        self._started_at = utc(clock())
+        self._wrapper = plan.provider_wrapper
+        self._transport = plan.transport
+        self._params = (
+            update.params.model_dump(mode="json"),
+            backtest.params.model_dump(mode="json"),
+        )
+        self._clock = clock
+        self._directory = attempt_directory(case.case_id, self._attempt_id)
+        self._files = _AttemptFiles(
+            store, self._directory, self._log_fields, synthetic=synthetic, case_id=case.case_id
+        )
+        self._update: StartRecordV1_3 | None = None
+        self._start: StartRecordV1_3 | None = None
+        self._authenticated = False
+        self._authentication_failed = False
+        self._ended = False
+        _logger.info("Attempt started.", extra=self._log_fields("attempt.started"))
+
+    @property
+    def attempt_id(self) -> uuid.UUID:
+        return self._attempt_id
+
+    @property
+    def case_id(self) -> str:
+        return self._case_id
+
+    @property
+    def directory(self) -> str:
+        """`cases/<case_id>/attempts/<attempt_id>`, relative to the output root."""
+        return self._directory
+
+    @property
+    def files(self) -> tuple[AttemptFile, ...]:
+        """Every file written so far, in order."""
+        return self._files.files
+
+    @property
+    def update_record(self) -> StartRecordV1_3 | None:
+        """The update record, `updating.json`, once it's written."""
+        return self._update
+
+    @property
+    def start_record(self) -> StartRecordV1_3 | None:
+        """The backtest's start record, `started.json`, once it's written."""
+        return self._start
+
+    def run(
+        self, client: ScreenBacktestClient, token_from: uuid.UUID | None
+    ) -> ExperimentAttemptResult:
+        """Sends the case's `rank_update`, then its backtest, each once, with the session's
+        `client`, and records the attempt. `token_from` and what this raises are as for
+        `ExperimentAttempt.run`."""
+        if token_from is not None and not client.authenticated:
+            raise RuntimeError("the client holds no token to send with")
+        if self._ended:
+            raise RuntimeError("an attempt ends once")
+        self._ended = True
+        first = len(client.exchanges)
+        ending: BaseException | None = None
+        try:
+            if token_from is None:
+                self._authenticate(client)
+                token_from = self._attempt_id
+            by = token_from
+            _send_definition(
+                self._files,
+                client,
+                self._params,
+                lambda operation: self._write_start(operation, by, client.exchanges[first:]),
+                self._log_fields,
+            )
+        except KeyboardInterrupt as interrupt:
+            ending = interrupt
+        # Every ending is recorded. An unexpected one is classified, and logged by its frames.
+        except Exception as error:  # noqa: BLE001
+            ending = error
+        return self._end(client.exchanges[first:], ending)
+
+    def _placed(self) -> "_RankingPlaced":
+        return _RankingPlaced(
+            schema_version=RANKING_EXPERIMENT_SCHEMA_VERSION,
+            trialfolio_version=self._version,
+            attempt_id=self._attempt_id,
+            case_id=self._case_id,
+            plan_hash=self._plan_hash,
+            session=self._session,
+            sequence=self._sequence,
+        )
+
+    def _authenticate(self, client: ScreenBacktestClient) -> None:
+        """Writes the authentication record durably, then makes Trial Folio's own
+        authentication call, as an `ExperimentAttempt` does."""
+        record = AuthenticationRecord(
+            schema_version=AUTHENTICATION_SCHEMA_VERSION,
+            trialfolio_version=self._version,
+            attempt_id=self._attempt_id,
+            case_id=self._case_id,
+            plan_hash=self._plan_hash,
+            session=self._session,
+            sequence=self._sequence,
+            repeat_of=self._repeat_of,
+            started_at=self._started_at,
+        )
+        self._files.write(
+            AUTHENTICATION_RECORD, model_json(record), "authentication_record", list_published=True
+        )
+        self._authenticated = True
+        try:
+            client.authenticate()
+        except Exception:
+            self._authentication_failed = True
+            raise
+
+    def _write_start(
+        self,
+        operation: RankingOperation,
+        token_from: uuid.UUID,
+        exchanges: tuple[Exchange, ...],
+    ) -> None:
+        record = StartRecordV1_3(
+            **self._placed(),
+            operation=operation,
+            authenticated_by=token_from,
+            repeat_of=self._repeat_of,
+            started_at=self._started_at,
+            provider_wrapper=self._wrapper,
+            transport=self._transport,
+            exchanges=exchanges,
+        )
+
+        def keep() -> None:
+            if operation == "rank_update":
+                self._update = record
+            else:
+                self._start = record
+
+        _write_start_record(self._files, operation, record, keep)
+
+    def _end(
+        self, exchanges: tuple[Exchange, ...], ending: BaseException | None
+    ) -> ExperimentAttemptResult:
+        def record(end: _Ending, error: TrialFolioError | None) -> AttemptRecordV1_3:
+            fields = self._files.ending_fields(end, error, _ended(self._clock, self._started_at))
+            return AttemptRecordV1_3(
+                **self._placed(),
+                operation="screen_backtest",
+                authenticated_by=None if self._update is None else self._update.authenticated_by,
+                repeat_of=self._repeat_of,
+                started_at=self._started_at,
+                provider_wrapper=self._wrapper,
+                transport=self._transport,
+                **fields,
+                exchanges=exchanges,
+                ranking_update=self._files.ranking_update(),
+            )
+
+        written, recorded, error = self._files.end(exchanges, ending, record, ranking=True)
+        saved = self._files.response if written.outcome == "succeeded" else None
+        return ExperimentAttemptResult(
+            record=written,
+            recorded=recorded,
+            start=self._start,
+            files=self.files,
+            response=None if saved is None else saved[1],
+            published=self._files.published_response,
+            error=error,
+            authenticated=self._authenticated,
+            authentication_failed=self._authentication_failed,
+            update=self._update,
+            update_saved=self._files.rank_response is not None,
+        )
+
+    def _log_fields(self, event: str) -> dict[str, str]:
+        return {
+            "event": event,
+            "plan_hash": self._plan_hash,
+            "case_id": self._case_id,
+            "attempt_id": str(self._attempt_id),
+        }
+
+
+class _RankingPlaced(TypedDict):
+    """The fields an experiment's start records 1.3.0 and its attempt record share, before
+    `operation`: the attempt, its plan, and its place in its session."""
+
+    schema_version: Literal["1.3.0"]
     trialfolio_version: str
     attempt_id: uuid.UUID
     case_id: str

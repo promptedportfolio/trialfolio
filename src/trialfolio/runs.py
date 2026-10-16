@@ -26,7 +26,10 @@ writes its copies, so a file changed after the check can't be copied.
 The checks it shares with an experiment's reader, `experiment_records.py`, are in
 `record_checks.py`.
 
-A `SavedRun` is also what the report renders when `run` writes it, before the manifest.
+A `SavedRun` is also what the report renders when `run` writes it, before the manifest: from
+0.4.0, that's also a run whose ranking is a definition, with its plan 1.2.0, its records 1.2.0,
+its `settings.csv` 1.1.0, and its manifest 1.1.0, which `read_run` doesn't read yet (release
+0.4.0's R04-T09 reads them).
 """
 
 import re
@@ -43,10 +46,26 @@ from trialfolio.attempts import (
     attempt_status,
     check_records,
 )
-from trialfolio.contracts.attempt import ArtifactReference, AttemptRecord, StartRecord
-from trialfolio.contracts.manifest import ArtifactRole, ManifestArtifact, RunManifest
-from trialfolio.contracts.plan import Plan
-from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, SettingsRow
+from trialfolio.contracts.attempt import (
+    ArtifactReference,
+    AttemptRecord,
+    AttemptRecordV1_2,
+    StartRecord,
+    StartRecordV1_2,
+)
+from trialfolio.contracts.manifest import (
+    ArtifactRole,
+    ManifestArtifact,
+    RunManifest,
+    RunManifestV1_1,
+)
+from trialfolio.contracts.plan import Plan, PlanV1_2
+from trialfolio.contracts.tables import (
+    TABLES_SCHEMA_VERSION,
+    MetricsRow,
+    SettingsRow,
+    SettingsRowV1_1,
+)
 from trialfolio.errors import ErrorCode, TrialFolioError, reason_of
 from trialfolio.normalization import METRICS_PATH, SETTINGS_PATH
 from trialfolio.record_checks import (
@@ -88,10 +107,11 @@ _RESPONSE_ROLES: Final[dict[str, ArtifactRole]] = {
 
 @dataclass(frozen=True)
 class SavedAttempt:
-    """An attempt's records: its start record, its attempt record, or both."""
+    """An attempt's records: its start record, its attempt record, or both. They're version 1.2.0
+    for an attempt that sends a definition, whose start record is its backtest's."""
 
-    start: StartRecord | None
-    record: AttemptRecord | None
+    start: StartRecord | StartRecordV1_2 | None
+    record: AttemptRecord | AttemptRecordV1_2 | None
 
     def __post_init__(self) -> None:
         if self.start is None and self.record is None:
@@ -111,11 +131,11 @@ class SavedRun:
     isn't written yet, so it's the manifest as it will be written, without the report.
     """
 
-    manifest: RunManifest
-    plan: Plan
+    manifest: RunManifest | RunManifestV1_1
+    plan: Plan | PlanV1_2
     attempts: tuple[SavedAttempt, ...]
     metrics: tuple[MetricsRow, ...] | None
-    settings: tuple[SettingsRow, ...] | None
+    settings: tuple[SettingsRow, ...] | tuple[SettingsRowV1_1, ...] | None
     """The tables' rows: both, or neither when the run has no normalized result."""
 
     def __post_init__(self) -> None:

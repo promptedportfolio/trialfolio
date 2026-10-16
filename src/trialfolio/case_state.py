@@ -17,14 +17,15 @@ import uuid
 from collections.abc import Container, Mapping, Sequence
 from typing import Final, Literal, Protocol
 
-from trialfolio.contracts.attempt import AttemptRecordV1_1
+from trialfolio.attempts import reported_cost
+from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3
 from trialfolio.contracts.experiment_manifest import (
     BudgetLimits,
     CaseCounts,
     ExperimentAttemptCounts,
     ExperimentManifestCounts,
 )
-from trialfolio.contracts.experiment_plan import PlanV1_1
+from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
 from trialfolio.contracts.tables import MetricsRow
 
 type CaseOutcome = Literal["succeeded", "failed", "unknown", "not_yet_run"]
@@ -63,7 +64,7 @@ class _CountedAttempt(_CaseAttempt, Protocol):
     @property
     def authentication_calls(self) -> int: ...
     @property
-    def record(self) -> AttemptRecordV1_1 | None: ...
+    def record(self) -> AttemptRecordV1_1 | AttemptRecordV1_3 | None: ...
 
 
 # A case's state and outcome
@@ -152,7 +153,7 @@ def confirmation_used(attempts: Sequence[_CaseAttempt], attempt_id: uuid.UUID | 
 
 
 def experiment_counts(
-    plan: PlanV1_1,
+    plan: PlanV1_1 | PlanV1_3,
     attempts: Sequence[_CountedAttempt],
     *,
     invalid: Container[str],
@@ -163,7 +164,7 @@ def experiment_counts(
     `retired`, how many cases revisions retired; every attempt of the experiment, a retired
     case's included, by its outcome, and the repeats; the sends and authentication calls the
     budget counts, `counted_requests` and `counted_authentications`, beside the plan's budget;
-    and the credits Portfolio123 reported."""
+    and the credits Portfolio123 reported, for each `rank_update` too."""
     outcomes = [
         case_outcome(
             [attempt for attempt in attempts if attempt.case_id == case.case_id],
@@ -173,7 +174,7 @@ def experiment_counts(
     ]
     made = [attempt for attempt in attempts if attempt.outcome is not None]
     records = [attempt.record for attempt in made if attempt.record is not None]
-    costs = [r.provider_metadata.cost for r in records if r.provider_metadata.cost is not None]
+    costs = [cost for record in records if (cost := reported_cost(record)) is not None]
     return ExperimentManifestCounts(
         cases=CaseCounts(
             planned=len(outcomes),
@@ -215,7 +216,9 @@ def counted_authentications(attempts: Sequence[_CountedAttempt]) -> int:
     return sum(attempt.authentication_calls for attempt in attempts)
 
 
-def unavailable_metrics(plan: PlanV1_1, metrics: Mapping[str, Sequence[MetricsRow]]) -> int:
+def unavailable_metrics(
+    plan: PlanV1_1 | PlanV1_3, metrics: Mapping[str, Sequence[MetricsRow]]
+) -> int:
     """The `unavailable` rows of the planned cases' `metrics.csv` files, given each case's rows
     by its `case_id`: the JSON summary's `metrics_unavailable`."""
     return sum(

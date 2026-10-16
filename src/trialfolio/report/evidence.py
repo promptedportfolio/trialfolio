@@ -16,20 +16,31 @@ from datetime import datetime
 from typing import Final, Literal, Self
 from uuid import UUID
 
-from trialfolio.contracts.attempt import AttemptRecordV1_1
+from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3
 from trialfolio.contracts.common import Approval, ErrorDetail
 from trialfolio.contracts.experiment_manifest import (
     ExperimentArtifact,
+    ExperimentArtifactV1_1,
     ExperimentCommandRecord,
     ExperimentManifestCounts,
 )
-from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
-from trialfolio.contracts.experiment_record import ExperimentRecord, RetiredCase
+from trialfolio.contracts.experiment_plan import (
+    ExperimentPlanCase,
+    ExperimentPlanCaseV1_3,
+    PlanV1_1,
+    PlanV1_3,
+)
+from trialfolio.contracts.experiment_record import (
+    ExperimentRecord,
+    ExperimentRecordV1_1,
+    RetiredCase,
+    RetiredCaseV1_1,
+)
 from trialfolio.contracts.manifest import Capabilities, ParserVersion, Reproducibility
-from trialfolio.contracts.plan import PlanCase
+from trialfolio.contracts.plan import PlanCase, PlanCaseV1_2
 from trialfolio.contracts.review_configuration import ReviewConfiguration
 from trialfolio.contracts.review_manifest import ReviewArtifact
-from trialfolio.contracts.tables import DifferencesRow, MetricsRow, SettingsRow
+from trialfolio.contracts.tables import DifferencesRow, MetricsRow, SettingsRow, SettingsRowV1_1
 from trialfolio.differences import Differences
 from trialfolio.display import series
 from trialfolio.report.fragments import Setting, resolved_settings
@@ -82,7 +93,7 @@ class RunContext:
         )
 
     @property
-    def case(self) -> PlanCase:
+    def case(self) -> PlanCase | PlanCaseV1_2:
         return self.saved.plan.cases[0]
 
     @property
@@ -202,14 +213,14 @@ class CaseView:
     """A case of the experiment, as its report shows it: a case of the current plan, with its
     outcome, attempts, and normalized tables."""
 
-    case: ExperimentPlanCase
+    case: ExperimentPlanCase | ExperimentPlanCaseV1_3
     outcome: Literal["succeeded", "failed", "unknown", "not_yet_run"]
     """As the manifest counts it."""
-    attempts: tuple[AttemptRecordV1_1, ...]
+    attempts: tuple[AttemptRecordV1_1 | AttemptRecordV1_3, ...]
     """Every attempt of the case, under any plan, by session and then sequence."""
     metrics: tuple[MetricsRow, ...] | None
     """Its `metrics.csv`'s rows, once its attempt succeeded and its response was normalized."""
-    settings: tuple[SettingsRow, ...] | None
+    settings: tuple[SettingsRow, ...] | tuple[SettingsRowV1_1, ...] | None
     """Its `settings.csv`'s rows, with `metrics`."""
     invalid: ErrorDetail | None
     """The `provider.response_invalid` its succeeded attempt's response got, which left it
@@ -226,7 +237,7 @@ class CaseView:
             raise ValueError("a case's attempts are in the order they were made")
 
     @property
-    def repeat_attempt(self) -> AttemptRecordV1_1 | None:
+    def repeat_attempt(self) -> AttemptRecordV1_1 | AttemptRecordV1_3 | None:
         """When the case awaits a repeat, its latest possibly charged attempt, whose
         `attempt_id` confirms the repeat; otherwise None (repeating a case)."""
         if any(attempt.outcome == "succeeded" for attempt in self.attempts):
@@ -239,10 +250,10 @@ class CaseView:
 class RetiredCaseView:
     """A case a revision retired, as the experiment's record keeps it, with its attempts."""
 
-    case: RetiredCase
+    case: RetiredCase | RetiredCaseV1_1
     outcome: Literal["succeeded", "failed", "unknown", "not_yet_run"]
     """By its attempts, as the manifest counts a planned case's."""
-    attempts: tuple[AttemptRecordV1_1, ...]
+    attempts: tuple[AttemptRecordV1_1 | AttemptRecordV1_3, ...]
 
 
 @dataclass(frozen=True)
@@ -254,9 +265,9 @@ class ExperimentEvidence:
     list apart from the report itself.
     """
 
-    plan: PlanV1_1
+    plan: PlanV1_1 | PlanV1_3
     plan_number: int
-    record: ExperimentRecord
+    record: ExperimentRecord | ExperimentRecordV1_1
     """The current plan's `experiment.json`."""
     session: int
     synthetic: bool
@@ -273,7 +284,7 @@ class ExperimentEvidence:
     parsers: tuple[ParserVersion, ...]
     capabilities: Capabilities
     reproducibility: Reproducibility
-    artifacts: tuple[ExperimentArtifact, ...]
+    artifacts: tuple[ExperimentArtifact | ExperimentArtifactV1_1, ...]
 
     def __post_init__(self) -> None:
         if tuple(view.case for view in self.cases) != self.plan.cases:
@@ -315,7 +326,7 @@ class ExperimentContext:
         )
 
     @property
-    def plan(self) -> PlanV1_1:
+    def plan(self) -> PlanV1_1 | PlanV1_3:
         return self.evidence.plan
 
     @property

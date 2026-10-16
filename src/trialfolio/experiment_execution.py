@@ -50,6 +50,22 @@ for it. Every attempt written so far stays, and is never replaced. `trialfolio.m
 what a session shares here with a run and a review: writing the manifest and discarding it, the
 endings without one, and the parts of the manifest that a run and an experiment record alike.
 
+From 0.4.0, a new experiment whose plan is 1.3.0, whose ranking is a definition, takes the same
+steps, with these differences (sending a definition, running an experiment):
+
+- Before step 1, it takes the ranking lock, on the file its caller gives, and holds it until the
+  execution ends, after the session's manifest (`experiment.locked`, `storage.write_failed`).
+- Step 3 also writes `plans/1/definition.xml`, right after `configuration.yaml`, from the
+  definition's bytes the configuration was validated with, and `experiment.json` 1.1.0.
+- Step 4's attempts (`RankingExperimentAttempt`) each send the case's `rank_update`, then its
+  backtest, with start and attempt records 1.3.0. An attempt starts only when the budget covers
+  both its requests.
+- Step 5 writes `settings.csv` 1.1.0, with a weight row for each node, and step 6 experiment
+  manifest 1.1.0, with the roles and source records of the files a definition adds.
+
+Resuming or revising an experiment whose plan, or its revision, is 1.3.0 is release 0.4.0's
+R04-T09's: until then, the executor refuses such a plan given an experiment's records.
+
 Execution with the demo's client, which sends nothing, writes a synthetic experiment: its plan
 and manifest record the approval `not_required`, and its report says its values are invented.
 It resumes and revises only a synthetic experiment, and nothing else does.
@@ -63,12 +79,13 @@ each case by its `case_id`, never by its key.
 
 import json
 import logging
+import os
 import threading
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Final, Literal
+from typing import Final, Literal, TypedDict, get_args
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -78,8 +95,9 @@ from trialfolio.attempts import (
     Clock,
     ExperimentAttempt,
     ExperimentAttemptResult,
+    RankingExperimentAttempt,
     provider_requests,
-    request_detail,
+    record_detail,
     utc_now,
 )
 from trialfolio.case_state import (
@@ -97,8 +115,14 @@ from trialfolio.case_state import (
     repeatable,
     unavailable_metrics,
 )
-from trialfolio.configuration import experiment_original_values, read_experiment_configuration
-from trialfolio.contracts.attempt import AttemptRecordV1_1
+from trialfolio.configuration import (
+    ExperimentConfigurationRead,
+    experiment_original_values,
+    experiment_original_values_v1_1,
+    read_experiment_configuration,
+    read_experiment_configuration_v1_1,
+)
+from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3
 from trialfolio.contracts.common import (
     AUTHENTICATION_REQUEST,
     Approval,
@@ -109,14 +133,32 @@ from trialfolio.contracts.experiment_manifest import (
     EXPERIMENT_CONFIGURATION_FORMAT,
     ExperimentArtifact,
     ExperimentArtifactRole,
+    ExperimentArtifactRoleV1_1,
+    ExperimentArtifactV1_1,
     ExperimentCommandRecord,
     ExperimentManifest,
     ExperimentManifestCounts,
+    ExperimentManifestV1_1,
 )
-from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
-from trialfolio.contracts.experiment_record import ExperimentRecord, SessionRecord
-from trialfolio.contracts.manifest import ParserVersion, SourceRecord
-from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow, SettingsRow
+from trialfolio.contracts.experiment_plan import (
+    ExperimentPlanCase,
+    ExperimentPlanCaseV1_3,
+    PlanV1_1,
+    PlanV1_3,
+)
+from trialfolio.contracts.experiment_record import (
+    ExperimentRecord,
+    ExperimentRecordV1_1,
+    SessionRecord,
+)
+from trialfolio.contracts.manifest import (
+    Capabilities,
+    ParserVersion,
+    Reproducibility,
+    SourceRecord,
+    SourceRecordV1_1,
+)
+from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow
 from trialfolio.demo import SyntheticScreenBacktestClient
 from trialfolio.display import series
 from trialfolio.errors import TrialFolioError
@@ -124,22 +166,29 @@ from trialfolio.experiment_paths import plan_path, session_path
 from trialfolio.experiment_records import MissingTables, SavedExperiment, SavedExperimentAttempt
 from trialfolio.manifests import (
     PROVIDER_ROLES,
+    RANK_UPDATE_ROLES,
     EndingWithoutManifest,
     ManifestDetails,
     ManifestFile,
     capabilities,
     configuration_source,
+    definition_source,
     ends_without_manifest,
     model_json,
     parsers,
     provider_source,
+    rank_update_source,
     reproducibility,
     running_detail,
+    source_v1_1,
+    updating_detail,
     utc,
 )
 from trialfolio.normalization import (
     METRICS_PATH,
     PARSER_VERSION,
+    AnySettingsRows,
+    RankingOriginals,
     case_tables_path,
     holds_series,
     write_case_settings,
@@ -150,14 +199,17 @@ from trialfolio.planning import (
     PlanRevision,
     Versions,
     build_experiment_plan,
+    build_experiment_plan_v1_1,
     check_approval,
-    first_experiment_record,
+    first_experiment_record_v1_1,
     plan_changes,
     plan_hash,
     retired_cases,
+    retired_cases_v1_1,
     revised_experiment_record,
 )
 from trialfolio.provider import DecodedResponse, ScreenBacktestClient, provider_message_of
+from trialfolio.ranking_lock import RankingLock
 from trialfolio.report import (
     CaseView,
     ExperimentEvidence,
@@ -172,9 +224,15 @@ _logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION: Final = "1.0.0"
 """The schema version of the experiment manifests, `experiment.json` files, and session records
-this module writes."""
+this module writes, without a ranking definition."""
 
-_SCHEMA_VERSIONS: Final[dict[ExperimentArtifactRole, str]] = {
+RANKING_SCHEMA_VERSION: Final = "1.1.0"
+"""The schema version of the experiment manifests of an experiment with a ranking definition."""
+
+DEFINITION_FILE: Final = "definition.xml"
+"""The copy of a plan's ranking definition, in its `plans/<n>/` (ranking definitions)."""
+
+_SCHEMA_VERSIONS: Final[dict[ExperimentArtifactRoleV1_1, str]] = {
     "plan": "1.1.0",
     "experiment_record": "1.0.0",
     "authentication_record": "1.0.0",
@@ -186,6 +244,19 @@ _SCHEMA_VERSIONS: Final[dict[ExperimentArtifactRole, str]] = {
 }
 """The schema version the manifest records for each role whose files have one, apart from the
 configuration, which gives its own."""
+
+_RANKING_SCHEMA_VERSIONS: Final[dict[ExperimentArtifactRoleV1_1, str]] = {
+    "plan": "1.3.0",
+    "experiment_record": "1.1.0",
+    "authentication_record": "1.0.0",
+    "update_record": "1.3.0",
+    "start_record": "1.3.0",
+    "attempt_record": "1.3.0",
+    "metrics": TABLES_SCHEMA_VERSION,
+    "settings": "1.1.0",
+    "session_record": "1.0.0",
+}
+"""The same, for an experiment with a ranking definition."""
 
 _REASON: Final = TypeAdapter[str](RevisionReason)
 
@@ -202,6 +273,37 @@ _MANIFEST: Final = ManifestDetails(
 )
 
 type StopReason = Literal["budget", "authentication_budget", "authentication", "quota", "cancelled"]
+
+
+_ROLES_V1_0: Final[dict[str, ExperimentArtifactRole]] = {
+    role: role for role in get_args(ExperimentArtifactRole)
+}
+"""Experiment manifest 1.0.0's roles, which every experiment without a ranking definition's files
+have."""
+
+
+class _SessionManifestFields(TypedDict):
+    """The fields experiment manifests 1.0.0 and 1.1.0 share, but the schema version and the
+    artifacts."""
+
+    artifact_type: Literal["experiment"]
+    trialfolio_version: str
+    created_at: datetime
+    experiment_id: str
+    session: int
+    command: ExperimentCommandRecord | None
+    synthetic: bool
+    plan: int
+    plan_hash: str
+    approval: Approval
+    outcome: Literal["completed", "partial"]
+    error: ErrorDetail | None
+    parsers: tuple[ParserVersion, ...]
+    license_id: str
+    notice_version: str
+    capabilities: Capabilities
+    reproducibility: Reproducibility
+    counts: ExperimentManifestCounts
 
 
 # Progress events (docs/contracts.md, progress and cancellation)
@@ -300,7 +402,7 @@ class _Attempt:
     """The sends the budget counts."""
     authentication_calls: int
     """Trial Folio's own authentication calls the budget counts."""
-    record: AttemptRecordV1_1 | None
+    record: AttemptRecordV1_1 | AttemptRecordV1_3 | None
     """Its attempt record, once it's written."""
     files: tuple[AttemptFile, ...]
 
@@ -322,7 +424,9 @@ def _saved(attempt: SavedExperimentAttempt) -> _Attempt:
     )
 
 
-def _recorded(record: AttemptRecordV1_1, files: tuple[AttemptFile, ...]) -> _Attempt:
+def _recorded(
+    record: AttemptRecordV1_1 | AttemptRecordV1_3, files: tuple[AttemptFile, ...]
+) -> _Attempt:
     return _Attempt(
         case_id=record.case_id,
         attempt_id=record.attempt_id,
@@ -342,13 +446,20 @@ def _recorded(record: AttemptRecordV1_1, files: tuple[AttemptFile, ...]) -> _Att
 def _ended(result: ExperimentAttemptResult) -> _Attempt:
     """An attempt of this session, as its records read. Without its attempt record, which a
     resume writes, it reads as the resume will count it: `running` with its start record, and
-    `failed`, not possibly charged, with only its authentication record."""
+    `failed`, not possibly charged, with only its authentication record. An attempt that sends a
+    definition counts one request for each start record it wrote, and with only its update
+    record, reads as `failed` with its `rank_update`'s saved response, and `unknown` without one,
+    possibly charged either way (sending a definition)."""
     record = result.record
     if result.recorded:
         return _recorded(record, result.files)
-    outcome: Literal["running", "failed"] | None
+    updated = int(result.update is not None)
+    outcome: Literal["running", "failed", "unknown"] | None
     if result.start is not None:
-        outcome, charged, requests = "running", True, 1
+        outcome, charged, requests = "running", True, 1 + updated
+    elif result.update is not None:
+        outcome = "failed" if result.update_saved else "unknown"
+        charged, requests = True, 1
     elif any(file.role == "authentication_record" for file in result.files):
         outcome, charged, requests = "failed", False, 0
     else:
@@ -377,7 +488,7 @@ class _Tables:
     settings: StoredFile
     parser_version: int
     metrics_rows: tuple[MetricsRow, ...]
-    settings_rows: tuple[SettingsRow, ...]
+    settings_rows: AnySettingsRows
 
 
 @dataclass(frozen=True)
@@ -385,12 +496,15 @@ class _RecordedPlan:
     """A plan of the experiment, with its files, as the manifest lists them."""
 
     number: int
-    record: ExperimentRecord
-    files: tuple[tuple[ExperimentArtifactRole, StoredFile], ...]
+    record: ExperimentRecord | ExperimentRecordV1_1
+    files: tuple[tuple[ExperimentArtifactRoleV1_1, StoredFile], ...]
     configuration: bytes
     """Its `configuration.yaml`'s bytes, from which its cases' tables take their original
     values."""
     configuration_version: str
+    read: ExperimentConfigurationRead | None = None
+    """The configuration as 0.4.0's reader read it, with its definition, for a plan with a
+    ranking definition, from which its cases' weight rows take their original values."""
 
 
 class ExperimentExecution:
@@ -404,7 +518,7 @@ class ExperimentExecution:
 
     def __init__(  # noqa: C901, PLR0915 - RF-T11 shortens it.
         self,
-        plan: PlanV1_1,
+        plan: PlanV1_1 | PlanV1_3,
         approved_hash: str,
         approval: Approval,
         store: ArtifactStore,
@@ -417,6 +531,7 @@ class ExperimentExecution:
         experiment: SavedExperiment | None = None,
         reason: str | None = None,
         repeats: Sequence[Repeat] = (),
+        ranking_lock: str | os.PathLike[str] | None = None,
     ) -> None:
         """Writes nothing.
 
@@ -430,7 +545,8 @@ class ExperimentExecution:
         while taking its lock, to resume or revise it; None for a new experiment. `plan` is then
         its current plan, which the session resumes, or a revision of it, which `plan_revision`
         built, with its `reason`. `repeats` are the confirmed repeats, each checked as repeating
-        a case says.
+        a case says. `ranking_lock` is the ranking lock's file, which a new experiment whose plan
+        is 1.3.0 takes, and no other execution does.
 
         Raises `TrialFolioError`:
 
@@ -446,14 +562,20 @@ class ExperimentExecution:
 
         Raises `ValueError` when `plan` revises another without the experiment's records, or
         isn't the current plan or a revision of it; when a repeat names a case twice; when the
-        reason isn't a valid reason; and when `approval` or `command` doesn't fit whether the
-        experiment is synthetic.
+        reason isn't a valid reason; when `approval` or `command` doesn't fit whether the
+        experiment is synthetic; and when `ranking_lock` is given for a plan without a ranking
+        definition, or not given for one. Raises `TypeError` for a plan 1.3.0 given an
+        experiment's records, to resume or revise: release 0.4.0's R04-T09 builds that.
         """
         synthetic = isinstance(client, SyntheticScreenBacktestClient)
         if (approval == "not_required") != synthetic:
             raise ValueError("only an experiment executed with the demo's client needs no approval")
         if synthetic and command is not None:
             raise ValueError("no trialfolio command writes a synthetic experiment")
+        if (ranking_lock is not None) != isinstance(plan, PlanV1_3):
+            raise ValueError(
+                "an experiment with a ranking definition, and only one, takes the lock"
+            )
         self._revision: PlanRevision | None = None
         self._reason: str | None = None
         self._repeats: dict[str, Repeat] = {}
@@ -471,6 +593,8 @@ class ExperimentExecution:
             if plan.revises is not None:
                 raise ValueError("a new experiment's first plan revises none")
         else:
+            if isinstance(plan, PlanV1_3):
+                raise TypeError("an experiment with a ranking definition isn't resumed here yet")
             if synthetic != experiment.synthetic:
                 raise _another_kind(synthetic=experiment.synthetic)
             self._repeats, self._used = _confirmed(plan, experiment, repeats)
@@ -479,6 +603,9 @@ class ExperimentExecution:
         self._approval: Approval = approval
         self._store = store
         self._client = client
+        self._lock = None if ranking_lock is None else RankingLock(ranking_lock)
+        self._read: ExperimentConfigurationRead | None = None
+        """The configuration, as 0.4.0's reader read it, for a plan with a ranking definition."""
         self._command = command
         self._clock = clock
         self._progress = progress
@@ -490,7 +617,9 @@ class ExperimentExecution:
         self._session = 1 if experiment is None else experiment.next_session
         self._plan_number = 1 if experiment is None else experiment.current.number
         self._session_record: StoredFile | None = None
-        self._record: ExperimentRecord | None = None if experiment is None else experiment.record
+        self._record: ExperimentRecord | ExperimentRecordV1_1 | None = (
+            None if experiment is None else experiment.record
+        )
         self._plans: list[_RecordedPlan] = (
             []
             if experiment is None
@@ -535,11 +664,11 @@ class ExperimentExecution:
         resume, from the start, those the records check found, so the outcomes are the records'
         before step 8 logs them, and after a failure that ends the session before it does."""
         self._results: list[ExperimentAttemptResult] = []
-        self._current: ExperimentAttempt | None = None
+        self._current: ExperimentAttempt | RankingExperimentAttempt | None = None
         self._stopped: tuple[StopReason, TrialFolioError | None] | None = None
         self._report: StoredFile | None = None
         self._evidence: ExperimentEvidence | None = None
-        self._manifest: ExperimentManifest | None = None
+        self._manifest: ExperimentManifest | ExperimentManifestV1_1 | None = None
         self._manifest_file = ManifestFile(
             store, session_path(self._session, "manifest.json"), _MANIFEST
         )
@@ -605,7 +734,9 @@ class ExperimentExecution:
         return tuple(self._results)
 
     @property
-    def outcomes(self) -> tuple[tuple[ExperimentPlanCase, CaseOutcome], ...]:
+    def outcomes(
+        self,
+    ) -> tuple[tuple[ExperimentPlanCase | ExperimentPlanCaseV1_3, CaseOutcome], ...]:
         """Each planned case, in the plan's order, with its outcome as the records now give it."""
         return tuple((case, self._outcome(case.case_id)) for case in self._plan.cases)
 
@@ -650,7 +781,7 @@ class ExperimentExecution:
         return unavailable_metrics(self._plan, rows)
 
     @property
-    def manifest(self) -> ExperimentManifest | None:
+    def manifest(self) -> ExperimentManifest | ExperimentManifestV1_1 | None:
         """The session's manifest, once it's written: the session is then complete."""
         return self._manifest
 
@@ -665,12 +796,18 @@ class ExperimentExecution:
         return self._evidence
 
     def run(
-        self, configuration: bytes, *, on_claimed: Callable[[], object] | None = None
+        self,
+        configuration: bytes,
+        *,
+        definition: bytes | None = None,
+        on_claimed: Callable[[], object] | None = None,
     ) -> TrialFolioError | None:
         """Takes the steps the module lists. `configuration` is the bytes of the experiment
-        configuration the plan was built from. `on_claimed` is called once the directory is
-        claimed, or, for a resume, whose store already holds the lock, before the first write,
-        before anything else is written into it, such as to start writing logs there.
+        configuration the plan was built from, and `definition` the bytes of the definition file
+        its baseline names, read when it was validated, for a plan 1.3.0. `on_claimed` is called
+        once the directory is claimed, or, for a resume, whose store already holds the lock,
+        before the first write, before anything else is written into it, such as to start
+        writing logs there.
 
         Returns the error the caller reports, or None when every planned case succeeded:
         `execution.partial` when the session reached its end with a case that didn't succeed;
@@ -682,12 +819,27 @@ class ExperimentExecution:
         `TrialFolioError`, `output.not_empty`, `experiment.locked`, or `storage.write_failed`,
         and a `KeyboardInterrupt` during the claim, which removes what the claim created, so
         nothing is left; and any unexpected exception, which leaves the session without its
-        manifest.
+        manifest. A plan 1.3.0's execution takes the ranking lock first, and raises its
+        `TrialFolioError`, `experiment.locked` or `storage.write_failed`, before anything is
+        written, and holds it until it ends. A plan 1.3.0 not given its definition, or one whose
+        hash isn't the plan's, or another plan given one, is a `ValueError` too.
         """
         if self._started:
             raise RuntimeError("an execution runs once")
         self._started = True
-        self._check_configuration(configuration)
+        self._check_configuration(configuration, definition)
+        if self._lock is None:
+            return self._run(configuration, definition, on_claimed)
+        with self._lock:
+            return self._run(configuration, definition, on_claimed)
+
+    def _run(
+        self,
+        configuration: bytes,
+        definition: bytes | None,
+        on_claimed: Callable[[], object] | None,
+    ) -> TrialFolioError | None:
+        """The steps the module lists, once the ranking lock, if any, is held."""
         if self._experiment is None:
             self._store.claim(LOCK_PATH, LOCK_LINE, lock=True)
         self._claimed = True
@@ -696,7 +848,7 @@ class ExperimentExecution:
                 on_claimed()
             self._write_session()
             if self._experiment is None:
-                self._write_plan(configuration)
+                self._write_plan(configuration, definition)
             else:
                 self._complete_records(self._experiment)
                 if self._revision is not None:
@@ -733,7 +885,9 @@ class ExperimentExecution:
 
     # The session's records
 
-    def _check_configuration(self, configuration: bytes) -> None:
+    def _check_configuration(self, configuration: bytes, definition: bytes | None) -> None:
+        """Checks that the configuration gives the plan, and, for a plan 1.3.0, with the
+        definition's bytes it's given, which `plans/<n>/definition.xml` then holds."""
         plan = self._plan
         versions = Versions(
             trialfolio=plan.trialfolio_version,
@@ -742,7 +896,21 @@ class ExperimentExecution:
             urllib3=plan.transport.urllib3,
         )
         number = self._plan_number if self._revision is None else self._next_plan()
-        read = read_experiment_configuration(configuration, plan_path(number, "configuration.yaml"))
+        source_name = plan_path(number, "configuration.yaml")
+        if isinstance(plan, PlanV1_3):
+            if definition is None:
+                raise ValueError("an experiment with a ranking definition is given its bytes")
+            ranked = read_experiment_configuration_v1_1(
+                configuration, source_name, source_name, definition=definition
+            )
+            if build_experiment_plan_v1_1(ranked, versions, plan.revises) != plan:
+                raise ValueError("the configuration doesn't give the plan")
+            self._read = ranked
+            self._configuration_version = ranked.configuration.schema_version
+            return
+        if definition is not None:
+            raise ValueError("only an experiment with a ranking definition is given one")
+        read = read_experiment_configuration(configuration, source_name)
         if build_experiment_plan(read, versions, plan.revises) != plan:
             raise ValueError("the configuration doesn't give the plan")
         self._configuration_version = read.schema_version
@@ -766,14 +934,17 @@ class ExperimentExecution:
             self._session_record = published(self._store, path, data)
             raise
 
-    def _write_plan(self, configuration: bytes) -> None:
+    def _write_plan(self, configuration: bytes, definition: bytes | None) -> None:
         number = self._plan_number
-        files: list[tuple[ExperimentArtifactRole, StoredFile]] = []
+        files: list[tuple[ExperimentArtifactRoleV1_1, StoredFile]] = []
         saved = self._store.write(plan_path(number, "configuration.yaml"), configuration)
         files.append(("configuration", saved))
+        if definition is not None:
+            copy = self._store.write(plan_path(number, DEFINITION_FILE), definition)
+            files.append(("ranking_definition", copy))
         plan = self._store.write(plan_path(number, "plan.json"), model_json(self._plan))
         files.append(("plan", plan))
-        record = first_experiment_record(
+        record = first_experiment_record_v1_1(
             self._plan,
             plan_artifact_id=plan.artifact_id,
             configuration_artifact_id=saved.artifact_id,
@@ -785,7 +956,14 @@ class ExperimentExecution:
         files.append(("experiment_record", written))
         self._record = record
         self._plans.append(
-            _RecordedPlan(number, record, tuple(files), configuration, self._configuration_version)
+            _RecordedPlan(
+                number,
+                record,
+                tuple(files),
+                configuration,
+                self._configuration_version,
+                self._read,
+            )
         )
         _logger.info(
             "Recorded plan %d.", number, extra=self._log_fields("experiment.plan.recorded")
@@ -796,7 +974,9 @@ class ExperimentExecution:
         `experiment.json`, written last: nothing is sent under it before."""
         number = self._next_plan()
         previous = self._experiment_record()
-        files: list[tuple[ExperimentArtifactRole, StoredFile]] = []
+        if not isinstance(previous, ExperimentRecord):  # a resume's records are 1.0.0's
+            raise TypeError("an experiment with a ranking definition isn't revised here yet")
+        files: list[tuple[ExperimentArtifactRoleV1_1, StoredFile]] = []
         saved = self._store.write(plan_path(number, "configuration.yaml"), configuration)
         files.append(("configuration", saved))
         plan = self._store.write(plan_path(number, "plan.json"), model_json(revision.plan))
@@ -906,7 +1086,7 @@ class ExperimentExecution:
 
     # The cases
 
-    def _sends(self) -> list[tuple[ExperimentPlanCase, uuid.UUID | None]]:
+    def _sends(self) -> list[tuple[ExperimentPlanCase | ExperimentPlanCaseV1_3, uuid.UUID | None]]:
         """The cases this session sends, in the plan's order, each with the attempt a repeat of
         it repeats: every case of a new experiment; and in a resume, each case that's due, and
         each awaiting a repeat that a confirmed repeat names."""
@@ -924,8 +1104,8 @@ class ExperimentExecution:
                     "terminal": False,
                 },
             )
-        sends: list[tuple[ExperimentPlanCase, uuid.UUID | None]] = []
-        for saved in experiment.cases(self._plan):
+        sends: list[tuple[ExperimentPlanCase | ExperimentPlanCaseV1_3, uuid.UUID | None]] = []
+        for saved in experiment.cases(self._resumed()):
             repeat = self._repeats.get(saved.case.case_id)
             if saved.state == "due":
                 sends.append((saved.case, None))
@@ -933,8 +1113,15 @@ class ExperimentExecution:
                 sends.append((saved.case, repeat.attempt_id))
         return sends
 
+    def _resumed(self) -> PlanV1_1:
+        """The plan of a resumed experiment, which, until release 0.4.0's R04-T09, has no
+        ranking definition: the constructor refuses one."""
+        if not isinstance(self._plan, PlanV1_1):
+            raise TypeError("an experiment with a ranking definition isn't resumed here yet")
+        return self._plan
+
     def _run_cases(
-        self, sends: Sequence[tuple[ExperimentPlanCase, uuid.UUID | None]]
+        self, sends: Sequence[tuple[ExperimentPlanCase | ExperimentPlanCaseV1_3, uuid.UUID | None]]
     ) -> TrialFolioError | None:
         """Runs each case to send in the plan's order, until one can't start. Returns the error
         of an attempt that an interrupt or a storage failure ended, or whose attempt record
@@ -959,17 +1146,7 @@ class ExperimentExecution:
                     repeat_of,
                     extra=self._log_fields("experiment.repeat.started", case.case_id),
                 )
-            attempt = ExperimentAttempt(
-                self._plan,
-                case,
-                self._store,
-                session=self._session,
-                # The session starts its attempts one at a time, so this is its next one.
-                sequence=len(self._results) + 1,
-                repeat_of=repeat_of,
-                clock=self._clock,
-                synthetic=self._synthetic,
-            )
+            attempt = self._new_attempt(case, repeat_of)
             self._current = attempt
             self._emit(AttemptStarted(case.case_id, attempt.attempt_id))
             result = attempt.run(self._client, token_from)
@@ -1003,14 +1180,48 @@ class ExperimentExecution:
                 break
         return None
 
+    def _new_attempt(
+        self, case: ExperimentPlanCase | ExperimentPlanCaseV1_3, repeat_of: uuid.UUID | None
+    ) -> ExperimentAttempt | RankingExperimentAttempt:
+        """The next attempt of the session, of `case`: one that sends the case's definition,
+        then its backtest, under a plan 1.3.0, and one that sends its backtest otherwise."""
+        plan = self._plan
+        # The session starts its attempts one at a time, so this is its next one.
+        sequence = len(self._results) + 1
+        if isinstance(plan, PlanV1_3) and isinstance(case, ExperimentPlanCaseV1_3):
+            return RankingExperimentAttempt(
+                plan,
+                case,
+                self._store,
+                session=self._session,
+                sequence=sequence,
+                repeat_of=repeat_of,
+                clock=self._clock,
+                synthetic=self._synthetic,
+            )
+        if isinstance(plan, PlanV1_1) and isinstance(case, ExperimentPlanCase):
+            return ExperimentAttempt(
+                plan,
+                case,
+                self._store,
+                session=self._session,
+                sequence=sequence,
+                repeat_of=repeat_of,
+                clock=self._clock,
+                synthetic=self._synthetic,
+            )
+        raise TypeError("a case is one of its plan's")
+
     def _stop_before(self, authenticates: bool) -> StopReason | None:
         """Why the next attempt can't start, if it can't: a cancellation, or a budget that
-        doesn't cover one more request, or one more authentication call when it authenticates.
-        The budget counts every attempt of the experiment, earlier sessions' included."""
+        doesn't cover one more case's requests, one or, for a case with a ranking definition, two
+        (sending a definition), or one more authentication call when it authenticates. The
+        budget counts every attempt of the experiment, earlier sessions' included."""
         if self._cancellation is not None and self._cancellation.requested:
             return "cancelled"
         budget, attempts = self._plan.budget, self._attempts
-        if counted_requests(attempts) + 1 > budget.provider_requests:
+        sends = 2 if isinstance(self._plan, PlanV1_3) else 1
+        if counted_requests(attempts) + sends > budget.provider_requests:
             return "budget"
         if authenticates and counted_authentications(attempts) + 1 > budget.authentication_calls:
             return "authentication_budget"
@@ -1024,7 +1235,9 @@ class ExperimentExecution:
             extra=self._log_fields("experiment.stopped"),
         )
 
-    def _write_tables(self, case: ExperimentPlanCase, result: ExperimentAttemptResult) -> None:
+    def _write_tables(
+        self, case: ExperimentPlanCase | ExperimentPlanCaseV1_3, result: ExperimentAttemptResult
+    ) -> None:
         """Writes the case's tables from its saved response, right after its attempt record. A
         response that fails validation leaves the case `failed`."""
         response = result.record.response
@@ -1033,10 +1246,18 @@ class ExperimentExecution:
         # The session's attempts run under the current plan, and its saved configuration gives
         # the original values, however the configuration given to this run is written.
         plan = self._plans[-1]
-        configuration_file = dict(plan.files)["configuration"]
-        originals = experiment_original_values(
-            plan.configuration, configuration_file.path, case.case_key
-        )
+        files = dict(plan.files)
+        configuration_file = files["configuration"]
+        ranking = None
+        if plan.read is None:
+            originals = experiment_original_values(
+                plan.configuration, configuration_file.path, case.case_key
+            )
+        else:
+            originals, weights = experiment_original_values_v1_1(
+                plan.configuration, configuration_file.path, plan.read, case.case_key
+            )
+            ranking = RankingOriginals(weights, files["ranking_definition"])
         try:
             tables = write_case_tables(
                 self._store,
@@ -1044,6 +1265,7 @@ class ExperimentExecution:
                 originals,
                 configuration=configuration_file,
                 response=response,
+                ranking=ranking,
             )
         except TrialFolioError as failure:
             if failure.code != "provider.response_invalid":
@@ -1133,7 +1355,9 @@ class ExperimentExecution:
             parsers=self._parsers(),
             capabilities=capabilities(series=self._holds_series()),
             reproducibility=reproducibility(self._plan.cases),
-            artifacts=self._artifacts(),
+            artifacts=(
+                self._artifacts_v1_1() if isinstance(self._plan, PlanV1_3) else self._artifacts()
+            ),
         )
         self._evidence = evidence
         self._report = write_experiment_report(
@@ -1151,7 +1375,7 @@ class ExperimentExecution:
             extra=self._log_fields("experiment.session.ended"),
         )
 
-    def _case_view(self, case: ExperimentPlanCase) -> CaseView:
+    def _case_view(self, case: ExperimentPlanCase | ExperimentPlanCaseV1_3) -> CaseView:
         tables = self._tables.get(case.case_id)
         invalid = self._invalid.get(case.case_id)
         return CaseView(
@@ -1165,11 +1389,11 @@ class ExperimentExecution:
             ),
         )
 
-    def _records_of(self, case_id: str) -> tuple[AttemptRecordV1_1, ...]:
+    def _records_of(self, case_id: str) -> tuple[AttemptRecordV1_1 | AttemptRecordV1_3, ...]:
         """The case's attempt records, by session and then sequence. Once the session reaches
         its end, every attempt has one: step 8 wrote those a stopped run left, and an attempt of
         this session that left none ended the session before its end."""
-        records: list[AttemptRecordV1_1] = []
+        records: list[AttemptRecordV1_1 | AttemptRecordV1_3] = []
         for attempt in self._of(case_id):
             if attempt.outcome is None:
                 continue
@@ -1186,7 +1410,7 @@ class ExperimentExecution:
             return None
         planned = len(self._plan.cases)
 
-        def listing(named: Callable[[ExperimentPlanCase], str]) -> str:
+        def listing(named: Callable[[ExperimentPlanCase | ExperimentPlanCaseV1_3], str]) -> str:
             return "; ".join(f"{named(case)}, {self._described(case.case_id)}" for case in missed)
 
         lead = f"{len(missed)} of the {planned} planned cases didn't succeed:"
@@ -1231,12 +1455,10 @@ class ExperimentExecution:
 
     def _build_manifest(
         self, error: TrialFolioError | None, created_at: datetime
-    ) -> ExperimentManifest:
-        artifacts = self._artifacts()
-        if self._report is not None:
-            artifacts = (*artifacts, self._listed("report", self._report))
-        return ExperimentManifest(
-            schema_version=SCHEMA_VERSION,
+    ) -> ExperimentManifest | ExperimentManifestV1_1:
+        """The session's manifest: version 1.1.0 for an experiment with a ranking definition,
+        and 1.0.0 otherwise."""
+        fields = _SessionManifestFields(
             artifact_type="experiment",
             trialfolio_version=self._plan.trialfolio_version,
             created_at=created_at,
@@ -1249,7 +1471,6 @@ class ExperimentExecution:
             approval=self._approval,
             outcome="completed" if error is None else "partial",
             error=None if error is None else ErrorDetail(code=error.code, message=error.message),
-            artifacts=artifacts,
             parsers=self._parsers(),
             license_id=LICENSE_ID,
             notice_version=NOTICE_VERSION,
@@ -1257,6 +1478,17 @@ class ExperimentExecution:
             reproducibility=reproducibility(self._plan.cases),
             counts=self._counts(),
         )
+        if isinstance(self._plan, PlanV1_3):
+            ranked = self._artifacts_v1_1()
+            if self._report is not None:
+                ranked = (*ranked, self._listed_v1_1("report", self._report))
+            return ExperimentManifestV1_1(
+                **fields, schema_version=RANKING_SCHEMA_VERSION, artifacts=ranked
+            )
+        artifacts = self._artifacts()
+        if self._report is not None:
+            artifacts = (*artifacts, self._listed("report", self._report))
+        return ExperimentManifest(**fields, schema_version=SCHEMA_VERSION, artifacts=artifacts)
 
     def _parsers(self) -> tuple[ParserVersion, ...]:
         """Each parser that wrote a case's `metrics.csv`, or the installed one when none did."""
@@ -1294,9 +1526,11 @@ class ExperimentExecution:
         record = self._record
         if record is None:  # a new experiment's, before its first plan is recorded
             return 0
-        return len(retired_cases(record, self._plan))
+        if isinstance(record, ExperimentRecord) and isinstance(self._plan, PlanV1_1):
+            return len(retired_cases(record, self._plan))
+        return len(retired_cases_v1_1(record, self._plan))
 
-    def _experiment_record(self) -> ExperimentRecord:
+    def _experiment_record(self) -> ExperimentRecord | ExperimentRecordV1_1:
         if self._record is None:  # written before any case runs
             raise RuntimeError("the plan is recorded before the session ends")
         return self._record
@@ -1307,7 +1541,7 @@ class ExperimentExecution:
         succeeded, and the session's record. A file the latest manifest lists is listed as it
         lists it, its source record included."""
         listed = [
-            self._earlier(stored.path) or self._listed(role, stored, plan=recorded)
+            self._earlier(stored.path) or self._listed(_ROLES_V1_0[role], stored, plan=recorded)
             for recorded in self._plans
             for role, stored in recorded.files
         ]
@@ -1322,11 +1556,34 @@ class ExperimentExecution:
             listed.append(self._listed("session_record", self._session_record))
         return tuple(listed)
 
+    def _artifacts_v1_1(self) -> tuple[ExperimentArtifactV1_1, ...]:
+        """Each file of the records of an experiment with a ranking definition, as experiment
+        manifest 1.1.0 lists it, in `_artifacts`' order, a plan's `definition.xml` and each
+        attempt's update record and `rank_update` files included. Only a new experiment has
+        one here, until release 0.4.0's R04-T09 resumes one, so no earlier manifest lists a
+        file of it."""
+        listed = [
+            self._listed_v1_1(role, stored, plan=recorded)
+            for recorded in self._plans
+            for role, stored in recorded.files
+        ]
+        for attempt in self._attempts:
+            listed.extend(
+                self._listed_v1_1(file.role, file.file, attempt=attempt) for file in attempt.files
+            )
+            tables = self._tables.get(attempt.case_id)
+            if tables is not None and attempt.outcome == "succeeded":
+                listed.append(self._listed_v1_1("metrics", tables.metrics))
+                listed.append(self._listed_v1_1("settings", tables.settings))
+        if self._session_record is not None:
+            listed.append(self._listed_v1_1("session_record", self._session_record))
+        return tuple(listed)
+
     def _attempt_file(self, file: AttemptFile, attempt: _Attempt) -> ExperimentArtifact:
         """The file as the manifest lists it: as the latest manifest does, unless it's a
         response whose case's `metrics.csv` that manifest doesn't list, which the installed
         parser wrote since, and which its source record then names (which parser wrote them)."""
-        role: ExperimentArtifactRole = file.role
+        role = _ROLES_V1_0[file.role]
         earlier = self._earlier(file.file.path)
         tables = self._tables.get(attempt.case_id)
         if earlier is not None and not (
@@ -1337,11 +1594,17 @@ class ExperimentExecution:
             return earlier
         source = None
         if role in PROVIDER_ROLES:
-            record = attempt.record
-            started = record.started_at if record is not None else utc(self._clock())
-            ended = record.ended_at if record is not None else started
+            started, ended = self._attempt_times(attempt)
             source = provider_source(role, started_at=started, ended_at=ended)
         return self._listed(role, file.file, source)
+
+    def _attempt_times(self, attempt: _Attempt) -> tuple[datetime, datetime]:
+        """When the attempt started and ended, as its record gives them, which date its
+        request's and its response's source records; without a record, the clock's time."""
+        record = attempt.record
+        started = record.started_at if record is not None else utc(self._clock())
+        ended = record.ended_at if record is not None else started
+        return started, ended
 
     def _earlier(self, path: str) -> ExperimentArtifact | None:
         """The latest manifest's entry for a file of the experiment's records, which the new
@@ -1365,6 +1628,44 @@ class ExperimentExecution:
                 EXPERIMENT_CONFIGURATION_FORMAT, schema_version, plan.record.created_at
             )
         return ExperimentArtifact(
+            path=stored.path,
+            artifact_id=stored.artifact_id,
+            size=stored.size,
+            role=role,
+            schema_version=schema_version,
+            source=source,
+        )
+
+    def _listed_v1_1(
+        self,
+        role: ExperimentArtifactRoleV1_1,
+        stored: StoredFile,
+        *,
+        plan: _RecordedPlan | None = None,
+        attempt: _Attempt | None = None,
+    ) -> ExperimentArtifactV1_1:
+        """A file as experiment manifest 1.1.0 lists it: with its schema version, and the source
+        record of a source artifact. A plan's `configuration.yaml` and `definition.xml` are
+        acquired when the plan is recorded, as its `experiment.json` records; an attempt's
+        requests and responses, at its times (a run with a ranking definition)."""
+        schema_version = _RANKING_SCHEMA_VERSIONS.get(role)
+        source: SourceRecordV1_1 | None = None
+        if plan is not None and role == "configuration":
+            schema_version = plan.configuration_version
+            source = source_v1_1(
+                configuration_source(
+                    EXPERIMENT_CONFIGURATION_FORMAT, schema_version, plan.record.created_at
+                )
+            )
+        elif plan is not None and role == "ranking_definition":
+            source = definition_source(plan.record.created_at)
+        elif attempt is not None and role in PROVIDER_ROLES:
+            started, ended = self._attempt_times(attempt)
+            source = source_v1_1(provider_source(role, started_at=started, ended_at=ended))
+        elif attempt is not None and role in RANK_UPDATE_ROLES:
+            started, ended = self._attempt_times(attempt)
+            source = rank_update_source(role, started_at=started, ended_at=ended)
+        return ExperimentArtifactV1_1(
             path=stored.path,
             artifact_id=stored.artifact_id,
             size=stored.size,
@@ -1416,14 +1717,18 @@ class ExperimentExecution:
         current = self._current
         if current is not None and current.start_record is not None:
             return running_detail("the attempt under way")
+        if isinstance(current, RankingExperimentAttempt) and current.update_record is not None:
+            return updating_detail("the attempt under way")
         if self._results:
             last = self._results[-1]
             record = last.record
             if not last.recorded:
                 if last.start is not None:
                     return running_detail("the last attempt")
+                if last.update is not None:
+                    return updating_detail("the last attempt")
                 return "The last attempt's request wasn't sent."
-            detail = request_detail(record.outcome, possibly_charged=record.possibly_charged)
+            detail = record_detail(record)
             return f"Of the last attempt: {detail}"
         return "No case's request was sent."
 

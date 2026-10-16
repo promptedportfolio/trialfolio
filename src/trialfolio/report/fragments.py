@@ -21,15 +21,23 @@ from typing import Final
 from urllib.parse import quote
 
 from trialfolio.contracts.common import UnavailableReason
-from trialfolio.contracts.experiment_plan import PlanBudgetV1_1, PlanV1_1
+from trialfolio.contracts.experiment_plan import PlanBudgetV1_1, PlanBudgetV1_3, PlanV1_1, PlanV1_3
 from trialfolio.contracts.manifest import (
     AttemptCounts,
     ParserVersion,
     Reproducibility,
     RunManifest,
+    RunManifestV1_1,
 )
-from trialfolio.contracts.plan import Budget, Plan, PlanSetting
-from trialfolio.contracts.tables import MetricsRow, SettingsRow
+from trialfolio.contracts.plan import (
+    Budget,
+    Plan,
+    PlanBudgetV1_2,
+    PlanSetting,
+    PlanSettingV1_2,
+    PlanV1_2,
+)
+from trialfolio.contracts.tables import MetricsRow, SettingsRow, SettingsRowV1_1
 from trialfolio.normalization import setting_text
 from trialfolio.report.page import code, facts, moment, table, text
 from trialfolio.report.vocabulary import FLAGS, METRIC_DEFINITIONS, UNAVAILABLE_REASONS
@@ -70,10 +78,13 @@ class Setting:
     original_value: str | None
     expected: bool
     """Whether `provenance` is the plan's expectation, because `settings.csv` wasn't written."""
+    node: str | None = None
+    """A weight row's node, by its canonical path, for a ranking given as a definition."""
 
 
 def resolved_settings(
-    rows: Sequence[SettingsRow] | None, planned: Sequence[PlanSetting]
+    rows: Sequence[SettingsRow] | Sequence[SettingsRowV1_1] | None,
+    planned: Sequence[PlanSetting] | Sequence[PlanSettingV1_2],
 ) -> tuple[Setting, ...]:
     """A run's or a case's resolved settings: its `settings.csv` rows, or, without them, its
     plan's, `planned`."""
@@ -89,6 +100,7 @@ def resolved_settings(
                 row.flags,
                 row.original_value,
                 expected=False,
+                node=row.node if isinstance(row, SettingsRowV1_1) else None,
             )
             for row in rows
         )
@@ -103,6 +115,7 @@ def resolved_settings(
             row.flags,
             None,
             expected=True,
+            node=row.node if isinstance(row, PlanSettingV1_2) else None,
         )
         for row in planned
     )
@@ -140,8 +153,10 @@ def settings_table(
         heads += ["As written", "Notes"]
     rows: list[str] = []
     for setting in settings:
+        # A weight row names its node too, by its canonical path.
+        node = "" if setting.node is None else f" {code(setting.node)}"
         row = (
-            f"<tr><td>{code(setting.name)}</td><td>{code(setting.category)}</td>"
+            f"<tr><td>{code(setting.name)}{node}</td><td>{code(setting.category)}</td>"
             f"<td>{code(setting.value)}</td><td>{unit(setting.unit)}</td>"
             f"<td>{code(setting.provenance)}</td><td>{flag_list(setting.flags)}</td>"
         )
@@ -245,8 +260,16 @@ def provenance(meanings: Mapping[str, str], found: Collection[str]) -> list[str]
 # 5. Cases and attempts
 
 
-def budget_limit(budget: Budget | PlanBudgetV1_1) -> str:
-    """The budget's credits, at Portfolio123's documented cost, with where it's documented."""
+def budget_limit(budget: Budget | PlanBudgetV1_1 | PlanBudgetV1_2 | PlanBudgetV1_3) -> str:
+    """The budget's credits, at Portfolio123's documented cost, with where it's documented: each
+    operation's, for a plan with a ranking definition."""
+    if isinstance(budget, PlanBudgetV1_2 | PlanBudgetV1_3):
+        sources = "; ".join(
+            f"{code(cost.operation)}, {cost.credits_per_request} each, {text(cost.source.title)},"
+            f" checked {cost.source.checked.isoformat()}"
+            for cost in budget.costs
+        )
+        return f"at most {budget.credits} credits at Portfolio123's documented costs ({sources})"
     source = budget.credits_per_request_source
     return (
         f"at most {budget.credits} credits at Portfolio123's documented cost"
@@ -269,18 +292,25 @@ def reported_cost(cost: int | None) -> str:
     return "Not reported" if cost is None else f"{cost} credits, as Portfolio123 reported"
 
 
-def run_written_by(manifest: RunManifest) -> tuple[str, str]:
-    """The Trial Folio version and command that wrote a run, and when the command started."""
+def run_written_by(manifest: RunManifest | RunManifestV1_1) -> tuple[str, str]:
+    """The Trial Folio version and command that wrote a run, and when the command started; or,
+    for a run the core wrote with the demo's client, that no command did."""
+    command = manifest.command
+    if command is None:
+        return (
+            "Run written by",
+            f"Trial Folio {text(manifest.trialfolio_version)}, through its core, with no command",
+        )
     return (
         "Run written by",
         (
             f"Trial Folio {text(manifest.trialfolio_version)}, command"
-            f" {code(manifest.command.name)}, started {moment(manifest.command.started_at)}"
+            f" {code(command.name)}, started {moment(command.started_at)}"
         ),
     )
 
 
-def plan_versions(plan: Plan | PlanV1_1) -> list[tuple[str, str]]:
+def plan_versions(plan: Plan | PlanV1_1 | PlanV1_2 | PlanV1_3) -> list[tuple[str, str]]:
     """The versions a plan records: Trial Folio's, which built it, the provider wrapper's, and
     the transport's."""
     return [

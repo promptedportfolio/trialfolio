@@ -25,59 +25,101 @@ error code). `trialfolio.manifests` holds what a run shares here with an experim
 writing the manifest and discarding it, the endings without one, and the parts of the manifest
 that a run and an experiment record alike.
 
+From 0.4.0, a plan 1.2.0, whose ranking is a definition, runs the same steps, with these
+differences (sending a definition, a run with a ranking definition):
+
+- Before step 1, it takes the ranking lock, on the file its caller gives, and holds it until the
+  execution ends, after the manifest (`experiment.locked`, `storage.write_failed`). So nothing is
+  sent or written while another Trial Folio process writes `ApiRankingSystem`.
+- Step 2 also writes `definition.xml`, right after `configuration.yaml`, from the definition's
+  bytes the configuration was validated with, which a manifest of such a run lists too.
+- Step 3's attempt (`RankingAttempt`) sends the case's `rank_update`, then its backtest, with
+  start and attempt records 1.2.0.
+- Step 4 writes `settings.csv` 1.1.0, with a weight row for each node, and step 6 run manifest
+  1.1.0, with the roles and source records of the files a definition adds. A run the core writes
+  with the demo's client, which no command writes, is synthetic, with no command, and needs no
+  approval.
+
 Nothing here prompts, reads the environment, or reads secrets: the command passes the approved
-hash, and a factory for the client, which holds any credentials.
+hash, a factory for the client, which holds any credentials, and the ranking lock's file.
 """
 
 import logging
+import os
 from collections.abc import Callable
 from datetime import datetime
-from typing import Final, Literal
+from typing import Final, Literal, TypedDict, get_args
 
 from trialfolio.attempts import (
     Attempt,
     AttemptResult,
     AttemptRole,
     Clock,
+    RankingAttempt,
     prevailing,
     provider_requests,
-    request_detail,
+    record_detail,
+    reported_cost,
     utc_now,
 )
-from trialfolio.configuration import original_values, read_screen_configuration
-from trialfolio.contracts.attempt import AttemptRecord, StartRecord
+from trialfolio.configuration import (
+    ScreenConfigurationRead,
+    original_values,
+    read_screen_configuration,
+    read_screen_configuration_v1_1,
+    screen_original_values_v1_1,
+)
+from trialfolio.contracts.attempt import (
+    AttemptRecord,
+    AttemptRecordV1_2,
+    StartRecord,
+    StartRecordV1_2,
+)
 from trialfolio.contracts.common import ErrorDetail
 from trialfolio.contracts.manifest import (
     ArtifactRole,
+    ArtifactRoleV1_1,
     AttemptCounts,
+    Capabilities,
     CommandRecord,
     ManifestArtifact,
+    ManifestArtifactV1_1,
     ManifestCounts,
+    ParserVersion,
+    Reproducibility,
     RunManifest,
+    RunManifestV1_1,
     SourceRecord,
+    SourceRecordV1_1,
 )
-from trialfolio.contracts.plan import Plan
+from trialfolio.contracts.plan import Plan, PlanV1_2
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION
 from trialfolio.errors import TrialFolioError
 from trialfolio.manifests import (
     PROVIDER_ROLES,
+    RANK_UPDATE_ROLES,
     EndingWithoutManifest,
     ManifestDetails,
     ManifestFile,
     capabilities,
     configuration_source,
+    definition_source,
     ends_without_manifest,
     model_json,
     parsers,
     provider_source,
+    rank_update_source,
     reproducibility,
     running_detail,
+    source_v1_1,
+    updating_detail,
     utc,
 )
-from trialfolio.normalization import NormalizedTables, holds_series, write_tables
+from trialfolio.normalization import NormalizedTables, RankingOriginals, holds_series, write_tables
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
 from trialfolio.planning import check_approval
 from trialfolio.provider import DecodedResponse, ScreenBacktestClient
+from trialfolio.ranking_lock import RankingLock
 from trialfolio.report import HtmlReportRenderer, write_report
 from trialfolio.runs import CONFIGURATION_PATH, MANIFEST_PATH, PLAN_PATH, SavedAttempt, SavedRun
 from trialfolio.storage import ArtifactStore, StoredFile
@@ -90,11 +132,18 @@ type ClientFactory = Callable[[], ScreenBacktestClient]
 type ApprovalMethod = Literal["interactive", "option", "not_required"]
 
 SCHEMA_VERSION: Final = "1.0.0"
-"""The schema version of the run manifests this module writes."""
+"""The schema version of the run manifests this module writes for a run without a ranking
+definition."""
+
+RANKING_SCHEMA_VERSION: Final = "1.1.0"
+"""The schema version of the run manifest of a run whose ranking is a definition."""
+
+DEFINITION_PATH: Final = "definition.xml"
+"""The copy of a ranking definition, beside `configuration.yaml` (ranking definitions)."""
 
 _SCREEN_CONFIGURATION_FORMAT: Final = "screen-configuration"
 
-_SCHEMA_VERSIONS: Final[dict[ArtifactRole, str]] = {
+_SCHEMA_VERSIONS: Final[dict[ArtifactRoleV1_1, str]] = {
     "plan": "1.0.0",
     "start_record": "1.0.0",
     "attempt_record": "1.0.0",
@@ -103,6 +152,19 @@ _SCHEMA_VERSIONS: Final[dict[ArtifactRole, str]] = {
 }
 """The schema version the manifest records for each role whose files have one, apart from the
 configuration, which gives its own."""
+
+_RANKING_SCHEMA_VERSIONS: Final[dict[ArtifactRoleV1_1, str]] = {
+    "plan": "1.2.0",
+    "update_record": "1.2.0",
+    "start_record": "1.2.0",
+    "attempt_record": "1.2.0",
+    "metrics": TABLES_SCHEMA_VERSION,
+    "settings": "1.1.0",
+}
+"""The same, for a run whose ranking is a definition."""
+
+_ROLES_V1_0: Final[dict[str, ArtifactRole]] = {role: role for role in get_args(ArtifactRole)}
+"""Run manifest 1.0.0's roles, which every run without a ranking definition's files have."""
 
 _MANIFEST: Final = ManifestDetails(
     written="The run's manifest was written, so its output is complete.",
@@ -114,6 +176,26 @@ _MANIFEST: Final = ManifestDetails(
 )
 
 
+class _ManifestFields(TypedDict):
+    """The fields run manifests 1.0.0 and 1.1.0 share, but the schema version, the command, and
+    the artifacts."""
+
+    artifact_type: Literal["run"]
+    trialfolio_version: str
+    created_at: datetime
+    synthetic: bool
+    plan_hash: str
+    approval: ApprovalMethod
+    outcome: Literal["completed", "failed"]
+    error: ErrorDetail | None
+    parsers: tuple[ParserVersion, ...]
+    license_id: str
+    notice_version: str
+    capabilities: Capabilities
+    reproducibility: Reproducibility
+    counts: ManifestCounts
+
+
 class Execution:
     """One execution of an approved plan's case into the output directory of `store`.
 
@@ -123,40 +205,62 @@ class Execution:
 
     def __init__(
         self,
-        plan: Plan,
+        plan: Plan | PlanV1_2,
         approved_hash: str,
         approval: ApprovalMethod,
         store: ArtifactStore,
-        command: CommandRecord,
+        command: CommandRecord | None,
         *,
         clock: Clock = utc_now,
+        ranking_lock: str | os.PathLike[str] | None = None,
     ) -> None:
         """Writes nothing.
 
         `approval` is how the plan was approved, as the manifest records it: `not_required`
-        exactly for the synthetic run `trialfolio demo` writes, which is `command`'s `demo`.
+        exactly for a synthetic run, the one `trialfolio demo` writes, which is `command`'s
+        `demo`, or one with a ranking definition that the core writes with the demo's client,
+        whose `command` is None, since no command writes it. `ranking_lock` is the ranking lock's
+        file, which an execution of a plan 1.2.0, whose ranking is a definition, takes, and no
+        other does.
+
         Raises `TrialFolioError` with `plan.approval_required` unless `approved_hash` is the
-        plan's hash, recomputed from its contents, and `ValueError` if `approval` and `command`
-        disagree about whether the run is synthetic.
+        plan's hash, recomputed from its contents (approval), and `ValueError` if `approval` and
+        `command` disagree about whether the run is synthetic, if `command` is None for a plan
+        without a ranking definition, or if `ranking_lock` is given for a plan without one, or
+        not given for a plan with one.
         """
         check_approval(plan, approved_hash)
-        if (approval == "not_required") != (command.name == "demo"):
-            raise ValueError("only the synthetic run trialfolio demo writes needs no approval")
+        ranking = isinstance(plan, PlanV1_2)
+        synthetic = command is None or command.name == "demo"
+        if (approval == "not_required") != synthetic:
+            raise ValueError("only a synthetic run needs no approval")
+        if command is None and not ranking:
+            raise ValueError("only a run with a ranking definition that the core writes has none")
+        if (ranking_lock is not None) != ranking:
+            raise ValueError(
+                "a run with a ranking definition, and only one, takes the ranking lock"
+            )
         self._plan = plan
         self._approved_hash = approved_hash
         self._approval: ApprovalMethod = approval
         self._store = store
         self._command = command
         self._clock = clock
+        self._lock = None if ranking_lock is None else RankingLock(ranking_lock)
         self._claimed = False
-        self._attempt: Attempt | None = None
+        self._attempt: Attempt | RankingAttempt | None = None
         self._result: AttemptResult | None = None
         self._configuration: StoredFile | None = None
+        self._definition: StoredFile | None = None
+        self._read: ScreenConfigurationRead | None = None
         self._tables: NormalizedTables | None = None
         self._report: StoredFile | None = None
         self._manifest = ManifestFile(store, MANIFEST_PATH, _MANIFEST)
-        self._files: list[tuple[ArtifactRole, StoredFile]] = []
+        self._files: list[tuple[ArtifactRoleV1_1, StoredFile]] = []
         self._configuration_version = ""
+        self._started_at: datetime | None = None
+        """When the execution began, for a run without a command, which dates its configuration
+        and its definition's copy by it, since no command started."""
 
     @property
     def claimed(self) -> bool:
@@ -164,7 +268,7 @@ class Execution:
         return self._claimed
 
     @property
-    def attempt(self) -> Attempt | None:
+    def attempt(self) -> Attempt | RankingAttempt | None:
         """The attempt, once the directory is claimed."""
         return self._attempt
 
@@ -191,36 +295,100 @@ class Execution:
         configuration: bytes,
         client: ClientFactory,
         *,
+        definition: bytes | None = None,
         on_claimed: Callable[[], object] | None = None,
     ) -> TrialFolioError | None:
         """Takes the steps the module lists. `configuration` is the configuration file's bytes,
-        as the plan was built from them. `on_claimed` is called once the directory is claimed,
-        before anything else is written into it, such as to start writing logs there.
+        as the plan was built from them, and `definition` the bytes of the definition file it
+        names, read when it was validated, for a plan 1.2.0. `on_claimed` is called once the
+        directory is claimed, before anything else is written into it, such as to start writing
+        logs there.
 
         Returns the error the command reports, or None when the run completed. Raises the claim's
-        `TrialFolioError`, `output.not_empty` or `storage.write_failed`, and a `KeyboardInterrupt`
-        during the claim, which removes what the claim created, so nothing is left. After the
-        claim, every ending is returned, except a second interrupt while the attempt record is
-        written once more, and an unexpected exception after the attempt ended, which leave the
-        output without a manifest. `ending_detail` says what such an ending means for the run.
+        `TrialFolioError`, `output.not_empty` or `storage.write_failed`, the ranking lock's,
+        `experiment.locked` or `storage.write_failed`, and a `KeyboardInterrupt` during the lock
+        or the claim, which removes what the claim created, so nothing is left. Raises
+        `ValueError`, before anything else, when a plan 1.2.0 isn't given its definition, or one
+        whose hash isn't the plan's, or another plan is given one. After the claim, every ending
+        is returned, except a second interrupt while the attempt record is written once more,
+        and an unexpected exception after the attempt ended, which leave the output without a
+        manifest. `ending_detail` says what such an ending means for the run.
         """
         if self._claimed:
             raise RuntimeError("an execution runs once")
-        # Validated already, when the plan was built from it; read here for its schema version.
-        self._configuration_version = read_screen_configuration(
-            configuration, CONFIGURATION_PATH
-        ).schema_version
+        self._check_configuration(configuration, definition)
+        if self._command is None:
+            self._started_at = utc(self._clock())
+        if self._lock is None:
+            return self._claimed_run(configuration, definition, client, on_claimed)
+        with self._lock:
+            return self._claimed_run(configuration, definition, client, on_claimed)
+
+    def ending_detail(self) -> str:
+        """What the run's records say, for the message of an ending after the claim that the run
+        didn't record itself: whether the screen backtest request, and a definition's
+        `rank_update`, were sent and may have been charged, as the attempt's records read, and
+        whether the run has its manifest."""
+        return f"{self._request_detail()} {self._manifest.detail}"
+
+    @property
+    def _version(self) -> str:
+        return self._plan.trialfolio_version
+
+    @property
+    def _synthetic(self) -> bool:
+        """Whether this is a synthetic run: the one `trialfolio demo` writes, or one with a
+        ranking definition that the core writes with the demo's client."""
+        return self._command is None or self._command.name == "demo"
+
+    @property
+    def _ranking(self) -> bool:
+        return isinstance(self._plan, PlanV1_2)
+
+    def _check_configuration(self, configuration: bytes, definition: bytes | None) -> None:
+        """Reads the configuration's schema version. For a plan 1.2.0, it reads the
+        configuration with the definition's bytes, which it checks are the plan's definition,
+        so `definition.xml` holds the definition the plan was built from."""
+        # Validated already, when the plan was built from it.
+        if not isinstance(self._plan, PlanV1_2):
+            if definition is not None:
+                raise ValueError("only a run with a ranking definition is given one")
+            read = read_screen_configuration(configuration, CONFIGURATION_PATH)
+            self._configuration_version = read.schema_version
+            return
+        if definition is None:
+            raise ValueError("a run with a ranking definition is given its definition's bytes")
+        ranked = read_screen_configuration_v1_1(
+            configuration, CONFIGURATION_PATH, CONFIGURATION_PATH, definition=definition
+        )
+        if ranked.definition is None or ranked.definition.hash != (
+            self._plan.ranking_source.definition
+        ):
+            raise ValueError("the definition isn't the plan's")
+        self._read = ranked
+        self._configuration_version = ranked.configuration.schema_version
+
+    def _claimed_run(
+        self,
+        configuration: bytes,
+        definition: bytes | None,
+        client: ClientFactory,
+        on_claimed: Callable[[], object] | None,
+    ) -> TrialFolioError | None:
+        """Steps 1 to 6, once the ranking lock, if any, is held."""
         plan_file = self._store.claim(PLAN_PATH, model_json(self._plan))
         self._claimed = True
         self._files.append(("plan", plan_file))
-        result = self._attempt_run(configuration, client, on_claimed)
+        result = self._attempt_run(configuration, definition, client, on_claimed)
         self._result = result
         self._files.extend((_run_role(file.role), file.file) for file in result.files)
         error = result.error
         if (
             ends_without_manifest(recorded=result.recorded, error=error)
-            # Every manifest lists the configuration, so without it there's none to write.
+            # Every manifest lists the configuration, and a definition's copy, so without them
+            # there's none to write.
             or self._configuration is None
+            or (self._ranking and self._definition is None)
         ):
             return error
         with EndingWithoutManifest(after="the attempt ended") as ended:
@@ -237,24 +405,27 @@ class Execution:
         )
         return error
 
-    def ending_detail(self) -> str:
-        """What the run's records say, for the message of an ending after the claim that the run
-        didn't record itself: whether the screen backtest request was sent and may have been
-        charged, as the attempt's records read, and whether the run has its manifest."""
-        return f"{self._request_detail()} {self._manifest.detail}"
-
-    @property
-    def _version(self) -> str:
-        return self._plan.trialfolio_version
-
-    @property
-    def _synthetic(self) -> bool:
-        """Whether this is the synthetic run `trialfolio demo` writes."""
-        return self._command.name == "demo"
+    def _new_attempt(self) -> Attempt | RankingAttempt:
+        if isinstance(self._plan, PlanV1_2):
+            return RankingAttempt(
+                self._plan,
+                self._approved_hash,
+                self._store,
+                clock=self._clock,
+                synthetic=self._synthetic,
+            )
+        return Attempt(
+            self._plan,
+            self._approved_hash,
+            self._store,
+            clock=self._clock,
+            synthetic=self._synthetic,
+        )
 
     def _attempt_run(
         self,
         configuration: bytes,
+        definition: bytes | None,
         client: ClientFactory,
         on_claimed: Callable[[], object] | None,
     ) -> AttemptResult:
@@ -262,27 +433,18 @@ class Execution:
         try:
             if on_claimed is not None:
                 on_claimed()
-            self._attempt = Attempt(
-                self._plan,
-                self._approved_hash,
-                self._store,
-                clock=self._clock,
-                synthetic=self._synthetic,
-            )
+            self._attempt = self._new_attempt()
             self._configuration = self._store.write(CONFIGURATION_PATH, configuration)
             self._files.append(("configuration", self._configuration))
+            if definition is not None:
+                self._definition = self._store.write(DEFINITION_PATH, definition)
+                self._files.append(("ranking_definition", self._definition))
             made = client()
         except (KeyboardInterrupt, Exception) as ending:  # noqa: BLE001 - every ending is recorded.
             if made is not None:
                 made.close()
             if self._attempt is None:
-                self._attempt = Attempt(
-                    self._plan,
-                    self._approved_hash,
-                    self._store,
-                    clock=self._clock,
-                    synthetic=self._synthetic,
-                )
+                self._attempt = self._new_attempt()
             return self._attempt.end_before_authenticating(ending)
         try:
             return self._attempt.run(made)
@@ -297,13 +459,21 @@ class Execution:
         response = result.record.response
         if error is not None or response is None or self._configuration is None:
             return error
+        originals = original_values(configuration, CONFIGURATION_PATH)
+        ranking = None
+        if self._read is not None and self._definition is not None:
+            originals, weights = screen_original_values_v1_1(
+                configuration, CONFIGURATION_PATH, self._read
+            )
+            ranking = RankingOriginals(weights, self._definition)
         try:
             self._tables = write_tables(
                 self._store,
                 self._plan,
-                original_values(configuration, CONFIGURATION_PATH),
+                originals,
                 configuration=self._configuration,
                 response=response,
+                ranking=ranking,
             )
         except TrialFolioError as failure:
             if failure.code != "provider.response_invalid":
@@ -312,7 +482,9 @@ class Execution:
         self._files.extend((("metrics", self._tables.metrics), ("settings", self._tables.settings)))
         return None
 
-    def _write_ending(self, record: AttemptRecord, error: TrialFolioError | None) -> None:
+    def _write_ending(
+        self, record: AttemptRecord | AttemptRecordV1_2, error: TrialFolioError | None
+    ) -> None:
         """Writes `report.html`, rendered from the manifest as it will be written, without the
         report, then `manifest.json`, which lists the report too. `record` is the attempt's
         record, and `error` the run's."""
@@ -329,66 +501,91 @@ class Execution:
         self._files.append(("report", report))
         self._manifest.write(self._build_manifest(record, error, created_at))
 
-    def _started(self) -> StartRecord | None:
+    def _started(self) -> StartRecord | StartRecordV1_2 | None:
         return None if self._attempt is None else self._attempt.start_record
 
     def _request_detail(self) -> str:
         result = self._result
         if result is not None and result.recorded:
-            record = result.record
-            return request_detail(record.outcome, possibly_charged=record.possibly_charged)
-        if self._attempt is not None and self._attempt.start_record is not None:
+            return record_detail(result.record)
+        attempt = self._attempt
+        if attempt is not None and attempt.start_record is not None:
             return running_detail()
+        if isinstance(attempt, RankingAttempt) and attempt.update_record is not None:
+            return updating_detail()
+        if self._ranking:
+            return "Neither the rank_update request nor the screen backtest request was sent."
         return "The screen backtest request wasn't sent."
 
     def _build_manifest(
-        self, record: AttemptRecord, error: TrialFolioError | None, created_at: datetime
-    ) -> RunManifest:
+        self,
+        record: AttemptRecord | AttemptRecordV1_2,
+        error: TrialFolioError | None,
+        created_at: datetime,
+    ) -> RunManifest | RunManifestV1_1:
         """The manifest of the files written so far, for the attempt `record` ended: once the
-        report is written, it's listed too."""
+        report is written, it's listed too. It's version 1.1.0 for a run with a ranking
+        definition."""
         saved = None if self._result is None else self._result.response
         series = isinstance(saved, DecodedResponse) and holds_series(saved.payload)
-        return RunManifest(
-            schema_version=SCHEMA_VERSION,
+        fields = _ManifestFields(
             artifact_type="run",
             trialfolio_version=self._version,
             created_at=created_at,
-            command=self._command,
             synthetic=self._synthetic,
             plan_hash=self._plan.plan_hash,
             approval=self._approval,
             outcome="completed" if error is None else "failed",
             error=None if error is None else ErrorDetail(code=error.code, message=error.message),
-            artifacts=tuple(self._listed(role, stored, record) for role, stored in self._files),
             # Every run lists the installed parser, which wrote its tables, if it has any.
             parsers=parsers(),
             license_id=LICENSE_ID,
             notice_version=NOTICE_VERSION,
             capabilities=capabilities(series=series),
             reproducibility=reproducibility(self._plan.cases),
-            counts=ManifestCounts(
-                results=0 if self._tables is None else 1,
-                cases=1,
-                attempts=AttemptCounts(
-                    succeeded=int(record.outcome == "succeeded"),
-                    failed=int(record.outcome == "failed"),
-                    unknown=int(record.outcome == "unknown"),
-                    running=0,
+            counts=self._counts(record),
+        )
+        if isinstance(record, AttemptRecordV1_2):
+            return RunManifestV1_1(
+                **fields,
+                schema_version=RANKING_SCHEMA_VERSION,
+                command=self._command,
+                artifacts=tuple(
+                    self._listed_v1_1(role, file, record) for role, file in self._files
                 ),
-                provider_requests=provider_requests(record),
-                retries=0,
-                cost=record.provider_metadata.cost,
+            )
+        if self._command is None:  # only a run with a ranking definition has none
+            raise RuntimeError("a run without a ranking definition records its command")
+        return RunManifest(
+            **fields,
+            schema_version=SCHEMA_VERSION,
+            command=self._command,
+            artifacts=tuple(self._listed(role, file, record) for role, file in self._files),
+        )
+
+    def _counts(self, record: AttemptRecord | AttemptRecordV1_2) -> ManifestCounts:
+        return ManifestCounts(
+            results=0 if self._tables is None else 1,
+            cases=1,
+            attempts=AttemptCounts(
+                succeeded=int(record.outcome == "succeeded"),
+                failed=int(record.outcome == "failed"),
+                unknown=int(record.outcome == "unknown"),
+                running=0,
             ),
+            provider_requests=provider_requests(record),
+            retries=0,
+            cost=reported_cost(record),
         )
 
     def _listed(
-        self, role: ArtifactRole, stored: StoredFile, record: AttemptRecord
+        self, role: ArtifactRoleV1_1, stored: StoredFile, record: AttemptRecord | AttemptRecordV1_2
     ) -> ManifestArtifact:
         return ManifestArtifact(
             path=stored.path,
             artifact_id=stored.artifact_id,
             size=stored.size,
-            role=role,
+            role=_ROLES_V1_0[role],
             schema_version=(
                 self._configuration_version
                 if role == "configuration"
@@ -397,16 +594,56 @@ class Execution:
             source=self._source(role, record),
         )
 
-    def _source(self, role: ArtifactRole, record: AttemptRecord) -> SourceRecord | None:
-        """The source record of a source artifact: the configuration, the request, and the
-        response (INV-04, source artifacts). None for any other role."""
+    def _listed_v1_1(
+        self, role: ArtifactRoleV1_1, stored: StoredFile, record: AttemptRecordV1_2
+    ) -> ManifestArtifactV1_1:
+        return ManifestArtifactV1_1(
+            path=stored.path,
+            artifact_id=stored.artifact_id,
+            size=stored.size,
+            role=role,
+            schema_version=(
+                self._configuration_version
+                if role == "configuration"
+                else _RANKING_SCHEMA_VERSIONS.get(role)
+            ),
+            source=self._source_v1_1(role, record),
+        )
+
+    def _source(
+        self, role: ArtifactRoleV1_1, record: AttemptRecord | AttemptRecordV1_2
+    ) -> SourceRecord | None:
+        """The source record of a source artifact 1.0.0 names: the configuration, the request,
+        and the response (INV-04, source artifacts). None for any other role."""
         if role == "configuration":
             return configuration_source(
-                _SCREEN_CONFIGURATION_FORMAT, self._configuration_version, self._command.started_at
+                _SCREEN_CONFIGURATION_FORMAT, self._configuration_version, self._acquired()
             )
         if role in PROVIDER_ROLES:
             return provider_source(role, started_at=record.started_at, ended_at=record.ended_at)
         return None
+
+    def _source_v1_1(
+        self, role: ArtifactRoleV1_1, record: AttemptRecordV1_2
+    ) -> SourceRecordV1_1 | None:
+        """The source record of a source artifact of a run with a ranking definition: 1.0.0's,
+        and those of a definition's copy, acquired with the configuration, and of the
+        `rank_update`'s request and response (a run with a ranking definition)."""
+        if role == "ranking_definition":
+            return definition_source(self._acquired())
+        if role in RANK_UPDATE_ROLES:
+            return rank_update_source(role, started_at=record.started_at, ended_at=record.ended_at)
+        source = self._source(role, record)
+        return None if source is None else source_v1_1(source)
+
+    def _acquired(self) -> datetime:
+        """When the configuration was acquired: when the command started, or, for a run without
+        a command, when its execution began."""
+        if self._command is not None:
+            return self._command.started_at
+        if self._started_at is None:  # set when a run without a command begins
+            raise RuntimeError("the run's configuration is acquired once it begins")
+        return self._started_at
 
     def _log_fields(self, event: str) -> dict[str, str]:
         fields = {
@@ -419,7 +656,7 @@ class Execution:
         return fields
 
 
-def _run_role(role: AttemptRole) -> ArtifactRole:
+def _run_role(role: AttemptRole) -> ArtifactRoleV1_1:
     """The role of a file a screen run's attempt wrote, which never writes an authentication
     record: only an experiment's attempts do."""
     if role == "authentication_record":

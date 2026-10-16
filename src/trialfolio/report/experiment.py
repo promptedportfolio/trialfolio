@@ -11,8 +11,8 @@ value.
 from collections.abc import Sequence
 from typing import Final
 
-from trialfolio.contracts.experiment_plan import ExperimentPlanCase
-from trialfolio.contracts.experiment_record import PlanChanges
+from trialfolio.contracts.experiment_plan import ExperimentPlanCase, ExperimentPlanCaseV1_3
+from trialfolio.contracts.experiment_record import PlanChanges, PlanChangesV1_1
 from trialfolio.contracts.tables import MetricsRow
 from trialfolio.display import series
 from trialfolio.normalization import LAYOUT, METRICS, setting_text
@@ -198,7 +198,7 @@ def _plans(experiment: ExperimentContext) -> list[str]:
     ]
 
 
-def _plan_changes(changes: PlanChanges | None) -> str:
+def _plan_changes(changes: PlanChanges | PlanChangesV1_1 | None) -> str:
     """What a revision changed from the plan before it, one kind of change to a line."""
     if changes is None:
         return "The first plan"
@@ -549,7 +549,7 @@ def _settings_across(experiment: ExperimentContext, names: Sequence[str]) -> lis
     return table(("Setting", "The baseline's", "Unit", "Changed by", "Notes"), rows)
 
 
-def _plan_value(case: ExperimentPlanCase, name: str) -> str:
+def _plan_value(case: ExperimentPlanCase | ExperimentPlanCaseV1_3, name: str) -> str:
     """The case's resolved value of a setting, as `settings.csv` writes it."""
     return next(setting_text(row.value) for row in case.settings if row.setting == name)
 

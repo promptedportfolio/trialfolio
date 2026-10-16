@@ -26,7 +26,7 @@ from tests.support.deep_json import DEEP, on_a_fixed_stack
 from trialfolio.configuration import original_values
 from trialfolio.contracts.manifest import ExternalReference, RunManifest
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS_BY_NAME
-from trialfolio.contracts.tables import MetricsRow, SettingsRow
+from trialfolio.contracts.tables import MetricsRow, SettingsRow, SettingsRowV1_1
 from trialfolio.errors import TrialFolioError
 from trialfolio.normalization import Value, read_response
 
@@ -99,8 +99,11 @@ DOCUMENTED_METRICS = (
 )  # fmt: skip
 
 
-def by_setting(rows: tuple[SettingsRow, ...]) -> dict[str, SettingsRow]:
-    return {row.setting: row for row in rows}
+def by_setting(
+    rows: tuple[SettingsRow, ...] | tuple[SettingsRowV1_1, ...],
+) -> dict[str, SettingsRow]:
+    assert all(isinstance(row, SettingsRow) for row in rows)
+    return {row.setting: row for row in rows if isinstance(row, SettingsRow)}
 
 
 def by_metric(rows: tuple[MetricsRow, ...]) -> dict[tuple[str, str], MetricsRow]:

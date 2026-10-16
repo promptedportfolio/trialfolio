@@ -54,7 +54,14 @@ its YAML rules and its `kind` are checked, and before anything else is.
 `settings.csv`'s `original_value` (docs/contracts.md, settings.csv), and
 `experiment_original_values` an experiment case's, with the key path that writes each one, such
 as `baseline.max_holdings` or `variants.max_holdings[0].value` (an experiment's normalized
-tables).
+tables). For a configuration 0.4.0's readers read, `screen_original_values_v1_1` and
+`experiment_original_values_v1_1` give the same, and each weight row's original key and value,
+by its node's canonical path: the definition's `Weight` attribute, or the `set` entry of a
+ranking variant that changes it (weight rows).
+
+The core reads no file, so 0.4.0's readers can also be given a definition's bytes, read when the
+configuration was validated, in place of reading the file it names again: the executors check the
+configuration they're given that way, and copy those bytes (ranking definitions).
 
 Error messages name the offending key and never include its value, so they're safe to log. A
 key's control and formatting characters and lone surrogates are written as escapes.
@@ -100,10 +107,13 @@ from trialfolio.contracts.experiment_configuration import (
     EXPERIMENT_SCHEMA_VERSIONS_V1_1,
     VARIANT_SETTINGS,
     VARIANT_SETTINGS_V1_1,
+    ConfiguredVariantV1_1,
     ExperimentConfiguration,
     ExperimentConfigurationV1_1,
+    RankingVariant,
     RuleVariant,
     configured_variants,
+    configured_variants_v1_1,
 )
 from trialfolio.contracts.ranking_snapshot_configuration import (
     RANKING_SNAPSHOT_SCHEMA_VERSIONS,
@@ -215,7 +225,11 @@ class ExperimentConfigurationRead:
 
 
 def read_screen_configuration_v1_1(
-    content: bytes, source_name: str, path: str | os.PathLike[str]
+    content: bytes,
+    source_name: str,
+    path: str | os.PathLike[str],
+    *,
+    definition: bytes | None = None,
 ) -> ScreenConfigurationRead:
     """Reads a screen configuration of a version release 0.4.0 reads, 1.0.0 or 1.1.0, by its
     `schema_version`, from the bytes of the file at `path`, named `source_name` in messages.
@@ -228,6 +242,10 @@ def read_screen_configuration_v1_1(
     with `input.not_found` when nothing exists where the definition's path leads, or the file
     there can't be read. A 1.0.0 file that gives `definition` or `snapshot` is told they need
     `schema_version` 1.1.0.
+
+    `definition` is the bytes of the file `ranking.definition` names, read when the configuration
+    was validated: they're read in its place, and no file is read. Raises `ValueError` when it's
+    given for a configuration whose ranking names no definition file.
     """
     document, plain = _read_document(
         content, source_name, "screen", SCREEN_SCHEMA_VERSIONS_V1_1, node_paths=True
@@ -237,9 +255,12 @@ def read_screen_configuration_v1_1(
         configuration = _validated(
             ScreenConfiguration, document, source_name, unquoted, later_versions=True
         )
+        _no_definition_given(definition)
         return ScreenConfigurationRead(configuration, None)
     read = _validated(ScreenConfigurationV1_1, document, source_name, unquoted)
-    return ScreenConfigurationRead(read, _definition(read.ranking, "ranking", source_name, path))
+    return ScreenConfigurationRead(
+        read, _definition(read.ranking, "ranking", source_name, path, definition)
+    )
 
 
 def read_review_configuration(content: bytes, source_name: str) -> ReviewConfiguration:
@@ -270,7 +291,11 @@ def read_experiment_configuration(content: bytes, source_name: str) -> Experimen
 
 
 def read_experiment_configuration_v1_1(
-    content: bytes, source_name: str, path: str | os.PathLike[str]
+    content: bytes,
+    source_name: str,
+    path: str | os.PathLike[str],
+    *,
+    definition: bytes | None = None,
 ) -> ExperimentConfigurationRead:
     """Reads an experiment configuration of a version release 0.4.0 reads, 1.0.0 or 1.1.0, by its
     `schema_version`, from the bytes of the file at `path`, named `source_name` in messages.
@@ -284,6 +309,9 @@ def read_experiment_configuration_v1_1(
     entry by its place, such as `variants.ranking[0].set[1]`, never by its path. A 1.0.0 file
     with a ranking variant, or a baseline ranked by a definition or a snapshot, is told they need
     `schema_version` 1.1.0.
+
+    `definition` is the bytes of the baseline's definition file, as `read_screen_configuration_v1_1`
+    takes a screen's.
     """
     document, plain = _read_document(
         content, source_name, "experiment", EXPERIMENT_SCHEMA_VERSIONS_V1_1, node_paths=True
@@ -293,6 +321,7 @@ def read_experiment_configuration_v1_1(
         configuration = _validated(
             ExperimentConfiguration, document, source_name, unquoted, later_versions=True
         )
+        _no_definition_given(definition)
         return ExperimentConfigurationRead(configuration, None, ())
     read = _validated(
         ExperimentConfigurationV1_1,
@@ -301,32 +330,43 @@ def read_experiment_configuration_v1_1(
         unquoted,
         variant_settings=VARIANT_SETTINGS_V1_1,
     )
-    definition = _definition(read.baseline.ranking, "baseline.ranking", source_name, path)
-    return ExperimentConfigurationRead(
-        read, definition, _ranking_cases(read, definition, source_name)
-    )
+    baseline = _definition(read.baseline.ranking, "baseline.ranking", source_name, path, definition)
+    return ExperimentConfigurationRead(read, baseline, _ranking_cases(read, baseline, source_name))
+
+
+def _no_definition_given(definition: bytes | None) -> None:
+    if definition is not None:
+        raise ValueError("a definition's bytes are given only for a ranking given as a definition")
 
 
 def _definition(
-    ranking: RankingV1_1, key: str, source_name: str, path: str | os.PathLike[str]
+    ranking: RankingV1_1,
+    key: str,
+    source_name: str,
+    path: str | os.PathLike[str],
+    given: bytes | None = None,
 ) -> RankingDefinition | None:
     """The definition a ranking given as a definition names, read once from its file, at the
     one path the file system resolves, from the configuration's directory unless the path is
-    absolute, and checked (docs/contracts.md, ranking definitions). None for any other form."""
+    absolute, and checked (docs/contracts.md, ranking definitions); or from `given`, its bytes,
+    read already. None for any other form."""
     if not isinstance(ranking, DefinitionRanking):
+        _no_definition_given(given)
         return None
     where = f"{key}.definition"
-    given = visible(ranking.definition)
+    if given is not None:
+        return _checked_definition(given, source_name, where)
+    shown = visible(ranking.definition)
     try:
         resolved = resolve_existing(Path(path).parent / ranking.definition)
     except OSError as error:
         # The file system can't follow the path, such as through a folder the user may not
         # search, so a file there, if there is one, can't be read.
-        raise _unreadable(source_name, where, given, error) from None
+        raise _unreadable(source_name, where, shown, error) from None
     if resolved is None:
         raise TrialFolioError(
             "input.not_found",
-            f"{source_name}: the file `{where}` names (`{given}`) doesn't exist. "
+            f"{source_name}: the file `{where}` names (`{shown}`) doesn't exist. "
             f"{_DEFINITION_PATH}",
             f"{source_name}: the file `{where}` names doesn't exist. {_DEFINITION_PATH}",
         )
@@ -340,9 +380,15 @@ def _definition(
     try:
         definition = Path(resolved).read_bytes()
     except OSError as error:
-        raise _unreadable(source_name, where, given, error) from None
+        raise _unreadable(source_name, where, shown, error) from None
+    return _checked_definition(definition, source_name, where)
+
+
+def _checked_definition(content: bytes, source_name: str, where: str) -> RankingDefinition:
+    """The definition in `content`, read and checked: `config.invalid` names `where`, the key that
+    names it, when it breaks a rule."""
     try:
-        return read_definition(definition)
+        return read_definition(content)
     except DefinitionProblem as problem:
         at = "" if problem.line is None else f", at line {problem.line}"
         _fail(
@@ -585,6 +631,113 @@ def experiment_original_values(
         if text is not None:
             originals[setting.name] = (key, text)
     return originals
+
+
+@dataclass(frozen=True)
+class WeightOriginal:
+    """Where a weight row's value comes from, for `settings.csv` (docs/contracts.md, weight rows):
+    the key that names it and its text there, and whether that's the definition's copy,
+    `definition.xml`, or the configuration."""
+
+    key: str
+    """`ranking.definition`, `baseline.ranking.definition`, or a ranking variant's `set`
+    entry's place, such as `variants.ranking[0].set[1]`."""
+    text: str
+    """The node's `Weight` attribute as the definition writes it, between its quotes, or the
+    `set` entry's weight as the configuration writes it."""
+    in_definition: bool
+    """Whether the definition gives it, so its source is the copy of the definition."""
+
+
+def screen_original_values_v1_1(
+    content: bytes, source_name: str, read: ScreenConfigurationRead
+) -> tuple[Mapping[str, str], Mapping[str, WeightOriginal]]:
+    """For a screen configuration that `read_screen_configuration_v1_1` read, as `read`, from
+    `content`: each top-level value's text, as `original_values` gives it, and, for a ranking
+    given as a definition, each weight row's original, by its node's canonical path, from the
+    definition, named by `ranking.definition`."""
+    originals = original_values(content, source_name)
+    if read.definition is None:
+        return originals, {}
+    return originals, _definition_weights(read.definition, "ranking.definition")
+
+
+def experiment_original_values_v1_1(
+    content: bytes, source_name: str, read: ExperimentConfigurationRead, case_key: str
+) -> tuple[Mapping[str, tuple[str, str]], Mapping[str, WeightOriginal]]:
+    """For the case `case_key` of an experiment configuration that
+    `read_experiment_configuration_v1_1` read, as `read`, from `content`: each setting's key path
+    and text, as `experiment_original_values` gives them, with a ranking variant's `ranking`
+    row's as its entry, `variants.ranking[<i>]`, and its text; and, for a baseline ranked by a
+    definition, each weight row's original, by its node's canonical path in the case's
+    definition. A weight the case's ranking variant changes comes from its `set` entry, and every
+    other from the baseline's definition, named by `baseline.ranking.definition`.
+
+    Raises `ValueError` when the configuration has no case keyed `case_key`.
+    """
+    configuration = read.configuration
+    if isinstance(configuration, ExperimentConfiguration):
+        return experiment_original_values(content, source_name, case_key), {}
+    _, _, _, values = _read_yaml(content, source_name, node_paths=True)
+    variant = None
+    if case_key != BASELINE_CASE_KEY:
+        found = [v for v in configured_variants_v1_1(configuration) if v.key == case_key]
+        if not found:
+            raise ValueError("the configuration has no case with this key")
+        (variant,) = found
+    originals: dict[str, tuple[str, str]] = {}
+    for setting in SCREEN_SETTINGS:
+        key = _original_key(setting.name, variant)
+        text = None if key is None else values.get(key)
+        if key is not None and text is not None:
+            originals[setting.name] = (key, text)
+    return originals, _experiment_weights(read, values, variant)
+
+
+def _original_key(setting: str, variant: ConfiguredVariantV1_1 | None) -> str | None:
+    """The key that writes the setting's value for a case of `variant`, or the baseline's case;
+    None for the default variant's `rebalance_weeks`, which no key writes."""
+    if variant is None or setting != variant.setting:
+        return f"baseline.{setting}"
+    if variant.place is None:
+        return None
+    change = variant.variant
+    if isinstance(change, RankingVariant):
+        return variant.place
+    if isinstance(change, RuleVariant):
+        return f"{variant.place}.{'add' if change.add is not None else 'with'}"
+    return f"{variant.place}.value"
+
+
+def _definition_weights(definition: RankingDefinition, key: str) -> dict[str, WeightOriginal]:
+    return {node.path: WeightOriginal(key, node.weight_text, True) for node in definition.nodes}
+
+
+def _experiment_weights(
+    read: ExperimentConfigurationRead,
+    values: Mapping[str, str],
+    variant: ConfiguredVariantV1_1 | None,
+) -> dict[str, WeightOriginal]:
+    """Each weight row's original for a case of `variant`, by its node's canonical path in the
+    case's definition: the baseline's definition's, but for each weight a ranking variant's `set`
+    changes. A removal leaves the other nodes in the baseline's order, so the case's nodes are
+    the baseline's, without the factor removed."""
+    baseline = read.definition
+    if baseline is None:
+        return {}
+    key = "baseline.ranking.definition"
+    if variant is None or not isinstance(variant.variant, RankingVariant):
+        return _definition_weights(baseline, key)
+    case = next(c for c in read.ranking_cases if c.place == variant.place)
+    weights = _definition_weights(case.definition, key)
+    removed = None if case.remove is None else case.remove.index
+    kept = [node for node in baseline.nodes if node.index != removed]
+    in_case = {node.index: own for node, own in zip(kept, case.definition.nodes, strict=True)}
+    for entry in case.set:
+        if entry.weight != entry.node.weight:
+            node = in_case[entry.node.index]
+            weights[node.path] = WeightOriginal(entry.place, values[entry.place], False)
+    return weights
 
 
 _SENT_TEXT: Final = frozenset(
