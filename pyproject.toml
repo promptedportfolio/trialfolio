@@ -71,10 +71,23 @@ line-length = 100
 # The specifications are read by people; keep the formatter out of their code blocks.
 extend-exclude = ["*.md"]
 
+[tool.ruff.lint]
+# The limits on a function's complexity and statements hold for src/ only (docs/refactoring.md,
+# decision 17). A function over them carries a noqa, which the task that shortens it removes
+# (docs/refactoring.md, Ruff's limits).
+extend-select = ["C901", "PLR0915"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-statements = 50
+
 [tool.ruff.lint.per-file-ignores]
 # Pydantic reports a ValueError from a validator as a validation error. A TypeError would escape
 # validation, so the contracts' validators raise ValueError for a value of the wrong type too.
 "src/trialfolio/contracts/*.py" = ["TRY004"]
+"!src/**" = ["C901", "PLR0915"]
 
 [tool.pyright]
 include = ["src", "tests", "scripts", "conftest.py"]

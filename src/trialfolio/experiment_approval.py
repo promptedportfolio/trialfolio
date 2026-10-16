@@ -536,7 +536,7 @@ class _CheckedRepeats:
     """Why a repeat named isn't made, for each that doesn't fail."""
 
 
-def _check_repeats(run: ExperimentRun, *, asks: bool) -> _CheckedRepeats:
+def _check_repeats(run: ExperimentRun, *, asks: bool) -> _CheckedRepeats:  # noqa: C901 - RF-T10 shortens it.
     """Checks each `--repeat` against the plan and the records (repeating a case). Raises
     `TrialFolioError` with `plan.approval_required` for one that can't apply."""
     if not run.repeats:

@@ -1,6 +1,6 @@
 # Readability refactor
 
-**Status:** Ready. The owner decided each of its [open questions](#open-questions) on 2026-10-13, and set it to Ready the same day, once the review of its pull request had ended. RF-T01 (2026-10-13) wrote the [check of the reports](#the-check-of-the-reports), and extracted the small shared helpers ([what RF-T01 settled](#what-rf-t01-settled)). RF-T02 (2026-10-13) split `report.py` into the `report/` package ([what RF-T02 settled](#what-rf-t02-settled)). RF-T03 (2026-10-14) wrote the shared `manifests` module, which the screen run, the experiment, and the review use ([what RF-T03 settled](#what-rf-t03-settled)). RF-T04 (2026-10-15) wrote the shared `record_checks` module, which the readers of a run and of an experiment use, and moved the experiment's paths to `experiment_paths` ([what RF-T04 settled](#what-rf-t04-settled)). RF-T05 (2026-10-15) wrote `case_state`, the rules of a case's state and outcome and the experiment's counts, which the reader of an experiment's records, the executor, and the plan display share, and `SavedExperiment.counts`, which the CLI only flattens ([what RF-T05 settled](#what-rf-t05-settled)). The owner confirmed the details it settled on 2026-10-16, and decided [question 5](#open-questions) the same day: `scripts/check` enforces Ruff's `C901` and `PLR0915` for `src/`, from a pull request of its own ([decision 17](#the-owners-decisions)). RF-T06 is next: it depends on RF-T03, and waits for no work under way unless that work changes `attempts.py` or `contracts/attempt.py`, the modules it separates ([decision 5](#the-owners-decisions)).
+**Status:** Ready. The owner decided each of its [open questions](#open-questions) on 2026-10-13, and set it to Ready the same day, once the review of its pull request had ended. RF-T01 (2026-10-13) wrote the [check of the reports](#the-check-of-the-reports), and extracted the small shared helpers ([what RF-T01 settled](#what-rf-t01-settled)). RF-T02 (2026-10-13) split `report.py` into the `report/` package ([what RF-T02 settled](#what-rf-t02-settled)). RF-T03 (2026-10-14) wrote the shared `manifests` module, which the screen run, the experiment, and the review use ([what RF-T03 settled](#what-rf-t03-settled)). RF-T04 (2026-10-15) wrote the shared `record_checks` module, which the readers of a run and of an experiment use, and moved the experiment's paths to `experiment_paths` ([what RF-T04 settled](#what-rf-t04-settled)). RF-T05 (2026-10-15) wrote `case_state`, the rules of a case's state and outcome and the experiment's counts, which the reader of an experiment's records, the executor, and the plan display share, and `SavedExperiment.counts`, which the CLI only flattens ([what RF-T05 settled](#what-rf-t05-settled)). The owner confirmed the details it settled on 2026-10-16, and decided [question 5](#open-questions) the same day: `scripts/check` enforces Ruff's `C901` and `PLR0915` for `src/`, from a pull request of its own ([decision 17](#the-owners-decisions)). That pull request enabled them on 2026-10-16, with an exemption for each function over them, which the task that shortens it removes ([Ruff's limits](#ruffs-limits)). RF-T06 is next: it depends on RF-T03, and waits for no work under way unless that work changes `attempts.py` or `contracts/attempt.py`, the modules it separates ([decision 5](#the-owners-decisions)).
 **Decided by:** [D-39](spec.md#decisions), on 2026-10-12 and 2026-10-13
 **Depends on:** the code on `main` at 8a4c475, the merge of [D-38](spec.md#decisions)'s fixes (#80), against which the findings below were checked. Each task also depends on the `v0.3.0` tag, which is met: `v0.3.0` was tagged on 2026-10-13, on 6da0c3f, the merge commit of the pull request that set [0.3.0](releases/0.3.0-experiments.md) to Implemented.
 
@@ -236,7 +236,7 @@ Each other function over 50 lines is left to the task that changes its module, w
 
 - **The tests.** 51 functions under `tests/` are over 50 lines, decorators included, and 38 of them are tests. `write_run`, in `tests/core/conftest.py`, is 124 lines. The largest test files are `tests/core/test_experiment_resume.py` (1,896 lines) and `tests/interface/test_json_summary.py` (1,807). They haven't been checked for repetition. The owner decided they get a second pass, after RF-T11 ([question 4](#open-questions)).
 - **The "1 metrics" wording.** `_Report._limitations` gives "1 metrics are unavailable", where `_ExperimentReport._limitations` gives the singular. It's fixed in a change of its own, outside the track ([question 3](#open-questions)).
-- **Enforcing the limits** in `scripts/check`, which the owner decided after RF-T05: a pull request of its own enables Ruff's `C901` and `PLR0915` for `src/` ([decision 17](#the-owners-decisions)).
+- **Enforcing the limits** in `scripts/check`, which the owner decided after RF-T05: a pull request of its own enables Ruff's `C901` and `PLR0915` for `src/` ([decision 17](#the-owners-decisions), [Ruff's limits](#ruffs-limits)).
 
 ## Acceptance criteria
 
@@ -384,6 +384,32 @@ RF-T04 moves no code that logs, and neither new module logs, so contracts.md's [
 8. **An invalid case's description.** The executor described a case whose response failed validation by its error's code, `failed (provider.response_invalid)`, and the plan display by that code written out; `outcome_code` gives the code written out for both, since only `provider.response_invalid` marks a case invalid. The executor's rejected cases, which `execution.partial` asks to revise, are those whose `outcome_code` is `provider.unsupported_capability`, which is the condition it tested in two parts.
 9. **What the executor keeps.** `_outcome` and `_described`, each one line over `case_state`, which its report, its counts, and `execution.partial` call by `case_id`, and `_provider_said`, which reads the describing attempt's record. `_partial` is 50 lines, from 51. The alternative was to call the functions at each site, which makes `_partial` longer.
 10. **The scratch checks aren't committed.** Besides RF-AC04's check, RF-T05's evidence used two scratch scripts, kept out of its pull request, as RF-T01's to RF-T04's were. One recorded, at 4003139 and on the branch, in the default suite, each `TrialFolioError` built, each plan display, and each value of the accessors RF-T05 rewrites: the executor's `counts`, `metrics_unavailable`, `outcomes`, and `repeat_attempts`, each `SavedCase`'s `state`, `outcome`, and `latest_charged`, `ExperimentRun.sends` and `awaiting_repeat`, and the CLI's `_experiment_counts` and `_cases`. The other built 20,000 random experiments, of up to nine attempts each, with every outcome, possible charge, and error code, responses that failed validation, tables, and `--repeat` options, and recorded what each of those gives, with the plan display's lines for each case and a retired one, `execution.partial`, both repeat checks, and the CLI's counts for a resume before its execution. A later task may propose them.
+
+## Ruff's limits
+
+Since 2026-10-16, as [decision 17](#the-owners-decisions) gives, `scripts/check`'s lint step enforces Ruff's `C901`, a function's complexity over 10, and `PLR0915`, its statements over 50, in `src/` only: `pyproject.toml`'s `[tool.ruff.lint]` selects both, and its per-file ignores leave out every path outside `src/`. Neither rule counts a function's lines, so the plan's limit of about 50 lines stays a criterion of each task, not of the check.
+
+Each function over a limit when they were enabled carries a `noqa` on its `def` line that names the task that shortens it, as below. That task removes the `noqa`, and `scripts/check` then holds the function to the limits. A new function in `src/` over a limit fails the check. There were 16 findings in 15 functions of 11 modules: the 15 RF-T05 counted, and `_check_ranking_variant`, which R04-T07 added.
+
+| Function | Rule | Task |
+|---|---|---|
+| `contracts/attempt.check_ending` | `C901` | RF-T06 |
+| `contracts/attempt.check_ranking_ending` | `C901` | RF-T06 |
+| `cli._Invocation._outputs` | `C901` | RF-T08 |
+| `cli._run_experiment` | `PLR0915` | RF-T08 |
+| `configuration._describe` | `C901` | RF-T09 |
+| `configuration._Builder._scalar` | `C901` | RF-T09 |
+| `storage.LocalArtifactStore._claim` | `C901` | RF-T09 |
+| `contracts/experiment_manifest._check_layout` | `C901` | RF-T10 |
+| `contracts/experiment_plan._check_ranking_variant` | `C901` | RF-T10 |
+| `contracts/screen_settings.check_value` | `C901` | RF-T10 |
+| `contracts/summary.JsonSummaryV1_2._check_experiment` | `C901` | RF-T10 |
+| `contracts/tables._check_setting` | `C901` | RF-T10 |
+| `contracts/tables._check_metric` | `C901` | RF-T10 |
+| `experiment_approval._check_repeats` | `C901` | RF-T10 |
+| `ExperimentExecution.__init__` | `C901` and `PLR0915` | RF-T11 |
+
+Each task is the one this plan gives the function's module: `_run_experiment`, `_scalar`, `_claim`, `_check_repeats`, and `__init__` are in [long functions](#long-functions), and each other function is left to the first task that changes its module, as that section gives. The two in `contracts/attempt.py` go to RF-T06, which deletes its `_Ending` Protocol, rather than to RF-T10.
 
 ## Open questions
 

@@ -190,7 +190,7 @@ class _Ending(Protocol):
     def response(self) -> SavedResponse | None: ...
 
 
-def check_ending(record: _Ending) -> tuple[list[Exchange], list[Exchange]]:
+def check_ending(record: _Ending) -> tuple[list[Exchange], list[Exchange]]:  # noqa: C901 - RF-T06 shortens it.
     """Raises `ValueError` unless the attempt record's ending is consistent, by the rules both
     versions share: its outcome, error, files, and `possibly_charged` follow its exchanges, as
     0.1.0's failure table gives them. Returns its request's exchanges and its authentication
@@ -526,7 +526,7 @@ class _RankingEnding(Protocol):
     def response(self) -> SavedResponse | None: ...
 
 
-def check_ranking_ending(record: _RankingEnding) -> list[Exchange]:
+def check_ranking_ending(record: _RankingEnding) -> list[Exchange]:  # noqa: C901 - RF-T06 shortens it.
     """Raises `ValueError` unless an attempt record 1.2.0's or 1.3.0's ending is consistent, as
     sending a definition gives it: a snapshot's `rank_get` by 0.1.0's rules; and an attempt with a
     definition's exchanges in order, its authentication's, then `POST /rank`, then

@@ -554,7 +554,7 @@ class _Invocation:
             ids["attempt_id"] = attempt.attempt_id
         return ids
 
-    def _outputs(self) -> dict[str, str]:
+    def _outputs(self) -> dict[str, str]:  # noqa: C901 - RF-T08 shortens it.
         if self._output_dir() is None:
             return {}
         if self.name == "init":
@@ -908,7 +908,7 @@ def _experiment_options(args: argparse.Namespace) -> str | None:
     )
 
 
-def _run_experiment(
+def _run_experiment(  # noqa: PLR0915 - RF-T08 shortens it.
     invocation: _Invocation,
     configuration: ExperimentConfiguration,
     content: bytes,

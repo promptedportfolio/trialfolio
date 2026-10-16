@@ -458,7 +458,7 @@ class PlanV1_3(ContractModel):
         return self
 
 
-def _check_ranking_variant(
+def _check_ranking_variant(  # noqa: C901 - RF-T10 shortens it.
     definition: RankingDefinition,
     baseline: ExperimentPlanCaseV1_3,
     case: ExperimentPlanCaseV1_3,

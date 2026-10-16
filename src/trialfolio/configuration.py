@@ -721,7 +721,7 @@ def _placed(location: KeyPath, document: object) -> KeyPath:
     return (*location[:4], list(cast("dict[str, object]", entries)).index(location[4]))
 
 
-def _describe(
+def _describe(  # noqa: C901 - RF-T09 shortens it.
     detail: ErrorDetails,
     document: object = None,
     variant_settings: tuple[str, ...] = VARIANT_SETTINGS,
@@ -953,7 +953,7 @@ class _Builder:
         if tag is not None:
             raise _Invalid(path, "has an explicit YAML tag. Tags aren't accepted.")
 
-    def _scalar(self, event: ScalarEvent, path: KeyPath) -> object:
+    def _scalar(self, event: ScalarEvent, path: KeyPath) -> object:  # noqa: C901 - RF-T09 shortens it.
         self._no_tag(event.tag, path)
         text = event.value
         if event.style is not None:

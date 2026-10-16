@@ -276,7 +276,7 @@ def _check_differences_row(row: "DifferencesRow | DifferencesRowV1_1") -> None:
         )
 
 
-def _check_setting(row: "DifferencesRow | DifferencesRowV1_1") -> None:
+def _check_setting(row: "DifferencesRow | DifferencesRowV1_1") -> None:  # noqa: C901 - RF-T10 shortens it.
     weights = isinstance(row, DifferencesRowV1_1)
     settings = SETTINGS_WITH_WEIGHTS_BY_NAME if weights else SCREEN_SETTINGS_BY_NAME
     setting = settings.get(row.name)
@@ -368,7 +368,7 @@ def _check_setting_flags(
         raise ValueError(f"{row.name}'s flags must be those its runs' rows carry")
 
 
-def _check_metric(row: "DifferencesRow | DifferencesRowV1_1") -> None:
+def _check_metric(row: "DifferencesRow | DifferencesRowV1_1") -> None:  # noqa: C901 - RF-T10 shortens it.
     if row.subject is None:
         raise ValueError("a metric row gives its subject")
     if (row.category, row.critical, row.declared_reason) != (None,) * 3:

@@ -402,7 +402,7 @@ class ExperimentExecution:
     and the manifest.
     """
 
-    def __init__(
+    def __init__(  # noqa: C901, PLR0915 - RF-T11 shortens it.
         self,
         plan: PlanV1_1,
         approved_hash: str,
