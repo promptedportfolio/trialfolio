@@ -511,6 +511,37 @@ def test_the_core_writes_a_synthetic_run_with_the_demos_client(tmp_path: Path) -
     assert lock.exists()
 
 
+def test_a_run_without_a_command_sends_nothing_with_a_client_that_isnt_the_demos(
+    tmp_path: Path, server: FakePortfolio123
+) -> None:
+    # A run without a command is synthetic, so its manifest would say its values are invented. A
+    # defect found by the review of R04-T08's pull request: a real client's requests were sent,
+    # and the run recorded as synthetic.
+    content, definition, plan = screen()
+    out = tmp_path / "out"
+    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
+    with LocalArtifactStore(out) as store:
+        execution = Execution(
+            plan,
+            plan.plan_hash,
+            "not_required",
+            store,
+            None,
+            clock=FixedClock(),
+            ranking_lock=tmp_path / LOCK_FILE,
+        )
+        with pytest.raises(ValueError, match="demo's"):
+            execution.run(
+                content,
+                lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint),
+                definition=definition,
+            )
+
+    assert server.requests() == []
+    assert not (out / "manifest.json").exists()
+    assert "Neither the rank_update request nor" in execution.ending_detail()
+
+
 def test_a_screen_run_is_given_its_definition_as_the_plan_has_it(tmp_path: Path) -> None:
     content, definition, plan = screen()
     store = LocalArtifactStore(tmp_path / "out")

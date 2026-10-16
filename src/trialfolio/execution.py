@@ -94,6 +94,7 @@ from trialfolio.contracts.manifest import (
 )
 from trialfolio.contracts.plan import Plan, PlanV1_2
 from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION
+from trialfolio.demo import SyntheticScreenBacktestClient
 from trialfolio.errors import TrialFolioError
 from trialfolio.manifests import (
     PROVIDER_ROLES,
@@ -309,7 +310,10 @@ class Execution:
         `experiment.locked` or `storage.write_failed`, and a `KeyboardInterrupt` during the lock
         or the claim, which removes what the claim created, so nothing is left. Raises
         `ValueError`, before anything else, when a plan 1.2.0 isn't given its definition, or one
-        whose hash isn't the plan's, or another plan is given one. After the claim, every ending
+        whose hash isn't the plan's, or another plan is given one. A run without a command is
+        synthetic, so `client` makes the demo's client: another one is closed unused, and is a
+        `ValueError` once it's made, before anything is sent, which leaves the output without an
+        attempt record or a manifest. After the claim, every ending
         is returned, except a second interrupt while the attempt record is written once more,
         and an unexpected exception after the attempt ended, which leave the output without a
         manifest. `ending_detail` says what such an ending means for the run.
@@ -446,6 +450,10 @@ class Execution:
             if self._attempt is None:
                 self._attempt = self._new_attempt()
             return self._attempt.end_before_authenticating(ending)
+        if self._command is None and not isinstance(made, SyntheticScreenBacktestClient):
+            # Its manifest would call the run synthetic, and its values invented.
+            made.close()
+            raise ValueError("a run without a command is synthetic: its client is the demo's")
         try:
             return self._attempt.run(made)
         finally:
