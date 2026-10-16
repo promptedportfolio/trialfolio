@@ -6,19 +6,25 @@ planner's job (R01-T10); the model doesn't recompute either.
 
 A 1.2.0 plan has 1.0.0's fields, with `ranking_source`, a case's two requests, its `rank_update`
 and its backtest, the weight rows, each setting's `node`, and a budget with each operation's
-cost. The models give their shapes and each row's rules; whether a case's requests and weight
-rows are what its definition gives is checked across the plan (release 0.4.0's R04-T07).
+cost. Besides their shapes and each row's rules, the models check the consistency rules of plans
+with a ranking definition (release 0.4.0's R04-T07): a case's `rank_update` writes the definition
+its `ranking` setting names by hash, with its ranking method; its weight rows are that
+definition's nodes and weights; its backtest ranks by `ApiRankingSystem`, and is otherwise what
+its settings send; `ranking_source` gives the baseline's definition; and the budget's credits are
+what its costs give. A case's definition is read by the rules of `trialfolio.ranking_definitions`.
 """
 
 import math
 from collections.abc import Mapping
 from datetime import date
-from typing import Annotated, Final, Literal, Self, cast
+from typing import TYPE_CHECKING, Annotated, Final, Literal, Self, cast
 
 from pydantic import AfterValidator, BeforeValidator, Field, StringConstraints, model_validator
 
 from trialfolio.contracts.common import (
+    API_RANKING_SYSTEM,
     MAX_SAFE_INTEGER,
+    RANKING_METHOD_NUMBERS,
     CaseId,
     ContractModel,
     DateText,
@@ -43,7 +49,6 @@ from trialfolio.contracts.screen_configuration import (
     IdRanking,
     NameRanking,
     Ranking,
-    read_ranking,
 )
 from trialfolio.contracts.screen_settings import (
     RANKING_WEIGHT,
@@ -53,7 +58,11 @@ from trialfolio.contracts.screen_settings import (
     check_flags,
     check_row,
     check_value,
+    read_ranking_setting,
 )
+
+if TYPE_CHECKING:
+    from trialfolio.ranking_definitions import RankingDefinition
 
 # The request's parameters keep Portfolio123's own names, so the model reads like the request.
 
@@ -188,7 +197,8 @@ REBALANCE_FREQUENCIES: Final = {1: "Every Week", 4: "Every 4 Weeks"}
 def screen_backtest_params(values: Mapping[str, object]) -> ScreenBacktestParams:
     """Builds the request the resolved settings send, by the screen configuration's "Sent as"
     mapping (docs/contracts.md). `values` holds each sent setting's value as a plan holds it,
-    by setting name, already valid."""
+    by setting name, already valid. A ranking given as a definition is sent as the name
+    `ApiRankingSystem`, which the case's `rank_update` writes it into (sending a definition)."""
 
     def text(name: str) -> str:
         return cast("str", values[name])
@@ -196,7 +206,7 @@ def screen_backtest_params(values: Mapping[str, object]) -> ScreenBacktestParams
     def integer(name: str) -> int:
         return cast("int", values[name])
 
-    ranking: Ranking = read_ranking(values["ranking"])
+    ranking: Ranking | DefinitionRankingSetting = read_ranking_setting(values["ranking"], "any")
     sent: object
     match ranking:
         case FormulaRanking():
@@ -205,6 +215,8 @@ def screen_backtest_params(values: Mapping[str, object]) -> ScreenBacktestParams
             sent = ranking.name
         case IdRanking():
             sent = ranking.id
+        case DefinitionRankingSetting():
+            sent = API_RANKING_SYSTEM
     rules = cast("tuple[str, ...]", values["rules"])
     return ScreenBacktestParams.model_validate(
         {
@@ -450,6 +462,68 @@ def check_ranking_settings(settings: tuple[PlanSettingV1_2, ...]) -> None:
         )
 
 
+def read_nodes(nodes: str) -> "RankingDefinition":
+    """The definition a `rank_update`'s `nodes` holds, read by the rules of ranking definitions,
+    as a definition file's text is. Raises `ValueError` unless it's a definition Trial Folio
+    reads, whose text, each line end a line feed, is `nodes` exactly."""
+    # Imported here, not above: trialfolio.ranking_definitions applies an experiment
+    # configuration's ranking variants, and that configuration's module imports this one.
+    from trialfolio.ranking_definitions import DefinitionProblem, read_definition
+
+    try:
+        definition = read_definition(nodes.encode("utf-8"))
+    except (DefinitionProblem, UnicodeEncodeError):
+        raise ValueError(
+            "a rank_update's nodes is a ranking definition that Trial Folio reads"
+        ) from None
+    if definition.text != nodes:
+        raise ValueError("a rank_update's nodes ends each line with a line feed alone")
+    return definition
+
+
+def _definition_setting(settings: tuple[PlanSettingV1_2, ...]) -> DefinitionRankingSetting:
+    """The `ranking` setting of a case whose settings are valid: a definition's hash and its
+    ranking method."""
+    (value,) = (row.value for row in settings if row.setting == "ranking")
+    if not isinstance(value, DefinitionRankingSetting):  # each row's value is checked first
+        raise ValueError("a ranking given as a definition holds its hash and its ranking method")
+    return value
+
+
+def check_ranking_case(
+    requests: tuple[RankUpdateRequest, PlanRequest], settings: tuple[PlanSettingV1_2, ...]
+) -> "RankingDefinition":
+    """Raises `ValueError` unless a case with a ranking definition is consistent (plans with a
+    ranking definition): its settings are the screen settings, in order, with its weight rows
+    right after `ranking`; its `rank_update` writes the definition whose hash its `ranking`
+    setting holds, with that setting's ranking method; its weight rows are the weights that
+    definition gives its nodes, in its order, by their canonical paths; and its backtest ranks by
+    `ApiRankingSystem`, and is otherwise what its settings send. Returns its definition."""
+    check_ranking_settings(settings)
+    ranking = _definition_setting(settings)
+    update = requests[0].params
+    definition = read_nodes(update.nodes)
+    if definition.hash != ranking.definition:
+        raise ValueError(
+            "a rank_update's nodes is the definition whose hash its case's ranking setting holds"
+        )
+    if update.rankingMethod != RANKING_METHOD_NUMBERS[ranking.ranking_method]:
+        raise ValueError("a rank_update's rankingMethod is the number of its case's ranking method")
+    weights = [(row.node, row.value) for row in settings if row.setting == RANKING_WEIGHT.name]
+    if weights != [(node.path, format(node.weight, "f")) for node in definition.nodes]:
+        raise ValueError(
+            "a case's weight rows are the weights its definition gives its nodes, in the "
+            "definition's order, by their canonical paths"
+        )
+    backtest = requests[1].params
+    if backtest.screen.ranking != API_RANKING_SYSTEM:
+        raise ValueError(f"a backtest with a ranking definition ranks by {API_RANKING_SYSTEM}")
+    values = {row.setting: row.value for row in settings if row.node is None}
+    if backtest != screen_backtest_params(values):
+        raise ValueError("the backtest's params must be what the settings send")
+    return definition
+
+
 class PlanCaseV1_2(ContractModel):
     """The one case of a screen whose ranking is a definition: its `rank_update`, then its
     backtest, ranked by `ApiRankingSystem`, and its settings, with a weight row for each node."""
@@ -460,8 +534,8 @@ class PlanCaseV1_2(ContractModel):
     settings: tuple[PlanSettingV1_2, ...]
 
     @model_validator(mode="after")
-    def _screen_settings(self) -> Self:
-        check_ranking_settings(self.settings)
+    def _consistent(self) -> Self:
+        check_ranking_case(self.requests, self.settings)
         return self
 
 
@@ -473,10 +547,31 @@ class OperationCost(ContractModel):
     source: DocumentedSource
 
 
-def check_costs(costs: tuple[OperationCost, OperationCost]) -> None:
-    """Raises `ValueError` unless `costs` gives the `rank_update`'s cost, then the backtest's."""
+def ranking_credits(provider_requests: int, costs: tuple[OperationCost, OperationCost]) -> int:
+    """The most `provider_requests` can cost at `costs`, the `rank_update`'s and then the
+    backtest's, sent as a plan with a ranking definition sends them: each backtest follows its
+    case's `rank_update` in the same attempt, so at most half of them, rounded down, are
+    backtests, and the rest cost what a `rank_update` does (plans with a ranking definition)."""
+    rank_update, backtest = costs
+    backtests = provider_requests // 2
+    return (
+        backtests * backtest.credits_per_request
+        + (provider_requests - backtests) * rank_update.credits_per_request
+    )
+
+
+def check_costs(
+    costs: tuple[OperationCost, OperationCost], provider_requests: int, credits: int
+) -> None:
+    """Raises `ValueError` unless `costs` gives the `rank_update`'s cost, then the backtest's,
+    and `credits` is the most `provider_requests` can cost at them."""
     if tuple(cost.operation for cost in costs) != ("rank_update", "screen_backtest"):
         raise ValueError("costs gives rank_update's cost, then screen_backtest's")
+    if credits != ranking_credits(provider_requests, costs):
+        raise ValueError(
+            "credits is the most the provider requests can cost at the costs given, with half of "
+            "them, rounded down, backtests, and the rest rank_updates"
+        )
 
 
 class PlanBudgetV1_2(ContractModel):
@@ -493,7 +588,7 @@ class PlanBudgetV1_2(ContractModel):
 
     @model_validator(mode="after")
     def _costs(self) -> Self:
-        check_costs(self.costs)
+        check_costs(self.costs, self.provider_requests, self.credits)
         return self
 
 
@@ -512,6 +607,24 @@ class RankingSource(ContractModel):
     """The `artifact_id` of a snapshot's `snapshot.json`; null for a file."""
     snapshot_definition: Sha256Digest | None
     """The `artifact_id` of a snapshot's `definition.xml`; null for a file."""
+
+    @model_validator(mode="after")
+    def _follows_its_form(self) -> Self:
+        snapshot = (self.system, self.snapshot_record, self.snapshot_definition)
+        if self.form == "definition" and snapshot != (None, None, None):
+            raise ValueError("a file's ranking_source gives no system or snapshot files")
+        if self.form == "snapshot" and None in snapshot:
+            raise ValueError(
+                "a snapshot's ranking_source gives its system's name and its files' artifact_ids"
+            )
+        return self
+
+
+def check_ranking_source(source: RankingSource, baseline: tuple[PlanSettingV1_2, ...]) -> None:
+    """Raises `ValueError` unless `source` gives the definition the baseline's `ranking` setting
+    names by hash (plans with a ranking definition)."""
+    if source.definition != _definition_setting(baseline).definition:
+        raise ValueError("ranking_source's definition is the hash of the baseline's definition")
 
 
 DATA_SENT_SETTINGS_V1_2: Final[dict[DataCategory, frozenset[str]]] = {
@@ -559,6 +672,7 @@ class PlanV1_2(ContractModel):
     plan_hash: Sha256Digest
 
     @model_validator(mode="after")
-    def _unique_categories(self) -> Self:
+    def _consistent(self) -> Self:
         require_unique(tuple(entry.category for entry in self.data_sent), "data_sent categories")
+        check_ranking_source(self.ranking_source, self.cases[0].settings)
         return self

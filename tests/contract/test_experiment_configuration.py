@@ -888,7 +888,7 @@ def test_documented_ranking_example_compiles_to_its_cases(tmp_path: Path) -> Non
     is the snapshot example; the experiment gives the four cases the example describes, each with
     the definition it describes; each alteration the validation lists fails; and a path with `\\/`
     in single quotes names the node a path with `\\\\/` in double quotes names. The plan these
-    cases compile to is release 0.4.0's R04-T07's."""
+    cases compile to is checked in `tests/core/test_ranking_plan.py` (release 0.4.0's R04-T07)."""
     xml = ranking_example_xml()
     assert (FIXTURES / "ranking" / "value-momentum.xml").read_bytes() == xml.encode()
     assert (FIXTURES / "ranking-example.yaml").read_bytes() == ranking_example().encode()
