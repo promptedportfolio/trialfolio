@@ -95,7 +95,7 @@ Every task respects these:
 
 At 8a4c475, measured as the scope measured 4a3bd93, with a function's lines counted from its `def` to its last line:
 
-- **Functions:** 38 are over 50 lines, and another 26 are 41 to 50 lines. Ruff's complexity rules, which the project doesn't enable, flag 38 places: `C901` 13, `PLR0913` 11, `PLR0912` 6, `PLR0911` 6, and `PLR0915` 2.
+- **Functions:** 38 are over 50 lines, and another 26 are 41 to 50 lines. Ruff's complexity rules, which the project didn't enable then, flag 38 places: `C901` 13, `PLR0913` 11, `PLR0912` 6, `PLR0911` 6, and `PLR0915` 2. Since 2026-10-16, `scripts/check` enforces `C901` and `PLR0915` in `src/` ([Ruff's limits](#ruffs-limits)).
 - **Modules:** five are over 1,000 lines: `report.py` (4,024), `experiment_execution.py` (1,721), `cli.py` (1,562), `experiment_records.py` (1,452), and `attempts.py` (1,071).
 - **Classes:** four have 30 or more methods, and each is over 750 lines: `ExperimentExecution` (62 methods), `_ReviewReport` (49), `_ExperimentReport` (38), and `_Report` (30).
 
