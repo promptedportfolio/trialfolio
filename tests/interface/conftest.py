@@ -43,6 +43,7 @@ from trialfolio.cli import API_ID_VARIABLE, API_KEY_VARIABLE, main
 from trialfolio.configuration import read_screen_configuration
 from trialfolio.planning import build_plan, installed_versions
 from trialfolio.provider import REQUEST_TIMEOUT_SECONDS
+from trialfolio.ranking_lock import LOCK_DIRECTORY_VARIABLE
 from trialfolio.storage import ArtifactStore, LocalArtifactStore
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -130,6 +131,11 @@ class Cli:
         monkeypatch.setenv("HOME", str(self.home))
         for name in VARIABLES:
             monkeypatch.delenv(name, raising=False)
+        # The ranking lock's file is in the test's own directory, so tests that run at once don't
+        # exclude each other, and none takes the machine's lock.
+        self.locks = tmp_path / "locks"
+        self.locks.mkdir()
+        monkeypatch.setenv(LOCK_DIRECTORY_VARIABLE, str(self.locks))
 
     def accept_license(self) -> None:
         """Acknowledges the license for the test, as CI would, without a record."""
