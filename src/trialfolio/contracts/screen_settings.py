@@ -270,7 +270,7 @@ def check_row(
     return setting
 
 
-def check_value(setting: ScreenSetting, value: object, rankings: RankingValues = "forms") -> None:
+def check_value(setting: ScreenSetting, value: object, rankings: RankingValues = "forms") -> None:  # noqa: C901 - RF-T10 shortens it.
     """Raises `ValueError` unless `value` is a valid value of the setting in its JSON type, as a
     plan holds it, and one of its `allowed` values when it has any. A `ranking` row's may be any
     form `rankings` allows."""

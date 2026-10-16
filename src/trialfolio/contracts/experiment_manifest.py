@@ -301,7 +301,7 @@ def _check_manifest(
     _check_layout(manifest, role_paths)
 
 
-def _check_layout(
+def _check_layout(  # noqa: C901 - RF-T10 shortens it.
     manifest: "ExperimentManifest | ExperimentManifestV1_1", role_paths: dict[str, re.Pattern[str]]
 ) -> None:
     plans: Counter[tuple[str, str]] = Counter()

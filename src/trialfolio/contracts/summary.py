@@ -299,7 +299,7 @@ class JsonSummaryV1_2(ContractModel):
         self._check_experiment()
         return self
 
-    def _check_experiment(self) -> None:
+    def _check_experiment(self) -> None:  # noqa: C901 - RF-T10 shortens it.
         if self.command != "run":
             raise ValueError("an experiment is run with run")
         if "case_id" in self.ids or "attempt_id" in self.ids:

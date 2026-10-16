@@ -482,7 +482,7 @@ class LocalArtifactStore:
             " Check the drive or share it's on.",
         )
 
-    def _claim(self, claim: "_Claim", data: bytes, *, lock: bool) -> None:
+    def _claim(self, claim: "_Claim", data: bytes, *, lock: bool) -> None:  # noqa: C901 - RF-T09 shortens it.
         try:
             new = _make_directories(self._root, claim.directories)
         except FileNotFoundError:
