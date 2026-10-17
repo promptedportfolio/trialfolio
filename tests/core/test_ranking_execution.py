@@ -52,7 +52,6 @@ from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 from trialfolio.errors import TrialFolioError
 from trialfolio.execution import Execution
 from trialfolio.experiment_execution import Cancellation, ExperimentExecution
-from trialfolio.experiment_records import open_experiment
 from trialfolio.planning import (
     build_experiment_plan,
     build_experiment_plan_v1_1,
@@ -1239,36 +1238,3 @@ def test_an_experiment_without_a_definition_is_refused_one_and_the_ranking_lock(
     with pytest.raises(ValueError, match="takes the lock"):
         execution(tmp_path / LOCK_FILE)
     assert not out.exists()
-
-
-def test_an_experiment_with_a_definition_isnt_resumed_by_this_executor_yet(
-    tmp_path: Path,
-) -> None:
-    # Resuming or revising one is release 0.4.0's R04-T09: until then, the executor refuses a
-    # plan 1.3.0 given an experiment's records, here a synthetic one's of plan 1.1.0.
-    content, earlier = synthetic_plan_1_1_0()
-    out = tmp_path / "out"
-    with LocalArtifactStore(out) as store:
-        ExperimentExecution(
-            earlier,
-            earlier.plan_hash,
-            "not_required",
-            store,
-            SyntheticScreenBacktestClient(response_bytes()),
-            command=None,
-            clock=FixedClock(),
-        ).run(content)
-    _, _, plan = experiment("ranking-example.yaml")
-    with LocalArtifactStore(out) as store:
-        saved = open_experiment(store)
-        with pytest.raises(TypeError):
-            ExperimentExecution(
-                plan,
-                plan.plan_hash,
-                "not_required",
-                store,
-                SyntheticScreenBacktestClient(response_bytes()),
-                command=None,
-                experiment=saved,
-                ranking_lock=tmp_path / LOCK_FILE,
-            )

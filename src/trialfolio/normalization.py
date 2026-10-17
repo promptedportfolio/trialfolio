@@ -591,7 +591,7 @@ def write_case_tables(
 
 
 def case_metrics_rows(
-    content: bytes, case: ExperimentPlanCase, response: SavedResponse
+    content: bytes, case: ExperimentPlanCase | ExperimentPlanCaseV1_3, response: SavedResponse
 ) -> tuple[MetricsRow, ...]:
     """The rows of the `metrics.csv` the installed parser writes for an experiment's case from its
     saved response, whose bytes are `content`. Raises `TrialFolioError` with
@@ -601,22 +601,38 @@ def case_metrics_rows(
 
 def write_case_settings(
     store: ArtifactStore,
-    case: ExperimentPlanCase,
+    case: ExperimentPlanCase | ExperimentPlanCaseV1_3,
     originals: Mapping[str, tuple[str, str]],
     *,
     configuration: StoredFile,
     metrics: Sequence[MetricsRow],
-) -> tuple[StoredFile, tuple[SettingsRow, ...]]:
+    ranking: RankingOriginals | None = None,
+) -> tuple[StoredFile, AnySettingsRows]:
     """Writes `cases/<case_id>/normalized/settings.csv` for a case whose `metrics.csv`, with the
     rows `metrics`, a stopped run wrote without it, and returns it with its rows.
 
     The settings are drawn from the configuration of the plan the attempt ran under, which no
     parser reads. The one thing they take from the response, its coverage dates, for
     `coverage_mismatch`, comes from `metrics`' coverage rows, so the pair agrees whichever parser
-    wrote `metrics.csv`. Raises `TrialFolioError` with `storage.write_failed` when it can't be
-    written.
+    wrote `metrics.csv`. A case of a plan 1.3.0 writes `settings.csv` 1.1.0, whose weight rows
+    take their originals from `ranking`, as `write_case_tables` writes it. Raises
+    `TrialFolioError` with `storage.write_failed` when it can't be written.
     """
     original_values, original_keys = _split(originals)
+    path = case_tables_path(case.case_id, SETTINGS_PATH)
+    if isinstance(case, ExperimentPlanCaseV1_3):
+        if ranking is None:
+            raise ValueError("a case whose ranking is a definition needs its weights' originals")
+        ranked = settings_rows_v1_1(
+            case,
+            original_values,
+            ranking,
+            label=case.case_id,
+            source_artifact=configuration.artifact_id,
+            coverage=_coverage_of(metrics),
+            original_keys=original_keys,
+        )
+        return store.write(path, settings_csv_v1_1(ranked)), ranked
     rows = settings_rows(
         case,
         original_values,
@@ -625,7 +641,6 @@ def write_case_settings(
         coverage=_coverage_of(metrics),
         original_keys=original_keys,
     )
-    path = case_tables_path(case.case_id, SETTINGS_PATH)
     return store.write(path, settings_csv(rows)), rows
 
 
@@ -654,7 +669,9 @@ def _coverage_of(metrics: Sequence[MetricsRow]) -> Coverage:
 
 
 def _metrics(
-    case: PlanCase | ExperimentPlanCase, response: SavedResponse, content: bytes
+    case: PlanCase | ExperimentPlanCase | ExperimentPlanCaseV1_3,
+    response: SavedResponse,
+    content: bytes,
 ) -> tuple[MetricsRow, ...]:
     _check_decoded(response)
     return metrics_rows(

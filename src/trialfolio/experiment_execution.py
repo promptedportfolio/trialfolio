@@ -63,8 +63,22 @@ steps, with these differences (sending a definition, running an experiment):
 - Step 5 writes `settings.csv` 1.1.0, with a weight row for each node, and step 6 experiment
   manifest 1.1.0, with the roles and source records of the files a definition adds.
 
-Resuming or revising an experiment whose plan, or its revision, is 1.3.0 is release 0.4.0's
-R04-T09's: until then, the executor refuses such a plan given an experiment's records.
+It resumes and revises such an experiment the same way (release 0.4.0's R04-T09), given its
+records, which `open_experiment` read with `ranking`:
+
+- It takes the ranking lock, on the file its caller gives, only when its session sends: when a
+  case is due or confirmed to repeat, and the budget covers the first one's two requests. It
+  takes it before its session record, and holds it until the execution ends. A resume that sends
+  nothing doesn't take it.
+- Step 2 writes the attempt record of each attempt whose latest record is its update record, as
+  sending a definition says, and a case's `settings.csv` 1.1.0, from the configuration and the
+  `definition.xml` of the plan its attempt ran under. A revision into a plan 1.3.0 writes its
+  `plans/<n>/definition.xml`, right after its `configuration.yaml`.
+- The budget counts each attempt's requests, two for an attempt that sends a definition, under
+  every plan, and an attempt starts only when both its requests fit; a repeat sends both again.
+- Each session of an experiment any of whose plans is 1.3.0 writes experiment manifest 1.1.0,
+  which lists each file of an earlier plan, or of an attempt under one, with the version it has,
+  and a file the latest manifest lists as it lists it.
 
 Execution with the demo's client, which sends nothing, writes a synthetic experiment: its plan
 and manifest record the approval `not_required`, and its report says its values are invented.
@@ -158,12 +172,22 @@ from trialfolio.contracts.manifest import (
     SourceRecord,
     SourceRecordV1_1,
 )
-from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION, MetricsRow
+from trialfolio.contracts.tables import (
+    TABLES_SCHEMA_VERSION,
+    TABLES_SCHEMA_VERSION_V1_1,
+    MetricsRow,
+    SettingsRowV1_1,
+)
 from trialfolio.demo import SyntheticScreenBacktestClient
 from trialfolio.display import series
 from trialfolio.errors import TrialFolioError
 from trialfolio.experiment_paths import plan_path, session_path
-from trialfolio.experiment_records import MissingTables, SavedExperiment, SavedExperimentAttempt
+from trialfolio.experiment_records import (
+    MissingTables,
+    SavedExperiment,
+    SavedExperimentAttempt,
+    SavedPlan,
+)
 from trialfolio.manifests import (
     PROVIDER_ROLES,
     RANK_UPDATE_ROLES,
@@ -197,16 +221,19 @@ from trialfolio.normalization import (
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
 from trialfolio.planning import (
     PlanRevision,
+    PlanRevisionV1_1,
     Versions,
     build_experiment_plan,
     build_experiment_plan_v1_1,
     check_approval,
     first_experiment_record_v1_1,
     plan_changes,
+    plan_changes_v1_1,
     plan_hash,
     retired_cases,
     retired_cases_v1_1,
     revised_experiment_record,
+    revised_experiment_record_v1_1,
 )
 from trialfolio.provider import DecodedResponse, ScreenBacktestClient, provider_message_of
 from trialfolio.ranking_lock import RankingLock
@@ -245,18 +272,20 @@ _SCHEMA_VERSIONS: Final[dict[ExperimentArtifactRoleV1_1, str]] = {
 """The schema version the manifest records for each role whose files have one, apart from the
 configuration, which gives its own."""
 
-_RANKING_SCHEMA_VERSIONS: Final[dict[ExperimentArtifactRoleV1_1, str]] = {
-    "plan": "1.3.0",
-    "experiment_record": "1.1.0",
+_FIXED_VERSIONS: Final[dict[ExperimentArtifactRoleV1_1, str]] = {
     "authentication_record": "1.0.0",
-    "update_record": "1.3.0",
-    "start_record": "1.3.0",
-    "attempt_record": "1.3.0",
     "metrics": TABLES_SCHEMA_VERSION,
-    "settings": "1.1.0",
     "session_record": "1.0.0",
 }
-"""The same, for an experiment with a ranking definition."""
+"""The same, for an experiment with a ranking definition, for the roles whose files have one
+version: each other file's is its plan's, its attempt's, or its table's (the experiment manifest's
+version 1.1.0)."""
+
+_ATTEMPT_RECORDS: Final[frozenset[ExperimentArtifactRoleV1_1]] = frozenset(
+    {"update_record", "start_record", "attempt_record"}
+)
+"""The roles of an attempt's records whose version is its attempt's: 1.3.0 for an attempt that
+sends a definition, and 1.1.0 otherwise."""
 
 _REASON: Final = TypeAdapter[str](RevisionReason)
 
@@ -405,6 +434,9 @@ class _Attempt:
     record: AttemptRecordV1_1 | AttemptRecordV1_3 | None
     """Its attempt record, once it's written."""
     files: tuple[AttemptFile, ...]
+    version: str
+    """The schema version of its start and attempt records: 1.3.0 for an attempt that sends a
+    definition, and 1.1.0 otherwise."""
 
 
 def _saved(attempt: SavedExperimentAttempt) -> _Attempt:
@@ -421,6 +453,7 @@ def _saved(attempt: SavedExperimentAttempt) -> _Attempt:
         authentication_calls=attempt.authentication_calls,
         record=attempt.record,
         files=attempt.files,
+        version=attempt.version,
     )
 
 
@@ -440,6 +473,7 @@ def _recorded(
         authentication_calls=sum(e.request == AUTHENTICATION_REQUEST for e in record.exchanges),
         record=record,
         files=files,
+        version=record.schema_version,
     )
 
 
@@ -478,6 +512,7 @@ def _ended(result: ExperimentAttemptResult) -> _Attempt:
         authentication_calls=int(result.authenticated),
         record=None,
         files=result.files,
+        version=record.schema_version,
     )
 
 
@@ -491,6 +526,14 @@ class _Tables:
     metrics_rows: tuple[MetricsRow, ...]
     settings_rows: AnySettingsRows
 
+    @property
+    def settings_version(self) -> str:
+        """`settings.csv`'s schema version: 1.1.0 for a case whose ranking is a definition."""
+        rows = self.settings_rows
+        if rows and isinstance(rows[0], SettingsRowV1_1):
+            return TABLES_SCHEMA_VERSION_V1_1
+        return TABLES_SCHEMA_VERSION
+
 
 @dataclass(frozen=True)
 class _RecordedPlan:
@@ -503,6 +546,8 @@ class _RecordedPlan:
     """Its `configuration.yaml`'s bytes, from which its cases' tables take their original
     values."""
     configuration_version: str
+    plan_version: str
+    """Its `plan.json`'s schema version: 1.3.0 for a plan with a ranking definition."""
     read: ExperimentConfigurationRead | None = None
     """The configuration as 0.4.0's reader read it, with its definition, for a plan with a
     ranking definition, from which its cases' weight rows take their original values."""
@@ -544,10 +589,11 @@ class ExperimentExecution:
 
         `experiment` is the experiment's records, which `open_experiment` read from `store`
         while taking its lock, to resume or revise it; None for a new experiment. `plan` is then
-        its current plan, which the session resumes, or a revision of it, which `plan_revision`
-        built, with its `reason`. `repeats` are the confirmed repeats, each checked as repeating
-        a case says. `ranking_lock` is the ranking lock's file, which a new experiment whose plan
-        is 1.3.0 takes, and no other execution does.
+        its current plan, which the session resumes, or a revision of it, which `plan_revision`,
+        or `plan_revision_v1_1` for an experiment with a ranking definition, built, with its
+        `reason`. `repeats` are the confirmed repeats, each checked as repeating a case says.
+        `ranking_lock` is the ranking lock's file, given exactly for a plan 1.3.0: a new
+        experiment takes it, and a resumed one when its session sends.
 
         Raises `TrialFolioError`:
 
@@ -565,8 +611,7 @@ class ExperimentExecution:
         isn't the current plan or a revision of it; when a repeat names a case twice; when the
         reason isn't a valid reason; when `approval` or `command` doesn't fit whether the
         experiment is synthetic; and when `ranking_lock` is given for a plan without a ranking
-        definition, or not given for one. Raises `TypeError` for a plan 1.3.0 given an
-        experiment's records, to resume or revise: release 0.4.0's R04-T09 builds that.
+        definition, or not given for one.
         """
         synthetic = isinstance(client, SyntheticScreenBacktestClient)
         if (approval == "not_required") != synthetic:
@@ -577,7 +622,7 @@ class ExperimentExecution:
             raise ValueError(
                 "an experiment with a ranking definition, and only one, takes the lock"
             )
-        self._revision: PlanRevision | None = None
+        self._revision: PlanRevision | PlanRevisionV1_1 | None = None
         self._reason: str | None = None
         self._repeats: dict[str, Repeat] = {}
         self._used: tuple[Repeat, ...] = ()
@@ -594,8 +639,6 @@ class ExperimentExecution:
             if plan.revises is not None:
                 raise ValueError("a new experiment's first plan revises none")
         else:
-            if isinstance(plan, PlanV1_3):
-                raise TypeError("an experiment with a ranking definition isn't resumed here yet")
             if synthetic != experiment.synthetic:
                 raise _another_kind(synthetic=experiment.synthetic)
             self._repeats, self._used = _confirmed(plan, experiment, repeats)
@@ -619,21 +662,10 @@ class ExperimentExecution:
         self._plan_number = 1 if experiment is None else experiment.current.number
         self._session_record: StoredFile | None = None
         self._record: ExperimentRecord | ExperimentRecordV1_1 | None = (
-            None if experiment is None else experiment.record
+            None if experiment is None else experiment.current.record
         )
         self._plans: list[_RecordedPlan] = (
-            []
-            if experiment is None
-            else [
-                _RecordedPlan(
-                    saved.number,
-                    saved.record,
-                    saved.files,
-                    saved.configuration_content,
-                    saved.configuration_version,
-                )
-                for saved in experiment.plans
-            ]
+            [] if experiment is None else [_recorded_plan(saved) for saved in experiment.plans]
         )
         self._attempts: list[_Attempt] = (
             [] if experiment is None else [_saved(attempt) for attempt in experiment.attempts]
@@ -679,16 +711,16 @@ class ExperimentExecution:
 
     def _approve(
         self,
-        plan: PlanV1_1,
+        plan: PlanV1_1 | PlanV1_3,
         approved_hash: str,
         experiment: SavedExperiment,
         reason: str | None,
     ) -> None:
         """Checks the approval of a resumed experiment's plan: the current plan's, as a new
         plan's is, or a revision's, with its reason (approving a revision)."""
-        current = experiment.plan
+        current = experiment.current.plan
         if plan == current:
-            if reason is not None and reason != experiment.record.plans[-1].reason:
+            if reason is not None and reason != experiment.current.record.plans[-1].reason:
                 raise _no_revision(
                     "The configuration gives the experiment's current plan, so there's no"
                     " revision to give a reason for: run it without a reason to resume it."
@@ -711,7 +743,17 @@ class ExperimentExecution:
             self._reason = _REASON.validate_python(reason)
         except ValidationError:
             raise ValueError("the reason isn't a valid revision reason") from None
-        self._revision = PlanRevision(plan, plan_changes(current, plan))
+        record = experiment.current.record
+        if (
+            isinstance(record, ExperimentRecord)
+            and isinstance(current, PlanV1_1)
+            and isinstance(plan, PlanV1_1)
+        ):
+            self._revision = PlanRevision(plan, plan_changes(current, plan))
+            return
+        # Once a plan of the experiment has a ranking definition, release 0.4.0's rules record
+        # its revisions, in experiment.json 1.1.0.
+        self._revision = PlanRevisionV1_1(plan, plan_changes_v1_1(current, plan))
 
     @property
     def claimed(self) -> bool:
@@ -820,19 +862,28 @@ class ExperimentExecution:
         `TrialFolioError`, `output.not_empty`, `experiment.locked`, or `storage.write_failed`,
         and a `KeyboardInterrupt` during the claim, which removes what the claim created, so
         nothing is left; and any unexpected exception, which leaves the session without its
-        manifest. A plan 1.3.0's execution takes the ranking lock first, and raises its
-        `TrialFolioError`, `experiment.locked` or `storage.write_failed`, before anything is
-        written, and holds it until it ends. A plan 1.3.0 not given its definition, or one whose
-        hash isn't the plan's, or another plan given one, is a `ValueError` too.
+        manifest. A plan 1.3.0's execution takes the ranking lock first, a resumed one's only
+        when its session sends, and raises its `TrialFolioError`, `experiment.locked` or
+        `storage.write_failed`, before anything is written, and holds it until it ends. A plan
+        1.3.0 not given its definition, or one whose hash isn't the plan's, or another plan given
+        one, is a `ValueError` too.
         """
         if self._started:
             raise RuntimeError("an execution runs once")
         self._started = True
         self._check_configuration(configuration, definition)
-        if self._lock is None:
+        if self._lock is None or not self._sends_any():
             return self._run(configuration, definition, on_claimed)
         with self._lock:
             return self._run(configuration, definition, on_claimed)
+
+    def _sends_any(self) -> bool:
+        """Whether the session will send anything, so it takes the ranking lock: a new
+        experiment's always does, and a resumed one's when a case is due, or confirmed to
+        repeat, and the remaining budget covers the first one's requests (the ranking lock)."""
+        if self._experiment is None:
+            return True
+        return bool(self._to_send()) and self._stop_before(authenticates=True) is None
 
     def _run(
         self,
@@ -853,7 +904,7 @@ class ExperimentExecution:
             else:
                 self._complete_records(self._experiment)
                 if self._revision is not None:
-                    self._write_revision(self._revision, configuration)
+                    self._write_revision(self._revision, configuration, definition)
         if ended.error is not None:
             return self._before_cases(ended.error)
         _logger.info(
@@ -963,6 +1014,7 @@ class ExperimentExecution:
                 tuple(files),
                 configuration,
                 self._configuration_version,
+                self._plan.schema_version,
                 self._read,
             )
         )
@@ -970,40 +1022,84 @@ class ExperimentExecution:
             "Recorded plan %d.", number, extra=self._log_fields("experiment.plan.recorded")
         )
 
-    def _write_revision(self, revision: PlanRevision, configuration: bytes) -> None:
+    def _write_revision(
+        self,
+        revision: PlanRevision | PlanRevisionV1_1,
+        configuration: bytes,
+        definition: bytes | None,
+    ) -> None:
         """Writes the revision's `plans/<n>/`, as for the first plan, with the reason in its
-        `experiment.json`, written last: nothing is sent under it before."""
+        `experiment.json`, written last: nothing is sent under it before. A revision into a plan
+        1.3.0 writes its `definition.xml` right after its `configuration.yaml`, and its
+        `experiment.json` is 1.1.0, as is every one after a plan 1.3.0."""
         number = self._next_plan()
         previous = self._experiment_record()
-        if not isinstance(previous, ExperimentRecord):  # a resume's records are 1.0.0's
-            raise TypeError("an experiment with a ranking definition isn't revised here yet")
         files: list[tuple[ExperimentArtifactRoleV1_1, StoredFile]] = []
         saved = self._store.write(plan_path(number, "configuration.yaml"), configuration)
         files.append(("configuration", saved))
+        if definition is not None:
+            copy = self._store.write(plan_path(number, DEFINITION_FILE), definition)
+            files.append(("ranking_definition", copy))
         plan = self._store.write(plan_path(number, "plan.json"), model_json(revision.plan))
         files.append(("plan", plan))
-        record = revised_experiment_record(
-            previous,
-            revision,
-            number=number,
-            reason=str(self._reason),
-            plan_artifact_id=plan.artifact_id,
-            configuration_artifact_id=saved.artifact_id,
-            approval=self._approval,
-            created_at=utc(self._clock()),
-        )
+        record = self._revised_record(previous, revision, number, plan, saved)
         written = self._store.write(plan_path(number, "experiment.json"), model_json(record))
         files.append(("experiment_record", written))
         self._record = record
         self._plan_number = number
         self._plans.append(
-            _RecordedPlan(number, record, tuple(files), configuration, self._configuration_version)
+            _RecordedPlan(
+                number,
+                record,
+                tuple(files),
+                configuration,
+                self._configuration_version,
+                revision.plan.schema_version,
+                self._read,
+            )
         )
         _logger.info(
             "Recorded plan %d, which revises plan %d.",
             number,
             previous.plans[-1].plan,
             extra=self._log_fields("experiment.plan.recorded"),
+        )
+
+    def _revised_record(
+        self,
+        previous: ExperimentRecord | ExperimentRecordV1_1,
+        revision: PlanRevision | PlanRevisionV1_1,
+        number: int,
+        plan: StoredFile,
+        configuration: StoredFile,
+    ) -> ExperimentRecord | ExperimentRecordV1_1:
+        """The revision's `experiment.json`, `plans/<number>/`'s, from the current plan's,
+        `previous`, written once its `plan.json` and its `configuration.yaml` are: 1.0.0 by
+        0.3.0's rules while no plan of the experiment has a ranking definition, and 1.1.0 by
+        release 0.4.0's once one has."""
+        reason, created_at = str(self._reason), utc(self._clock())
+        if isinstance(revision, PlanRevision) and isinstance(previous, ExperimentRecord):
+            return revised_experiment_record(
+                previous,
+                revision,
+                number=number,
+                reason=reason,
+                plan_artifact_id=plan.artifact_id,
+                configuration_artifact_id=configuration.artifact_id,
+                approval=self._approval,
+                created_at=created_at,
+            )
+        if isinstance(revision, PlanRevision):  # an experiment.json 1.1.0 takes 0.4.0's changes
+            raise TypeError("a revision recorded in experiment.json 1.1.0 is a PlanRevisionV1_1")
+        return revised_experiment_record_v1_1(
+            previous,
+            revision,
+            number=number,
+            reason=reason,
+            plan_artifact_id=plan.artifact_id,
+            configuration_artifact_id=configuration.artifact_id,
+            approval=self._approval,
+            created_at=created_at,
         )
 
     def _complete_records(self, experiment: SavedExperiment) -> None:
@@ -1061,6 +1157,7 @@ class ExperimentExecution:
                     configuration=missing.configuration,
                     response=missing.response,
                     content=missing.content,
+                    ranking=missing.ranking,
                 )
             except BaseException:
                 self._keep_published_metrics(case_id)
@@ -1080,6 +1177,7 @@ class ExperimentExecution:
             missing.originals,
             configuration=missing.configuration,
             metrics=saved.metrics_rows,
+            ranking=missing.ranking,
         )
         self._tables[case_id] = _Tables(
             saved.metrics, settings, saved.parser_version, saved.metrics_rows, rows
@@ -1089,11 +1187,8 @@ class ExperimentExecution:
 
     def _sends(self) -> list[tuple[ExperimentPlanCase | ExperimentPlanCaseV1_3, uuid.UUID | None]]:
         """The cases this session sends, in the plan's order, each with the attempt a repeat of
-        it repeats: every case of a new experiment; and in a resume, each case that's due, and
-        each awaiting a repeat that a confirmed repeat names."""
-        experiment = self._experiment
-        if experiment is None:
-            return [(case, None) for case in self._plan.cases]
+        it repeats, as `_to_send` gives them, once the repeats whose confirmation is used are
+        logged."""
         for repeat in self._used:
             _logger.info(
                 "The case isn't repeated: the repeat confirmed for its attempt %s was made"
@@ -1105,21 +1200,25 @@ class ExperimentExecution:
                     "terminal": False,
                 },
             )
+        return self._to_send()
+
+    def _to_send(
+        self,
+    ) -> list[tuple[ExperimentPlanCase | ExperimentPlanCaseV1_3, uuid.UUID | None]]:
+        """The cases this session sends, in the plan's order, each with the attempt a repeat of
+        it repeats: every case of a new experiment; and in a resume, each case that's due, and
+        each awaiting a repeat that a confirmed repeat names."""
+        experiment = self._experiment
+        if experiment is None:
+            return [(case, None) for case in self._plan.cases]
         sends: list[tuple[ExperimentPlanCase | ExperimentPlanCaseV1_3, uuid.UUID | None]] = []
-        for saved in experiment.cases(self._resumed()):
+        for saved in experiment.cases(self._plan):
             repeat = self._repeats.get(saved.case.case_id)
             if saved.state == "due":
                 sends.append((saved.case, None))
             elif saved.state == "awaiting_repeat" and repeat is not None:
                 sends.append((saved.case, repeat.attempt_id))
         return sends
-
-    def _resumed(self) -> PlanV1_1:
-        """The plan of a resumed experiment, which, until release 0.4.0's R04-T09, has no
-        ranking definition: the constructor refuses one."""
-        if not isinstance(self._plan, PlanV1_1):
-            raise TypeError("an experiment with a ranking definition isn't resumed here yet")
-        return self._plan
 
     def _run_cases(
         self, sends: Sequence[tuple[ExperimentPlanCase | ExperimentPlanCaseV1_3, uuid.UUID | None]]
@@ -1356,9 +1455,7 @@ class ExperimentExecution:
             parsers=self._parsers(),
             capabilities=capabilities(series=self._holds_series()),
             reproducibility=reproducibility(self._plan.cases),
-            artifacts=(
-                self._artifacts_v1_1() if isinstance(self._plan, PlanV1_3) else self._artifacts()
-            ),
+            artifacts=(self._artifacts_v1_1() if self._ranked else self._artifacts()),
         )
         self._evidence = evidence
         self._report = write_experiment_report(
@@ -1479,7 +1576,7 @@ class ExperimentExecution:
             reproducibility=reproducibility(self._plan.cases),
             counts=self._counts(),
         )
-        if isinstance(self._plan, PlanV1_3):
+        if self._ranked:
             ranked = self._artifacts_v1_1()
             if self._report is not None:
                 ranked = (*ranked, self._listed_v1_1("report", self._report))
@@ -1557,28 +1654,52 @@ class ExperimentExecution:
             listed.append(self._listed("session_record", self._session_record))
         return tuple(listed)
 
+    @property
+    def _ranked(self) -> bool:
+        """Whether a plan of the experiment has a ranking definition, so its sessions write
+        experiment manifest 1.1.0: the current plan's `experiment.json` is 1.1.0, or the plan
+        this execution runs is 1.3.0 (the experiment manifest's version 1.1.0)."""
+        return isinstance(self._record, ExperimentRecordV1_1) or isinstance(self._plan, PlanV1_3)
+
     def _artifacts_v1_1(self) -> tuple[ExperimentArtifactV1_1, ...]:
         """Each file of the records of an experiment with a ranking definition, as experiment
         manifest 1.1.0 lists it, in `_artifacts`' order, a plan's `definition.xml` and each
-        attempt's update record and `rank_update` files included. Only a new experiment has
-        one here, until release 0.4.0's R04-T09 resumes one, so no earlier manifest lists a
-        file of it."""
+        attempt's update record and `rank_update` files included. A file the latest manifest
+        lists is listed as it lists it, as `_artifacts` lists one, an entry of a manifest 1.0.0
+        as version 1.1.0 lists it; and each other file with its own version, its plan's, its
+        attempt's, or its table's."""
         listed = [
-            self._listed_v1_1(role, stored, plan=recorded)
+            self._earlier_v1_1(stored.path) or self._listed_v1_1(role, stored, plan=recorded)
             for recorded in self._plans
             for role, stored in recorded.files
         ]
         for attempt in self._attempts:
-            listed.extend(
-                self._listed_v1_1(file.role, file.file, attempt=attempt) for file in attempt.files
-            )
+            listed.extend(self._attempt_file_v1_1(file, attempt) for file in attempt.files)
             tables = self._tables.get(attempt.case_id)
             if tables is not None and attempt.outcome == "succeeded":
-                listed.append(self._listed_v1_1("metrics", tables.metrics))
-                listed.append(self._listed_v1_1("settings", tables.settings))
+                metrics, settings = tables.metrics, tables.settings
+                listed.append(
+                    self._earlier_v1_1(metrics.path) or self._listed_v1_1("metrics", metrics)
+                )
+                listed.append(
+                    self._earlier_v1_1(settings.path)
+                    or self._listed_v1_1("settings", settings, version=tables.settings_version)
+                )
         if self._session_record is not None:
             listed.append(self._listed_v1_1("session_record", self._session_record))
         return tuple(listed)
+
+    def _attempt_file_v1_1(self, file: AttemptFile, attempt: _Attempt) -> ExperimentArtifactV1_1:
+        """The file as experiment manifest 1.1.0 lists it, by `_attempt_file`'s rule."""
+        earlier = self._earlier_v1_1(file.file.path)
+        tables = self._tables.get(attempt.case_id)
+        if earlier is not None and not (
+            file.role == "provider_response"
+            and tables is not None
+            and self._earlier_v1_1(tables.metrics.path) is None
+        ):
+            return earlier
+        return self._listed_v1_1(file.role, file.file, attempt=attempt)
 
     def _attempt_file(self, file: AttemptFile, attempt: _Attempt) -> ExperimentArtifact:
         """The file as the manifest lists it: as the latest manifest does, unless it's a
@@ -1609,8 +1730,22 @@ class ExperimentExecution:
 
     def _earlier(self, path: str) -> ExperimentArtifact | None:
         """The latest manifest's entry for a file of the experiment's records, which the new
-        manifest lists as it is, its source record included."""
-        return None if self._experiment is None else self._experiment.listed(path)
+        manifest lists as it is, its source record included. A manifest 1.0.0 follows only
+        manifests 1.0.0: once a plan has a ranking definition, every session writes 1.1.0."""
+        entry = None if self._experiment is None else self._experiment.listed(path)
+        if entry is not None and not isinstance(entry, ExperimentArtifact):
+            raise RuntimeError("an experiment manifest 1.0.0 never follows a 1.1.0")
+        return entry
+
+    def _earlier_v1_1(self, path: str) -> ExperimentArtifactV1_1 | None:
+        """The latest manifest's entry for a file, as `_earlier` gives it, as experiment
+        manifest 1.1.0 lists it: an entry of a manifest 1.0.0, written before a plan of the
+        experiment had a ranking definition, has the same fields, and its source record a
+        version 1.1.0's."""
+        entry = None if self._experiment is None else self._experiment.listed(path)
+        if entry is None or isinstance(entry, ExperimentArtifactV1_1):
+            return entry
+        return ExperimentArtifactV1_1.model_validate_json(entry.model_dump_json())
 
     def _listed(
         self,
@@ -1644,12 +1779,21 @@ class ExperimentExecution:
         *,
         plan: _RecordedPlan | None = None,
         attempt: _Attempt | None = None,
+        version: str | None = None,
     ) -> ExperimentArtifactV1_1:
         """A file as experiment manifest 1.1.0 lists it: with its schema version, and the source
         record of a source artifact. A plan's `configuration.yaml` and `definition.xml` are
         acquired when the plan is recorded, as its `experiment.json` records; an attempt's
-        requests and responses, at its times (a run with a ranking definition)."""
-        schema_version = _RANKING_SCHEMA_VERSIONS.get(role)
+        requests and responses, at its times (a run with a ranking definition). Its version is
+        its plan's, for a plan's file, its attempt's, for an attempt's records, `version`, for
+        `settings.csv`, and otherwise its role's."""
+        schema_version = _FIXED_VERSIONS.get(role, version)
+        if plan is not None and role == "plan":
+            schema_version = plan.plan_version
+        elif plan is not None and role == "experiment_record":
+            schema_version = plan.record.schema_version
+        elif attempt is not None and role in _ATTEMPT_RECORDS:
+            schema_version = attempt.version
         source: SourceRecordV1_1 | None = None
         if plan is not None and role == "configuration":
             schema_version = plan.configuration_version
@@ -1747,8 +1891,21 @@ class ExperimentExecution:
         return fields
 
 
+def _recorded_plan(saved: SavedPlan) -> _RecordedPlan:
+    """A plan of a resumed experiment, as the records hold it."""
+    return _RecordedPlan(
+        saved.number,
+        saved.record,
+        saved.files,
+        saved.configuration_content,
+        saved.configuration_version,
+        saved.plan.schema_version,
+        saved.read,
+    )
+
+
 def _confirmed(
-    plan: PlanV1_1, experiment: SavedExperiment, repeats: Sequence[Repeat]
+    plan: PlanV1_1 | PlanV1_3, experiment: SavedExperiment, repeats: Sequence[Repeat]
 ) -> tuple[dict[str, Repeat], tuple[Repeat, ...]]:
     """Checks each confirmed repeat against the plan and the records (repeating a case), and
     returns the repeats to make, by `case_id`, and those whose confirmation an earlier repeat
