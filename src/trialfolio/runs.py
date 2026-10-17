@@ -381,6 +381,7 @@ def _attempts(
         records.setdefault(directory, {})[artifact.role] = _record(
             contents[artifact.path], artifact.path, artifact.role, plan, checks
         )
+    _check_recordless_responses(manifest, records)
     listed = {artifact.path: artifact for artifact in manifest.artifacts}
     attempts: list[SavedAttempt] = []
     for directory, read in records.items():
@@ -533,6 +534,19 @@ def _check_unrecorded(
             f"its manifest lists the start record in {named(directory)}, but not the {REQUEST}"
             " written before it."
         )
+
+
+def _check_recordless_responses(manifest: AnyManifest, records: Mapping[str, object]) -> None:
+    """Each saved `rank_update` response the manifest lists is in a directory whose records it
+    lists, as an experiment's attempt directory without records holds none (resuming, in the
+    core): an attempt saves one only after its update record."""
+    for artifact in manifest.artifacts:
+        directory = artifact.path.rpartition("/")[0]
+        if artifact.role in _RANK_UPDATE_ROLES.values() and directory not in records:
+            raise _not_a_run(
+                f"its manifest lists a saved rank_update response in {named(directory)}, but"
+                " not the update record written before its send."
+            )
 
 
 def _check_references(record: AnyRecord, listed: dict[str, AnyArtifact]) -> None:

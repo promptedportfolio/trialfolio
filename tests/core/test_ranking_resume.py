@@ -590,6 +590,26 @@ def _stopped_after_start(lab: Lab) -> Path:
     return lab.directory(EXAMPLE.cases[0].case_id)
 
 
+def _stopped_after_update_with_a_token(lab: Lab) -> Path:
+    """As `_stopped_after_update`, at the second case's attempt, which sends with the first's
+    token, so it has no authentication record: its update record is its only record."""
+    script(lab.server, ranks=[updated() for _ in range(4)], backtests=[complete()] * 3)
+    second = EXAMPLE.cases[1].case_id
+
+    def arm(store: StorageFaults) -> None:
+        store.fail_before(f"{second}/request.json", RuntimeError())
+        store.fail_before(f"{second}/attempt.json", RuntimeError())
+
+    lab.new(arm=arm)
+    directory = lab.directory(second)
+    assert sorted(path.name for path in directory.iterdir()) == [
+        "rank-update-request.json",
+        "rank-update-response.json",
+        "updating.json",
+    ]
+    return directory
+
+
 def _no_update_record(directory: Path) -> None:
     (directory / "updating.json").unlink()
 
@@ -622,6 +642,11 @@ def _rank_response_without_update(directory: Path) -> None:
             _rank_response_without_update,
             "holds the rank_update's response, but not the update record",
         ),
+        (
+            _stopped_after_update_with_a_token,
+            _rank_response_without_update,
+            "holds the rank_update's response, but not the update record",
+        ),
     ],
     ids=[
         "a start record without its update record",
@@ -629,6 +654,7 @@ def _rank_response_without_update(directory: Path) -> None:
         "two saved rank_update responses",
         "a start record without the rank_update's response",
         "a rank_update's response without its update record",
+        "a rank_update's response without any record",
     ],
 )
 def test_an_attempt_without_its_record_needs_the_files_written_before_it(
@@ -1682,6 +1708,11 @@ def _rank_update_request_listed_as(role: str) -> Callable[[Screen], None]:
             None,
             "not the request.json written before it",
         ),
+        (
+            ("rank-update-request.json", "rank-update-response.json"),
+            None,
+            "but not the update record written before its send",
+        ),
     ],
     ids=[
         "an update record without its request",
@@ -1689,6 +1720,7 @@ def _rank_update_request_listed_as(role: str) -> Callable[[Screen], None]:
         "two saved rank_update responses",
         "a start record without the rank_update's response",
         "a start record without its request",
+        "a rank_update's response without any record",
     ],
 )
 def test_a_runs_attempt_without_its_record_lists_the_files_written_before_it(

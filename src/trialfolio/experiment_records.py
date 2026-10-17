@@ -1460,7 +1460,9 @@ def _attempt(
     sessions: set[int],
 ) -> SavedExperimentAttempt | None:
     """The attempt in this directory, or None when it has none of its records, as after a
-    process killed before it wrote its first: there's no record of the attempt then."""
+    process killed before it wrote its first: there's no record of the attempt then. A saved
+    `rank_update` response, which an attempt saves only after its update record, is refused
+    then (resuming, in the core)."""
     directory = attempt_directory(case_id, attempt_id)
     names = reader.names(directory)
     if set(names) - set(reader.attempt_files):
@@ -1468,6 +1470,7 @@ def _attempt(
     authentication, update, start, record = _records(reader, directory, names)
     present = [r for r in (authentication, update, start, record) if r is not None]
     if not present:
+        _saved_rank_responses(directory, names, None)
         return None
     _check_identity(present, case_id, attempt_id)
     _check_agreement(
@@ -1746,13 +1749,8 @@ def _rank_response(
     if isinstance(record, AttemptRecordV1_3):
         saved = record.ranking_update.response
         return None if saved is None else (saved, reader.require(saved.path))
-    held = [name for name in (RANK_UPDATE_RESPONSE_FILE, RANK_UPDATE_RESPONSE_RAW) if name in names]
+    held = _saved_rank_responses(directory, names, update)
     if update is None:
-        if held:
-            raise _refused(
-                f"{named(directory + '/')} holds the rank_update's response, but not the update"
-                " record written before its send."
-            )
         return None
     if RANK_UPDATE_REQUEST_FILE not in names:
         raise _refused(
@@ -1776,6 +1774,21 @@ def _rank_response(
         form="decoded" if held[0] == RANK_UPDATE_RESPONSE_FILE else "undecoded",
     )
     return response, content
+
+
+def _saved_rank_responses(
+    directory: str, names: Sequence[str], update: StartRecordV1_3 | None
+) -> list[str]:
+    """The names of the `rank_update`'s saved responses among `names`, its directory's, which
+    an attempt without its attempt record holds only with its update record, written before the
+    `rank_update`'s send: one that lost every record included (resuming, in the core)."""
+    held = [name for name in (RANK_UPDATE_RESPONSE_FILE, RANK_UPDATE_RESPONSE_RAW) if name in names]
+    if held and update is None:
+        raise _refused(
+            f"{named(directory + '/')} holds the rank_update's response, but not the update"
+            " record written before its send."
+        )
+    return held
 
 
 def _check_references(
