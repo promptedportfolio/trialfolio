@@ -21,7 +21,8 @@ and its `settings.csv` 1.1.0, each the version a run of its plan writes. Such a 
 its `definition.xml`, which, read as a definition's file is read, has the hash its plan's
 `ranking_source` gives; each attempt that wrote its update record, `updating.json`, lists it, and
 it agrees with its other records; each file an attempt record's `ranking_update` references is
-listed, with the `rank_update`'s roles; and its weight rows are its plan's, drawn from its
+listed, with the `rank_update`'s roles, and an attempt listed without its attempt record lists the
+files written before its start records; and its weight rows are its plan's, drawn from its
 `definition.xml`. A snapshot's records are release 0.4.0's R04-T10's, so a plan whose ranking is
 a snapshot is refused until then.
 
@@ -50,6 +51,9 @@ from typing import Final, cast
 
 from trialfolio.attempts import (
     ATTEMPT_RECORD,
+    RANK_UPDATE_REQUEST_FILE,
+    RANK_UPDATE_RESPONSE_FILE,
+    RANK_UPDATE_RESPONSE_RAW,
     START_RECORD,
     UPDATE_RECORD,
     AttemptStatus,
@@ -81,6 +85,7 @@ from trialfolio.contracts.tables import (
     SettingsRowV1_1,
 )
 from trialfolio.errors import ErrorCode, TrialFolioError, reason_of
+from trialfolio.experiment_paths import REQUEST
 from trialfolio.normalization import METRICS_PATH, SETTINGS_PATH
 from trialfolio.record_checks import (
     RecordChecks,
@@ -400,6 +405,8 @@ def _attempts(
                 raise _not_a_run(f"the records in {named(directory)} name another plan.")
         if record is not None:
             _check_references(record, listed)
+        else:
+            _check_unrecorded(directory, update, start, listed)
         attempts.append(SavedAttempt(start, record, update))
     return tuple(attempts)
 
@@ -485,6 +492,47 @@ def _check_held(
         )
     ):
         raise ValueError("the attempt record doesn't hold its start records' contents")
+
+
+def _check_unrecorded(
+    directory: str,
+    update: StartRecordV1_2 | None,
+    start: AnyStart | None,
+    listed: dict[str, AnyArtifact],
+) -> None:
+    """An attempt that sends a definition, listed without its attempt record, lists the files
+    written before its start records, with their roles, as an experiment's attempt has them
+    (resuming, in the core): the `rank-update-request.json` written before its update record, at
+    most one saved `rank_update` response, and, with `started.json`, the decoded
+    `rank-update-response.json` and the backtest's `request.json`, both written before it. Any
+    other attempt without its attempt record, which has no update record, is read as before."""
+    if update is None:
+        return
+
+    def lists(name: str, role: ArtifactRoleV1_1) -> bool:
+        artifact = listed.get(f"{directory}/{name}")
+        return artifact is not None and artifact.role == role
+
+    if not lists(RANK_UPDATE_REQUEST_FILE, "rank_update_request"):
+        raise _not_a_run(
+            f"its manifest lists the update record in {named(directory)}, but not the"
+            f" {RANK_UPDATE_REQUEST_FILE} written before it."
+        )
+    responses = (RANK_UPDATE_RESPONSE_FILE, RANK_UPDATE_RESPONSE_RAW)
+    if all(f"{directory}/{name}" in listed for name in responses):
+        raise _not_a_run(
+            f"its manifest lists two saved rank_update responses in {named(directory)}."
+        )
+    if start is not None and not lists(RANK_UPDATE_RESPONSE_FILE, "rank_update_response"):
+        raise _not_a_run(
+            f"its manifest lists the start record in {named(directory)}, but not the"
+            f" {RANK_UPDATE_RESPONSE_FILE} saved before it."
+        )
+    if start is not None and not lists(REQUEST, "provider_request"):
+        raise _not_a_run(
+            f"its manifest lists the start record in {named(directory)}, but not the {REQUEST}"
+            " written before it."
+        )
 
 
 def _check_references(record: AnyRecord, listed: dict[str, AnyArtifact]) -> None:

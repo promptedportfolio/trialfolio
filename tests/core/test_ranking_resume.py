@@ -1606,6 +1606,135 @@ def test_a_runs_attempt_with_only_its_update_record_reads_as_running(
     )
 
 
+def _listing_only(run: Screen, *names: str) -> None:
+    """The run's manifest lists its plan's files, and only these of its attempt's, as a run whose
+    attempt record wasn't written would list them."""
+    kept = {f"{run.attempt}/{name}" for name in names}
+
+    def only(content: Json) -> None:
+        content["artifacts"] = [
+            a
+            for a in content["artifacts"]
+            if a["path"] in ("plan.json", "configuration.yaml", "definition.xml")
+            or a["path"] in kept
+        ]
+
+    _edit(run.out, "manifest.json", only, run.manifest)
+
+
+def _undecoded_rank_update_response_listed(run: Screen) -> None:
+    """A `rank-update-response.raw` beside the decoded response, listed with its role."""
+    data = b"<html>not JSON</html>"
+    path = f"{run.attempt}/rank-update-response.raw"
+    (run.out / path).write_bytes(data)
+
+    def listed(content: Json) -> None:
+        (decoded,) = [a for a in content["artifacts"] if a["role"] == "rank_update_response"]
+        raw = json.loads(json.dumps(decoded))
+        raw.update(
+            path=path,
+            artifact_id="sha256:" + sha256_hex(data),
+            size=len(data),
+            role="rank_update_response_undecoded",
+        )
+        raw["source"]["format"] = "p123api-rank-update-response_undecoded"
+        content["artifacts"].append(raw)
+
+    _edit(run.out, "manifest.json", listed, run.manifest)
+
+
+def _rank_update_request_listed_as(role: str) -> Callable[[Screen], None]:
+    """The manifest's entry for `rank-update-request.json`, with another role."""
+
+    def change(content: Json) -> None:
+        (entry,) = [a for a in content["artifacts"] if a["role"] == "rank_update_request"]
+        entry["role"] = role
+
+    return lambda run: _edit(run.out, "manifest.json", change, run.manifest)
+
+
+@pytest.mark.parametrize(
+    ("names", "change", "problem"),
+    [
+        (("updating.json",), None, "not the rank-update-request.json written before it"),
+        (
+            ("rank-update-request.json", "updating.json"),
+            _rank_update_request_listed_as("provider_request"),
+            "not the rank-update-request.json written before it",
+        ),
+        (
+            ("rank-update-request.json", "updating.json", "rank-update-response.json"),
+            _undecoded_rank_update_response_listed,
+            "two saved rank_update responses",
+        ),
+        (
+            ("rank-update-request.json", "updating.json", "request.json", "started.json"),
+            None,
+            "not the rank-update-response.json saved before it",
+        ),
+        (
+            (
+                "rank-update-request.json",
+                "updating.json",
+                "rank-update-response.json",
+                "started.json",
+            ),
+            None,
+            "not the request.json written before it",
+        ),
+    ],
+    ids=[
+        "an update record without its request",
+        "an update record whose request is listed as another file",
+        "two saved rank_update responses",
+        "a start record without the rank_update's response",
+        "a start record without its request",
+    ],
+)
+def test_a_runs_attempt_without_its_record_lists_the_files_written_before_it(
+    tmp_path: Path,
+    server: FakePortfolio123,
+    names: tuple[str, ...],
+    change: Callable[[Screen], object] | None,
+    problem: str,
+) -> None:
+    # As an experiment's attempt without its attempt record has them (resuming, in the core).
+    run = write_screen(tmp_path, server)
+    _listing_only(run, *names)
+    if change is not None:
+        change(run)
+    before = _files(run.out)
+
+    with pytest.raises(TrialFolioError) as caught:
+        read_run(LocalArtifactStore(run.out))
+
+    assert caught.value.code == "input.not_a_run"
+    assert problem in caught.value.message, caught.value.message
+    assert _files(run.out) == before
+
+
+def test_a_runs_attempt_with_its_start_record_and_no_attempt_record_reads_as_running(
+    tmp_path: Path, server: FakePortfolio123
+) -> None:
+    # Its files written before `started.json` are listed, so it's complete: two requests.
+    run = write_screen(tmp_path, server)
+    _listing_only(
+        run,
+        "rank-update-request.json",
+        "updating.json",
+        "rank-update-response.json",
+        "request.json",
+        "started.json",
+    )
+
+    saved = read_run(LocalArtifactStore(run.out))
+
+    (attempt,) = saved.attempts
+    assert attempt.record is None and attempt.start is not None
+    status = attempt.status
+    assert (status.outcome, status.provider_requests) == ("running", 2)
+
+
 def _settings_listed_1_1_0(manifest: Json) -> None:
     (entry,) = [a for a in manifest["artifacts"] if a["role"] == "settings"]
     entry["schema_version"] = "1.1.0"
