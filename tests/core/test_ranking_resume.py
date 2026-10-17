@@ -1057,6 +1057,40 @@ def _weight_row_source(out: Path) -> None:
     _rewrite(out, path, settings_csv_v1_1(changed))
 
 
+def _weight_row_drawn_from(case: int, node: str, file: str) -> Callable[[Path], None]:
+    """Gives the weight row of `node`, in the settings.csv of `EXAMPLE`'s case at that place, the
+    `artifact_id` of `file`, one of the plan's, as its source."""
+
+    def change(out: Path) -> None:
+        path = f"cases/{EXAMPLE.cases[case].case_id}/normalized/settings.csv"
+        rows = read_settings_csv_v1_1((out / path).read_bytes(), "settings")
+        source = "sha256:" + sha256_hex((out / file).read_bytes())
+        assert any(row.node == node and row.source_artifact != source for row in rows)
+        changed = [
+            row.model_copy(update={"source_artifact": source}) if row.node == node else row
+            for row in rows
+        ]
+        _rewrite(out, path, settings_csv_v1_1(changed))
+
+    return change
+
+
+def _start_record_as_update_record(out: Path) -> None:
+    """The second case's `started.json`, replaced by its `updating.json`. The attempt sent with its
+    session's token, so its update record holds no exchange, and both records then name the
+    rank_update."""
+    directory = _attempt_of(out, 1)
+    _rewrite(out, f"{directory}/started.json", (out / directory / "updating.json").read_bytes())
+
+
+def _update_record_as_start_record(out: Path) -> None:
+    """The second case's `updating.json`, replaced by its `started.json`, which is gone: both
+    records then name the backtest, and the update record holds the rank_update's 200."""
+    directory = _attempt_of(out, 1)
+    _rewrite(out, f"{directory}/updating.json", (out / directory / "started.json").read_bytes())
+    _unlisted(out, f"{directory}/started.json")
+
+
 def _record_1_1_0(out: Path) -> None:
     """An attempt record 1.1.0, valid, of an attempt that ended before it authenticated, under the
     plan 1.3.0, in a new attempt's directory, which no manifest lists."""
@@ -1114,6 +1148,18 @@ EXPERIMENT_BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         lambda out: _edit(out, f"{_attempt_of(out, 1)}/updating.json", _transport_changed),
         "the start record doesn't hold the update record's values",
     ),
+    "a started.json that names the rank_update, as its updating.json does": (
+        _start_record_as_update_record,
+        "a start record doesn't name the request it comes before",
+    ),
+    "an updating.json that names the backtest, as its missing started.json did": (
+        _update_record_as_start_record,
+        "a start record doesn't name the request it comes before",
+    ),
+    "an attempt record that sent its backtest, without its started.json": (
+        lambda out: _unlisted(out, f"{_attempt_of(out, 1)}/started.json"),
+        "its backtest was sent, or may have been, without the start record written before it",
+    ),
     "a started.json whose exchanges don't end with the rank_update's 200": (
         lambda out: _edit(out, f"{_attempt_of(out, 1)}/started.json", _rank_update_status(500)),
         "isn't a valid start record",
@@ -1146,6 +1192,14 @@ EXPERIMENT_BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
     ),
     "a weight row drawn from another file": (
         _weight_row_source,
+        "weight rows aren't its case's definition's",
+    ),
+    "a weight row its ranking variant changes, drawn from the definition": (
+        _weight_row_drawn_from(1, "Value", "plans/1/definition.xml"),
+        "weight rows aren't its case's definition's",
+    ),
+    "a weight row its definition gives, drawn from the configuration": (
+        _weight_row_drawn_from(0, "Value", "plans/1/configuration.yaml"),
         "weight rows aren't its case's definition's",
     ),
     "a settings.csv listed as 1.0.0 under a plan 1.3.0": (
@@ -1182,6 +1236,29 @@ def test_an_experiments_broken_records_fail_the_check_and_nothing_is_sent(
 
     error = refused(ran, "input.not_a_run")
     assert problem in error.message, error.message
+    assert ran.received == () and ran.published == ()
+    assert _files(lab.out) == before
+
+
+def test_an_attempt_a_resume_recorded_from_its_started_json_needs_that_record(lab: Lab) -> None:
+    # Only a resume from `started.json` records an attempt `unknown` after its rank_update's 200,
+    # without a backtest exchange, so its backtest may have been sent: a copy that lost that start
+    # record fails the check, as one that lost a sent backtest's does.
+    script(lab.server, auths=2, ranks=[updated() for _ in range(4)], backtests=[complete()] * 4)
+    lab.new(arm=first_case_faults(("response.json", "os"), ("attempt.json", "unexpected")))
+    lab.resume()
+    (record,) = lab.attempts(EXAMPLE.cases[0].case_id)
+    assert (record.outcome, record.exchanges) == (
+        "unknown",
+        (exchange(AUTH, 200), exchange(RANK, 200)),
+    )
+    _unlisted(lab.out, f"{_attempt_of(lab.out, 0)}/started.json")
+    before = _files(lab.out)
+
+    ran = lab.resume()
+
+    error = refused(ran, "input.not_a_run")
+    assert "its backtest was sent, or may have been, without the start record" in error.message
     assert ran.received == () and ran.published == ()
     assert _files(lab.out) == before
 

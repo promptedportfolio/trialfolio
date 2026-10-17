@@ -1650,9 +1650,24 @@ def _check_update(
     shared: set[str],
     disagree: str,
 ) -> None:
-    """The update record of an attempt that sends a definition agrees with its other records:
-    `started.json` holds its values, and its exchanges, then the `rank_update`'s 200; and the
-    attempt record holds its values, and both's exchanges, first (sending a definition)."""
+    """The update record of an attempt that sends a definition agrees with its other records: each
+    names the request it comes before, the update record the `rank_update`, and `started.json`
+    the backtest; `started.json` holds its values, and its exchanges, then the `rank_update`'s
+    200; the attempt record holds its values, and both's exchanges, first; and an attempt record
+    that shows its backtest sent, or possibly sent, has `started.json`, the last write before that
+    send (sending a definition)."""
+    if update.operation != "rank_update" or (
+        isinstance(start, StartRecordV1_3) and start.operation != "screen_backtest"
+    ):
+        raise _refused(
+            f"{disagree}: a start record doesn't name the request it comes before: the"
+            f" rank_update in {UPDATE_RECORD}, and the screen backtest in {START_RECORD}."
+        )
+    if start is None and isinstance(record, AttemptRecordV1_3) and _backtest_sent(record):
+        raise _refused(
+            f"{disagree}: the attempt record shows that its backtest was sent, or may have been,"
+            " without the start record written before it."
+        )
     if start is not None and (
         start.model_dump(include=shared) != update.model_dump(include=shared)
         or start.exchanges[:-1] != update.exchanges
@@ -1667,6 +1682,16 @@ def _check_update(
         or record.exchanges[: len(latest.exchanges)] != latest.exchanges
     ):
         raise _refused(f"{disagree}: the attempt record doesn't hold its start records'.")
+
+
+def _backtest_sent(record: AttemptRecordV1_3) -> bool:
+    """Whether the attempt record shows its backtest sent, or possibly sent: by its exchange, or
+    as a resume records an attempt from `started.json` without a saved response, `unknown`, with
+    the backtest's request and no exchange of it, as counting the requests counts it (sending a
+    definition)."""
+    return any(e.request == SCREEN_BACKTEST_REQUEST for e in record.exchanges) or (
+        record.outcome == "unknown" and record.request is not None
+    )
 
 
 def _response(
@@ -1995,13 +2020,40 @@ def _settings(
     if saved.definition is not None and (
         not isinstance(case, ExperimentPlanCaseV1_3)
         or not holds_each_weight(weights, case.settings)
-        or not drawn_from(weights, configuration, saved.definition.artifact_id)
+        or not _drawn_as_written(weights, saved, case.case_key)
     ):
         raise _refused(
             f"{named(path)}'s weight rows aren't its case's definition's: each gives the weight its"
-            " plan gives its node, drawn from the plan's definition.xml, or its configuration."
+            " plan gives its node, drawn from the plan's definition.xml, or, for a weight its"
+            " ranking variant changes, its configuration."
         )
     return StoredFile.of(path, content), rows
+
+
+def _drawn_as_written(weights: Sequence[SettingsRowV1_1], saved: SavedPlan, case_key: str) -> bool:
+    """Whether each weight row of the case `case_key`, of the plan 1.3.0 `saved`, was drawn from
+    the file its weight comes from: the plan's `definition.xml`, or its configuration, for a
+    weight the case's ranking variant changes, as the session that wrote it draws it (weight
+    rows)."""
+    path = saved.configuration.path
+    read = cast("ExperimentConfigurationRead", saved.read)
+    definition = cast("StoredFile", saved.definition)
+    try:
+        _, originals = experiment_original_values_v1_1(
+            saved.configuration_content, path, read, case_key
+        )
+    except (TrialFolioError, ValueError):
+        raise _refused(
+            f"{named(path)} isn't a configuration this version reads for its case, so its weight"
+            " rows' sources can't be checked."
+        ) from None
+    for row in weights:
+        original = originals.get(cast("str", row.node))
+        given = original is not None and original.in_definition
+        source = definition.artifact_id if given else saved.configuration.artifact_id
+        if row.source_artifact != source:
+            return False
+    return True
 
 
 def _parser_of(response: str, listed: Mapping[str, AnyArtifact]) -> int:
