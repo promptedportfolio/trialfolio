@@ -95,6 +95,8 @@ from trialfolio.attempts import (
     AttemptFile,
     AttemptRole,
     attempt_directory,
+    authentication_calls,
+    provider_metadata,
     provider_requests,
     ranking_detail,
     request_detail,
@@ -463,9 +465,9 @@ class SavedExperimentAttempt:
         of its attempt record, or of its first start record when it has no attempt record yet,
         or one when its authentication record is its only record (the budget across runs)."""
         if self.record is not None:
-            return _authentications(self.record.exchanges)
+            return authentication_calls(self.record.exchanges)
         if self.opening is not None:
-            return _authentications(self.opening.exchanges)
+            return authentication_calls(self.opening.exchanges)
         return 1
 
     def completed_record(self, plan: AnyPlan, ended_at: datetime) -> AnyAttemptRecord:
@@ -2224,21 +2226,7 @@ def _metadata(response: SavedResponse | RankUpdateResponse, content: bytes) -> P
         payload: object = json.loads(content)
     except (UnicodeDecodeError, ValueError, RecursionError):
         return ProviderMetadata(cost=None, quota_remaining=None)
-    if not isinstance(payload, dict):
-        return ProviderMetadata(cost=None, quota_remaining=None)
-    fields = cast("dict[str, object]", payload)
-    return ProviderMetadata(
-        cost=_count(fields.get("cost")), quota_remaining=_count(fields.get("quotaRemaining"))
-    )
-
-
-def _count(value: object) -> int | None:
-    # A bool is an int in Python, and never a count.
-    return value if type(value) is int and value >= 0 else None
-
-
-def _authentications(exchanges: Sequence[Exchange]) -> int:
-    return sum(exchange.request == AUTHENTICATION_REQUEST for exchange in exchanges)
+    return provider_metadata(payload)
 
 
 # Refusing
