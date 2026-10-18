@@ -57,8 +57,11 @@ are its plan's, drawn from the plan's `definition.xml`, or, for a weight its ran
 changes, its configuration. An attempt whose latest record is its update record stopped during
 its `rank_update`, or after it and before its backtest was sent: it reads as step 8 records it,
 `failed` with the `rank_update`'s response saved, and `unknown` without it, possibly charged
-either way, with one provider request (sending a definition). A snapshot's records are release
-0.4.0's R04-T10's, so a plan whose ranking is a snapshot is refused until then. Without
+either way, with one provider request (sending a definition). A plan whose baseline's ranking
+a snapshot names also holds the copy of the snapshot's record, `snapshot.json`, which, with its
+`definition.xml`, is the snapshot its `ranking_source` names, by their `artifact_id`s (release
+0.4.0's R04-T10); a plan whose ranking is a definition's file holds none.
+Without
 `ranking`, as `trialfolio run` reads the records until release 0.4.0's R04-T12, it reads 0.3.0's
 versions only.
 
@@ -157,6 +160,7 @@ from trialfolio.contracts.experiment_record import (
     RecordedCaseV1_1,
     SessionRecord,
 )
+from trialfolio.contracts.ranking_snapshot import RankingSnapshotRecord
 from trialfolio.contracts.tables import (
     TABLES_SCHEMA_VERSION,
     TABLES_SCHEMA_VERSION_V1_1,
@@ -199,6 +203,7 @@ from trialfolio.record_checks import (
     matches,
     named,
 )
+from trialfolio.snapshots import SnapshotFiles
 from trialfolio.storage import LOCK_PATH, ArtifactStore, StoredFile
 from trialfolio.tables import (
     metrics_csv,
@@ -227,6 +232,9 @@ type AnyArtifact = ExperimentArtifact | ExperimentArtifactV1_1
 
 DEFINITION: Final = "definition.xml"
 """A plan's copy of its ranking definition, in its `plans/<n>/` (ranking definitions)."""
+SNAPSHOT: Final = "snapshot.json"
+"""A plan's copy of the record of the snapshot its baseline's ranking names, after its
+`definition.xml` (reading a snapshot)."""
 
 _ATTEMPT_FILES: Final[dict[str, AttemptRole]] = {
     AUTHENTICATION_RECORD: "authentication_record",
@@ -262,8 +270,9 @@ record."""
 _PLAN_FILES: Final = frozenset({CONFIGURATION, PLAN, EXPERIMENT_RECORD})
 """The files of a plan's directory, `plans/<n>/`."""
 
-_RANKING_PLAN_FILES: Final = _PLAN_FILES | {DEFINITION}
-"""The same, with the copy of a ranking definition, which a plan 1.3.0's directory holds."""
+_RANKING_PLAN_FILES: Final = _PLAN_FILES | {DEFINITION, SNAPSHOT}
+"""The same, with the copy of a ranking definition, which a plan 1.3.0's directory holds, and of
+a snapshot's record, when a snapshot names its baseline's ranking."""
 
 _NUMBER: Final = re.compile(r"[1-9][0-9]*")
 _CASE_ID: Final = re.compile(r"case-[0-9a-f]{16}")
@@ -294,6 +303,7 @@ messages: 0.3.0's, as `trialfolio run` reads them until release 0.4.0's R04-T12.
 _RANKING_READABLE: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
     "experiment_record": ("experiment records", ("1.0.0", "1.1.0")),
     "plan": ("plans", ("1.1.0", "1.3.0")),
+    "ranking_snapshot_record": ("snapshot records", ("1.0.0",)),
     "session_record": ("session records", ("1.0.0",)),
     "manifest": ("experiment manifests", ("1.0.0", "1.1.0")),
     "authentication_record": ("authentication records", ("1.0.0",)),
@@ -327,6 +337,8 @@ class SavedPlan:
     """The schema version of its `configuration.yaml`, which its manifest entry records."""
     definition: StoredFile | None = None
     """Its `definition.xml`, for a plan 1.3.0, whose ranking is a definition."""
+    snapshot: StoredFile | None = None
+    """Its `snapshot.json`, for a plan 1.3.0 whose baseline's ranking a snapshot names."""
     read: ExperimentConfigurationRead | None = None
     """For a plan 1.3.0, its configuration as release 0.4.0's reader read it, with its
     `definition.xml`, from which its cases' weight rows take their originals."""
@@ -1129,12 +1141,14 @@ def _plan(reader: _Reader, number: int, previous: SavedPlan | None) -> SavedPlan
     _check_entry(record, number, plan, content, configuration)
     _check_history(record, number, plan, previous)
     _check_declared(record, number, plan, previous)
-    definition = _definition(reader, number, plan)
+    definition, snapshot = _definition(reader, number, plan)
     files: list[tuple[ExperimentArtifactRoleV1_1, StoredFile]] = [
         ("configuration", StoredFile.of(configuration_path, configuration))
     ]
     if definition is not None:
         files.append(("ranking_definition", definition))
+    if snapshot is not None:
+        files.append(("ranking_snapshot_record", snapshot))
     files.append(("plan", StoredFile.of(path, content)))
     files.append(("experiment_record", StoredFile.of(record_path, record_content)))
     return SavedPlan(
@@ -1146,6 +1160,7 @@ def _plan(reader: _Reader, number: int, previous: SavedPlan | None) -> SavedPlan
         files=tuple(files),
         configuration_version="",
         definition=definition,
+        snapshot=snapshot,
     )
 
 
@@ -1171,22 +1186,24 @@ def _version(reader: _Reader, content: bytes, path: str, kind: str) -> object:
     return version
 
 
-def _definition(reader: _Reader, number: int, plan: AnyPlan) -> StoredFile | None:
+def _definition(
+    reader: _Reader, number: int, plan: AnyPlan
+) -> tuple[StoredFile | None, StoredFile | None]:
     """`plans/<number>/definition.xml`, for a plan 1.3.0, checked: there, and, read as a
     definition's file is read, with the hash its plan's `ranking_source` gives (a complete run,
-    and checking the records). A plan 1.1.0 has none. A snapshot's records are release 0.4.0's
-    R04-T10's."""
+    and checking the records); and its `snapshot.json`, for a plan whose baseline's ranking a
+    snapshot names, the snapshot its `ranking_source` names. A plan 1.1.0 has neither, and a
+    plan whose ranking is a definition's file no `snapshot.json`."""
     path = plan_path(number, DEFINITION)
+    names = reader.names(f"plans/{number}")
     if not isinstance(plan, PlanV1_3):
-        if DEFINITION in reader.names(f"plans/{number}"):
-            raise _refused(f"{named(path)} is there, though its plan has no ranking definition.")
-        return None
+        if DEFINITION in names or SNAPSHOT in names:
+            raise _refused(
+                f"{named(path)} or its snapshot.json is there, though its plan has no ranking"
+                " definition."
+            )
+        return None, None
     source = plan.ranking_source
-    if source.form != "definition":
-        raise _refused(
-            f"{named(plan_path(number, PLAN))}'s ranking is a snapshot, whose records this version"
-            " of Trial Folio doesn't read."
-        )
     content = reader.get(path)
     if content is None:
         raise _refused(f"{named(path)} is missing, though its plan's ranking is a definition.")
@@ -1194,6 +1211,36 @@ def _definition(reader: _Reader, number: int, plan: AnyPlan) -> StoredFile | Non
         raise _refused(
             f"{named(path)} isn't its plan's ranking definition: read as a definition's file is"
             " read, it doesn't have the hash its plan's ranking_source gives."
+        )
+    if source.form == "definition":
+        if SNAPSHOT in names:
+            raise _refused(
+                f"{named(plan_path(number, SNAPSHOT))} is there, though its plan's ranking is a"
+                " definition's file."
+            )
+        return StoredFile.of(path, content), None
+    return StoredFile.of(path, content), _snapshot(reader, number, plan, content)
+
+
+def _snapshot(reader: _Reader, number: int, plan: PlanV1_3, definition: bytes) -> StoredFile:
+    """`plans/<number>/snapshot.json`, for a plan whose baseline's ranking a snapshot names,
+    checked: there, a valid snapshot record, and, with the plan's `definition.xml`, whose bytes
+    are `definition`, the snapshot its `ranking_source` names, by their `artifact_id`s (reading a
+    snapshot)."""
+    path = plan_path(number, SNAPSHOT)
+    content = reader.get(path)
+    if content is None:
+        raise _refused(f"{named(path)} is missing, though its plan's ranking is a snapshot.")
+    reader.checks.record(RankingSnapshotRecord, content, path, "ranking_snapshot_record")
+    source = plan.ranking_source
+    if (artifact_id(content), artifact_id(definition)) != (
+        source.snapshot_record,
+        source.snapshot_definition,
+    ):
+        raise _refused(
+            f"{named(path)} and its plan's definition.xml aren't the snapshot its plan's"
+            " ranking_source names: their artifact_ids aren't its snapshot_record and"
+            " snapshot_definition."
         )
     return StoredFile.of(path, content)
 
@@ -1320,11 +1367,13 @@ def _ranked_configuration(reader: _Reader, saved: SavedPlan) -> ExperimentConfig
     which reads no file but those bytes."""
     path = saved.configuration.path
     content = saved.configuration_content
-    definition = cast("StoredFile", saved.definition)
+    definition = reader.require(cast("StoredFile", saved.definition).path)
     try:
-        return read_experiment_configuration_v1_1(
-            content, path, path, definition=reader.require(definition.path)
-        )
+        if saved.snapshot is not None:
+            record = reader.require(saved.snapshot.path)
+            files = SnapshotFiles(definition=definition, record=record)
+            return read_experiment_configuration_v1_1(content, path, path, snapshot=files)
+        return read_experiment_configuration_v1_1(content, path, path, definition=definition)
     except (TrialFolioError, ValueError):
         pass
     _check_configuration_version(reader, content, path)

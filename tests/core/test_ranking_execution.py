@@ -59,7 +59,7 @@ from trialfolio.planning import (
     build_plan_v1_1,
     installed_versions,
 )
-from trialfolio.provider import Credentials, P123ScreenBacktestClient
+from trialfolio.provider import REQUEST_TIMEOUT_SECONDS, Credentials, P123ScreenBacktestClient
 from trialfolio.ranking_lock import LOCK_FILE
 from trialfolio.storage import LocalArtifactStore
 from trialfolio.tables import read_settings_csv_v1_1
@@ -161,7 +161,7 @@ def run_screen(
     if os_fault is not None:
         store.fail_os(os_fault)
     credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-    options = {} if timeout is None else {"timeout": timeout}
+    seconds = REQUEST_TIMEOUT_SECONDS if timeout is None else timeout
     before = len(server.received)
     try:
         error = Execution(
@@ -174,7 +174,9 @@ def run_screen(
             ranking_lock=tmp_path / LOCK_FILE,
         ).run(
             content,
-            lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint, **options),
+            lambda: P123ScreenBacktestClient(
+                credentials, endpoint=server.endpoint, timeout=seconds
+            ),
             definition=definition,
         )
     finally:

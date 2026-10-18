@@ -12,9 +12,8 @@ R04-T06).
   gives the segment at fault by its number, counted from 1, never the path's text.
 - `apply_ranking_variant` gives a ranking variant's case: its definition, the baseline's with
   the variant's change, made by the text rules, and the nodes it sets and removes, by the
-  baseline's nodes. `check_node_paths` checks only how a variant's paths are written, for a
-  baseline whose definition isn't read yet. Each raises `VariantProblem`, which names the entry
-  at fault by its place in the configuration, such as `variants.ranking[0].set[1]`.
+  baseline's nodes. It raises `VariantProblem`, which names the entry at fault by its place in
+  the configuration, such as `variants.ranking[0].set[1]`.
 
 The configuration's readers, in `trialfolio.configuration`, read the file a configuration names,
 and turn these problems into `config.invalid`.
@@ -674,19 +673,6 @@ def apply_ranking_variant(
     definition = read_definition(text.encode("utf-8"))
     ordered = tuple(sorted(entries, key=lambda entry: entry.node.index))
     return RankingCase(place, ordered, removed, definition)
-
-
-def check_node_paths(variant: RankingVariant, place: str) -> None:
-    """Checks only how the variant's paths are written, for a baseline whose definition isn't
-    read here: a ranking snapshot's, until release 0.4.0's R04-T10 reads it. Raises
-    `VariantProblem` for the first path written wrongly."""
-    paths = [(f"{place}.remove", variant.remove)] if variant.remove is not None else []
-    paths += [(f"{place}.set[{number}]", path) for number, path in enumerate(variant.set)]
-    for where, path in paths:
-        try:
-            parse_node_path(path)
-        except NodePathProblem as problem:
-            raise _path_problem(where, problem) from None
 
 
 def _named(baseline: RankingDefinition, path: str, where: str) -> RankingNode:

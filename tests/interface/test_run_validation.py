@@ -106,18 +106,25 @@ def test_an_invalid_experiment_configuration_fails_before_anything_is_created_or
 @pytest.mark.parametrize(
     ("document", "problem"),
     [
-        pytest.param(b"kind: review\n", "`kind` must be screen or experiment.", id="another-kind"),
+        pytest.param(
+            b"kind: review\n",
+            "`kind` must be screen, experiment, or ranking-snapshot.",
+            id="another-kind",
+        ),
         pytest.param(
             b"title: No kind\n",
-            "`kind` is required. A screen configuration has `kind: screen`, and an experiment"
-            " configuration has `kind: experiment`.",
+            "`kind` is required. A screen configuration has `kind: screen`, an experiment"
+            " configuration has `kind: experiment`, and a ranking-snapshot configuration has"
+            " `kind: ranking-snapshot`.",
             id="no-kind",
         ),
     ],
 )
-def test_run_takes_a_screen_or_an_experiment_by_its_kind(
+def test_run_takes_a_screen_an_experiment_or_a_snapshot_by_its_kind(
     cli: Cli, document: bytes, problem: str
 ) -> None:
+    """From release 0.4.0's R04-T10, `run` takes a ranking snapshot configuration too, so the
+    message names the three kinds, where 0.3.0's named two."""
     cli.ready()
     path = cli.tmp / "other.yaml"
     path.write_bytes(document)

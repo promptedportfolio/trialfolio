@@ -27,6 +27,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from tests.support.snapshot_builder import SnapshotBuilder
 from trialfolio.configuration import (
     read_run_configuration,
     read_screen_configuration,
@@ -642,10 +643,6 @@ def version_1_1(ranking: str) -> bytes:
             ),
         ),
         (
-            "ranking:\n  snapshot: 'ranking/value-momentum/'\n",
-            SnapshotRanking(snapshot="ranking/value-momentum/"),
-        ),
-        (
             "ranking:\n  formula: 'EarnYield'\n  lower_is_better: false\n",
             FormulaRanking(formula="EarnYield", lower_is_better=False),
         ),
@@ -655,14 +652,36 @@ def version_1_1(ranking: str) -> bytes:
         ),
         ("ranking:\n  id: 424242\n", IdRanking(id=424242)),
     ],
-    ids=["definition", "definition-neutral", "snapshot", "formula", "name", "id"],
+    ids=["definition", "definition-neutral", "formula", "name", "id"],
 )
 def test_version_1_1_0_reads_each_ranking_form(ranking: str, expected: RankingV1_1) -> None:
-    """Version 1.1.0 adds the definition and the snapshot, and keeps 1.0.0's three forms."""
+    """Version 1.1.0 adds the definition and the snapshot, below, and keeps 1.0.0's three
+    forms."""
     configuration = read_v1_1(version_1_1(ranking))
 
     assert isinstance(configuration, ScreenConfigurationV1_1)
     assert configuration.ranking == expected
+
+
+def test_version_1_1_0_reads_a_ranking_named_by_a_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The snapshot form, which release 0.4.0's R04-T10 reads: the snapshot the test takes over
+    the fake server, beside the configuration. R04-T05's parametrized test above read this form
+    with the others before any reader read a snapshot's directory."""
+    SnapshotBuilder(monkeypatch, tmp_path / "home").snapshot(
+        tmp_path / "ranking" / "value-momentum"
+    )
+    path = tmp_path / "screen.yaml"
+
+    read = read_screen_configuration_v1_1(
+        version_1_1("ranking:\n  snapshot: 'ranking/value-momentum/'\n"), path.name, path
+    )
+
+    assert isinstance(read.configuration, ScreenConfigurationV1_1)
+    assert read.configuration.ranking == SnapshotRanking(snapshot="ranking/value-momentum/")
+    assert read.snapshot is not None
+    assert read.definition == read.snapshot.definition
 
 
 def test_a_1_1_0_file_with_a_formula_has_1_0_0_s_settings() -> None:

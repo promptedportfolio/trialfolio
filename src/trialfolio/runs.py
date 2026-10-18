@@ -23,8 +23,10 @@ its `definition.xml`, which, read as a definition's file is read, has the hash i
 it agrees with its other records; each file an attempt record's `ranking_update` references is
 listed, with the `rank_update`'s roles, and an attempt listed without its attempt record lists the
 files written before its start records; and its weight rows are its plan's, drawn from its
-`definition.xml`. A snapshot's records are release 0.4.0's R04-T10's, so a plan whose ranking is
-a snapshot is refused until then.
+`definition.xml`. A run whose ranking a snapshot names also lists the copy of the snapshot's
+record, `snapshot.json`, a valid record, which, with its `definition.xml`, is the snapshot its
+plan's `ranking_source` names, by their `artifact_id`s (release 0.4.0's R04-T10).
+A run whose ranking is a definition's file lists no `snapshot.json`.
 
 Otherwise `read_run` raises `input.not_a_run`, or `artifact.unknown_schema_version` for a schema
 version with no reader. The message names the problem, never a value, and names the run as a
@@ -77,6 +79,7 @@ from trialfolio.contracts.manifest import (
     RunManifestV1_1,
 )
 from trialfolio.contracts.plan import Plan, PlanCase, PlanCaseV1_2, PlanV1_2
+from trialfolio.contracts.ranking_snapshot import RankingSnapshotRecord
 from trialfolio.contracts.tables import (
     TABLES_SCHEMA_VERSION,
     TABLES_SCHEMA_VERSION_V1_1,
@@ -89,6 +92,7 @@ from trialfolio.experiment_paths import REQUEST
 from trialfolio.normalization import METRICS_PATH, SETTINGS_PATH
 from trialfolio.record_checks import (
     RecordChecks,
+    artifact_id,
     definition_hash,
     drawn_from,
     holds_each_metric,
@@ -106,6 +110,8 @@ PLAN_PATH: Final = "plan.json"
 CONFIGURATION_PATH: Final = "configuration.yaml"
 DEFINITION_PATH: Final = "definition.xml"
 """A run's copy of its ranking definition, beside its `configuration.yaml`."""
+SNAPSHOT_PATH: Final = "snapshot.json"
+"""A run's copy of the record of the snapshot its ranking names, beside its `definition.xml`."""
 
 type AnyManifest = RunManifest | RunManifestV1_1
 type AnyArtifact = ManifestArtifact | ManifestArtifactV1_1
@@ -126,6 +132,7 @@ what they're called in messages: 0.3.0's, which a review reads."""
 _RANKING_VERSIONS: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
     "manifest": ("run manifests", ("1.0.0", "1.1.0")),
     "plan": ("plans", ("1.0.0", "1.2.0")),
+    "ranking_snapshot_record": ("snapshot records", ("1.0.0",)),
     "update_record": ("update records", ("1.2.0",)),
     "start_record": ("start records", ("1.0.0", "1.2.0")),
     "attempt_record": ("attempt records", ("1.0.0", "1.2.0")),
@@ -340,23 +347,35 @@ def _definition(
     manifest: AnyManifest, contents: dict[str, bytes], plan: Plan | PlanV1_2
 ) -> AnyArtifact | None:
     """The run's `definition.xml`, for a plan with a ranking definition, checked: listed once,
-    and, read as a definition's file is read, with the hash its plan's `ranking_source` gives
-    (a complete run). A snapshot's records are release 0.4.0's R04-T10's."""
+    and, read as a definition's file is read, with the hash its plan's `ranking_source` gives;
+    and, for a ranking a snapshot names, its `snapshot.json`, listed once, a valid record, the
+    snapshot its plan's `ranking_source` names (a complete run)."""
     if not isinstance(plan, PlanV1_2):
         return None
     source = plan.ranking_source
-    if source.form != "definition" or any(
-        artifact.role == "ranking_snapshot_record" for artifact in manifest.artifacts
-    ):
-        raise _not_a_run(
-            "its plan's ranking is a snapshot, whose records this version of Trial Folio doesn't"
-            " read."
-        )
     copy = _only(manifest, "ranking_definition", DEFINITION_PATH, _RANKING_CHECKS)
     if definition_hash(contents[DEFINITION_PATH]) != source.definition:
         raise _not_a_run(
             "its definition.xml isn't its plan's ranking definition: read as a definition's file"
             " is read, it doesn't have the hash its plan's ranking_source gives."
+        )
+    if source.form == "definition":
+        if any(artifact.role == "ranking_snapshot_record" for artifact in manifest.artifacts):
+            raise _not_a_run(
+                "its manifest lists a snapshot.json, though its plan's ranking is a definition's"
+                " file."
+            )
+        return copy
+    _only(manifest, "ranking_snapshot_record", SNAPSHOT_PATH, _RANKING_CHECKS)
+    content = contents[SNAPSHOT_PATH]
+    _RANKING_CHECKS.record(RankingSnapshotRecord, content, SNAPSHOT_PATH, "ranking_snapshot_record")
+    if (artifact_id(content), artifact_id(contents[DEFINITION_PATH])) != (
+        source.snapshot_record,
+        source.snapshot_definition,
+    ):
+        raise _not_a_run(
+            "its snapshot.json and definition.xml aren't the snapshot its plan's ranking_source"
+            " names: their artifact_ids aren't its snapshot_record and snapshot_definition."
         )
     return copy
 

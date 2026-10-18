@@ -56,7 +56,10 @@ steps, with these differences (sending a definition, running an experiment):
 - Before step 1, it takes the ranking lock, on the file its caller gives, and holds it until the
   execution ends, after the session's manifest (`experiment.locked`, `storage.write_failed`).
 - Step 3 also writes `plans/1/definition.xml`, right after `configuration.yaml`, from the
-  definition's bytes the configuration was validated with, and `experiment.json` 1.1.0.
+  definition's bytes the configuration was validated with, and `experiment.json` 1.1.0. For a
+  baseline named by a snapshot, it's the snapshot's `definition.xml`, and the snapshot's
+  record, `snapshot.json`, follows it, each from the bytes read and checked when the
+  configuration was validated (reading a snapshot).
 - Step 4's attempts (`RankingExperimentAttempt`) each send the case's `rank_update`, then its
   backtest, with start and attempt records 1.3.0. An attempt starts only when the budget covers
   both its requests.
@@ -73,7 +76,8 @@ records, which `open_experiment` read with `ranking`:
 - Step 2 writes the attempt record of each attempt whose latest record is its update record, as
   sending a definition says, and a case's `settings.csv` 1.1.0, from the configuration and the
   `definition.xml` of the plan its attempt ran under. A revision into a plan 1.3.0 writes its
-  `plans/<n>/definition.xml`, right after its `configuration.yaml`.
+  `plans/<n>/definition.xml`, right after its `configuration.yaml`, and, for a snapshot, its
+  `snapshot.json` after it.
 - The budget counts each attempt's requests, two for an attempt that sends a definition, under
   every plan, and an attempt starts only when both its requests fit; a repeat sends both again.
 - Each session of an experiment any of whose plans is 1.3.0 writes experiment manifest 1.1.0,
@@ -204,6 +208,7 @@ from trialfolio.manifests import (
     rank_update_source,
     reproducibility,
     running_detail,
+    snapshot_definition_source,
     source_v1_1,
     updating_detail,
     utc,
@@ -244,6 +249,7 @@ from trialfolio.report import (
     RetiredCaseView,
     write_experiment_report,
 )
+from trialfolio.snapshots import SnapshotFiles
 from trialfolio.storage import LOCK_LINE, LOCK_PATH, ArtifactStore, StoredFile, published
 from trialfolio.tables import read_metrics_csv
 
@@ -259,6 +265,10 @@ RANKING_SCHEMA_VERSION: Final = "1.1.0"
 DEFINITION_FILE: Final = "definition.xml"
 """The copy of a plan's ranking definition, in its `plans/<n>/` (ranking definitions)."""
 
+SNAPSHOT_FILE: Final = "snapshot.json"
+"""The copy of the record of the snapshot a plan's baseline names, after its `definition.xml`
+(reading a snapshot)."""
+
 _SCHEMA_VERSIONS: Final[dict[ExperimentArtifactRoleV1_1, str]] = {
     "plan": "1.1.0",
     "experiment_record": "1.0.0",
@@ -273,6 +283,7 @@ _SCHEMA_VERSIONS: Final[dict[ExperimentArtifactRoleV1_1, str]] = {
 configuration, which gives its own."""
 
 _FIXED_VERSIONS: Final[dict[ExperimentArtifactRoleV1_1, str]] = {
+    "ranking_snapshot_record": "1.0.0",
     "authentication_record": "1.0.0",
     "metrics": TABLES_SCHEMA_VERSION,
     "session_record": "1.0.0",
@@ -843,11 +854,13 @@ class ExperimentExecution:
         configuration: bytes,
         *,
         definition: bytes | None = None,
+        snapshot: SnapshotFiles | None = None,
         on_claimed: Callable[[], object] | None = None,
     ) -> TrialFolioError | None:
         """Takes the steps the module lists. `configuration` is the bytes of the experiment
-        configuration the plan was built from, and `definition` the bytes of the definition file
-        its baseline names, read when it was validated, for a plan 1.3.0. `on_claimed` is called
+        configuration the plan was built from, and, for a plan 1.3.0, `definition` the bytes of
+        the definition file its baseline names, or `snapshot` those of the two files of the
+        snapshot it names, read when it was validated. `on_claimed` is called
         once the directory is claimed, or, for a resume, whose store already holds the lock,
         before the first write, before anything else is written into it, such as to start
         writing logs there.
@@ -865,17 +878,18 @@ class ExperimentExecution:
         manifest. A plan 1.3.0's execution takes the ranking lock first, a resumed one's only
         when its session sends, and raises its `TrialFolioError`, `experiment.locked` or
         `storage.write_failed`, before anything is written, and holds it until it ends. A plan
-        1.3.0 not given its definition, or one whose hash isn't the plan's, or another plan given
-        one, is a `ValueError` too.
+        1.3.0 not given its definition, or its snapshot's files, or given ones that aren't the
+        plan's, or another plan given either, is a `ValueError` too.
         """
         if self._started:
             raise RuntimeError("an execution runs once")
         self._started = True
-        self._check_configuration(configuration, definition)
+        self._check_configuration(configuration, definition, snapshot)
+        copies = _copies(definition, snapshot)
         if self._lock is None or not self._sends_any():
-            return self._run(configuration, definition, on_claimed)
+            return self._run(configuration, copies, on_claimed)
         with self._lock:
-            return self._run(configuration, definition, on_claimed)
+            return self._run(configuration, copies, on_claimed)
 
     def _sends_any(self) -> bool:
         """Whether the session will send anything, so it takes the ranking lock: a new
@@ -888,7 +902,7 @@ class ExperimentExecution:
     def _run(
         self,
         configuration: bytes,
-        definition: bytes | None,
+        copies: tuple["_Copy", ...],
         on_claimed: Callable[[], object] | None,
     ) -> TrialFolioError | None:
         """The steps the module lists, once the ranking lock, if any, is held."""
@@ -900,11 +914,11 @@ class ExperimentExecution:
                 on_claimed()
             self._write_session()
             if self._experiment is None:
-                self._write_plan(configuration, definition)
+                self._write_plan(configuration, copies)
             else:
                 self._complete_records(self._experiment)
                 if self._revision is not None:
-                    self._write_revision(self._revision, configuration, definition)
+                    self._write_revision(self._revision, configuration, copies)
         if ended.error is not None:
             return self._before_cases(ended.error)
         _logger.info(
@@ -937,9 +951,12 @@ class ExperimentExecution:
 
     # The session's records
 
-    def _check_configuration(self, configuration: bytes, definition: bytes | None) -> None:
+    def _check_configuration(
+        self, configuration: bytes, definition: bytes | None, snapshot: SnapshotFiles | None
+    ) -> None:
         """Checks that the configuration gives the plan, and, for a plan 1.3.0, with the
-        definition's bytes it's given, which `plans/<n>/definition.xml` then holds."""
+        definition's bytes it's given, or the snapshot's files', which `plans/<n>/definition.xml`
+        and `snapshot.json` then hold."""
         plan = self._plan
         versions = Versions(
             trialfolio=plan.trialfolio_version,
@@ -950,17 +967,22 @@ class ExperimentExecution:
         number = self._plan_number if self._revision is None else self._next_plan()
         source_name = plan_path(number, "configuration.yaml")
         if isinstance(plan, PlanV1_3):
-            if definition is None:
-                raise ValueError("an experiment with a ranking definition is given its bytes")
+            if (definition is None) == (snapshot is None) or (snapshot is None) != (
+                plan.ranking_source.form == "definition"
+            ):
+                raise ValueError(
+                    "an experiment with a ranking definition is given its bytes: its definition"
+                    " file's, or its snapshot's files', as its plan's ranking_source gives"
+                )
             ranked = read_experiment_configuration_v1_1(
-                configuration, source_name, source_name, definition=definition
+                configuration, source_name, source_name, definition=definition, snapshot=snapshot
             )
             if build_experiment_plan_v1_1(ranked, versions, plan.revises) != plan:
                 raise ValueError("the configuration doesn't give the plan")
             self._read = ranked
             self._configuration_version = ranked.configuration.schema_version
             return
-        if definition is not None:
+        if definition is not None or snapshot is not None:
             raise ValueError("only an experiment with a ranking definition is given one")
         read = read_experiment_configuration(configuration, source_name)
         if build_experiment_plan(read, versions, plan.revises) != plan:
@@ -986,14 +1008,13 @@ class ExperimentExecution:
             self._session_record = published(self._store, path, data)
             raise
 
-    def _write_plan(self, configuration: bytes, definition: bytes | None) -> None:
+    def _write_plan(self, configuration: bytes, copies: tuple["_Copy", ...]) -> None:
         number = self._plan_number
         files: list[tuple[ExperimentArtifactRoleV1_1, StoredFile]] = []
         saved = self._store.write(plan_path(number, "configuration.yaml"), configuration)
         files.append(("configuration", saved))
-        if definition is not None:
-            copy = self._store.write(plan_path(number, DEFINITION_FILE), definition)
-            files.append(("ranking_definition", copy))
+        for role, name, data in copies:
+            files.append((role, self._store.write(plan_path(number, name), data)))
         plan = self._store.write(plan_path(number, "plan.json"), model_json(self._plan))
         files.append(("plan", plan))
         record = first_experiment_record_v1_1(
@@ -1026,20 +1047,20 @@ class ExperimentExecution:
         self,
         revision: PlanRevision | PlanRevisionV1_1,
         configuration: bytes,
-        definition: bytes | None,
+        copies: tuple["_Copy", ...],
     ) -> None:
         """Writes the revision's `plans/<n>/`, as for the first plan, with the reason in its
         `experiment.json`, written last: nothing is sent under it before. A revision into a plan
-        1.3.0 writes its `definition.xml` right after its `configuration.yaml`, and its
-        `experiment.json` is 1.1.0, as is every one after a plan 1.3.0."""
+        1.3.0 writes its `definition.xml` right after its `configuration.yaml`, and, for a
+        snapshot, its `snapshot.json` after that, and its `experiment.json` is 1.1.0, as is
+        every one after a plan 1.3.0."""
         number = self._next_plan()
         previous = self._experiment_record()
         files: list[tuple[ExperimentArtifactRoleV1_1, StoredFile]] = []
         saved = self._store.write(plan_path(number, "configuration.yaml"), configuration)
         files.append(("configuration", saved))
-        if definition is not None:
-            copy = self._store.write(plan_path(number, DEFINITION_FILE), definition)
-            files.append(("ranking_definition", copy))
+        for role, name, data in copies:
+            files.append((role, self._store.write(plan_path(number, name), data)))
         plan = self._store.write(plan_path(number, "plan.json"), model_json(revision.plan))
         files.append(("plan", plan))
         record = self._revised_record(previous, revision, number, plan, saved)
@@ -1803,7 +1824,12 @@ class ExperimentExecution:
                 )
             )
         elif plan is not None and role == "ranking_definition":
-            source = definition_source(plan.record.created_at)
+            snapshot = None if plan.read is None else plan.read.snapshot
+            source = (
+                definition_source(plan.record.created_at)
+                if snapshot is None
+                else snapshot_definition_source(snapshot.record.taken_at)
+            )
         elif attempt is not None and role in PROVIDER_ROLES:
             started, ended = self._attempt_times(attempt)
             source = source_v1_1(provider_source(role, started_at=started, ended_at=ended))
@@ -1889,6 +1915,25 @@ class ExperimentExecution:
         if case_id is not None:
             fields["case_id"] = case_id
         return fields
+
+
+type _Copy = tuple[Literal["ranking_definition", "ranking_snapshot_record"], str, bytes]
+"""A copy a plan with a ranking definition holds after its `configuration.yaml`: its role, its
+file's name in `plans/<n>/`, and its bytes."""
+
+
+def _copies(definition: bytes | None, snapshot: SnapshotFiles | None) -> tuple[_Copy, ...]:
+    """The copies a plan's directory holds after its `configuration.yaml`, in order: the
+    definition's, `definition.xml`, from its file's bytes, or from a snapshot's, and then, for a
+    snapshot, its record's, `snapshot.json` (ranking definitions, reading a snapshot)."""
+    if snapshot is not None:
+        return (
+            ("ranking_definition", DEFINITION_FILE, snapshot.definition),
+            ("ranking_snapshot_record", SNAPSHOT_FILE, snapshot.record),
+        )
+    if definition is not None:
+        return (("ranking_definition", DEFINITION_FILE, definition),)
+    return ()
 
 
 def _recorded_plan(saved: SavedPlan) -> _RecordedPlan:

@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import canaries
+from tests.support.snapshot_builder import SnapshotBuilder
 from trialfolio.canonical import sha256_hex
 from trialfolio.configuration import (
     ExperimentConfigurationRead,
@@ -658,12 +659,14 @@ def test_a_path_written_wrongly_fails_before_what_its_segments_name(tmp_path: Pa
 
 
 def test_a_position_too_long_to_read_as_a_number_is_past_its_parent_s_last_node(
-    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """By default, Python reads no whole number of more than 4,300 digits. A position of more is
-    written correctly, so a snapshot's baseline, whose definition isn't read, accepts it; against
-    a definition, it's past its parent's last node, in a `set` and in `remove`, through
-    `RankingDefinition.node` and the reader (node paths; review of R04-T06's pull request)."""
+    written correctly, so it's past its parent's last node, in a `set` and in `remove`, through
+    `RankingDefinition.node` and the reader, against a definition's file and against a
+    snapshot's definition alike (node paths; review of R04-T06's pull request). Until release
+    0.4.0's R04-T10 read a snapshot, a snapshot's baseline accepted it, since only how its paths
+    were written was checked; now the snapshot, taken during the test, gives the same problems."""
     position = "#" + "9" * 4301
     # YAML reads a key of more than 1,024 characters only after a `?`.
     variants = (
@@ -689,6 +692,9 @@ def test_a_position_too_long_to_read_as_a_number_is_past_its_parent_s_last_node(
             "parent's last node."
         ),
     ]
+    SnapshotBuilder(monkeypatch, tmp_path / "home").snapshot(
+        tmp_path / "ranking" / "value-momentum"
+    )
     text = EXAMPLE.read_text(encoding="utf-8")
     start, end = text.index("  ranking:\n    - key:"), text.index("  rebalance_weeks: []")
     path = tmp_path / "experiment.yaml"
@@ -702,8 +708,16 @@ def test_a_position_too_long_to_read_as_a_number_is_past_its_parent_s_last_node(
         + text[end:],
         encoding="utf-8",
     )
-    read = read_experiment(path)
-    assert (read.definition, read.ranking_cases) == (None, ())
+    assert problems(path) == [
+        (
+            "`variants.ranking[0].set[1]` is a node path whose segment 2 is a position past its "
+            "parent's last node."
+        ),
+        (
+            "`variants.ranking[1].remove` is a node path whose segment 1 is a position past its "
+            "parent's last node."
+        ),
+    ]
 
 
 # Ranking variants.
@@ -1126,9 +1140,17 @@ def test_messages_never_hold_a_node_s_name() -> None:
             assert node_name not in problem
 
 
-def test_a_snapshot_baseline_s_paths_are_checked_for_how_they_re_written(tmp_path: Path) -> None:
-    """Release 0.4.0's R04-T10 reads a snapshot, which gives its definition, and so the cases.
-    Until then, what's written wrongly in a path fails, and nothing else is read."""
+def test_a_snapshot_baseline_s_variants_give_the_file_s_cases(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Release 0.4.0's R04-T10 reads the snapshot a baseline names, whose definition gives the
+    ranking variants' cases, as a file's does; and what's written wrongly in a path fails as it
+    does against a file. Until then, R04-T06's reader checked only how a snapshot baseline's
+    paths were written, and gave no case, which this test held; the snapshot is now taken during
+    the test, over the fake server, of `value-momentum.xml`'s definition."""
+    SnapshotBuilder(monkeypatch, tmp_path / "home").snapshot(
+        tmp_path / "ranking" / "value-momentum"
+    )
     text = EXAMPLE.read_text(encoding="utf-8").replace(
         "    definition: 'ranking/value-momentum.xml'\n    ranking_method: percentile_nas_negative\n",
         "    snapshot: 'ranking/value-momentum/'\n",
@@ -1136,8 +1158,12 @@ def test_a_snapshot_baseline_s_paths_are_checked_for_how_they_re_written(tmp_pat
     path = tmp_path / "experiment.yaml"
     path.write_text(text, encoding="utf-8")
 
-    read = read_experiment(path)
-    assert (read.definition, read.ranking_cases) == (None, ())
+    read, from_file = read_experiment(path), read_experiment(EXAMPLE)
+    assert read.definition is not None and from_file.definition is not None
+    assert read.definition.text == from_file.definition.text
+    assert [case.definition.text for case in read.ranking_cases] == [
+        case.definition.text for case in from_file.ranking_cases
+    ]
 
     path.write_text(text.replace("'Value/Sales Yield': 30", "'Value//Sales Yield': 30"), "utf-8")
     assert problems(path) == [

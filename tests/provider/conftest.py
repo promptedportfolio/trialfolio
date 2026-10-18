@@ -35,12 +35,16 @@ def make_client(server: FakePortfolio123) -> Iterator[ClientFactory]:
     made: list[P123ScreenBacktestClient] = []
 
     def make(
-        *, endpoint: str | None = None, timeout: int = REQUEST_TIMEOUT_SECONDS
+        *,
+        endpoint: str | None = None,
+        timeout: int = REQUEST_TIMEOUT_SECONDS,
+        snapshot: bool = False,
     ) -> P123ScreenBacktestClient:
         client = P123ScreenBacktestClient(
             Credentials(canaries.API_ID, canaries.API_KEY),
             endpoint=endpoint or server.endpoint,
             timeout=timeout,
+            snapshot=snapshot,
         )
         made.append(client)
         return client

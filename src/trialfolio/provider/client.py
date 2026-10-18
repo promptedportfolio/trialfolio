@@ -5,8 +5,12 @@ ADR 0001, decisions 6 and 7; ADR 0006).
 `P123ScreenBacktestClient` drives the wrapper in two calls: Trial Folio's own authentication call,
 and the request's call. The caller writes the start record between them. From 0.4.0, a case whose
 ranking is a definition makes a request's call before its backtest's too: the `rank_update`, which
-writes the definition into `ApiRankingSystem` (sending a definition). The client configures the
-wrapper's session, a private attribute (`Client._session` in 3.1.0):
+writes the definition into `ApiRankingSystem` (sending a definition). A ranking snapshot's request
+is a `rank_get`, which reads the system its configuration names: the wrapper's `RankInfoResult`
+keeps only the fields it knows, so the client decodes the 200's body its adapter holds instead,
+with the standard library's `json`, `cost` and `quotaRemaining` included (`p123api-rank-get`
+version 1). The client configures the wrapper's session, a private attribute (`Client._session` in
+3.1.0):
 
 - **One HTTP attempt per call.** `set_max_request_retries(1)`, for authentication and the request.
 - **The timeout.** `set_timeout(300)`, the wrapper's own default, set explicitly. Tests may pass a
@@ -26,6 +30,7 @@ reference to the wrapper's exception, whose response holds the bearer token and,
 authentication, the API key.
 """
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import TracebackType
@@ -40,7 +45,9 @@ from trialfolio.provider.credentials import Credentials
 from trialfolio.provider.failures import (
     AUTHENTICATION,
     BACKTEST,
+    RANK_GET,
     RANK_UPDATE,
+    SNAPSHOT_AUTHENTICATION,
     CallMessages,
     ProviderError,
 )
@@ -69,13 +76,13 @@ type ScreenBacktestResponse = DecodedResponse | UndecodedResponse
 
 class ScreenBacktestClient(Protocol):
     """Executes the one supported screen-backtest request, and, from 0.4.0, the `rank_update`
-    that writes a case's ranking definition before it, and returns the captured provider evidence
-    (docs/contracts.md, protocols).
+    that writes a case's ranking definition before it, and a ranking snapshot's `rank_get`, and
+    returns the captured provider evidence (docs/contracts.md, protocols).
 
     The caller authenticates with `authenticate`, writes the start record, and only then calls
-    `screen_backtest`, or `rank_update`, at most once for each approved send. `exchanges` gives
-    every exchange so far, in order, at any time, including after an interrupt. No call retries
-    anything.
+    `screen_backtest`, `rank_update`, or `rank_get`, at most once for each approved send.
+    `exchanges` gives every exchange so far, in order, at any time, including after an interrupt.
+    No call retries anything.
     """
 
     @property
@@ -116,6 +123,18 @@ class ScreenBacktestClient(Protocol):
         """
         ...
 
+    def rank_get(self, name: str) -> ScreenBacktestResponse:
+        """Sends `GET /rank` with `name` as its query, at most once: `p123api`'s `rank_get`, which
+        reads the ranking system saved in the account by that name, and writes nothing (ranking
+        snapshot output).
+
+        Returns the 200's body, decoded with the standard library's `json`, since the wrapper's
+        result leaves out `cost` and `quotaRemaining`, or undecoded when the wrapper raised after
+        the 200, as for a ranking method it doesn't know. Raises as `screen_backtest` does, with
+        the code its exchange gives it.
+        """
+        ...
+
     def close(self) -> None:
         """Closes the client's connections."""
         ...
@@ -132,6 +151,7 @@ class _Wrapper(Protocol):
     def auth(self) -> None: ...
     def screen_backtest(self, params: dict[str, object], to_pandas: bool = False) -> object: ...
     def rank_update(self, params: dict[str, object]) -> object: ...
+    def rank_get(self, *, name: str) -> object: ...
     def close(self) -> None: ...
 
 
@@ -144,9 +164,12 @@ class P123ScreenBacktestClient:
         *,
         endpoint: str | None = None,
         timeout: int = REQUEST_TIMEOUT_SECONDS,
+        snapshot: bool = False,
     ) -> None:
         """`endpoint` and `timeout` are for tests only (docs/contracts.md, credentials): without
-        `endpoint`, the wrapper's default, Portfolio123's API, applies."""
+        `endpoint`, the wrapper's default, Portfolio123's API, applies. `snapshot` is for a
+        ranking snapshot's client, whose authentication's messages say that its `rank_get`, not
+        a backtest, wasn't sent."""
         if endpoint is None:
             client = p123api.Client(api_id=credentials.api_id, api_key=credentials.api_key)
         else:
@@ -155,6 +178,7 @@ class P123ScreenBacktestClient:
             )
         self._wrapper = cast(_Wrapper, client)
         self._secrets = (credentials.api_id, credentials.api_key)
+        self._authentication = SNAPSHOT_AUTHENTICATION if snapshot else AUTHENTICATION
         self._wrapper.set_max_request_retries(1)
         self._wrapper.set_timeout(timeout)
         # The private attribute ADR 0006 relies on.
@@ -192,7 +216,7 @@ class P123ScreenBacktestClient:
             except Exception as error:  # noqa: BLE001
                 # Portfolio123's own text is redacted of the credentials and the token.
                 secrets = (*self._secrets, self._wrapper.get_token())
-                failure = AUTHENTICATION.failure(call.exchange, call.refused, error, secrets)
+                failure = self._authentication.failure(call.exchange, call.refused, error, secrets)
             else:
                 return
         raise failure
@@ -213,11 +237,20 @@ class P123ScreenBacktestClient:
             raise sent
         return sent
 
+    def rank_get(self, name: str) -> ScreenBacktestResponse:
+        sent = self._request(lambda: self._wrapper.rank_get(name=name), RANK_GET, decode_body=True)
+        if isinstance(sent, ProviderError):
+            raise sent
+        return sent
+
     def _request(
-        self, send: Callable[[], object], messages: CallMessages
+        self, send: Callable[[], object], messages: CallMessages, *, decode_body: bool = False
     ) -> ScreenBacktestResponse | ProviderError:
         """Makes the request's call, `send`, and returns its decoded response, or the undecoded
-        body of a 200, or its failure, classified from its exchange, for the caller to raise."""
+        body of a 200, or its failure, classified from its exchange, for the caller to raise.
+        With `decode_body`, the decoded response is the 200's body its adapter holds, decoded
+        with the standard library's `json`, rather than what the wrapper returned: undecoded when
+        `json` can't decode it."""
         if not self.authenticated:
             # Otherwise the wrapper would authenticate inside the request's call, and the adapter
             # would refuse the request as its second exchange.
@@ -234,8 +267,21 @@ class P123ScreenBacktestClient:
                 secrets = (*self._secrets, self._wrapper.get_token())
                 failure = messages.failure(call.exchange, call.refused, error, secrets)
             else:
+                if decode_body:
+                    return _decoded_body(call.body)
                 return DecodedResponse(payload)
         return failure
 
     def close(self) -> None:
         self._wrapper.close()
+
+
+def _decoded_body(body: bytes | None) -> ScreenBacktestResponse:
+    """A 200's body, which the adapter holds, decoded with the standard library's `json`, as the
+    wrapper decoded it already; or undecoded, when `json` can't decode it."""
+    if body is None:  # The adapter holds every 200's body on the request's exchange.
+        raise RuntimeError("a request's 200 has its body")
+    try:
+        return DecodedResponse(json.loads(body))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return UndecodedResponse(body)

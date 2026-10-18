@@ -3,11 +3,12 @@ the call's ending (docs/releases/0.1.0-api-execution.md, failure behavior; docs/
 HTTP exchanges, credentials, and errors).
 
 Each call has a table of messages: `_AUTHENTICATION`, Trial Folio's own authentication call's, and
-`_REQUEST`, a request's, which a `rank_update`'s follows too (sending a definition). A table's
-`message` classifies what the call's exchange shows: no exchange, not connected, no complete
-response, a 5xx, or a status, with a message of its own or the table's other. Where the adapter
-refused the call's next exchange, a message can say so. `AUTHENTICATION`, `BACKTEST`, and
-`RANK_UPDATE` fill a table's messages for their call, and `CallMessages.failure` builds the error.
+`_REQUEST`, a request's, which a `rank_update`'s and a snapshot's `rank_get`'s follow too (sending a
+definition, ranking snapshot output). A table's `message` classifies what the call's exchange
+shows: no exchange, not connected, no complete response, a 5xx, or a status, with a message of its
+own or the table's other. Where the adapter refused the call's next exchange, a message can say
+so. `AUTHENTICATION`, `BACKTEST`, `RANK_UPDATE`, `SNAPSHOT_AUTHENTICATION`, and `RANK_GET` fill a
+table's messages for their call, and `CallMessages.failure` builds the error.
 
 A message that calls for it ends with Portfolio123's own text, from the wrapper's message,
 sanitized: `_provider_message` reads only the exception's type and message, never anything else
@@ -254,6 +255,13 @@ AUTHENTICATION: Final = CallMessages(
 )
 """The messages of Trial Folio's own authentication call."""
 
+SNAPSHOT_AUTHENTICATION: Final = replace(
+    AUTHENTICATION,
+    fields={**AUTHENTICATION.fields, "not_sent": "The rank_get request wasn't sent."},
+)
+"""The messages of a snapshot's authentication call, which comes before its `rank_get` rather
+than a backtest (ranking snapshot output)."""
+
 _REJECTED: Final = _Message(
     "provider.request_rejected",
     "Portfolio123 rejected the {name} with HTTP {status}. {may_be_charged}{after} Wait before"
@@ -381,3 +389,12 @@ RANK_UPDATE: Final = _request(
 )
 """The messages of the `rank_update` request's call, which follow a request's (sending a
 definition)."""
+
+RANK_GET: Final = _request(
+    "rank_get request",
+    rejected="it doesn't accept a value in it",
+    check="the snapshot configuration's system, the name of a ranking system saved in the account,",
+    after=" So the snapshot has no definition.xml or snapshot.json.",
+)
+"""The messages of a snapshot's `rank_get` request's call, which follow a request's (ranking
+snapshot output)."""

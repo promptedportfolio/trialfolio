@@ -725,6 +725,9 @@ class BeforeTheRequest:
     def rank_update(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
         return self._client.rank_update(params)
 
+    def rank_get(self, name: str) -> ScreenBacktestResponse:
+        return self._client.rank_get(name)
+
     def close(self) -> None:
         self._client.close()
 
