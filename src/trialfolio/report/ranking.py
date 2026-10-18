@@ -23,12 +23,7 @@ from trialfolio.contracts.attempt import (
 from trialfolio.contracts.experiment_plan import ExperimentPlanCaseV1_3, PlanVariantV1_3
 from trialfolio.contracts.plan import RankingSource
 from trialfolio.contracts.ranking_snapshot import RankingSnapshotRecord
-from trialfolio.contracts.screen_settings import (
-    SCREEN_SETTINGS_BY_NAME,
-    DefinitionRankingSetting,
-    check_value_text,
-    read_ranking_setting,
-)
+from trialfolio.contracts.screen_settings import SCREEN_SETTINGS_BY_NAME, DefinitionRankingSetting
 from trialfolio.report.evidence import CaseView
 from trialfolio.report.fragments import Setting, reported_cost, resolved_settings
 from trialfolio.report.page import code, facts, moment, table
@@ -50,13 +45,13 @@ def run_weights(settings: Sequence[Setting]) -> list[str]:
     """A run's ranking definition, in section 2: its `ranking` row, the definition's hash and
     ranking method, and each weight row, by its node's canonical path, in the definition's order.
     Empty for a run whose ranking isn't a definition."""
-    ranking = next((setting for setting in settings if setting.name == _RANKING.name), None)
     weights = [setting for setting in settings if setting.node is not None]
-    if ranking is None or not weights:
+    if not weights:
         return []
-    value = read_ranking_setting(check_value_text(_RANKING, ranking.value, "any"), "any")
-    if not isinstance(value, DefinitionRankingSetting):
-        return []
+    # Weight rows follow a ranking given as a definition, whose `ranking` row is its hash and
+    # its ranking method.
+    ranking = next(setting for setting in settings if setting.name == _RANKING.name)
+    value = DefinitionRankingSetting.model_validate_json(ranking.value)
     rows = [
         f"<tr><td>{code(setting.node or '')}</td><td>{code(setting.value)}</td></tr>"
         for setting in weights

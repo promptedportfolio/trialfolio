@@ -6,7 +6,7 @@ Synthetic review configurations for Trial Folio's tests ([fixtures](../../../doc
 - **Schema version:** [review configuration](../../../docs/contracts.md#review-configuration) 1.0.0.
 - **Redistribution:** synthetic, so they may be committed and shared.
 
-Each configuration names its runs by paths relative to itself, and a test puts it beside the runs it builds ([0.2.0's test pairing](../../../docs/releases/0.2.0-review.md#test-pairing)). The [run builder](../../support/run_builder.py) writes each run with `trialfolio run`, over the fake server, from the screen configuration and the reply [below](#the-runs-each-configuration-names), and its `RUNS` gives the same runs. R02-T04 wrote `example.yaml`. R02-T06 wrote the others ahead of R02-T09, for the comparison core's tests, apart from `synthetic.yaml` and `synthetic-only.yaml`, which R02-T07 wrote for the review report's, and `canaries.yaml`, which R02-T09 wrote.
+Each configuration names its runs by paths relative to itself, and a test puts it beside the runs it builds ([0.2.0's test pairing](../../../docs/releases/0.2.0-review.md#test-pairing)). The [run builder](../../support/run_builder.py) writes each run with `trialfolio run`, over the fake server, from the screen configuration and the reply [below](#the-runs-each-configuration-names), and its `RUNS` gives the same runs. R02-T04 wrote `example.yaml`. R02-T06 wrote the others ahead of R02-T09, for the comparison core's tests, apart from `synthetic.yaml` and `synthetic-only.yaml`, which R02-T07 wrote for the review report's, `canaries.yaml`, which R02-T09 wrote, and the five `ranking-` configurations, which release 0.4.0's R04-T11 wrote for the review's weight rows. Until R04-T12 builds `trialfolio run` for a ranking definition, the run builder writes a run of a screen configuration 1.1.0 through the core, as `run` will write it, with the fake server answering its `POST /rank` with `rank-update.json`.
 
 | File | Contents | Criteria |
 |---|---|---|
@@ -22,10 +22,15 @@ Each configuration names its runs by paths relative to itself, and a test puts i
 | `synthetic.yaml` | The run `trialfolio demo` wrote as the baseline, `demo`, and a result whose run isn't synthetic, `hold50`, which declares `max_holdings` | R02-AC09, R02-AC16 |
 | `synthetic-only.yaml` | Two results, `demo` and `demo-again`, that both name the run `trialfolio demo` wrote, so they share its saved response | R02-AC16; [artifact compatibility](../../../docs/contracts.md#artifact-compatibility), as the configuration of the historical review [`reviews/synthetic-review-1.0.0/`](../reviews/README.md) |
 | `canaries.yaml` | A distinct canary string in the title, the purpose, each result's description, and each reason; canary labels, such as `canary-label-5a66f676`; and `run` paths whose directory names are canaries, such as `runs/canary-run-da943a28`. Its three results name three runs of one screen configuration with one response, so they share it, and the two after the baseline declare changes their runs don't have. [`tests/support/canaries.py`](../../support/canaries.py) lists its canaries. | R02-AC12 |
+| `ranking-weights.yaml` | The baseline `definition`, whose run is ranked by the ranking example's definition, and `value-heavy`, whose run is ranked by its `value-heavy` variant's, which declares `ranking` | R04-AC04 |
+| `ranking-undeclared.yaml` | `ranking-weights.yaml`'s results, without the declaration | R04-AC04 |
+| `ranking-other-forms.yaml` | The baseline `definition`, and two results that declare `ranking`: `formula`, whose run is ranked by a formula, and `ranking-name`, whose run is ranked by a ranking system's name | R04-AC04 |
+| `ranking-without-tables.yaml` | `ranking-weights.yaml`, whose `value-heavy` run has no normalized tables: Portfolio123 rejected its backtest, so its weights are its plan's | R04-AC04 |
+| `ranking-removal.yaml` | The baseline `positions`, whose run is ranked by `positions.xml`, and `without-first-yield`, whose run is ranked by `positions-without-first-yield.xml`, which declares `ranking` | R04-AC04, the alignment's limit |
 
 ## The runs each configuration names
 
-Each run is a screen configuration in [`screen-configs/`](../screen-configs/README.md), run with a reply from the fake server to its backtest request: a response in [`responses/`](../responses/README.md), sent with a 200, or a 400. The baseline is `formula.yaml` with `complete.json`, apart from `synthetic.yaml`'s and `synthetic-only.yaml`'s, which is a copy of the committed run [`runs/synthetic-run-1.0.0/`](../runs/README.md), as `trialfolio demo` wrote it, and `canaries.yaml`'s, which is a run of `canaries.yaml` with `canaries.json`, as each of its results' runs is.
+Each run is a screen configuration in [`screen-configs/`](../screen-configs/README.md), run with a reply from the fake server to its backtest request: a response in [`responses/`](../responses/README.md), sent with a 200, or a 400. The baseline is `formula.yaml` with `complete.json`, apart from `synthetic.yaml`'s and `synthetic-only.yaml`'s, which is a copy of the committed run [`runs/synthetic-run-1.0.0/`](../runs/README.md), as `trialfolio demo` wrote it, `canaries.yaml`'s, which is a run of `canaries.yaml` with `canaries.json`, as each of its results' runs is, and the `ranking-` configurations', which is a run of `definition.yaml`, or, for `ranking-removal.yaml`, of `positions.yaml`, with `complete.json`.
 
 | Configuration | `run` path | Screen configuration | Reply |
 |---|---|---|---|
@@ -61,3 +66,14 @@ Each run is a screen configuration in [`screen-configs/`](../screen-configs/READ
 | `canaries.yaml` | `runs/canary-run-da943a28` | `canaries.yaml` | `canaries.json` |
 | | `runs/canary-run-bdcb5a6c` | `canaries.yaml` | `canaries.json` |
 | | `runs/canary-run-993a190a` | `canaries.yaml` | `canaries.json` |
+| `ranking-weights.yaml` | `runs/definition` | `definition.yaml` | `complete.json` |
+| | `runs/value-heavy` | `value-heavy.yaml` | `changed-metrics.json` |
+| `ranking-undeclared.yaml` | `runs/definition` | `definition.yaml` | `complete.json` |
+| | `runs/value-heavy` | `value-heavy.yaml` | `changed-metrics.json` |
+| `ranking-other-forms.yaml` | `runs/definition` | `definition.yaml` | `complete.json` |
+| | `runs/formula` | `formula.yaml` | `changed-metrics.json` |
+| | `runs/ranking-name` | `ranking-name.yaml` | `missing-metrics.json` |
+| `ranking-without-tables.yaml` | `runs/definition` | `definition.yaml` | `complete.json` |
+| | `runs/value-heavy` | `value-heavy.yaml` | A 400 |
+| `ranking-removal.yaml` | `runs/positions` | `positions.yaml` | `complete.json` |
+| | `runs/without-first-yield` | `positions-without-first-yield.yaml` | `changed-metrics.json` |

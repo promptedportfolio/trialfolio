@@ -982,6 +982,17 @@ def test_a_removal_that_shifts_a_nodes_position_compares_it_by_its_new_path(
     ]
 
 
+def test_a_run_without_tables_is_compared_by_its_plans_weights(review: Review) -> None:
+    differences = review("ranking-without-tables.yaml").differences
+
+    rows = weights(differences, "value-heavy")
+
+    assert [(row.node, row.baseline_value, row.value) for row in rows] == list(
+        zip(NODES, EXAMPLE_WEIGHTS, VALUE_HEAVY_WEIGHTS, strict=True)
+    )
+    assert sum(row.classification == "intended_change" for row in rows) == 3
+
+
 @pytest.mark.parametrize("name", ["ranking-weights.yaml", "ranking-other-forms.yaml"])
 def test_a_review_with_weight_rows_is_differences_csv_1_1_0_and_version_2(
     review: Review, name: str

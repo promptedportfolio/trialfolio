@@ -139,6 +139,10 @@ RUNS: Final[dict[str, dict[str, Run | Path]]] = {
         "runs/formula": Run("formula.yaml", "changed-metrics.json"),
         "runs/ranking-name": Run("ranking-name.yaml", "missing-metrics.json"),
     },
+    "ranking-without-tables.yaml": {
+        "runs/definition": DEFINITION,
+        "runs/value-heavy": Run("value-heavy.yaml", REJECTED),
+    },
     "ranking-removal.yaml": {
         "runs/positions": Run("positions.yaml", "complete.json"),
         "runs/without-first-yield": Run(

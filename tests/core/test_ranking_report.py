@@ -54,6 +54,8 @@ from trialfolio.planning import (
 )
 from trialfolio.provider import Credentials, P123ScreenBacktestClient
 from trialfolio.ranking_lock import LOCK_FILE
+from trialfolio.report import HtmlReportRenderer
+from trialfolio.runs import read_run
 from trialfolio.storage import LocalArtifactStore
 from trialfolio.tables import read_settings_csv_v1_1
 
@@ -141,11 +143,17 @@ def server() -> Iterator[FakePortfolio123]:
 
 
 def write_run(
-    tmp_path: Path, server: FakePortfolio123, path: Path = SCREEN, *, synthetic: bool = False
+    tmp_path: Path,
+    server: FakePortfolio123,
+    path: Path = SCREEN,
+    *,
+    synthetic: bool = False,
+    backtest: Reply | None = None,
 ) -> Path:
     """Writes the run of the screen configuration at `path` through the core: over the fake
     server, which answers its `rank_update` with `rank-update.json` and its backtest with
-    `complete.json`; or, for a synthetic run, with the demo's client, and no command."""
+    `backtest`, `complete.json` by default; or, for a synthetic run, with the demo's client, and
+    no command."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     content = path.read_bytes()
     read = read_screen_configuration_v1_1(content, path.name, path)
@@ -159,7 +167,7 @@ def write_run(
     out = tmp_path / "run"
     server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
     server.reply("/rank", reply("rank-update.json"), method="POST")
-    server.reply("/screen/backtest", reply("complete.json"))
+    server.reply("/screen/backtest", backtest or reply("complete.json"))
     credentials = Credentials(canaries.API_ID, canaries.API_KEY)
     with LocalArtifactStore(out) as store:
         execution = Execution(
@@ -180,7 +188,7 @@ def write_run(
             ),
             **given,  # pyright: ignore[reportArgumentType]
         )
-    assert error is None
+    assert (error is None) == (backtest is None)
     return out
 
 
@@ -327,6 +335,21 @@ def test_a_runs_report_gives_its_ranking_row_and_each_weight_by_its_path(
     )
 
 
+def test_a_run_without_tables_gives_the_weights_its_plan_resolves(
+    tmp_path: Path, server: FakePortfolio123
+) -> None:
+    document = report(write_run(tmp_path, server, backtest=Reply(400, b"Unsupported value")))
+
+    rows = cells(document, "The ranking definition")
+
+    assert rows[1:] == [list(row) for row in zip(NODES, WEIGHTS, strict=True)]
+    caption = table_after(document, "The ranking definition").find_all("caption")[0]
+    assert caption.text == (
+        "Each node's weight, by its canonical path, in the definition's order, as the plan"
+        " resolves them."
+    )
+
+
 def test_a_runs_report_gives_its_definitions_source_a_file_by_its_hash(
     tmp_path: Path, server: FakePortfolio123
 ) -> None:
@@ -353,6 +376,12 @@ def test_a_runs_snapshot_source_gives_its_systems_name_id_and_when_it_was_read(
 
     document = report(write_run(tmp_path, server, path))
 
+    # `trialfolio report` reads the snapshot's record from the run's copy, and renders the same.
+    with LocalArtifactStore(tmp_path / "run") as store:
+        saved = read_run(store)
+    assert saved.snapshot == record
+    html = (tmp_path / "run" / "report.html").read_text(encoding="utf-8")
+    assert HtmlReportRenderer(installed_versions().trialfolio).render(saved, "") == html
     read = record.taken_at.isoformat().replace("+00:00", "Z")
     assert paragraph_after(document, "The ranking definition's source") == (
         f"A ranking snapshot of the system Value and momentum, ID 104729, read {read}, as its"
