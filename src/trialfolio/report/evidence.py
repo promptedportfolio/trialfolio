@@ -3,7 +3,8 @@ kind of report's sections read.
 
 - **The evidence.** A run's report reads a `SavedRun`, from `trialfolio.runs`. A review's reads a
   `ReviewEvidence`, and an experiment session's an `ExperimentEvidence`, with a `CaseView` for
-  each planned case and a `RetiredCaseView` for each retired one, which the core builds.
+  each planned case, a `RetiredCaseView` for each retired one, and, from release 0.4.0, a
+  `PlanRanking` for each plan, where its ranking definition came from, which the core builds.
 - **The contexts.** `RunContext`, `ReviewContext`, and `ExperimentContext` each hold the evidence
   of one report, the version rendering it, and the lookups its sections share, such as its
   settings by name, so each section is a function of its report's context.
@@ -37,11 +38,17 @@ from trialfolio.contracts.experiment_record import (
     RetiredCaseV1_1,
 )
 from trialfolio.contracts.manifest import Capabilities, ParserVersion, Reproducibility
-from trialfolio.contracts.plan import PlanCase, PlanCaseV1_2
+from trialfolio.contracts.plan import PlanCase, PlanCaseV1_2, RankingSource
+from trialfolio.contracts.ranking_snapshot import RankingSnapshotRecord
 from trialfolio.contracts.review_configuration import ReviewConfiguration
 from trialfolio.contracts.review_manifest import ReviewArtifact
-from trialfolio.contracts.tables import DifferencesRow, MetricsRow, SettingsRow, SettingsRowV1_1
-from trialfolio.differences import Differences
+from trialfolio.contracts.tables import (
+    DifferencesRowV1_1,
+    MetricsRow,
+    SettingsRow,
+    SettingsRowV1_1,
+)
+from trialfolio.differences import AnyDifferencesRow, Differences
 from trialfolio.display import series
 from trialfolio.report.fragments import Setting, resolved_settings
 from trialfolio.report.page import code
@@ -50,6 +57,12 @@ from trialfolio.review_inputs import ReviewInput
 from trialfolio.runs import MANIFEST_PATH, SavedRun
 
 REPORT_PATH: Final = "report.html"
+
+
+def node_of(row: AnyDifferencesRow) -> str | None:
+    """A row's node: a weight row's canonical path, in `differences.csv` 1.1.0, and None on every
+    other row."""
+    return row.node if isinstance(row, DifferencesRowV1_1) else None
 
 
 def experiment_report_path(session: int) -> str:
@@ -144,16 +157,25 @@ class ReviewContext:
     """Each result but the baseline, in the configuration's order."""
     synthetic: tuple[str, ...]
     """The labels of the synthetic results, in the configuration's order."""
+    resolved: Mapping[str, tuple[Setting, ...]]
+    """By label: each result's resolved settings, in their order, its weight rows included."""
     settings: Mapping[str, Mapping[str, Setting]]
-    """By label, and then by setting name."""
+    """By label, and then by setting name, its weight rows apart: each weight row has the name
+    `ranking_weight`, so only its node tells it apart."""
     metrics: Mapping[str, Mapping[tuple[str, str], MetricsRow]]
     """By label, and then by subject and `metric_id`."""
-    rows: Mapping[tuple[str, str, str | None, str], DifferencesRow]
-    """`differences.csv`'s rows, by label, kind, subject, and name."""
+    rows: Mapping[tuple[str, str, str | None, str], AnyDifferencesRow]
+    """`differences.csv`'s rows but its weight rows, by label, kind, subject, and name."""
 
     @classmethod
     def of(cls, evidence: ReviewEvidence, version: str) -> Self:
         baseline = evidence.configuration.baseline
+        resolved = {
+            checked.result.label: resolved_settings(
+                checked.run.settings, checked.run.plan.cases[0].settings
+            )
+            for checked in evidence.inputs
+        }
         return cls(
             evidence,
             version,
@@ -164,14 +186,10 @@ class ReviewContext:
                 for checked in evidence.inputs
                 if checked.run.manifest.synthetic
             ),
+            resolved,
             {
-                checked.result.label: {
-                    setting.name: setting
-                    for setting in resolved_settings(
-                        checked.run.settings, checked.run.plan.cases[0].settings
-                    )
-                }
-                for checked in evidence.inputs
+                label: {setting.name: setting for setting in settings if setting.node is None}
+                for label, settings in resolved.items()
             },
             {
                 checked.result.label: {
@@ -182,6 +200,7 @@ class ReviewContext:
             {
                 (row.label, row.kind, row.subject, row.name): row
                 for row in evidence.differences.rows
+                if node_of(row) is None
             },
         )
 
@@ -257,6 +276,24 @@ class RetiredCaseView:
 
 
 @dataclass(frozen=True)
+class PlanRanking:
+    """Where a plan of the experiment took its ranking definition from, as the report shows it:
+    its `ranking_source`, and, for a snapshot, the record its `snapshot.json` copies (release
+    0.4.0, R04-T11)."""
+
+    number: int
+    source: RankingSource | None
+    """None for a plan whose ranking isn't a definition."""
+    snapshot: RankingSnapshotRecord | None
+
+    def __post_init__(self) -> None:
+        if (self.snapshot is None) != (self.source is None or self.source.form != "snapshot"):
+            raise ValueError(
+                "a plan has its snapshot's record exactly when a snapshot names its ranking"
+            )
+
+
+@dataclass(frozen=True)
 class ExperimentEvidence:
     """What an experiment session's report shows: the current plan and its `experiment.json`,
     each case with its attempts and tables, and what the session's manifest will record.
@@ -285,12 +322,19 @@ class ExperimentEvidence:
     capabilities: Capabilities
     reproducibility: Reproducibility
     artifacts: tuple[ExperimentArtifact | ExperimentArtifactV1_1, ...]
+    rankings: tuple[PlanRanking, ...] = ()
+    """Each plan's, oldest first, once a plan of the experiment has a ranking definition, as its
+    `experiment.json` 1.1.0 shows; empty before."""
 
     def __post_init__(self) -> None:
         if tuple(view.case for view in self.cases) != self.plan.cases:
             raise ValueError("each planned case has one view, in the plan's order")
         if tuple(view.case for view in self.retired) != self.record.retired_cases:
             raise ValueError("each retired case has one view, in the record's order")
+        ranked = isinstance(self.record, ExperimentRecordV1_1)
+        numbers = tuple(entry.plan for entry in self.record.plans) if ranked else ()
+        if tuple(ranking.number for ranking in self.rankings) != numbers:
+            raise ValueError("an experiment with a ranking definition gives each plan's source")
         if any(artifact.role == "report" for artifact in self.artifacts):
             raise ValueError("the artifacts are the ones the report links, so not the report")
 

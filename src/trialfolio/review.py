@@ -11,7 +11,8 @@ output).
    first is the first atomic write, so a file system that can't take one fails there
    (`storage.write_failed`).
 3. Compares each result with the baseline, warns when results share a saved response, and writes
-   `normalized/differences.csv`.
+   `normalized/differences.csv`: version 1.1.0 when any result has weight rows, as a run whose
+   ranking is a definition has, and 1.0.0 otherwise (release 0.4.0, R04-T11).
 4. Writes `report.html`, rendered from what the manifest will record, without the report.
 5. Writes `manifest.json` last. Without it, the review is incomplete. A write of it that fails, an
    interrupt included, discards it if the store had published it already, so a review the
@@ -44,11 +45,10 @@ from trialfolio.contracts.review_manifest import (
     ReviewManifest,
     ReviewManifestCounts,
 )
-from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION
+from trialfolio.contracts.tables import DifferencesRow, DifferencesRowV1_1
 from trialfolio.differences import (
     DIFFERENCES_PATH,
     METHOD,
-    METHOD_VERSION,
     ComparedRun,
     Differences,
     SharedResponse,
@@ -67,7 +67,7 @@ from trialfolio.report import HtmlReportRenderer, ReviewEvidence, write_review_r
 from trialfolio.review_inputs import ReviewInput
 from trialfolio.runs import CONFIGURATION_PATH, MANIFEST_PATH
 from trialfolio.storage import ArtifactStore, StoredFile
-from trialfolio.tables import differences_csv
+from trialfolio.tables import differences_csv, differences_csv_v1_1
 
 _logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ class Review:
 
     @property
     def synthetic(self) -> bool:
-        """Whether any result is synthetic: the run `trialfolio demo` writes."""
+        """Whether any result is synthetic, as its run's manifest gives it."""
         return any(checked.reviewed.synthetic for checked in self._inputs)
 
     @property
@@ -241,9 +241,13 @@ class Review:
         )
 
     def _write_differences(self, differences: Differences) -> None:
-        stored = self._store.write(DIFFERENCES_PATH, differences_csv(differences.rows))
+        # Every row is one version's: 1.1.0's when any result has weight rows.
+        weighted = [row for row in differences.rows if isinstance(row, DifferencesRowV1_1)]
+        unweighted = [row for row in differences.rows if isinstance(row, DifferencesRow)]
+        content = differences_csv_v1_1(weighted) if weighted else differences_csv(unweighted)
+        stored = self._store.write(DIFFERENCES_PATH, content)
         self._differences, self._differences_file = differences, stored
-        self._artifacts.append(_listed(stored, "differences", TABLES_SCHEMA_VERSION))
+        self._artifacts.append(_listed(stored, "differences", differences.schema_version))
 
     def _listed_configuration(self, stored: StoredFile) -> ReviewArtifact:
         version = self._configuration.schema_version
@@ -266,7 +270,7 @@ class Review:
             baseline=self._configuration.baseline,
             results=tuple(checked.reviewed for checked in self._inputs),
             artifacts=tuple(self._artifacts),
-            methods=(Method(name=METHOD, version=METHOD_VERSION),),
+            methods=(Method(name=METHOD, version=differences.method_version),),
             license_id=LICENSE_ID,
             notice_version=NOTICE_VERSION,
             capabilities=ReviewCapabilities(

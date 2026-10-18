@@ -115,7 +115,8 @@ title, "Another title", is a value no message may show."""
 
 
 def newer(content: Json) -> None:
-    content["schema_version"] = "1.1.0"
+    # Not 1.1.0, which a review reads in a run manifest, from release 0.4.0's R04-T11.
+    content["schema_version"] = "9.9.9"
 
 
 def newer_entry(role: str) -> Callable[[Json], None]:

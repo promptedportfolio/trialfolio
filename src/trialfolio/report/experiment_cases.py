@@ -22,6 +22,7 @@ from trialfolio.report.fragments import (
     reported_cost,
 )
 from trialfolio.report.page import code, facts, moment, table, text
+from trialfolio.report.ranking import costs
 from trialfolio.report.vocabulary import EXCHANGE_RESULTS, EXPERIMENT_APPROVALS
 
 
@@ -292,17 +293,25 @@ def _attempts(experiment: ExperimentContext) -> list[str]:
         "Repeats",
         "Exchanges",
     )
+    # An experiment with a ranking definition shows each attempt's costs too: its rank_update's
+    # beside its backtest's.
+    ranked = bool(experiment.evidence.rankings)
+    if ranked:
+        heads = (*heads, "Cost")
     for retired, view in views:
         if not view.attempts:
             continue
         caption = f"{code(view.case.case_key)}{retired}, {code(view.case.case_id)}"
-        rows = [_attempt_row(experiment, attempt) for attempt in view.attempts]
+        rows = [_attempt_row(experiment, attempt, ranked=ranked) for attempt in view.attempts]
         parts.extend(table(heads, rows, caption=caption))
     return parts
 
 
 def _attempt_row(
-    experiment: ExperimentContext, attempt: AttemptRecordV1_1 | AttemptRecordV1_3
+    experiment: ExperimentContext,
+    attempt: AttemptRecordV1_1 | AttemptRecordV1_3,
+    *,
+    ranked: bool,
 ) -> str:
     plan = experiment.plan_numbers.get(attempt.plan_hash)
     error = (
@@ -318,7 +327,9 @@ def _attempt_row(
         f"<td>{plan if plan is not None else code(attempt.plan_hash)}</td>"
         f"<td>{moment(attempt.started_at)}</td><td>{code(attempt.outcome)}</td>"
         f"<td>{'Yes' if attempt.possibly_charged else 'No'}</td><td>{error}</td>"
-        f'<td class="long">{repeats}</td><td>{exchanges}</td></tr>'
+        f'<td class="long">{repeats}</td><td>{exchanges}</td>'
+        + (f"<td>{costs(attempt)}</td>" if ranked else "")
+        + "</tr>"
     )
 
 

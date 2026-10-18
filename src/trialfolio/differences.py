@@ -1,6 +1,7 @@
 """The comparison core: each result's settings and metrics compared with the baseline's, as the
 rows of `differences.csv` (release 0.2.0, R02-T06; docs/contracts.md, differences between screen
-runs). Its rules are the review's method, `screen-run-differences` version 1.
+runs). Its rules are the review's method, `screen-run-differences` version 1, or version 2 with
+weight rows.
 
 `compare` compares each result except the baseline, in the configuration's order, and gives its
 23 setting rows, then its 20 metric rows:
@@ -17,6 +18,14 @@ runs). Its rules are the review's method, `screen-run-differences` version 1.
 - **Identical responses.** Every metric row of a result whose saved response is byte-identical
   to another result's, the baseline's included, is flagged `identical_source`.
 
+From release 0.4.0 (R04-T11), the rules are version 2 when either run of a comparison has a
+ranking given as a definition: its weight rows follow `ranking`, one for each node either run's
+definition has, the baseline's nodes in its order, then the result's others, each named by its
+canonical path. A node a run doesn't have is `absent` when its record shows its ranking in full,
+a definition or a formula, and unknown when it names a ranking system by name or ID. A result
+that declares `ranking` declares each weight that differs. A review with weight rows writes
+`differences.csv` 1.1.0, with `node`, and every other review 1.0.0, as 0.3.0 does.
+
 Nothing here logs: the rows hold configuration values, formulas, and results. A warning that
 results share a response is the command's to log, by their positions.
 """
@@ -26,18 +35,35 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import MAX_EMAX, MAX_PREC, MIN_EMIN, ROUND_HALF_EVEN, Context, Decimal
-from typing import Final, Self, get_args
+from types import MappingProxyType
+from typing import Final, Literal, Self, TypedDict, get_args
 
-from trialfolio.contracts.common import CRITICAL_CATEGORIES, FlagCode
+from trialfolio.contracts.common import CRITICAL_CATEGORIES, FlagCode, SettingCategory
+from trialfolio.contracts.plan import PlanSettingV1_2
 from trialfolio.contracts.review_manifest import MetricRowCounts, SettingRowCounts
-from trialfolio.contracts.screen_settings import SCREEN_SETTINGS, ScreenSetting, check_value_text
+from trialfolio.contracts.screen_configuration import FormulaRanking
+from trialfolio.contracts.screen_settings import (
+    RANKING_WEIGHT,
+    SCREEN_SETTINGS,
+    SCREEN_SETTINGS_BY_NAME,
+    DefinitionRankingSetting,
+    ScreenSetting,
+    check_value_text,
+    read_ranking_setting,
+)
 from trialfolio.contracts.tables import (
+    ABSENT,
     FLAGGING,
+    TABLES_SCHEMA_VERSION,
+    TABLES_SCHEMA_VERSION_V1_1,
     DifferenceReason,
     DifferencesRow,
+    DifferencesRowV1_1,
+    DifferenceUnit,
     MetricClassification,
     MetricsRow,
     SettingClassification,
+    SettingsRowV1_1,
 )
 from trialfolio.normalization import METRICS, Metric, setting_text
 from trialfolio.review_inputs import ReviewInput
@@ -46,8 +72,14 @@ METHOD: Final = "screen-run-differences"
 METHOD_VERSION: Final = 1
 """The review manifest's method: these rules. A change that could change a row makes a new
 version."""
+METHOD_VERSION_WITH_WEIGHTS: Final = 2
+"""The method's version when any result has weight rows, which version 2 compares (R04-T11)."""
+
+type AnyDifferencesRow = DifferencesRow | DifferencesRowV1_1
 
 DIFFERENCES_PATH: Final = "normalized/differences.csv"
+
+_RANKING: Final = SCREEN_SETTINGS_BY_NAME["ranking"]
 
 _FLAG_ORDER: Final[tuple[FlagCode, ...]] = get_args(FlagCode)
 """A row's flags are written in the order of the flag codes table."""
@@ -74,35 +106,63 @@ class ComparedRun:
 
     label: str
     settings: Mapping[str, RunSetting]
-    """By setting name: its `settings.csv` rows, or its plan's for a run without tables. A
-    setting missing from the run is absent, which no complete 1.0.0 screen run gives."""
+    """By setting name, its weight rows apart: its `settings.csv` rows, or its plan's for a run
+    without tables. A setting missing from the run is absent, which no complete screen run
+    gives."""
     metrics: Mapping[tuple[str, str], MetricsRow]
     """By subject and `metric_id`: its `metrics.csv` rows. Empty for a run without tables."""
     response: str | None
     """The `artifact_id` of its saved response; None when it has none."""
     intended_changes: Mapping[str, str]
     """Each setting the result declares as an intended change, with the reason it gives."""
+    weights: Mapping[str, RunSetting] = MappingProxyType({})
+    """Its weight rows, by their nodes' canonical paths, in its definition's order, as
+    `settings` holds its other rows; empty when its ranking isn't a definition."""
 
     @classmethod
     def of(cls, checked: ReviewInput) -> Self:
         """A result's run, as the input check read it."""
         run = checked.run
         if run.settings is not None:
-            settings = {row.setting: RunSetting(row.value, row.flags) for row in run.settings}
+            rows = [
+                (
+                    row.setting,
+                    row.node if isinstance(row, SettingsRowV1_1) else None,
+                    RunSetting(row.value, row.flags),
+                )
+                for row in run.settings
+            ]
         else:
             (case,) = run.plan.cases
-            settings = {
-                row.setting: RunSetting(setting_text(row.value), row.flags) for row in case.settings
-            }
+            rows = [
+                (
+                    row.setting,
+                    row.node if isinstance(row, PlanSettingV1_2) else None,
+                    RunSetting(setting_text(row.value), row.flags),
+                )
+                for row in case.settings
+            ]
         return cls(
             label=checked.result.label,
-            settings=settings,
+            settings={name: setting for name, node, setting in rows if node is None},
             metrics={(row.subject, row.metric_id): row for row in run.metrics or ()},
             response=checked.reviewed.response,
             intended_changes={
                 change.setting: change.reason for change in checked.result.intended_changes or ()
             },
+            weights={node: setting for _, node, setting in rows if node is not None},
         )
+
+    @property
+    def in_full(self) -> bool:
+        """Whether its record shows its ranking in full, so it has no node but its weight rows':
+        a definition, or a formula, which has none. A ranking system named by name or ID wasn't
+        captured, so which nodes it has is unknown."""
+        ranking = self.settings.get(_RANKING.name)
+        if ranking is None:
+            return False
+        value = read_ranking_setting(check_value_text(_RANKING, ranking.value, "any"), "any")
+        return isinstance(value, DefinitionRankingSetting | FormulaRanking)
 
 
 @dataclass(frozen=True)
@@ -121,8 +181,24 @@ class SharedResponse:
 class Differences:
     """The rows of `differences.csv`, and the results that share a response."""
 
-    rows: tuple[DifferencesRow, ...]
+    rows: tuple[DifferencesRow, ...] | tuple[DifferencesRowV1_1, ...]
+    """Version 1.1.0's when any result has weight rows, and 1.0.0's otherwise."""
     shared_responses: tuple[SharedResponse, ...]
+
+    @property
+    def weighted(self) -> bool:
+        """Whether any result has weight rows, so the table is 1.1.0."""
+        return any(isinstance(row, DifferencesRowV1_1) for row in self.rows)
+
+    @property
+    def schema_version(self) -> str:
+        """`differences.csv`'s schema version, which the review manifest records."""
+        return TABLES_SCHEMA_VERSION_V1_1 if self.weighted else TABLES_SCHEMA_VERSION
+
+    @property
+    def method_version(self) -> int:
+        """The version of `screen-run-differences` the rows follow."""
+        return METHOD_VERSION_WITH_WEIGHTS if self.weighted else METHOD_VERSION
 
     @property
     def setting_counts(self) -> SettingRowCounts:
@@ -161,14 +237,50 @@ def compare(baseline: str, runs: Sequence[ComparedRun]) -> Differences:
     base = runs[labels.index(baseline)]
     shared = _shared_responses(runs)
     sharing = {position for group in shared for position in group.positions}
-    rows: list[DifferencesRow] = []
+    rows: list[_Row] = []
     for position, run in enumerate(runs, start=1):
         if run is base:
             continue
-        rows.extend(_setting_row(setting, base, run) for setting in SCREEN_SETTINGS)
+        for setting in SCREEN_SETTINGS:
+            rows.append(_setting_row(setting, base, run))
+            if setting is _RANKING:
+                rows.extend(_weight_row(node, base, run) for node in _nodes(base, run))
         identical = position in sharing
         rows.extend(_metric_row(metric, base, run, identical) for metric in METRICS)
-    return Differences(tuple(rows), shared)
+    if any(run.weights for run in runs):
+        return Differences(tuple(DifferencesRowV1_1.model_validate(row) for row in rows), shared)
+    return Differences(
+        tuple(DifferencesRow.model_validate(_without_node(row)) for row in rows), shared
+    )
+
+
+class _Row(TypedDict):
+    """A row's cells, `node` included, before its version's model checks them."""
+
+    label: str
+    baseline_label: str
+    kind: Literal["setting", "metric"]
+    name: str
+    subject: Literal["strategy", "benchmark"] | None
+    category: SettingCategory | None
+    critical: bool | None
+    baseline_value: str | None
+    value: str | None
+    unit: str | None
+    classification: SettingClassification | MetricClassification
+    difference: str | None
+    difference_unit: DifferenceUnit | None
+    difference_decimals: int | None
+    reason: DifferenceReason | None
+    declared_reason: str | None
+    flagged: bool
+    flags: tuple[FlagCode, ...]
+    node: str | None
+
+
+def _without_node(row: _Row) -> dict[str, object]:
+    """A row's cells but `node`, which `differences.csv` 1.0.0 doesn't have."""
+    return {name: value for name, value in row.items() if name != "node"}
 
 
 def _shared_responses(runs: Sequence[ComparedRun]) -> tuple[SharedResponse, ...]:
@@ -189,14 +301,15 @@ def _shared_responses(runs: Sequence[ComparedRun]) -> tuple[SharedResponse, ...]
     )
 
 
-def _setting_row(setting: ScreenSetting, base: ComparedRun, run: ComparedRun) -> DifferencesRow:
+def _setting_row(setting: ScreenSetting, base: ComparedRun, run: ComparedRun) -> _Row:
     before, after = base.settings.get(setting.name), run.settings.get(setting.name)
     declared = run.intended_changes.get(setting.name)
-    critical = setting.category in CRITICAL_CATEGORIES
     classification: SettingClassification
     if before is None or after is None:
         classification = "unknown"
-    elif check_value_text(setting, before.value) == check_value_text(setting, after.value):
+    elif check_value_text(setting, before.value, "any") == check_value_text(
+        setting, after.value, "any"
+    ):
         # A list or a ranking reads as JSON, and anything else as its text.
         classification = "same"
     else:
@@ -205,37 +318,89 @@ def _setting_row(setting: ScreenSetting, base: ComparedRun, run: ComparedRun) ->
     for row in (before, after):
         if row is not None:
             flags.update(row.flags)
+    if classification == "same" and declared is not None:
+        flags.add("intended_change_not_observed")
+    return _setting_cells(setting, base, run, (before, after), classification, declared, flags)
+
+
+def _nodes(base: ComparedRun, run: ComparedRun) -> list[str]:
+    """The nodes of either run's definition, by canonical path: the baseline's, in its order,
+    then the result's others, in its order. A node is the same node in both when its canonical
+    path is the same."""
+    return [*base.weights, *(node for node in run.weights if node not in base.weights)]
+
+
+def _weight_row(node: str, base: ComparedRun, run: ComparedRun) -> _Row:
+    """The weight row of `node`. A result that declares `ranking` declares each weight that
+    differs, with `ranking`'s reason, and a weight that's the same isn't a declared change that
+    wasn't observed: the declaration is of the ranking, which its own row shows."""
+    before, after = _weight(base, node), _weight(run, node)
+    declared = run.intended_changes.get(_RANKING.name)
+    classification: SettingClassification
+    if before is None or after is None:
+        classification = "unknown"
+    elif before.value == after.value:
+        # Each is a normalized decimal, or `absent`.
+        classification = "same"
+    else:
+        classification = "unexplained_mismatch" if declared is None else "intended_change"
+    reason = declared if classification == "intended_change" else None
+    return {
+        **_setting_cells(RANKING_WEIGHT, base, run, (before, after), classification, reason, set()),
+        "node": node,
+    }
+
+
+def _weight(run: ComparedRun, node: str) -> RunSetting | None:
+    """A run's weight of `node`: its weight row's; `absent` when its record shows its ranking
+    in full without the node; and None, unknown, when its ranking is a system named by name or
+    ID, whose definition wasn't captured."""
+    weight = run.weights.get(node)
+    if weight is not None:
+        return weight
+    return RunSetting(ABSENT, ()) if run.in_full else None
+
+
+def _setting_cells(
+    setting: ScreenSetting,
+    base: ComparedRun,
+    run: ComparedRun,
+    compared: tuple[RunSetting | None, RunSetting | None],
+    classification: SettingClassification,
+    declared: str | None,
+    flags: set[FlagCode],
+) -> _Row:
+    """A setting row's cells, with the flags its comparison gives it added to `flags`."""
+    before, after = compared
+    critical = setting.category in CRITICAL_CATEGORIES
     if critical and classification == "unexplained_mismatch":
         flags.add("critical_unexplained_mismatch")
     if critical and classification == "unknown":
         flags.add("critical_unknown")
-    if classification == "same" and declared is not None:
-        flags.add("intended_change_not_observed")
-    return DifferencesRow(
-        label=run.label,
-        baseline_label=base.label,
-        kind="setting",
-        name=setting.name,
-        subject=None,
-        category=setting.category,
-        critical=critical,
-        baseline_value=None if before is None else before.value,
-        value=None if after is None else after.value,
-        unit=setting.unit,
-        classification=classification,
-        difference=None,
-        difference_unit=None,
-        difference_decimals=None,
-        reason=None,
-        declared_reason=declared,
-        flagged=_flagged(flags),
-        flags=_ordered(flags),
-    )
+    return {
+        "label": run.label,
+        "baseline_label": base.label,
+        "kind": "setting",
+        "name": setting.name,
+        "subject": None,
+        "category": setting.category,
+        "critical": critical,
+        "baseline_value": None if before is None else before.value,
+        "value": None if after is None else after.value,
+        "unit": setting.unit,
+        "classification": classification,
+        "difference": None,
+        "difference_unit": None,
+        "difference_decimals": None,
+        "reason": None,
+        "declared_reason": declared,
+        "flagged": _flagged(flags),
+        "flags": _ordered(flags),
+        "node": None,
+    }
 
 
-def _metric_row(
-    metric: Metric, base: ComparedRun, run: ComparedRun, identical: bool
-) -> DifferencesRow:
+def _metric_row(metric: Metric, base: ComparedRun, run: ComparedRun, identical: bool) -> _Row:
     key = (metric.subject, metric.metric_id)
     before, after = base.metrics.get(key), run.metrics.get(key)
     flags: set[FlagCode] = {"identical_source"} if identical else set()
@@ -251,26 +416,27 @@ def _metric_row(
         else:
             classification = "differenced"
             difference = _difference(metric.unit, before.value, after.value)
-    return DifferencesRow(
-        label=run.label,
-        baseline_label=base.label,
-        kind="metric",
-        name=metric.metric_id,
-        subject=metric.subject,
-        category=None,
-        critical=None,
-        baseline_value=None if before is None else before.value,
-        value=None if after is None else after.value,
-        unit=metric.unit,
-        classification=classification,
-        difference=None if difference is None else difference[0],
-        difference_unit=None if difference is None else difference[1],
-        difference_decimals=None if difference is None else difference[2],
-        reason=reason,
-        declared_reason=None,
-        flagged=_flagged(flags),
-        flags=_ordered(flags),
-    )
+    return {
+        "label": run.label,
+        "baseline_label": base.label,
+        "kind": "metric",
+        "name": metric.metric_id,
+        "subject": metric.subject,
+        "category": None,
+        "critical": None,
+        "baseline_value": None if before is None else before.value,
+        "value": None if after is None else after.value,
+        "unit": metric.unit,
+        "classification": classification,
+        "difference": None if difference is None else difference[0],
+        "difference_unit": None if difference is None else difference[1],
+        "difference_decimals": None if difference is None else difference[2],
+        "reason": reason,
+        "declared_reason": None,
+        "flagged": _flagged(flags),
+        "flags": _ordered(flags),
+        "node": None,
+    }
 
 
 def _not_comparable(

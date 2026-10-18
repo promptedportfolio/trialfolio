@@ -176,6 +176,7 @@ from trialfolio.contracts.manifest import (
     SourceRecord,
     SourceRecordV1_1,
 )
+from trialfolio.contracts.plan import RankingSource
 from trialfolio.contracts.tables import (
     TABLES_SCHEMA_VERSION,
     TABLES_SCHEMA_VERSION_V1_1,
@@ -246,6 +247,7 @@ from trialfolio.report import (
     CaseView,
     ExperimentEvidence,
     HtmlReportRenderer,
+    PlanRanking,
     RetiredCaseView,
     write_experiment_report,
 )
@@ -562,6 +564,14 @@ class _RecordedPlan:
     read: ExperimentConfigurationRead | None = None
     """The configuration as 0.4.0's reader read it, with its definition, for a plan with a
     ranking definition, from which its cases' weight rows take their original values."""
+    source: RankingSource | None = None
+    """Its `ranking_source`, for a plan with a ranking definition, which its report shows."""
+
+    @property
+    def ranking(self) -> PlanRanking:
+        """Where its ranking definition came from, as the session's report shows it."""
+        snapshot = None if self.read is None else self.read.snapshot
+        return PlanRanking(self.number, self.source, None if snapshot is None else snapshot.record)
 
 
 class ExperimentExecution:
@@ -1037,6 +1047,7 @@ class ExperimentExecution:
                 self._configuration_version,
                 self._plan.schema_version,
                 self._read,
+                _ranking_source(self._plan),
             )
         )
         _logger.info(
@@ -1077,6 +1088,7 @@ class ExperimentExecution:
                 self._configuration_version,
                 revision.plan.schema_version,
                 self._read,
+                _ranking_source(revision.plan),
             )
         )
         _logger.info(
@@ -1477,6 +1489,7 @@ class ExperimentExecution:
             capabilities=capabilities(series=self._holds_series()),
             reproducibility=reproducibility(self._plan.cases),
             artifacts=(self._artifacts_v1_1() if self._ranked else self._artifacts()),
+            rankings=tuple(plan.ranking for plan in self._plans) if self._ranked else (),
         )
         self._evidence = evidence
         self._report = write_experiment_report(
@@ -1946,7 +1959,14 @@ def _recorded_plan(saved: SavedPlan) -> _RecordedPlan:
         saved.configuration_version,
         saved.plan.schema_version,
         saved.read,
+        _ranking_source(saved.plan),
     )
+
+
+def _ranking_source(plan: PlanV1_1 | PlanV1_3) -> RankingSource | None:
+    """A plan's `ranking_source`: where its ranking definition came from, or None for a plan
+    without one."""
+    return plan.ranking_source if isinstance(plan, PlanV1_3) else None
 
 
 def _confirmed(

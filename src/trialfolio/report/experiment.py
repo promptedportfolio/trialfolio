@@ -40,6 +40,12 @@ from trialfolio.report.fragments import (
     unit,
 )
 from trialfolio.report.page import code, facts, page, table, text
+from trialfolio.report.ranking import (
+    definition_source,
+    experiment_sources,
+    experiment_weights,
+    limitations,
+)
 from trialfolio.report.vocabulary import (
     EXPERIMENT_APPROVALS,
     EXPERIMENT_ROLES,
@@ -236,6 +242,7 @@ def _definitions(experiment: ExperimentContext) -> list[str]:
         *table(("Case", "case_id", "Change", "Description"), changes),
         "<h3>The baseline's settings</h3>",
         *_baseline_table(experiment),
+        *experiment_weights(experiment.cases),
         "<h3>Metric definitions</h3>",
         *metric_definitions(_metric_source(experiment), overrides),
     ]
@@ -290,9 +297,14 @@ def _data(experiment: ExperimentContext) -> list[str]:
         layouts = "Unavailable: no planned case's response was normalized."
     verified = SYNTHETIC_EXPERIMENT_VERIFIED if experiment.synthetic else EXPERIMENT_VERIFIED
     meanings = PROVENANCE | {"verified": verified}
+    rankings = [
+        (ranking.number, definition_source(ranking.source, ranking.snapshot))
+        for ranking in experiment.evidence.rankings
+    ]
     return [
         "<h3>Sources</h3>",
         *data_facts(source, layouts, experiment.baseline_by_name),
+        *(experiment_sources(rankings) if rankings else ()),
         "<h3>Coverage</h3>",
         *_coverage(experiment),
         *provenance(meanings, _provenances(experiment)),
@@ -674,6 +686,12 @@ def _limitations(experiment: ExperimentContext) -> list[str]:
             " give different results. A repeat is a new attempt, never a replacement."
         )
     items.append(_prior_research(experiment))
+    if evidence.rankings:
+        items.extend(
+            limitations(
+                synthetic=experiment.synthetic, each="Each case's definition", kind="experiment"
+            )
+        )
     items.extend(inferred_defaults(experiment.baseline_settings))
     items.extend(_case_limitations(experiment))
     items.append(

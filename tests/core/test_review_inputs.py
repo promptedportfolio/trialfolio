@@ -507,7 +507,7 @@ def test_a_schema_version_without_a_reader_is_unknown(
     assert f"{named}` in result `{label(2)}`'s run directory (`{run_path(2)}`): " in error.message
     assert f"{named}` in result 2's run directory: " in error.log_message
     assert_names_the_result(error, 2)
-    assert "1.1.0" not in error.message
+    assert "9.9.9" not in error.message
 
 
 # Labels in logs (review output)

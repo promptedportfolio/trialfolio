@@ -33,10 +33,9 @@ version with no reader. The message names the problem, never a value, and names 
 `RunName` says: `trialfolio report` reads one run, "the run directory", and a review names each
 result's run by its label and path, and in logs by its position.
 
-`check_run` reads it the same way, and also gives back the bytes it checked, from which a review
-writes its copies, so a file changed after the check can't be copied. A review compares no weight
-rows until release 0.4.0's R04-T11, so `check_run` reads 0.3.0's versions only, unless it's told
-to read a run with a ranking definition too, as `read_run` does.
+`check_run` reads it the same way, a run whose ranking is a definition included, since a review
+compares its weight rows (release 0.4.0's R04-T11), and also gives back the bytes it checked, from
+which a review writes its copies, so a file changed after the check can't be copied.
 
 The checks it shares with an experiment's reader, `experiment_records.py`, are in
 `record_checks.py`.
@@ -119,17 +118,6 @@ type AnyStart = StartRecord | StartRecordV1_2
 type AnyRecord = AttemptRecord | AttemptRecordV1_2
 
 _SCHEMA_VERSIONS: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
-    "manifest": ("run manifests", ("1.0.0",)),
-    "plan": ("plans", ("1.0.0",)),
-    "start_record": ("start records", ("1.0.0",)),
-    "attempt_record": ("attempt records", ("1.0.0",)),
-    "metrics": ("metrics.csv", (TABLES_SCHEMA_VERSION,)),
-    "settings": ("settings.csv", (TABLES_SCHEMA_VERSION,)),
-}
-"""The schema versions `check_run` has a reader for, for the manifest and each role it reads, with
-what they're called in messages: 0.3.0's, which a review reads."""
-
-_RANKING_VERSIONS: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
     "manifest": ("run manifests", ("1.0.0", "1.1.0")),
     "plan": ("plans", ("1.0.0", "1.2.0")),
     "ranking_snapshot_record": ("snapshot records", ("1.0.0",)),
@@ -139,7 +127,8 @@ _RANKING_VERSIONS: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
     "metrics": ("metrics.csv", (TABLES_SCHEMA_VERSION,)),
     "settings": ("settings.csv", (TABLES_SCHEMA_VERSION, TABLES_SCHEMA_VERSION_V1_1)),
 }
-"""The same, for `read_run`, which also reads a run whose ranking is a definition."""
+"""The schema versions `check_run` has a reader for, for the manifest and each role it reads, with
+what they're called in messages."""
 
 _RECORD_FILES: Final[dict[str, str]] = {
     "update_record": UPDATE_RECORD,
@@ -198,10 +187,18 @@ class SavedRun:
     metrics: tuple[MetricsRow, ...] | None
     settings: tuple[SettingsRow, ...] | tuple[SettingsRowV1_1, ...] | None
     """The tables' rows: both, or neither when the run has no normalized result."""
+    snapshot: RankingSnapshotRecord | None = None
+    """The record of the snapshot its ranking names, as its copy, `snapshot.json`, holds it; None
+    for every other ranking."""
 
     def __post_init__(self) -> None:
         if (self.metrics is None) != (self.settings is None):
             raise ValueError("a run has both normalized tables, or neither")
+        source = self.plan.ranking_source if isinstance(self.plan, PlanV1_2) else None
+        if (self.snapshot is None) != (source is None or source.form != "snapshot"):
+            raise ValueError(
+                "a run has its snapshot's record exactly when a snapshot names its ranking"
+            )
 
 
 @dataclass(frozen=True)
@@ -234,30 +231,24 @@ def read_run(store: ArtifactStore) -> SavedRun:
     `artifact.unknown_schema_version` when one of its artifacts has a schema version with no
     reader. Writes nothing.
     """
-    return check_run(store, ranking=True).saved
+    return check_run(store).saved
 
 
-def check_run(
-    store: ArtifactStore, name: RunName = THE_RUN_DIRECTORY, *, ranking: bool = False
-) -> CheckedRun:
+def check_run(store: ArtifactStore, name: RunName = THE_RUN_DIRECTORY) -> CheckedRun:
     """Reads and checks a saved run as `read_run` does, reading each file once, and returns it
-    with the bytes it checked. Its errors name the run as `name` says.
-
-    Without `ranking`, it reads 0.3.0's versions only, as a review does until release 0.4.0's
-    R04-T11 compares weight rows, so a run whose ranking is a definition has a manifest version
-    with no reader."""
-    checks = _RANKING_CHECKS if ranking else _CHECKS
+    with the bytes it checked. Its errors name the run as `name` says."""
+    checks = _CHECKS
     try:
         content = _read_manifest(store)
         manifest = _manifest(content, checks)
         contents = {artifact.path: _listed(store, artifact) for artifact in manifest.artifacts}
         plan = _plan(manifest, contents, checks)
-        definition = _definition(manifest, contents, plan)
+        definition, snapshot = _definition(manifest, contents, plan)
         attempts = _attempts(manifest, contents, plan, checks)
         metrics, settings = _tables(manifest, contents, plan, attempts, definition, checks)
     except _Refused as refused:
         raise refused.error(name) from None
-    saved = SavedRun(manifest, plan, attempts, metrics, settings)
+    saved = SavedRun(manifest, plan, attempts, metrics, settings, snapshot)
     return CheckedRun(saved, MappingProxyType({MANIFEST_PATH: content, **contents}))
 
 
@@ -345,15 +336,15 @@ def _only(
 
 def _definition(
     manifest: AnyManifest, contents: dict[str, bytes], plan: Plan | PlanV1_2
-) -> AnyArtifact | None:
+) -> tuple[AnyArtifact | None, RankingSnapshotRecord | None]:
     """The run's `definition.xml`, for a plan with a ranking definition, checked: listed once,
     and, read as a definition's file is read, with the hash its plan's `ranking_source` gives;
     and, for a ranking a snapshot names, its `snapshot.json`, listed once, a valid record, the
-    snapshot its plan's `ranking_source` names (a complete run)."""
+    snapshot its plan's `ranking_source` names, with that record (a complete run)."""
     if not isinstance(plan, PlanV1_2):
-        return None
+        return None, None
     source = plan.ranking_source
-    copy = _only(manifest, "ranking_definition", DEFINITION_PATH, _RANKING_CHECKS)
+    copy = _only(manifest, "ranking_definition", DEFINITION_PATH, _CHECKS)
     if definition_hash(contents[DEFINITION_PATH]) != source.definition:
         raise _not_a_run(
             "its definition.xml isn't its plan's ranking definition: read as a definition's file"
@@ -365,10 +356,12 @@ def _definition(
                 "its manifest lists a snapshot.json, though its plan's ranking is a definition's"
                 " file."
             )
-        return copy
-    _only(manifest, "ranking_snapshot_record", SNAPSHOT_PATH, _RANKING_CHECKS)
+        return copy, None
+    _only(manifest, "ranking_snapshot_record", SNAPSHOT_PATH, _CHECKS)
     content = contents[SNAPSHOT_PATH]
-    _RANKING_CHECKS.record(RankingSnapshotRecord, content, SNAPSHOT_PATH, "ranking_snapshot_record")
+    record = _CHECKS.record(
+        RankingSnapshotRecord, content, SNAPSHOT_PATH, "ranking_snapshot_record"
+    )
     if (artifact_id(content), artifact_id(contents[DEFINITION_PATH])) != (
         source.snapshot_record,
         source.snapshot_definition,
@@ -377,7 +370,7 @@ def _definition(
             "its snapshot.json and definition.xml aren't the snapshot its plan's ranking_source"
             " names: their artifact_ids aren't its snapshot_record and snapshot_definition."
         )
-    return copy
+    return copy, record
 
 
 def _attempts(
@@ -714,11 +707,3 @@ _CHECKS: Final = RecordChecks(
     manifest="its manifest",
 )
 """The checks `check_run` shares with an experiment's reader, which refuse as it does."""
-
-_RANKING_CHECKS: Final = RecordChecks(
-    refused=_not_a_run,
-    unknown_version=_unknown_version,
-    readable=_RANKING_VERSIONS,
-    manifest="its manifest",
-)
-"""The same, reading a run whose ranking is a definition too, as `read_run` does."""

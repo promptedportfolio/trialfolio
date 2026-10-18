@@ -452,7 +452,8 @@ def two_copies(cli: Cli, break_second: Callable[[Path], None] = lambda run: None
 
 def newer_manifest(run: Path) -> None:
     manifest = json.loads((run / "manifest.json").read_bytes())
-    manifest["schema_version"] = "1.1.0"
+    # Not 1.1.0, which a review reads in a run manifest, from release 0.4.0's R04-T11.
+    manifest["schema_version"] = "9.9.9"
     (run / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
