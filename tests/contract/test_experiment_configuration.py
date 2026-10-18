@@ -41,6 +41,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from tests.support.snapshot_builder import SnapshotBuilder
 from trialfolio.configuration import (
     read_experiment_configuration,
     read_experiment_configuration_v1_1,
@@ -1022,17 +1023,28 @@ def test_the_ranking_example_reads_as_documented() -> None:
     assert configuration.budget.provider_requests == 8
 
 
-def test_a_baseline_may_name_a_snapshot_instead() -> None:
+def test_a_baseline_may_name_a_snapshot_instead(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """The example's second form: the snapshot's directory, and no `ranking_method`, which the
-    snapshot records."""
+    snapshot records. Release 0.4.0's R04-T10 reads the snapshot, so the test takes one, over the
+    fake server, beside the configuration, where R04-T05's test named a directory that didn't
+    exist, which no reader read then."""
+    SnapshotBuilder(monkeypatch, tmp_path / "home").snapshot(
+        tmp_path / "ranking" / "value-momentum"
+    )
     content = ranking_line(
         "    definition: 'ranking/value-momentum.xml'\n    ranking_method: percentile_nas_negative",
         "    snapshot: 'ranking/value-momentum/'",
     )
+    path = tmp_path / "experiment.yaml"
 
-    configuration = read_v1_1(content)
+    configuration = read_experiment_configuration_v1_1(content.encode(), path.name, path)
 
-    assert configuration.baseline.ranking.model_dump() == {"snapshot": "ranking/value-momentum/"}
+    assert configuration.configuration.baseline.ranking.model_dump() == {
+        "snapshot": "ranking/value-momentum/"
+    }
+    assert configuration.snapshot is not None
 
 
 def test_a_weight_is_read_as_a_normalized_decimal() -> None:

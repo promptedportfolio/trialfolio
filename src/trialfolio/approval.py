@@ -26,6 +26,11 @@ from trialfolio.contracts.plan import (
     PlanSetting,
     RetryPolicy,
 )
+from trialfolio.contracts.ranking_snapshot import (
+    RankGetRequest,
+    RankingSnapshotPlan,
+    SnapshotDataSent,
+)
 from trialfolio.errors import TrialFolioError
 from trialfolio.planning import check_approval, plan_hash
 
@@ -131,7 +136,9 @@ def setting_lines(row: PlanSetting) -> list[str]:
     return lines
 
 
-def request_lines(requests: Sequence[PlanRequest], indent: str = "") -> list[str]:
+def request_lines(
+    requests: Sequence[PlanRequest] | Sequence[RankGetRequest], indent: str = ""
+) -> list[str]:
     """Each request of a case, exactly as it will be sent."""
     lines: list[str] = []
     for request in requests:
@@ -146,7 +153,9 @@ def request_lines(requests: Sequence[PlanRequest], indent: str = "") -> list[str
     return lines
 
 
-def data_sent_lines(data_sent: Sequence[DataSent], not_sent: str) -> list[str]:
+def data_sent_lines(
+    data_sent: Sequence[DataSent] | Sequence[SnapshotDataSent], not_sent: str
+) -> list[str]:
     """The data sent, its recipient, and what isn't sent: `not_sent`, and earlier results and
     logs."""
     lines = ["Data sent to Portfolio123, through p123api:"]
@@ -203,7 +212,48 @@ def format_plan(plan: Plan) -> str:
     return "\n".join(lines) + "\n"
 
 
-def format_plan_summary(plan: Plan, *, full_plan_hint: bool) -> str:
+def format_snapshot_plan(plan: RankingSnapshotPlan) -> str:
+    """The full display of a ranking snapshot's plan (ranking snapshot output): the system's name,
+    the request exactly as it will be sent, the budget, that nothing is written to the account,
+    the retry policy, the data sent, and the plan hash with how to approve it. It holds the
+    configuration's text, so it's for a terminal only, never a log."""
+    shown_hash = plan_hash(plan)
+    lines = [
+        f"Ranking snapshot plan {shown_hash}",
+        "",
+        f"Ranking system: {shown(plan.system)}",
+        (
+            "It reads the ranking system saved in the account by this name, with one rank_get, and"
+            " saves its definition, as Portfolio123 holds it, in a ranking snapshot. It writes"
+            " nothing to the account."
+        ),
+        "",
+        *request_lines(plan.requests),
+        "p123api sends these params as the query of GET /rank.",
+        "",
+        *budget_lines(plan.budget),
+        "",
+        *retry_lines(plan.retry_policy),
+        "",
+        *data_sent_lines(plan.data_sent, "the configuration file, file paths"),
+        "",
+        f"Plan hash: {shown_hash}",
+        (
+            f"Approve it by typing {APPROVE_ANSWER} when asked in a terminal, or with --approve "
+            f"{shown_hash}"
+        ),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _full_plan(plan: Plan | RankingSnapshotPlan) -> str:
+    """The full display of a screen's plan, or of a snapshot's."""
+    if isinstance(plan, RankingSnapshotPlan):
+        return format_snapshot_plan(plan)
+    return format_plan(plan)
+
+
+def format_plan_summary(plan: Plan | RankingSnapshotPlan, *, full_plan_hint: bool) -> str:
     """The plan hash and the budget, and nothing from the configuration. With
     `full_plan_hint`, it also says how to see the full plan."""
     lines = [f"Plan hash: {plan_hash(plan)}", *budget_lines(plan.budget)]
@@ -228,15 +278,15 @@ def _not_approved(shown_hash: str, reason: str) -> TrialFolioError:
 
 
 def obtain_approval(
-    plan: Plan,
+    plan: Plan | RankingSnapshotPlan,
     approve: str | None,
     *,
     stdin: TextIO,
     stderr: TextIO,
     refused: str | None = None,
 ) -> Approval:
-    """Shows the plan on `stderr`, and obtains its approval: from `approve`, the value of
-    `--approve`, or else by asking on a terminal (approval).
+    """Shows the plan on `stderr`, a screen's or a ranking snapshot's, and obtains its approval:
+    from `approve`, the value of `--approve`, or else by asking on a terminal (approval).
 
     - With `approve`, it never asks. A value that's exactly the plan's hash approves it, with
       the method `option`, and only the hash and the budget are shown.
@@ -257,7 +307,7 @@ def obtain_approval(
     if refused is not None:
         write_shown(
             stderr,
-            format_plan(plan) if on_terminal else format_plan_summary(plan, full_plan_hint=True),
+            _full_plan(plan) if on_terminal else format_plan_summary(plan, full_plan_hint=True),
         )
         raise _not_approved(shown_hash, refused)
     if approve is not None:
@@ -265,7 +315,7 @@ def obtain_approval(
             approved = check_approval(plan, approve)
         except TrialFolioError:
             text = (
-                format_plan(plan) if on_terminal else format_plan_summary(plan, full_plan_hint=True)
+                _full_plan(plan) if on_terminal else format_plan_summary(plan, full_plan_hint=True)
             )
             write_shown(stderr, text)
             raise _not_approved(
@@ -276,7 +326,7 @@ def obtain_approval(
         write_shown(stderr, format_plan_summary(plan, full_plan_hint=False))
         return Approval(approved, "option")
     if on_terminal and stdin.isatty():
-        write_shown(stderr, format_plan(plan))
+        write_shown(stderr, _full_plan(plan))
         write_shown(stderr, f"\nType {APPROVE_ANSWER} to run this plan, or anything else to stop: ")
         if read_answer(stdin) != APPROVE_ANSWER:
             raise _not_approved(
@@ -285,7 +335,7 @@ def obtain_approval(
         return Approval(check_approval(plan, shown_hash), "interactive")
     write_shown(
         stderr,
-        format_plan(plan) if on_terminal else format_plan_summary(plan, full_plan_hint=True),
+        _full_plan(plan) if on_terminal else format_plan_summary(plan, full_plan_hint=True),
     )
     raise _not_approved(
         shown_hash,

@@ -2,26 +2,29 @@
 configuration files). `read_screen_configuration` reads a `kind: screen` file,
 `read_review_configuration` a `kind: review` one, and `read_experiment_configuration` a
 `kind: experiment` one. `read_run_configuration` reads the configuration `trialfolio run` takes, a
-screen's or an experiment's, choosing the reader by its `kind` (D-24).
+screen's, an experiment's, or, from release 0.4.0, a ranking snapshot's, choosing the reader by
+its `kind` (D-24).
 
 Release 0.4.0's readers read its versions too: `read_screen_configuration_v1_1` reads a screen
 configuration 1.0.0 or 1.1.0, `read_experiment_configuration_v1_1` an experiment configuration
 1.0.0 or 1.1.0, each by its `schema_version`, and `read_ranking_snapshot_configuration` a
 `kind: ranking-snapshot` file. Version 1.1.0 adds a ranking given as a ranking system's
-definition or a ranking snapshot, and ranking variants. Until the CLI's path for them is built
-(R04-T10 and R04-T12), `trialfolio run` reads with 0.3.0's readers, which read 1.0.0 only, and
-give 0.3.0's messages: only 0.4.0's readers tell a 1.0.0 file that a key it gives needs 1.1.0,
-since `run` refuses 1.1.0 until then, and only they read a ranking variant's node paths, below.
+definition or a ranking snapshot, and ranking variants. `trialfolio run` reads a ranking
+snapshot configuration from R04-T10. Until its path for a screen or an experiment of 1.1.0 is
+built (R04-T12), it reads those with 0.3.0's readers, which read 1.0.0 only, and give 0.3.0's
+messages: only 0.4.0's readers tell a 1.0.0 file that a key it gives needs 1.1.0, since `run`
+refuses 1.1.0 until then, and only they read a ranking variant's node paths, below.
 
 0.4.0's readers of a screen and an experiment take the configuration file's path too, and read
 the definition file its `ranking.definition`, or its baseline's, names, from the configuration's
 directory, once, in step 2, by the rules of `trialfolio.ranking_definitions` (docs/contracts.md,
-ranking definitions). An experiment's reader then applies each ranking variant to it, which
-gives each ranking variant's case its definition (ranking variants). They give the configuration
-with what they read: `ScreenConfigurationRead` and `ExperimentConfigurationRead`. A snapshot's
-directory isn't read here: release 0.4.0's R04-T10 reads it, so until then a baseline named by a
-snapshot has no definition here, and its ranking variants' paths are checked only for how
-they're written.
+ranking definitions). A ranking named by a snapshot is read the same way, from the snapshot's
+directory, by `trialfolio.snapshots`: it's complete, and can be a ranking, and its definition
+is its `definition.xml`, with the ranking method its record gives (ranking snapshot output,
+reading a snapshot). An experiment's reader then applies each ranking variant to the baseline's
+definition, which gives each ranking variant's case its definition (ranking variants). They give
+the configuration with what they read: `ScreenConfigurationRead` and
+`ExperimentConfigurationRead`.
 
 Reading is a named adapter step before model validation (ADR 0002). It builds plain values from
 PyYAML's parse events, never through PyYAML's constructors, so it decides what each scalar means:
@@ -59,9 +62,10 @@ tables). For a configuration 0.4.0's readers read, `screen_original_values_v1_1`
 by its node's canonical path: the definition's `Weight` attribute, or the `set` entry of a
 ranking variant that changes it (weight rows).
 
-The core reads no file, so 0.4.0's readers can also be given a definition's bytes, read when the
-configuration was validated, in place of reading the file it names again: the executors check the
-configuration they're given that way, and copy those bytes (ranking definitions).
+The core reads no file, so 0.4.0's readers can also be given a definition's bytes, or a
+snapshot's two files', read when the configuration was validated, in place of reading the file or
+the directory it names again: the executors check the configuration they're given that way, and
+copy those bytes (ranking definitions, reading a snapshot).
 
 Error messages name the offending key and never include its value, so they're safe to log. A
 key's control and formatting characters and lone surrogates are written as escapes.
@@ -128,6 +132,7 @@ from trialfolio.contracts.screen_configuration import (
     RankingV1_1,
     ScreenConfiguration,
     ScreenConfigurationV1_1,
+    SnapshotRanking,
 )
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS
 from trialfolio.display import visible
@@ -139,9 +144,17 @@ from trialfolio.ranking_definitions import (
     RankingDefinition,
     VariantProblem,
     apply_ranking_variant,
-    check_node_paths,
     read_definition,
 )
+from trialfolio.snapshots import (
+    NotARanking,
+    SnapshotFiles,
+    SnapshotName,
+    SnapshotRead,
+    read_snapshot,
+    snapshot_from,
+)
+from trialfolio.storage import LocalArtifactStore
 
 type KeyPath = tuple[str | int, ...]
 
@@ -206,8 +219,11 @@ class ScreenConfigurationRead:
     configuration: ScreenConfiguration | ScreenConfigurationV1_1
     definition: RankingDefinition | None
     """The definition `ranking.definition` names, read and checked, with the bytes it was read
-    from, which a plan's `definition.xml` copies; None for every other ranking form, and, until
-    release 0.4.0's R04-T10 reads it, for a snapshot."""
+    from, which a plan's `definition.xml` copies, or the definition of the snapshot
+    `ranking.snapshot` names; None for every other ranking form."""
+    snapshot: SnapshotRead | None = None
+    """The snapshot `ranking.snapshot` names, read and checked, whose definition `definition`
+    is; None for every other ranking form."""
 
 
 @dataclass(frozen=True)
@@ -220,8 +236,10 @@ class ExperimentConfigurationRead:
     """The baseline's definition, as `ScreenConfigurationRead.definition` gives a screen's."""
     ranking_cases: tuple[RankingCase, ...]
     """Each ranking variant's case, in the order of `variants.ranking`, with its definition:
-    the baseline's, with the variant's change. Empty without a definition, a snapshot's
-    included, until R04-T10 reads it."""
+    the baseline's, with the variant's change. Empty without a definition."""
+    snapshot: SnapshotRead | None = None
+    """The snapshot the baseline's `ranking.snapshot` names, as `ScreenConfigurationRead.snapshot`
+    gives a screen's."""
 
 
 def read_screen_configuration_v1_1(
@@ -230,22 +248,27 @@ def read_screen_configuration_v1_1(
     path: str | os.PathLike[str],
     *,
     definition: bytes | None = None,
+    snapshot: SnapshotFiles | None = None,
 ) -> ScreenConfigurationRead:
     """Reads a screen configuration of a version release 0.4.0 reads, 1.0.0 or 1.1.0, by its
     `schema_version`, from the bytes of the file at `path`, named `source_name` in messages.
     Version 1.1.0's `ranking` may also be a definition, named by its file's path, with its
-    `ranking_method`, or a snapshot, named by its directory's path. A definition's file is read
-    from `path`'s directory, unless its path is absolute, and checked (ranking definitions).
+    `ranking_method`, or a snapshot, named by its directory's path. A definition's file, and a
+    snapshot's directory, are read from `path`'s directory, unless the path is absolute, and
+    checked (ranking definitions, reading a snapshot).
 
     Raises `TrialFolioError` with `config.invalid` as `read_screen_configuration` does, and
-    for a definition that breaks a rule, or a path that names something other than a file; and
-    with `input.not_found` when nothing exists where the definition's path leads, or the file
-    there can't be read. A 1.0.0 file that gives `definition` or `snapshot` is told they need
-    `schema_version` 1.1.0.
+    for a definition that breaks a rule, a path that names something other than a file, or a
+    snapshot that can't be a ranking; with `input.not_found` when nothing exists where the
+    definition's path or the snapshot's leads, or the file there can't be read; and with
+    `input.not_a_run` or `artifact.unknown_schema_version` when the snapshot isn't complete. A
+    1.0.0 file that gives `definition` or `snapshot` is told they need `schema_version` 1.1.0.
 
-    `definition` is the bytes of the file `ranking.definition` names, read when the configuration
-    was validated: they're read in its place, and no file is read. Raises `ValueError` when it's
-    given for a configuration whose ranking names no definition file.
+    `definition` is the bytes of the file `ranking.definition` names, and `snapshot` those of the
+    two files of the snapshot `ranking.snapshot` names, read when the configuration was
+    validated: they're read in their place, and no file is read. Raises `ValueError` when either
+    is given for a configuration whose ranking doesn't name its kind, or a snapshot's files
+    given can't be a ranking.
     """
     document, plain = _read_document(
         content, source_name, "screen", SCREEN_SCHEMA_VERSIONS_V1_1, node_paths=True
@@ -255,12 +278,11 @@ def read_screen_configuration_v1_1(
         configuration = _validated(
             ScreenConfiguration, document, source_name, unquoted, later_versions=True
         )
-        _no_definition_given(definition)
+        _no_definition_given(definition, snapshot)
         return ScreenConfigurationRead(configuration, None)
     read = _validated(ScreenConfigurationV1_1, document, source_name, unquoted)
-    return ScreenConfigurationRead(
-        read, _definition(read.ranking, "ranking", source_name, path, definition)
-    )
+    ranking = _ranking_read(read.ranking, "ranking", source_name, path, definition, snapshot)
+    return ScreenConfigurationRead(read, *ranking)
 
 
 def read_review_configuration(content: bytes, source_name: str) -> ReviewConfiguration:
@@ -296,6 +318,7 @@ def read_experiment_configuration_v1_1(
     path: str | os.PathLike[str],
     *,
     definition: bytes | None = None,
+    snapshot: SnapshotFiles | None = None,
 ) -> ExperimentConfigurationRead:
     """Reads an experiment configuration of a version release 0.4.0 reads, 1.0.0 or 1.1.0, by its
     `schema_version`, from the bytes of the file at `path`, named `source_name` in messages.
@@ -310,8 +333,8 @@ def read_experiment_configuration_v1_1(
     with a ranking variant, or a baseline ranked by a definition or a snapshot, is told they need
     `schema_version` 1.1.0.
 
-    `definition` is the bytes of the baseline's definition file, as `read_screen_configuration_v1_1`
-    takes a screen's.
+    `definition` is the bytes of the baseline's definition file, and `snapshot` those of its
+    snapshot's two files, as `read_screen_configuration_v1_1` takes a screen's.
     """
     document, plain = _read_document(
         content, source_name, "experiment", EXPERIMENT_SCHEMA_VERSIONS_V1_1, node_paths=True
@@ -321,7 +344,7 @@ def read_experiment_configuration_v1_1(
         configuration = _validated(
             ExperimentConfiguration, document, source_name, unquoted, later_versions=True
         )
-        _no_definition_given(definition)
+        _no_definition_given(definition, snapshot)
         return ExperimentConfigurationRead(configuration, None, ())
     read = _validated(
         ExperimentConfigurationV1_1,
@@ -330,13 +353,87 @@ def read_experiment_configuration_v1_1(
         unquoted,
         variant_settings=VARIANT_SETTINGS_V1_1,
     )
-    baseline = _definition(read.baseline.ranking, "baseline.ranking", source_name, path, definition)
-    return ExperimentConfigurationRead(read, baseline, _ranking_cases(read, baseline, source_name))
+    baseline, read_snapshot = _ranking_read(
+        read.baseline.ranking, "baseline.ranking", source_name, path, definition, snapshot
+    )
+    return ExperimentConfigurationRead(
+        read, baseline, _ranking_cases(read, baseline, source_name), read_snapshot
+    )
 
 
-def _no_definition_given(definition: bytes | None) -> None:
+def _no_definition_given(definition: bytes | None, snapshot: SnapshotFiles | None = None) -> None:
     if definition is not None:
         raise ValueError("a definition's bytes are given only for a ranking given as a definition")
+    if snapshot is not None:
+        raise ValueError("a snapshot's files are given only for a ranking named by a snapshot")
+
+
+def _ranking_read(
+    ranking: RankingV1_1,
+    key: str,
+    source_name: str,
+    path: str | os.PathLike[str],
+    definition: bytes | None,
+    snapshot: SnapshotFiles | None,
+) -> tuple[RankingDefinition | None, SnapshotRead | None]:
+    """What a ranking given as a definition, or named by a snapshot, reads: the definition, and
+    the snapshot whose definition it is. Neither for any other form."""
+    if not isinstance(ranking, SnapshotRanking):
+        _no_definition_given(None, snapshot)
+        return _definition(ranking, key, source_name, path, definition), None
+    _no_definition_given(definition)
+    read = _snapshot(ranking, key, source_name, path, snapshot)
+    return read.definition, read
+
+
+def _snapshot(
+    ranking: SnapshotRanking,
+    key: str,
+    source_name: str,
+    path: str | os.PathLike[str],
+    given: SnapshotFiles | None,
+) -> SnapshotRead:
+    """The snapshot a ranking names, read once from its directory, at the one path the file
+    system resolves, from the configuration's directory unless the path is absolute, and checked
+    (reading a snapshot); or from `given`, its two files' bytes, read already."""
+    where = f"{key}.snapshot"
+    if given is not None:
+        try:
+            return snapshot_from(given)
+        except NotARanking as refused:
+            raise ValueError("the snapshot's files given can't be a ranking") from refused
+    shown = visible(ranking.snapshot)
+    try:
+        resolved = resolve_existing(Path(path).parent / ranking.snapshot)
+    except OSError as error:
+        reason = reason_of(error)
+        raise TrialFolioError(
+            "input.not_found",
+            f"{source_name}: couldn't read the directory `{where}` names (`{shown}`): {reason}.",
+            f"{source_name}: couldn't read the directory `{where}` names: {reason}.",
+        ) from None
+    if resolved is None:
+        raise TrialFolioError(
+            "input.not_found",
+            f"{source_name}: the directory `{where}` names (`{shown}`) doesn't exist. {_SNAPSHOT_PATH}",
+            f"{source_name}: the directory `{where}` names doesn't exist. {_SNAPSHOT_PATH}",
+        )
+    name = SnapshotName(
+        shown=f"{source_name}: the directory `{where}` names (`{shown}`)",
+        logged=f"{source_name}: the directory `{where}` names",
+    )
+    try:
+        return read_snapshot(LocalArtifactStore(resolved), name)
+    except NotARanking as refused:
+        _fail(
+            source_name, [f"`{where}` names a snapshot {problem}." for problem in refused.problems]
+        )
+
+
+_SNAPSHOT_PATH: Final = (
+    "A snapshot's path is read from the configuration's directory, unless it's absolute: give the"
+    " directory trialfolio run of a ranking snapshot configuration wrote."
+)
 
 
 def _definition(
@@ -349,7 +446,7 @@ def _definition(
     """The definition a ranking given as a definition names, read once from its file, at the
     one path the file system resolves, from the configuration's directory unless the path is
     absolute, and checked (docs/contracts.md, ranking definitions); or from `given`, its bytes,
-    read already. None for any other form."""
+    read already. None for any form but a definition and a snapshot, which `_snapshot` reads."""
     if not isinstance(ranking, DefinitionRanking):
         _no_definition_given(given)
         return None
@@ -421,21 +518,22 @@ def _ranking_cases(
     source_name: str,
 ) -> tuple[RankingCase, ...]:
     """Each ranking variant's case, by the rules of ranking variants, from the baseline's
-    definition. Without one, as for a snapshot until R04-T10 reads it, only how each variant's
-    paths are written is checked, and there's no case. Raises `TrialFolioError` with
-    `config.invalid` listing the first problem of each variant that breaks a rule, and each
-    variant whose definition another's gives already, byte for byte."""
+    definition, its file's or its snapshot's. Without one, there's no ranking variant: the model
+    allows one only with a baseline ranked by a definition or a snapshot. Raises
+    `TrialFolioError` with `config.invalid` listing the first problem of each variant that breaks
+    a rule, and each variant whose definition another's gives already, byte for byte."""
     variants = configuration.variants
     listed = () if variants is None or variants.ranking is None else variants.ranking
+    if definition is None:
+        if listed:  # the model's rule, which a reader's result keeps
+            raise ValueError("a ranking variant needs the baseline's definition")
+        return ()
     problems: list[str] = []
     cases: list[RankingCase] = []
     for number, variant in enumerate(listed):
         place = f"variants.ranking[{number}]"
         try:
-            if definition is None:
-                check_node_paths(variant, place)
-            else:
-                cases.append(apply_ranking_variant(definition, variant, place))
+            cases.append(apply_ranking_variant(definition, variant, place))
         except VariantProblem as problem:
             problems.append(f"`{problem.where}` {problem.problem}.")
     first: dict[str, RankingCase] = {}
@@ -505,18 +603,20 @@ def _unquoted(plain: list[KeyPath], quoted: Callable[[KeyPath], bool]) -> list[s
 
 def read_run_configuration(
     content: bytes, source_name: str
-) -> ScreenConfiguration | ExperimentConfiguration:
+) -> ScreenConfiguration | ExperimentConfiguration | RankingSnapshotConfiguration:
     """Reads the configuration `trialfolio run` takes, from the bytes of a file named
-    `source_name` in messages: a screen configuration, or an experiment configuration, by its
-    `kind` (D-24).
+    `source_name` in messages: a screen configuration, an experiment configuration, or, from
+    release 0.4.0, a ranking snapshot configuration, by its `kind` (D-24, D-36).
 
-    Raises `TrialFolioError` with `config.invalid` as the screen's or the experiment's reader
-    does. A file that breaks a YAML rule, isn't a mapping, or whose `kind` is missing or is
-    neither, such as `review`, fails before either reads it, and the message names both kinds.
+    Raises `TrialFolioError` with `config.invalid` as the reader of its kind does. A file that
+    breaks a YAML rule, isn't a mapping, or whose `kind` is missing or is none of them, such as
+    `review`, fails before any reads it, and the message names the three kinds.
     """
-    document, _ = _read_kind(content, source_name, ("screen", "experiment"))
+    document, _ = _read_kind(content, source_name, ("screen", "experiment", "ranking-snapshot"))
     if document["kind"] == "experiment":
         return read_experiment_configuration(content, source_name)
+    if document["kind"] == "ranking-snapshot":
+        return read_ranking_snapshot_configuration(content, source_name)
     return read_screen_configuration(content, source_name)
 
 
@@ -570,10 +670,13 @@ def _read_kind(
             f"{'an' if kind[0] in 'aeiou' else 'a'} {kind} configuration has `kind: {kind}`"
             for kind in kinds
         ]
-        listed = ", and ".join(named)
+        listed = named[0] if len(named) == 1 else f"{', '.join(named[:-1])}, and {named[-1]}"
         _fail(source_name, [f"`kind` is required. {listed[0].upper()}{listed[1:]}."])
     if document["kind"] not in kinds:
-        _fail(source_name, [f"`kind` must be {' or '.join(kinds)}."])
+        choices = (
+            " or ".join(kinds) if len(kinds) <= 2 else f"{', '.join(kinds[:-1])}, or {kinds[-1]}"
+        )
+        _fail(source_name, [f"`kind` must be {choices}."])
     return document, plain
 
 
@@ -640,8 +743,9 @@ class WeightOriginal:
     `definition.xml`, or the configuration."""
 
     key: str
-    """`ranking.definition`, `baseline.ranking.definition`, or a ranking variant's `set`
-    entry's place, such as `variants.ranking[0].set[1]`."""
+    """`ranking.definition` or `ranking.snapshot`, `baseline.ranking.definition` or
+    `baseline.ranking.snapshot`, or a ranking variant's `set` entry's place, such as
+    `variants.ranking[0].set[1]`."""
     text: str
     """The node's `Weight` attribute as the definition writes it, between its quotes, or the
     `set` entry's weight as the configuration writes it."""
@@ -655,11 +759,12 @@ def screen_original_values_v1_1(
     """For a screen configuration that `read_screen_configuration_v1_1` read, as `read`, from
     `content`: each top-level value's text, as `original_values` gives it, and, for a ranking
     given as a definition, each weight row's original, by its node's canonical path, from the
-    definition, named by `ranking.definition`."""
+    definition, named by `ranking.definition`, or `ranking.snapshot` for a snapshot's."""
     originals = original_values(content, source_name)
     if read.definition is None:
         return originals, {}
-    return originals, _definition_weights(read.definition, "ranking.definition")
+    key = "ranking.definition" if read.snapshot is None else "ranking.snapshot"
+    return originals, _definition_weights(read.definition, key)
 
 
 def experiment_original_values_v1_1(
@@ -725,7 +830,7 @@ def _experiment_weights(
     baseline = read.definition
     if baseline is None:
         return {}
-    key = "baseline.ranking.definition"
+    key = "baseline.ranking.definition" if read.snapshot is None else "baseline.ranking.snapshot"
     if variant is None or not isinstance(variant.variant, RankingVariant):
         return _definition_weights(baseline, key)
     case = next(c for c in read.ranking_cases if c.place == variant.place)

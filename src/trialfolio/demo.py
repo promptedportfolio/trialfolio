@@ -17,6 +17,11 @@ exchange, a 200, so the core can execute, with it, a screen run or an experiment
 a definition, which no 0.4.0 command does: `trialfolio demo` still runs its packaged
 configuration. Such an execution takes the ranking lock all the same (docs/contracts.md, CLI
 behavior).
+
+It also answers a `rank_get` with an invented system, the response its caller gives, in the layout
+of `p123api-rank-get` version 1, and records its `GET /rank` exchange, a 200, so the core can take,
+with it, a ranking snapshot, which no 0.4.0 command does either. Such a snapshot is synthetic, and
+takes no lock, as no snapshot does.
 """
 
 import json
@@ -27,6 +32,7 @@ from typing import Final
 from trialfolio.contracts.attempt import Exchange
 from trialfolio.contracts.common import (
     AUTHENTICATION_REQUEST,
+    RANK_GET_REQUEST,
     RANK_UPDATE_REQUEST,
     SCREEN_BACKTEST_REQUEST,
 )
@@ -48,12 +54,15 @@ def response_bytes() -> bytes:
 
 class SyntheticScreenBacktestClient:
     """A `ScreenBacktestClient` that sends nothing: it answers the backtest with a synthetic
-    response, and a `rank_update` with an empty object, and records the exchanges a successful
-    call would."""
+    response, a `rank_update` with an empty object, and a `rank_get` with an invented system, and
+    records the exchanges a successful call would."""
 
-    def __init__(self, response: bytes) -> None:
-        """`response` is the synthetic response's JSON. Raises `ValueError` if it isn't JSON."""
+    def __init__(self, response: bytes, *, system: bytes | None = None) -> None:
+        """`response` is the synthetic response's JSON, and `system` the invented system's, a
+        `rank_get` response, for a client that answers one. Raises `ValueError` if either isn't
+        JSON."""
         self._payload: object = json.loads(response)
+        self._system: object = None if system is None else json.loads(system)
         self._exchanges: list[Exchange] = []
 
     @property
@@ -79,6 +88,16 @@ class SyntheticScreenBacktestClient:
             raise RuntimeError("Trial Folio authenticates with its own call before a request")
         self._exchanges.append(_answered(RANK_UPDATE_REQUEST))
         return DecodedResponse({})
+
+    def rank_get(self, name: str) -> ScreenBacktestResponse:
+        """Answers with the invented system its caller gave, whatever `name` is: nothing is
+        sent, and nothing is read from an account."""
+        if not self.authenticated:
+            raise RuntimeError("Trial Folio authenticates with its own call before a request")
+        if self._system is None:
+            raise RuntimeError("the demo's client answers a rank_get with the system it's given")
+        self._exchanges.append(_answered(RANK_GET_REQUEST))
+        return DecodedResponse(self._system)
 
     def close(self) -> None:
         """Nothing to close: no connection was opened."""

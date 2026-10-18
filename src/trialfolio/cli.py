@@ -12,7 +12,10 @@ to exit codes (REQ-03). Commands:
   backtest, once its plan is approved, in the order of steps docs/contracts.md's approval gives.
   Given an experiment's configuration, by its `kind`, it plans and executes the experiment
   instead, and run again into the experiment's directory, it resumes or revises it, with
-  `--revision-reason` and `--repeat` (release 0.3.0; running an experiment).
+  `--revision-reason` and `--repeat` (release 0.3.0; running an experiment). Given a ranking
+  snapshot configuration, it reads the ranking system the configuration names, with one
+  `rank_get`, into a ranking snapshot, once its plan is approved (release 0.4.0; ranking snapshot
+  output).
 - `trialfolio report <run-dir> --out <dir>` re-renders a saved run's report offline.
 - `trialfolio demo --out <dir>` writes a synthetic example run offline, labeled synthetic.
 - `trialfolio review <config> --out <dir>` compares saved runs with a baseline offline, as a
@@ -79,6 +82,8 @@ from trialfolio.contracts.experiment_manifest import (
 from trialfolio.contracts.experiment_plan import PlanV1_1
 from trialfolio.contracts.manifest import CommandRecord
 from trialfolio.contracts.plan import Plan
+from trialfolio.contracts.ranking_snapshot import RankingSnapshotPlan, SnapshotCommandRecord
+from trialfolio.contracts.ranking_snapshot_configuration import RankingSnapshotConfiguration
 from trialfolio.contracts.review_manifest import ReviewCommandRecord
 from trialfolio.contracts.summary import (
     ExperimentCounts,
@@ -94,7 +99,7 @@ from trialfolio.errors import EXIT_CODES, TrialFolioError, interrupted, reason_o
 from trialfolio.logs import LOGS_DIRECTORY, CommandLogs
 from trialfolio.notices import CONCISE_NOTICE, FULL_NOTICE, LICENSE_ID, LICENSE_NAME, NOTICE_VERSION
 from trialfolio.paths import existing_path
-from trialfolio.planning import build_plan, installed_versions
+from trialfolio.planning import build_plan, build_snapshot_plan, installed_versions
 from trialfolio.starter import CONFIGURATION, starter_files
 from trialfolio.storage import LOCK_PATH, ArtifactStore, LocalArtifactStore
 
@@ -104,8 +109,9 @@ if TYPE_CHECKING:
     from trialfolio.experiment_approval import ExperimentRun
     from trialfolio.experiment_execution import ExperimentExecution
     from trialfolio.experiment_records import SavedExperiment
-    from trialfolio.provider import Credentials, ScreenBacktestClient
+    from trialfolio.provider import Credentials, P123ScreenBacktestClient, ScreenBacktestClient
     from trialfolio.review import Review
+    from trialfolio.snapshot_execution import SnapshotExecution
 
 _logger = logging.getLogger(__name__)
 
@@ -212,9 +218,13 @@ def _parser(version: str) -> argparse.ArgumentParser:
     run = command(
         "run",
         "Plan and execute a screen backtest, or an experiment, once its plan is approved. Run an"
-        " experiment's configuration again into its output directory to resume or revise it.",
+        " experiment's configuration again into its output directory to resume or revise it. A"
+        " ranking snapshot configuration reads a ranking system saved in the account into a"
+        " ranking snapshot.",
     )
-    run.add_argument("config", help="the screen or experiment configuration, a YAML file")
+    run.add_argument(
+        "config", help="the screen, experiment, or ranking snapshot configuration, a YAML file"
+    )
     run.add_argument(
         "--out",
         required=True,
@@ -413,6 +423,8 @@ class _Invocation:
     output_dir: str | None = None
     """The output directory as given, once the command has claimed it."""
     execution: "Execution | None" = None
+    snapshot: "SnapshotExecution | None" = None
+    """A ranking snapshot's execution, once `run` of a snapshot configuration has one."""
     report: str | None = None
     """`report.html`, once `trialfolio report` has written it."""
     review: "Review | None" = None
@@ -488,6 +500,8 @@ class _Invocation:
                 output_dir = self._output_dir()
                 if self.experiment is not None and output_dir is not None:
                     self.stderr.write(f"The experiment's records are in {_shown(output_dir)}.\n")
+                elif self.output_dir is not None and self.snapshot is not None:
+                    self.stderr.write(f"The snapshot's records are in {_shown(self.output_dir)}.\n")
                 elif self.output_dir is not None and self.name in ("run", "demo"):
                     self.stderr.write(f"The run's records are in {_shown(self.output_dir)}.\n")
                 self.stderr.flush()
@@ -546,8 +560,9 @@ class _Invocation:
         execution = None if experiment is None else experiment.execution
         if execution is not None and execution.session is not None:
             ids["session"] = execution.session
-        attempt = self.execution.attempt if self.execution is not None else None
-        result = self.execution.result if self.execution is not None else None
+        ran = self._ran()
+        attempt = None if ran is None else ran.attempt
+        result = None if ran is None else ran.result
         if attempt is not None and (
             attempt.start_record is not None or (result is not None and result.recorded)
         ):
@@ -578,6 +593,8 @@ class _Invocation:
             if ran is not None and ran.report is not None:
                 outputs["report"] = ran.report.path
             return outputs
+        if self.snapshot is not None and self.snapshot.manifest is not None:
+            return {"manifest": self.snapshot.manifest.path}
         execution = self.execution
         if execution is None:
             return outputs
@@ -609,19 +626,19 @@ class _Invocation:
             return NoCounts()
         attempts = sent = unavailable = 0
         cost: int | None = None
-        execution = self.execution
-        if execution is not None and execution.attempt is not None:
+        ran = self._ran()
+        if ran is not None and ran.attempt is not None:
             from trialfolio.attempts import provider_requests
 
-            result = execution.result
+            result = ran.result
             if result is not None and result.recorded:
                 attempts, sent = 1, provider_requests(result.record)
                 cost = result.record.provider_metadata.cost
-            elif execution.attempt.start_record is not None:
+            elif ran.attempt.start_record is not None:
                 # It reads as running: one possible send (uncertain completion).
                 attempts, sent = 1, 1
-            if execution.tables is not None:
-                unavailable = execution.tables.metrics_unavailable
+        if self.execution is not None and self.execution.tables is not None:
+            unavailable = self.execution.tables.metrics_unavailable
         return RunCounts(
             attempts=attempts,
             provider_requests=sent,
@@ -701,6 +718,10 @@ class _Invocation:
         plan = saved.plan if experiment.plan is None else experiment.plan
         return _flattened(saved.counts(plan), saved.metrics_unavailable(plan), warnings)
 
+    def _ran(self) -> "Execution | SnapshotExecution | None":
+        """A screen run's execution, or a snapshot's, once `run` or `demo` has one."""
+        return self.execution if self.execution is not None else self.snapshot
+
     def _linked_ids(self) -> dict[str, str]:
         ids = self._ids()
         return {name: str(value) for name, value in ids.items()}
@@ -740,7 +761,7 @@ class _Invocation:
         if self.experiment is not None:
             ran = self.experiment.execution
             return ran.ending_detail() if ran is not None and ran.claimed else None
-        execution = self.execution
+        execution = self._ran()
         if execution is None or not execution.claimed:
             return None
         return execution.ending_detail()
@@ -833,7 +854,8 @@ def _init(invocation: _Invocation) -> TrialFolioError | None:
 
 
 def _run(invocation: _Invocation) -> TrialFolioError | None:
-    """Runs a screen's configuration, or an experiment's, by its `kind` (D-24)."""
+    """Runs a screen's configuration, an experiment's, or a ranking snapshot's, by its `kind`
+    (D-24, D-36)."""
     args = invocation.args
     _ignore_key_log(invocation.environ)
     _require_acknowledgment(invocation)
@@ -842,6 +864,8 @@ def _run(invocation: _Invocation) -> TrialFolioError | None:
     configuration = read_run_configuration(content, _shown(args.config))
     if isinstance(configuration, ExperimentConfiguration):
         return _run_experiment(invocation, configuration, content, started_at)
+    if isinstance(configuration, RankingSnapshotConfiguration):
+        return _run_snapshot(invocation, configuration, content, started_at)
     store = invocation.store_factory(args.out)
     store.check_empty()
     plan = _plan(invocation, build_plan(configuration, installed_versions()))
@@ -860,7 +884,6 @@ def _run(invocation: _Invocation) -> TrialFolioError | None:
     credentials = _credentials(invocation.environ)
 
     from trialfolio.execution import Execution
-    from trialfolio.provider import P123ScreenBacktestClient
 
     execution = Execution(
         plan,
@@ -876,10 +899,9 @@ def _run(invocation: _Invocation) -> TrialFolioError | None:
         clock=invocation.clock,
     )
     invocation.execution = execution
-    timeout = {} if invocation.timeout is None else {"timeout": invocation.timeout}
     error = execution.run(
         content,
-        lambda: P123ScreenBacktestClient(credentials, endpoint=invocation.endpoint, **timeout),
+        lambda: _provider_client(invocation, credentials),
         on_claimed=lambda: invocation.claimed(args.out),
     )
     if error is None:
@@ -887,9 +909,81 @@ def _run(invocation: _Invocation) -> TrialFolioError | None:
     return error
 
 
-def _experiment_options(args: argparse.Namespace) -> str | None:
-    """Why a screen's run refuses `--revision-reason` or `--repeat`, when either is given: each
-    applies only to an experiment that has run already."""
+def _run_snapshot(
+    invocation: _Invocation,
+    configuration: RankingSnapshotConfiguration,
+    content: bytes,
+    started_at: datetime,
+) -> TrialFolioError | None:
+    """Takes a ranking snapshot, as a screen's run takes its steps (ranking snapshot output): the
+    output directory must be absent or empty, since a snapshot is never resumed or added to; its
+    plan, with its one `rank_get`, is shown and approved; and its execution reads the system with
+    the credentials, and writes nothing to the account, so it takes no lock."""
+    args = invocation.args
+    store = invocation.store_factory(args.out)
+    store.check_empty()
+    plan = build_snapshot_plan(configuration, installed_versions())
+    invocation.ids["plan_hash"] = plan.plan_hash
+    _logger.info("Built the plan.", extra={**_event("plan.created", False), **invocation.ids})
+    approval = obtain_approval(
+        plan,
+        args.approve,
+        stdin=invocation.stdin,
+        stderr=invocation.stderr,
+        refused=_experiment_options(args, "A ranking snapshot's run"),
+    )
+    _logger.info(
+        "Plan approved (%s).",
+        approval.method,
+        extra={**_event("plan.approved", False), **invocation.ids},
+    )
+    credentials = _credentials(invocation.environ)
+
+    from trialfolio.snapshot_execution import SnapshotExecution
+
+    execution = SnapshotExecution(
+        plan,
+        approval.plan_hash,
+        approval.method,
+        store,
+        SnapshotCommandRecord(
+            name="run",
+            # No path: one can name the user, and the manifest is in the output directory.
+            options={"approve": args.approve, "json": args.json},
+            started_at=started_at,
+        ),
+        clock=invocation.clock,
+    )
+    invocation.snapshot = execution
+    error = execution.run(
+        content,
+        lambda: _provider_client(invocation, credentials, snapshot=True),
+        on_claimed=lambda: invocation.claimed(args.out),
+    )
+    if error is None:
+        invocation.result = _snapshot_result(args.out, plan, execution)
+    return error
+
+
+def _provider_client(
+    invocation: _Invocation, credentials: "Credentials", *, snapshot: bool = False
+) -> "P123ScreenBacktestClient":
+    """Portfolio123's client, with the credentials, and the endpoint and the timeout tests give.
+    `snapshot` is for a ranking snapshot's, whose authentication's messages name its `rank_get`."""
+    from trialfolio.provider import REQUEST_TIMEOUT_SECONDS, P123ScreenBacktestClient
+
+    return P123ScreenBacktestClient(
+        credentials,
+        endpoint=invocation.endpoint,
+        timeout=REQUEST_TIMEOUT_SECONDS if invocation.timeout is None else invocation.timeout,
+        snapshot=snapshot,
+    )
+
+
+def _experiment_options(args: argparse.Namespace, run: str = "A screen's run") -> str | None:
+    """Why a screen's run, or a ranking snapshot's, refuses `--revision-reason` or `--repeat`,
+    when either is given: each applies only to an experiment that has run already. `run` names
+    the run that refuses them."""
     given = [
         option
         for option, value in (
@@ -902,7 +996,7 @@ def _experiment_options(args: argparse.Namespace) -> str | None:
         return None
     return (
         f"{' and '.join(given)} {'applies' if len(given) == 1 else 'apply'} only to an"
-        " experiment's configuration, run again into its output directory. A screen's run has no"
+        f" experiment's configuration, run again into its output directory. {run} has no"
         " plan to revise, and no case to repeat. Run the command without"
         f" {'it' if len(given) == 1 else 'them'}."
     )
@@ -1027,12 +1121,7 @@ def _experiment_client(invocation: _Invocation, *, sends: bool) -> "ScreenBackte
     credentials (running an experiment, step 7)."""
     if not sends:
         return _NothingToSend()
-    credentials = _credentials(invocation.environ)
-
-    from trialfolio.provider import P123ScreenBacktestClient
-
-    timeout = {} if invocation.timeout is None else {"timeout": invocation.timeout}
-    return P123ScreenBacktestClient(credentials, endpoint=invocation.endpoint, **timeout)
+    return _provider_client(invocation, _credentials(invocation.environ))
 
 
 class _NothingToSend:
@@ -1053,6 +1142,9 @@ class _NothingToSend:
         raise RuntimeError("a session with nothing to send sent a request")
 
     def rank_update(self, params: object) -> NoReturn:
+        raise RuntimeError("a session with nothing to send sent a request")
+
+    def rank_get(self, name: str) -> NoReturn:
         raise RuntimeError("a session with nothing to send sent a request")
 
     def close(self) -> None:
@@ -1345,6 +1437,35 @@ def _run_result(out: str, plan: Plan, execution: "Execution", *, synthetic: bool
         f"Plan hash: {plan.plan_hash}",
         "Statistical validation and trading readiness: not assessed.",
     ]
+    return lines
+
+
+def _snapshot_result(
+    out: str, plan: RankingSnapshotPlan, execution: "SnapshotExecution"
+) -> list[str]:
+    """Where the snapshot is, the name of the system it read, and whether its definition, ranking
+    method, currency, and type can be a ranking, and if not, which rule each breaks. It never
+    shows the definition (ranking snapshot output, the result)."""
+    record = execution.record
+    if record is None:  # a snapshot completes only once its record is written
+        raise RuntimeError("a completed snapshot has its record")
+    lines = [
+        f"Ranking snapshot taken: {out}",
+        f"Ranking system read: {visible(record.system.name)}",
+    ]
+    if execution.problems:
+        lines.append(
+            "It can't be a ranking: a screen's or an experiment's configuration that named it"
+            " would fail, as one names a snapshot"
+        )
+        lines += [f"- {problem}." for problem in execution.problems]
+    else:
+        lines.append(
+            "Its definition, ranking method, currency, and type can be a ranking: name the"
+            " snapshot's directory as ranking.snapshot in a screen's or an experiment's"
+            " configuration, schema version 1.1.0."
+        )
+    lines.append(f"Plan hash: {plan.plan_hash}")
     return lines
 
 

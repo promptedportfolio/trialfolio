@@ -32,7 +32,10 @@ differences (sending a definition, a run with a ranking definition):
   execution ends, after the manifest (`experiment.locked`, `storage.write_failed`). So nothing is
   sent or written while another Trial Folio process writes `ApiRankingSystem`.
 - Step 2 also writes `definition.xml`, right after `configuration.yaml`, from the definition's
-  bytes the configuration was validated with, which a manifest of such a run lists too.
+  bytes the configuration was validated with, which a manifest of such a run lists too. For a
+  ranking named by a snapshot, it's the snapshot's `definition.xml`, and `snapshot.json`, the
+  snapshot's record, follows it, each from the bytes read and checked when the configuration was
+  validated (reading a snapshot).
 - Step 3's attempt (`RankingAttempt`) sends the case's `rank_update`, then its backtest, with
   start and attempt records 1.2.0.
 - Step 4 writes `settings.csv` 1.1.0, with a weight row for each node, and step 6 run manifest
@@ -112,17 +115,19 @@ from trialfolio.manifests import (
     rank_update_source,
     reproducibility,
     running_detail,
+    snapshot_definition_source,
     source_v1_1,
     updating_detail,
     utc,
 )
 from trialfolio.normalization import NormalizedTables, RankingOriginals, holds_series, write_tables
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
-from trialfolio.planning import check_approval
+from trialfolio.planning import check_approval, ranking_source
 from trialfolio.provider import DecodedResponse, ScreenBacktestClient
 from trialfolio.ranking_lock import RankingLock
 from trialfolio.report import HtmlReportRenderer, write_report
 from trialfolio.runs import CONFIGURATION_PATH, MANIFEST_PATH, PLAN_PATH, SavedAttempt, SavedRun
+from trialfolio.snapshots import SnapshotFiles
 from trialfolio.storage import ArtifactStore, StoredFile
 
 _logger = logging.getLogger(__name__)
@@ -142,6 +147,9 @@ RANKING_SCHEMA_VERSION: Final = "1.1.0"
 DEFINITION_PATH: Final = "definition.xml"
 """The copy of a ranking definition, beside `configuration.yaml` (ranking definitions)."""
 
+SNAPSHOT_PATH: Final = "snapshot.json"
+"""The copy of a ranking snapshot's record, beside its `definition.xml` (reading a snapshot)."""
+
 _SCREEN_CONFIGURATION_FORMAT: Final = "screen-configuration"
 
 _SCHEMA_VERSIONS: Final[dict[ArtifactRoleV1_1, str]] = {
@@ -156,6 +164,7 @@ configuration, which gives its own."""
 
 _RANKING_SCHEMA_VERSIONS: Final[dict[ArtifactRoleV1_1, str]] = {
     "plan": "1.2.0",
+    "ranking_snapshot_record": "1.0.0",
     "update_record": "1.2.0",
     "start_record": "1.2.0",
     "attempt_record": "1.2.0",
@@ -253,6 +262,8 @@ class Execution:
         self._result: AttemptResult | None = None
         self._configuration: StoredFile | None = None
         self._definition: StoredFile | None = None
+        self._snapshot: StoredFile | None = None
+        """The copy of the snapshot's record, `snapshot.json`, for a ranking named by one."""
         self._read: ScreenConfigurationRead | None = None
         self._tables: NormalizedTables | None = None
         self._report: StoredFile | None = None
@@ -297,20 +308,22 @@ class Execution:
         client: ClientFactory,
         *,
         definition: bytes | None = None,
+        snapshot: SnapshotFiles | None = None,
         on_claimed: Callable[[], object] | None = None,
     ) -> TrialFolioError | None:
         """Takes the steps the module lists. `configuration` is the configuration file's bytes,
-        as the plan was built from them, and `definition` the bytes of the definition file it
-        names, read when it was validated, for a plan 1.2.0. `on_claimed` is called once the
-        directory is claimed, before anything else is written into it, such as to start writing
-        logs there.
+        as the plan was built from them, and, for a plan 1.2.0, `definition` the bytes of the
+        definition file it names, or `snapshot` those of the snapshot's two files it names, read
+        when it was validated. `on_claimed` is called once the directory is claimed, before
+        anything else is written into it, such as to start writing logs there.
 
         Returns the error the command reports, or None when the run completed. Raises the claim's
         `TrialFolioError`, `output.not_empty` or `storage.write_failed`, the ranking lock's,
         `experiment.locked` or `storage.write_failed`, and a `KeyboardInterrupt` during the lock
         or the claim, which removes what the claim created, so nothing is left. Raises
-        `ValueError`, before anything else, when a plan 1.2.0 isn't given its definition, or one
-        whose hash isn't the plan's, or another plan is given one. A run without a command is
+        `ValueError`, before anything else, when a plan 1.2.0 isn't given its definition, or its
+        snapshot's files, or is given ones that aren't the plan's, or another plan is given
+        either. A run without a command is
         synthetic, so `client` makes the demo's client: another one is closed unused, and is a
         `ValueError` once it's made, before anything is sent, which leaves the output without an
         attempt record or a manifest. After the claim, every ending
@@ -320,13 +333,14 @@ class Execution:
         """
         if self._claimed:
             raise RuntimeError("an execution runs once")
-        self._check_configuration(configuration, definition)
+        self._check_configuration(configuration, definition, snapshot)
+        copies = _copies(definition, snapshot)
         if self._command is None:
             self._started_at = utc(self._clock())
         if self._lock is None:
-            return self._claimed_run(configuration, definition, client, on_claimed)
+            return self._claimed_run(configuration, copies, client, on_claimed)
         with self._lock:
-            return self._claimed_run(configuration, definition, client, on_claimed)
+            return self._claimed_run(configuration, copies, client, on_claimed)
 
     def ending_detail(self) -> str:
         """What the run's records say, for the message of an ending after the claim that the run
@@ -349,24 +363,42 @@ class Execution:
     def _ranking(self) -> bool:
         return isinstance(self._plan, PlanV1_2)
 
-    def _check_configuration(self, configuration: bytes, definition: bytes | None) -> None:
+    @property
+    def _snapshot_named(self) -> bool:
+        """Whether the plan's ranking is named by a snapshot, whose record the run copies."""
+        return isinstance(self._plan, PlanV1_2) and self._plan.ranking_source.form == "snapshot"
+
+    def _check_configuration(
+        self, configuration: bytes, definition: bytes | None, snapshot: SnapshotFiles | None
+    ) -> None:
         """Reads the configuration's schema version. For a plan 1.2.0, it reads the
-        configuration with the definition's bytes, which it checks are the plan's definition,
-        so `definition.xml` holds the definition the plan was built from."""
+        configuration with the definition's bytes, or the snapshot's files', which it checks are
+        the plan's definition, and its snapshot, so `definition.xml` and `snapshot.json` hold
+        what the plan was built from."""
         # Validated already, when the plan was built from it.
         if not isinstance(self._plan, PlanV1_2):
-            if definition is not None:
+            if definition is not None or snapshot is not None:
                 raise ValueError("only a run with a ranking definition is given one")
             read = read_screen_configuration(configuration, CONFIGURATION_PATH)
             self._configuration_version = read.schema_version
             return
-        if definition is None:
-            raise ValueError("a run with a ranking definition is given its definition's bytes")
+        source = self._plan.ranking_source
+        if (definition is None) == (snapshot is None) or (snapshot is None) != (
+            source.form == "definition"
+        ):
+            raise ValueError(
+                "a run with a ranking definition is given its definition's bytes, or its"
+                " snapshot's files, as its plan's ranking_source gives"
+            )
         ranked = read_screen_configuration_v1_1(
-            configuration, CONFIGURATION_PATH, CONFIGURATION_PATH, definition=definition
+            configuration,
+            CONFIGURATION_PATH,
+            CONFIGURATION_PATH,
+            definition=definition,
+            snapshot=snapshot,
         )
-        if ranked.definition is None or ranked.definition.hash != (
-            self._plan.ranking_source.definition
+        if ranked.definition is None or (
+            ranking_source(ranked.definition, ranked.snapshot) != source
         ):
             raise ValueError("the definition isn't the plan's")
         self._read = ranked
@@ -375,7 +407,7 @@ class Execution:
     def _claimed_run(
         self,
         configuration: bytes,
-        definition: bytes | None,
+        copies: tuple["_Copy", ...],
         client: ClientFactory,
         on_claimed: Callable[[], object] | None,
     ) -> TrialFolioError | None:
@@ -383,16 +415,17 @@ class Execution:
         plan_file = self._store.claim(PLAN_PATH, model_json(self._plan))
         self._claimed = True
         self._files.append(("plan", plan_file))
-        result = self._attempt_run(configuration, definition, client, on_claimed)
+        result = self._attempt_run(configuration, copies, client, on_claimed)
         self._result = result
         self._files.extend((_run_role(file.role), file.file) for file in result.files)
         error = result.error
         if (
             ends_without_manifest(recorded=result.recorded, error=error)
-            # Every manifest lists the configuration, and a definition's copy, so without them
-            # there's none to write.
+            # Every manifest lists the configuration, and a definition's copy, with a snapshot's
+            # record for a snapshot, so without them there's none to write.
             or self._configuration is None
             or (self._ranking and self._definition is None)
+            or (self._snapshot_named and self._snapshot is None)
         ):
             return error
         with EndingWithoutManifest(after="the attempt ended") as ended:
@@ -429,7 +462,7 @@ class Execution:
     def _attempt_run(
         self,
         configuration: bytes,
-        definition: bytes | None,
+        copies: tuple["_Copy", ...],
         client: ClientFactory,
         on_claimed: Callable[[], object] | None,
     ) -> AttemptResult:
@@ -440,9 +473,13 @@ class Execution:
             self._attempt = self._new_attempt()
             self._configuration = self._store.write(CONFIGURATION_PATH, configuration)
             self._files.append(("configuration", self._configuration))
-            if definition is not None:
-                self._definition = self._store.write(DEFINITION_PATH, definition)
-                self._files.append(("ranking_definition", self._definition))
+            for role, path, data in copies:
+                stored = self._store.write(path, data)
+                self._files.append((role, stored))
+                if role == "ranking_definition":
+                    self._definition = stored
+                else:
+                    self._snapshot = stored
             made = client()
         except (KeyboardInterrupt, Exception) as ending:  # noqa: BLE001 - every ending is recorded.
             if made is not None:
@@ -638,6 +675,9 @@ class Execution:
         and those of a definition's copy, acquired with the configuration, and of the
         `rank_update`'s request and response (a run with a ranking definition)."""
         if role == "ranking_definition":
+            snapshot = None if self._read is None else self._read.snapshot
+            if snapshot is not None:
+                return snapshot_definition_source(snapshot.record.taken_at)
             return definition_source(self._acquired())
         if role in RANK_UPDATE_ROLES:
             return rank_update_source(role, started_at=record.started_at, ended_at=record.ended_at)
@@ -662,6 +702,25 @@ class Execution:
         if self._attempt is not None:
             fields["attempt_id"] = str(self._attempt.attempt_id)
         return fields
+
+
+type _Copy = tuple[Literal["ranking_definition", "ranking_snapshot_record"], str, bytes]
+"""A copy a run with a ranking definition writes beside `configuration.yaml`: its role, its path,
+and its bytes."""
+
+
+def _copies(definition: bytes | None, snapshot: SnapshotFiles | None) -> tuple[_Copy, ...]:
+    """The copies a run writes right after `configuration.yaml`, in order: the definition's,
+    `definition.xml`, from its file's bytes, or from a snapshot's, and then, for a snapshot, its
+    record's, `snapshot.json` (ranking definitions, reading a snapshot)."""
+    if snapshot is not None:
+        return (
+            ("ranking_definition", DEFINITION_PATH, snapshot.definition),
+            ("ranking_snapshot_record", SNAPSHOT_PATH, snapshot.record),
+        )
+    if definition is not None:
+        return (("ranking_definition", DEFINITION_PATH, definition),)
+    return ()
 
 
 def _run_role(role: AttemptRole) -> ArtifactRoleV1_1:

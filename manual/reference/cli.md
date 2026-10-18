@@ -28,7 +28,7 @@ trialfolio [-h] [--version] <command> ...
 | Command | What it does |
 |---|---|
 | [`init`](#trialfolio-init) | Set up a workspace: a folder with a starter screen configuration, a README, and a .gitignore. |
-| [`run`](#trialfolio-run) | Plan and execute a screen backtest, or an experiment, once its plan is approved. Run an experiment's configuration again into its output directory to resume or revise it. |
+| [`run`](#trialfolio-run) | Plan and execute a screen backtest, or an experiment, once its plan is approved. Run an experiment's configuration again into its output directory to resume or revise it. A ranking snapshot configuration reads a ranking system saved in the account into a ranking snapshot. |
 | [`report`](#trialfolio-report) | Re-render a saved run's report offline. |
 | [`demo`](#trialfolio-demo) | Write a synthetic example run offline, labeled synthetic, with its report. |
 | [`review`](#trialfolio-review) | Compare saved runs with a baseline offline. |
@@ -104,7 +104,7 @@ trialfolio run [-h] --out DIR [--approve PLAN_HASH]
 
 | Argument or option | Required | Default | What it is |
 |---|---|---|---|
-| `config` | Yes | None | The screen or experiment configuration, a YAML file |
+| `config` | Yes | None | The screen, experiment, or ranking snapshot configuration, a YAML file |
 | `--out DIR` | Yes | None | The output directory: absent, or an empty directory, or, for an experiment, its own output directory, to resume or revise it |
 | `--approve PLAN_HASH` | No | None | Approve the plan with its full hash, as shown, without asking |
 | `--revision-reason TEXT` | No | None | Why the experiment's plan changed: needed, with the revision's approval, when the configuration or the installed versions no longer give the current plan |

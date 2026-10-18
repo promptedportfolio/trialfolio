@@ -121,11 +121,9 @@ def test_a_screen_configuration_is_not_a_snapshot() -> None:
     assert "`kind` must be ranking-snapshot." in rejection(content)
 
 
-def test_run_reads_a_snapshot_configuration_only_once_it_runs_one() -> None:
+def test_run_reads_a_snapshot_configuration() -> None:
     """`trialfolio run` takes `kind: ranking-snapshot` from R04-T10, which builds a snapshot's
-    run; until then its reader names the two kinds it runs."""
-    with pytest.raises(TrialFolioError) as caught:
-        read_run_configuration(documented_example().encode(), "snapshot.yaml")
+    run. R04-T05 held that its reader refused the kind until then, naming the two kinds it ran."""
+    configuration = read_run_configuration(documented_example().encode(), "snapshot.yaml")
 
-    assert caught.value.code == "config.invalid"
-    assert "`kind` must be screen or experiment." in caught.value.message
+    assert configuration == read(documented_example())

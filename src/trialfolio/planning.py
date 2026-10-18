@@ -10,6 +10,8 @@ CLI's side: it shows the plan and obtains the approved hash.
   directory, file paths, attempt IDs, credentials, or account information.
 - `plan_hash` recomputes a plan's hash from its contents, never from its stored `plan_hash`, and
   `check_approval` passes only exactly that hash.
+- `build_snapshot_plan` builds a ranking snapshot configuration's plan (release 0.4.0; ranking
+  snapshot output): the system it names, its one `rank_get`, the budget, and the data sent.
 
 An experiment's plan compiler and revision rules (docs/contracts.md, experiment plans and
 revisions):
@@ -132,7 +134,15 @@ from trialfolio.contracts.plan import (
     ranking_credits,
     screen_backtest_params,
 )
-from trialfolio.contracts.ranking_snapshot import RANK_GET_COST_SOURCE
+from trialfolio.contracts.ranking_snapshot import (
+    RANK_GET_COST_SOURCE,
+    SNAPSHOT_BUDGET,
+    RankGetParams,
+    RankGetRequest,
+    RankingSnapshotPlan,
+    SnapshotDataSent,
+)
+from trialfolio.contracts.ranking_snapshot_configuration import RankingSnapshotConfiguration
 from trialfolio.contracts.screen_configuration import (
     DefinitionRanking,
     IdRanking,
@@ -153,6 +163,7 @@ from trialfolio.contracts.screen_settings import (
 )
 from trialfolio.errors import TrialFolioError
 from trialfolio.ranking_definitions import RankingCase, RankingDefinition
+from trialfolio.snapshots import SnapshotRead
 
 type ProviderPackage = Literal["p123api", "requests", "urllib3"]
 
@@ -419,8 +430,8 @@ def case_id(settings: Sequence[PlanSetting] | Sequence[PlanSettingV1_2]) -> str:
     return "case-" + sha256_hex(canonical_json(rows))[:16]
 
 
-type AnyPlan = Plan | PlanV1_1 | PlanV1_2 | PlanV1_3
-"""A screen's or an experiment's plan, of any version."""
+type AnyPlan = Plan | PlanV1_1 | PlanV1_2 | PlanV1_3 | RankingSnapshotPlan
+"""A screen's or an experiment's plan, of any version, or a ranking snapshot's."""
 
 
 def plan_hash(plan: AnyPlan) -> str:
@@ -435,7 +446,7 @@ _UNHASHED: Final = "sha256:" + "0" * 64
 it."""
 
 
-def _hashed[P: (Plan, PlanV1_1, PlanV1_2, PlanV1_3)](draft: P) -> P:
+def _hashed[P: (Plan, PlanV1_1, PlanV1_2, PlanV1_3, RankingSnapshotPlan)](draft: P) -> P:
     # The draft was validated whole. Its hash is well formed, so the copy needs no validation.
     return draft.model_copy(update={"plan_hash": plan_hash(draft)})
 
@@ -486,6 +497,52 @@ def _screen_plan(
     )
 
 
+_SNAPSHOT_DATA_SENT: Final = (
+    SnapshotDataSent(category="credentials", recipient="Portfolio123", via="p123api", settings=()),
+    SnapshotDataSent(
+        category="strategy_definition",
+        recipient="Portfolio123",
+        via="p123api",
+        settings=("system",),
+    ),
+)
+"""A snapshot plan's data sent: the credentials, then the system's name, as the strategy's
+definition (ranking snapshot output)."""
+
+
+def build_snapshot_plan(
+    configuration: RankingSnapshotConfiguration, versions: Versions
+) -> RankingSnapshotPlan:
+    """Builds a ranking snapshot configuration's plan (ranking snapshot output): the system it
+    names, which is sent, its one `rank_get`, with the params `p123api`'s `rank_get` sends as the
+    query of `GET /rank`, the budget of one request at `rank_get`'s documented cost, the retry
+    policy, and the data sent, the credentials and the system's name. It has no title, purpose,
+    or cases, and holds nothing that varies between invocations.
+
+    Raises `TrialFolioError` with `environment.unsupported` as `build_plan` does.
+    """
+    _require_verified(versions)
+    return _hashed(
+        RankingSnapshotPlan(
+            schema_version="1.0.0",
+            trialfolio_version=versions.trialfolio,
+            canonicalization_version=CANONICALIZATION_VERSION,
+            provider_wrapper=WrapperVersions(p123api=versions.p123api),
+            transport=TransportVersions(requests=versions.requests, urllib3=versions.urllib3),
+            system=configuration.system,
+            requests=(
+                RankGetRequest(
+                    operation="rank_get", params=RankGetParams(name=configuration.system)
+                ),
+            ),
+            budget=SNAPSHOT_BUDGET,
+            retry_policy=RETRY_POLICY,
+            data_sent=_SNAPSHOT_DATA_SENT,
+            plan_hash=_UNHASHED,
+        )
+    )
+
+
 def check_approval(plan: AnyPlan, approved_hash: str | None) -> str:
     """Returns the plan's hash when `approved_hash` is exactly that hash, recomputed from the
     plan's contents: the full hash, `sha256:` and 64 lowercase hex digits (approval).
@@ -512,15 +569,20 @@ def check_approval(plan: AnyPlan, approved_hash: str | None) -> str:
 
 
 def _definition_setting(
-    ranking: RankingV1_1, definition: RankingDefinition | None
+    ranking: RankingV1_1, definition: RankingDefinition | None, snapshot: SnapshotRead | None
 ) -> DefinitionRankingSetting | None:
-    """The `ranking` setting of a ranking given as a definition, read with it: its hash and its
-    ranking method. None for any other ranking, which `resolve_settings` plans as it's configured,
-    or refuses with `TypeError`: a definition without the definition read with it, and a snapshot,
-    whose definition and source release 0.4.0's R04-T10 reads."""
+    """The `ranking` setting of a ranking given as a definition, read with it, or named by a
+    snapshot, read with it: the definition's hash, and its ranking method, the configuration's or
+    the snapshot's system's. None for any other ranking, which `resolve_settings` plans as it's
+    configured, or refuses with `TypeError`: a definition or a snapshot without what was read
+    with it."""
     if isinstance(ranking, DefinitionRanking) and definition is not None:
         return DefinitionRankingSetting(
             definition=definition.hash, ranking_method=ranking.ranking_method
+        )
+    if isinstance(ranking, SnapshotRanking) and snapshot is not None:
+        return DefinitionRankingSetting(
+            definition=snapshot.definition.hash, ranking_method=snapshot.ranking_method
         )
     return None
 
@@ -591,15 +653,25 @@ def _ranking_requests(
     return update, backtest
 
 
-def _file_source(definition: RankingDefinition) -> RankingSource:
-    """A definition file's source: the definition's hash, not the file's `artifact_id`, which its
-    line endings would change (ranking definitions)."""
+def ranking_source(definition: RankingDefinition, snapshot: SnapshotRead | None) -> RankingSource:
+    """Where the definition came from (ranking definitions, its source): a file, by the
+    definition's hash, not the file's `artifact_id`, which its line endings would change; or a
+    snapshot, by its system's name, as its record gives it, and the `artifact_id`s of its
+    `snapshot.json` and `definition.xml`."""
+    if snapshot is None:
+        return RankingSource(
+            form="definition",
+            definition=definition.hash,
+            system=None,
+            snapshot_record=None,
+            snapshot_definition=None,
+        )
     return RankingSource(
-        form="definition",
+        form="snapshot",
         definition=definition.hash,
-        system=None,
-        snapshot_record=None,
-        snapshot_definition=None,
+        system=snapshot.record.system.name,
+        snapshot_record=snapshot.record_id,
+        snapshot_definition=snapshot.definition_id,
     )
 
 
@@ -607,21 +679,20 @@ def build_plan_v1_1(read: ScreenConfigurationRead, versions: Versions) -> Plan |
     """Builds the plan of a screen configuration that release 0.4.0's reader read, 1.0.0 or
     1.1.0, from what it read.
 
-    A ranking given as a definition gives plan 1.2.0 (plans with a ranking definition): its one
-    case's `rank_update`, which writes the whole definition into `ApiRankingSystem`, with its
-    ranking method, then its backtest, ranked by that system; its settings, with the `ranking`
-    row's definition hash and ranking method, and a weight row for each node; its `case_id`,
-    which covers both; `ranking_source`, the file's, by the definition's hash; and a budget of
-    the two requests, with each operation's documented cost. Any other ranking gives plan 1.0.0,
-    as `build_plan` builds it, whichever version the file is.
+    A ranking given as a definition, or named by a snapshot, gives plan 1.2.0 (plans with a
+    ranking definition): its one case's `rank_update`, which writes the whole definition into
+    `ApiRankingSystem`, with its ranking method, then its backtest, ranked by that system; its
+    settings, with the `ranking` row's definition hash and ranking method, and a weight row for
+    each node; its `case_id`, which covers both, and so is the same for a file and for a
+    snapshot of the same definition; `ranking_source`, the file's, by the definition's hash, or
+    the snapshot's; and a budget of the two requests, with each operation's documented cost. Any
+    other ranking gives plan 1.0.0, as `build_plan` builds it, whichever version the file is.
 
-    Raises `TrialFolioError` with `environment.unsupported` as `build_plan` does. Raises
-    `TypeError` for a ranking named by a snapshot, until release 0.4.0's R04-T10 reads its
-    definition.
+    Raises `TrialFolioError` with `environment.unsupported` as `build_plan` does.
     """
     _require_verified(versions)
     configuration = read.configuration
-    ranking = _definition_setting(configuration.ranking, read.definition)
+    ranking = _definition_setting(configuration.ranking, read.definition, read.snapshot)
     if ranking is None or read.definition is None:
         return _screen_plan(configuration, versions)
     settings = _ranking_settings(configuration, ranking, read.definition)
@@ -640,7 +711,7 @@ def build_plan_v1_1(read: ScreenConfigurationRead, versions: Versions) -> Plan |
             transport=TransportVersions(requests=versions.requests, urllib3=versions.urllib3),
             title=configuration.title,
             purpose=configuration.purpose,
-            ranking_source=_file_source(read.definition),
+            ranking_source=ranking_source(read.definition, read.snapshot),
             cases=(
                 PlanCaseV1_2(
                     case_id=case_id(settings),
@@ -809,14 +880,14 @@ def build_experiment_plan_v1_1(
     rows of its definition; and its `case_id`, which covers them. A ranking variant's case has the
     definition its change of the baseline's gives, which the reader read, and its `variant` gives
     its `set` and `remove` by canonical paths in the baseline's definition; every other case has
-    the baseline's definition. The plan gives `ranking_source`, the baseline's file, by the
-    definition's hash, and the budget across runs, with each operation's documented cost. Any
-    other ranking gives plan 1.1.0, as `build_experiment_plan` compiles it, whichever version the
-    file is, so a case without a definition keeps the `case_id` 0.3.0 gave it.
+    the baseline's definition. A baseline named by a snapshot is planned the same way, from the
+    snapshot's definition and ranking method. The plan gives `ranking_source`, the baseline's
+    file, by the definition's hash, or its snapshot, and the budget across runs, with each
+    operation's documented cost. Any other ranking gives plan 1.1.0, as `build_experiment_plan`
+    compiles it, whichever version the file is, so a case without a definition keeps the
+    `case_id` 0.3.0 gave it.
 
-    Raises `TrialFolioError` with `environment.unsupported` as `build_experiment_plan` does. Raises
-    `TypeError` for a baseline named by a snapshot, until release 0.4.0's R04-T10 reads its
-    definition.
+    Raises `TrialFolioError` with `environment.unsupported` as `build_experiment_plan` does.
     """
     _require_verified(versions)
     configuration = read.configuration
@@ -825,11 +896,16 @@ def build_experiment_plan_v1_1(
             configuration, configured_variants(configuration), versions, revises
         )
     variants = configured_variants_v1_1(configuration)
-    ranking = _definition_setting(configuration.baseline.ranking, read.definition)
+    ranking = _definition_setting(configuration.baseline.ranking, read.definition, read.snapshot)
     if ranking is None or read.definition is None:
         return _experiment_plan(configuration, variants, versions, revises)
     return _ranking_plan(
-        configuration, variants, (ranking, read.definition), read.ranking_cases, versions, revises
+        configuration,
+        variants,
+        (ranking, read.definition, ranking_source(read.definition, read.snapshot)),
+        read.ranking_cases,
+        versions,
+        revises,
     )
 
 
@@ -875,14 +951,15 @@ def _ranking_variant(case: RankingCase) -> PlanVariantV1_3:
 def _ranking_plan(
     configuration: ExperimentConfigurationV1_1,
     variants: Sequence[ConfiguredVariantV1_1],
-    baseline: tuple[DefinitionRankingSetting, RankingDefinition],
+    baseline: tuple[DefinitionRankingSetting, RankingDefinition, RankingSource],
     ranking_cases: Sequence[RankingCase],
     versions: Versions,
     revises: str | None,
 ) -> PlanV1_3:
     """An experiment's plan 1.3.0, whose baseline's ranking is `baseline`: its `ranking` setting,
-    and its definition. `ranking_cases` gives each ranking variant's definition, by its place."""
-    ranking, definition = baseline
+    its definition, and where that came from. `ranking_cases` gives each ranking variant's
+    definition, by its place."""
+    ranking, definition, source = baseline
     settings = _ranking_settings(configuration.baseline, ranking, definition)
     cases = [_ranking_case(BASELINE_CASE_KEY, None, None, settings, definition)]
     by_place = {case.place: case for case in ranking_cases}
@@ -921,7 +998,7 @@ def _ranking_plan(
             title=configuration.title,
             purpose=configuration.purpose,
             prior_research=_declared(configuration),
-            ranking_source=_file_source(definition),
+            ranking_source=source,
             revises=revises,
             cases=tuple(cases),
             budget=_ranking_budget(configuration.budget.provider_requests),

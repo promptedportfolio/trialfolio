@@ -579,27 +579,6 @@ def test_a_case_without_a_definition_keeps_the_case_id_0_3_0_gave() -> None:
         assert build_plan_v1_1(read, VERSIONS) == screen_plan
 
 
-def test_a_baseline_named_by_a_snapshot_isn_t_planned_until_its_definition_is_read(
-    tmp_path: Path,
-) -> None:
-    """Release 0.4.0's R04-T10 reads a snapshot, and its definition, which the plan holds."""
-    path = tmp_path / "ranking-example.yaml"
-    path.write_text(
-        (EXPERIMENTS / "ranking-example.yaml")
-        .read_text(encoding="utf-8")
-        .replace(
-            "    definition: 'ranking/value-momentum.xml'\n"
-            "    ranking_method: percentile_nas_negative\n",
-            "    snapshot: 'ranking/value-momentum/'\n",
-        ),
-        encoding="utf-8",
-    )
-    read = read_experiment_configuration_v1_1(path.read_bytes(), path.name, path)
-
-    with pytest.raises(TypeError, match="snapshot"):
-        build_experiment_plan_v1_1(read, VERSIONS)
-
-
 @pytest.mark.parametrize("kind", ["screen", "experiment"])
 def test_a_version_no_release_verified_isn_t_planned(kind: str) -> None:
     unverified = Versions("0.4.0", "3.1.0", "2.34.3", "2.8.0")

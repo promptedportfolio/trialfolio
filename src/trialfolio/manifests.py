@@ -134,6 +134,21 @@ def definition_source(acquired_at: datetime) -> SourceRecordV1_1:
     )
 
 
+def snapshot_definition_source(taken_at: datetime) -> SourceRecordV1_1:
+    """The source record of the copy of a snapshot's definition, `definition.xml`: the format
+    `ranking-definition`, version 1, which no parser reads, `verified`, from the `rank_get` that
+    read it, acquired when the snapshot was taken, at `taken_at`, its record's `taken_at`
+    (artifact storage, a run with a ranking definition; ranking snapshot output)."""
+    return SourceRecordV1_1(
+        acquired_at=taken_at,
+        format=RANKING_DEFINITION_FORMAT,
+        format_version="1",
+        parser_version=None,
+        provenance="verified",
+        operation="rank_get",
+    )
+
+
 def rank_update_source(
     role: RankUpdateRole, *, started_at: datetime, ended_at: datetime
 ) -> SourceRecordV1_1:
@@ -308,18 +323,21 @@ def updating_detail(attempt: str | None = None) -> str:
     )
 
 
-def running_detail(attempt: str | None = None, *, ranking: bool = False) -> str:
+def running_detail(
+    attempt: str | None = None, *, ranking: bool = False, name: str = "screen backtest request"
+) -> str:
     """What the start record of an attempt without its attempt record says of its request, for
     an ending's message: it may have been sent and charged. `attempt` names the attempt, such as
     "the attempt under way", where the output has several; without it, it's a run's one
-    attempt. With `ranking`, for an attempt that sends a definition, it says what each of its two
-    requests did: its backtest's start record follows only its `rank_update`'s 200, so the
-    `rank_update` reached Portfolio123 (sending a definition)."""
+    attempt, or a snapshot's, whose request `name` names, as "rank_get request". With `ranking`,
+    for an attempt that sends a definition, it says what each of its two requests did: its
+    backtest's start record follows only its `rank_update`'s 200, so the `rank_update` reached
+    Portfolio123 (sending a definition)."""
     of, record = ("", "the attempt's") if attempt is None else (f" of {attempt}", "its")
     if not ranking:
         return (
-            f"The screen backtest request{of} may have been sent, and may have been charged:"
-            f" {record} start record reads as running. Trial Folio never retries it automatically."
+            f"The {name}{of} may have been sent, and may have been charged: {record} start record"
+            " reads as running. Trial Folio never retries it automatically."
         )
     return (
         f"The rank_update request{of}, which writes the case's ranking definition into"
