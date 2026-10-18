@@ -45,9 +45,12 @@ def serve(cli: Cli, reply: Reply | None = None) -> None:
     cli.server.reply("/rank", rank_get() if reply is None else reply, method="GET")
 
 
-def take(cli: Cli, out: Path, *args: str) -> Outcome:
-    """Runs the example's snapshot into `out`, approved with `--approve`."""
-    return cli("run", EXAMPLE, "--out", out, "--approve", snapshot_plan_hash(), *args)
+def take(cli: Cli, out: Path, *args: str, timeout: int | None = None) -> Outcome:
+    """Runs the example's snapshot into `out`, approved with `--approve`, with the request
+    timeout `timeout`, or the CLI's own."""
+    return cli(
+        "run", EXAMPLE, "--out", out, "--approve", snapshot_plan_hash(), *args, timeout=timeout
+    )
 
 
 def error_code(outcome: Outcome) -> str:
@@ -210,6 +213,28 @@ def test_stdout_says_which_rule_keeps_a_snapshot_from_being_a_ranking(cli: Cli) 
     assert "CAD" not in outcome.stdout
 
 
+def test_stdout_writes_the_systems_name_with_its_control_and_formatting_characters_escaped(
+    cli: Cli,
+) -> None:
+    """The name is text from Portfolio123's response, so an escape sequence or a bidirectional
+    override in it can't act on the terminal (the result)."""
+    cli.ready()
+    escape, override, backslash = chr(0x1B), chr(0x202E), chr(0x5C)
+    response = json.loads((RESPONSES / "rank-get.json").read_bytes())
+    response["name"] = f"Value{escape}[31m and {override}momentum"
+    serve(cli, Reply(200, json.dumps(response).encode()))
+
+    outcome = take(cli, cli.tmp / "snapshot")
+
+    assert outcome.exit_code == 0, outcome.stderr
+    assert (
+        f"Ranking system read: Value{backslash}u001b[31m and {backslash}u202emomentum"
+        in outcome.stdout.splitlines()
+    )
+    assert escape not in outcome.stdout
+    assert override not in outcome.stdout
+
+
 def test_the_same_command_again_into_the_completed_snapshot_is_refused(cli: Cli) -> None:
     """A snapshot is never resumed or added to: a later snapshot goes into a directory of its
     own."""
@@ -230,23 +255,25 @@ def test_the_same_command_again_into_the_completed_snapshot_is_refused(cli: Cli)
 
 
 @pytest.mark.parametrize(
-    ("reply", "code"),
+    ("reply", "code", "timeout"),
     [
-        (Reply(404, b"Not found"), "provider.request_rejected"),
-        (Reply(503, b""), "provider.outcome_unknown"),
-        (rank_get("rank-get-without-xml.json"), "provider.response_invalid"),
-        (rank_get("rank-get-lone-surrogate.json"), "provider.response_invalid"),
+        (Reply(404, b"Not found"), "provider.request_rejected", None),
+        (Reply(503, b""), "provider.outcome_unknown", None),
+        # A reply that comes after the 1-second request timeout.
+        (Reply(200, b"{}", delay=3), "provider.outcome_unknown", 1),
+        (rank_get("rank-get-without-xml.json"), "provider.response_invalid", None),
+        (rank_get("rank-get-lone-surrogate.json"), "provider.response_invalid", None),
     ],
-    ids=["404", "503", "without-structure", "lone-surrogate"],
+    ids=["404", "503", "read-timeout", "without-structure", "lone-surrogate"],
 )
 def test_a_failed_snapshot_has_no_definition_and_a_failed_manifest(
-    cli: Cli, reply: Reply, code: str
+    cli: Cli, reply: Reply, code: str, timeout: int | None
 ) -> None:
     cli.ready()
     serve(cli, reply)
     out = cli.tmp / "snapshot"
 
-    outcome = take(cli, out, "--json")
+    outcome = take(cli, out, "--json", timeout=timeout)
 
     assert outcome.exit_code == 5
     assert error_code(outcome) == code
