@@ -5,7 +5,8 @@ and reading a snapshot as a configuration's ranking, offline, in step 2, which p
 copies its two files beside each plan's `configuration.yaml`.
 
 Traces to docs/contracts.md, ranking snapshot output (its steps, plan, layout, records, manifest,
-response, `definition.xml`, `snapshot.json`, and reading a snapshot), ranking definitions (a
+response, `definition.xml`, `snapshot.json`, reading a snapshot, and the executors), ranking
+definitions (a
 case's definition and its identity, its source), plans with a ranking definition
 (`ranking_source`), a run with a ranking definition (the copies and their roles), the experiment
 manifest's version 1.1.0, a complete run, checking the records, and CLI behavior (the demo's
@@ -401,8 +402,34 @@ def test_a_storage_failure_at_the_snapshots_files_leaves_no_manifest(
     _, error = take(server, out, faults=(monkeypatch, name, failure))
 
     assert error is not None and error.code == "storage.write_failed"
+    # Its attempt record says the rank_get succeeded, so the message does, and names no backtest.
+    assert "The rank_get request succeeded, and its response was saved." in error.message
+    assert "screen backtest" not in error.message
     assert "The snapshot has no manifest, so its output is incomplete." in error.message
     assert not (out / "manifest.json").exists()
+
+
+def test_a_snapshot_without_its_attempt_record_says_its_rank_get_may_have_been_sent(
+    tmp_path: Path, server: FakePortfolio123, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only its start record says what became of the `rank_get`, so what the snapshot's records
+    say, for an ending the command doesn't record itself, such as a second interrupt, is that it
+    may have been sent and charged (the CLI's `ending_detail`)."""
+    out = tmp_path / "snapshot"
+    failure = TrialFolioError("storage.write_failed", "The disk is full.")
+
+    execution, error = take(server, out, faults=(monkeypatch, "attempt.json", failure))
+
+    assert error is not None and error.code == "storage.write_failed"
+    assert (attempt_directory(out) / "started.json").is_file()
+    assert not (attempt_directory(out) / "attempt.json").exists()
+    assert not (out / "manifest.json").exists()
+    detail = execution.ending_detail()
+    assert detail.startswith(
+        "The rank_get request may have been sent, and may have been charged: the attempt's start"
+        " record reads as running."
+    )
+    assert "screen backtest" not in detail
 
 
 def test_a_ranking_method_the_wrapper_doesnt_know_is_saved_undecoded(
@@ -487,6 +514,8 @@ def test_a_snapshot_without_a_command_sends_nothing_with_a_client_that_isnt_the_
 
     assert server.received == ()
     assert not (tmp_path / "snapshot" / "manifest.json").exists()
+    # Its attempt has no start record, so the snapshot's records say the rank_get wasn't sent.
+    assert execution.ending_detail().startswith("The rank_get request wasn't sent.")
 
 
 def test_a_snapshot_needs_its_plans_approval_and_its_configuration(tmp_path: Path) -> None:
@@ -580,6 +609,15 @@ def _break_listed(snapshot: Path, name: str) -> None:
     (snapshot / name).write_bytes((snapshot / name).read_bytes() + b"\n")
 
 
+def _change_in_place(snapshot: Path, name: str) -> None:
+    """Changes one weight's digit in the snapshot's file `name`, keeping its size, so only its
+    `artifact_id` shows the change."""
+    content = (snapshot / name).read_bytes()
+    changed = content.replace(b'Weight="40"', b'Weight="41"', 1)
+    assert changed != content and len(changed) == len(content)
+    (snapshot / name).write_bytes(changed)
+
+
 @pytest.mark.parametrize(
     ("change", "problem"),
     [
@@ -588,9 +626,13 @@ def _break_listed(snapshot: Path, name: str) -> None:
             lambda s: _break_listed(s, "definition.xml"),
             "`definition.xml` doesn't match its artifact_id",
         ),
+        (
+            lambda s: _change_in_place(s, "definition.xml"),
+            "`definition.xml` doesn't match its artifact_id",
+        ),
         (lambda s: (s / "manifest.json").unlink(), "it has no manifest.json."),
     ],
-    ids=["record-missing", "definition-changed", "no-manifest"],
+    ids=["record-missing", "definition-changed", "definition-changed-same-size", "no-manifest"],
 )
 def test_a_snapshot_that_isnt_complete_is_input_not_a_run(
     tmp_path: Path, snapshot: Path, change: object, problem: str
@@ -835,6 +877,26 @@ def test_a_run_is_given_its_snapshots_files_as_its_plan_has_them(
     assert not (tmp_path / "run").exists()
 
 
+def test_a_snapshots_files_given_whose_record_names_another_definition_are_refused(
+    tmp_path: Path, snapshot: Path
+) -> None:
+    """Given a snapshot's two files' bytes in place of its directory, the configuration's reader
+    checks that `snapshot.json` names `definition.xml`, though another definition that can be a
+    ranking is given in its place (the executors)."""
+    content, files, _ = ranked_screen(tmp_path, snapshot)
+    other = (DEFINITION.parent / "value-momentum-revised.xml").read_bytes()
+    assert other != files.definition
+    path = tmp_path / "screen-configs" / SCREEN.name
+
+    with pytest.raises(ValueError, match="names another definition.xml"):
+        read_screen_configuration_v1_1(
+            content,
+            path.name,
+            path,
+            snapshot=SnapshotFiles(definition=other, record=files.record),
+        )
+
+
 def test_a_runs_snapshot_that_isnt_its_plans_is_refused_as_not_a_run(
     tmp_path: Path, server: FakePortfolio123, snapshot: Path
 ) -> None:
@@ -913,6 +975,16 @@ def test_an_experiment_copies_the_snapshot_into_its_plan_and_resumes_with_it(
         read.snapshot.record.taken_at,
     )
     assert (record.schema_version, record.source) == ("1.0.0", None)
+    # Each of the baseline's weight rows takes its original from the snapshot's copy, named by
+    # `baseline.ranking.snapshot`.
+    baseline = plan.cases[0]
+    assert baseline.case_key == "baseline"
+    settings = out / "cases" / baseline.case_id / "normalized" / "settings.csv"
+    rows = read_settings_csv_v1_1(settings.read_bytes(), settings.name)
+    weights = [row for row in rows if row.node is not None]
+    assert weights
+    assert {row.original_key for row in weights} == {"baseline.ranking.snapshot"}
+    assert {row.source_artifact for row in weights} == {copy.artifact_id}
     with LocalArtifactStore(out) as store:
         saved = open_experiment(store, ranking=True)
         assert saved.current.snapshot is not None
@@ -1111,6 +1183,24 @@ def test_an_experiments_snapshot_record_of_a_version_with_no_reader_is_unknown(
         open_experiment(store, ranking=True)
 
     assert raised.value.code == "artifact.unknown_schema_version"
+
+
+def test_an_experiments_plan_whose_snapshot_isnt_its_plans_is_refused_as_not_a_run(
+    tmp_path: Path, snapshot: Path
+) -> None:
+    """A valid snapshot record in `plans/1/` that, with the plan's `definition.xml`, isn't the
+    snapshot the plan's `ranking_source` names (checking the records), as for a run's."""
+    out = new_experiment(tmp_path, naming(EXAMPLE, snapshot, tmp_path / "experiment-configs"))
+    path = out / "plans" / "1" / "snapshot.json"
+    record = read_json(path)
+    record["requested"] = "Another system"
+    path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+
+    with LocalArtifactStore(out) as store, pytest.raises(TrialFolioError) as raised:
+        open_experiment(store, ranking=True)
+
+    assert raised.value.code == "input.not_a_run"
+    assert "aren't the snapshot its plan's ranking_source names" in raised.value.message
 
 
 def test_a_plan_records_the_system_by_the_name_its_snapshot_gives(
