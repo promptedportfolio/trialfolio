@@ -371,15 +371,11 @@ def test_the_repeats_prompt_counts_both_of_a_cases_requests(
     assert cli.server.requests()[before:] == ["POST /auth", "POST /rank", "POST /screen/backtest"]
 
 
-def test_a_remaining_budget_of_one_request_covers_no_case(
-    cli: Cli, experiments: ExperimentBuilder[Outcome], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A case's attempt starts only when both its requests fit, so a confirmed repeat with one
-    request left isn't started: the run needs no credentials, sends nothing, and the display names
-    the case the remaining budget can't cover (the budget across runs)."""
-    cli.ready()
-    out = cli.tmp / "experiment"
-    # The baseline's rank_update gets a 400: one request counted, failed and possibly charged.
+def refused_baseline(cli: Cli, experiments: ExperimentBuilder[Outcome], out: Path) -> str:
+    """Runs `ranking-example.yaml`, a budget of 8, as a new experiment, whose baseline's
+    `rank_update` gets a 400: that attempt counts one request, failed and possibly charged, and
+    the other three cases' attempts two each, so 7 are counted and 1 remains. Returns the
+    baseline's attempt's ID, which confirms its repeat."""
     first = experiments.run(
         EXAMPLE,
         out,
@@ -389,16 +385,54 @@ def test_a_remaining_budget_of_one_request_covers_no_case(
     assert first.exit_code == 6, first.stderr
     assert counts(first)["provider_requests"] == 7
     (baseline,) = [case for case in summary_cases(first) if case["case_key"] == "baseline"]
+    return cast("str", baseline["repeat_attempt_id"])
+
+
+def test_a_remaining_budget_of_one_request_covers_no_case(
+    cli: Cli, experiments: ExperimentBuilder[Outcome], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A case's attempt starts only when both its requests fit, so a confirmed repeat with one
+    request left isn't started: the run needs no credentials, sends nothing, and the display names
+    the case the remaining budget can't cover (the budget across runs)."""
+    cli.ready()
+    out = cli.tmp / "experiment"
+    attempt = refused_baseline(cli, experiments, out)
     received = cli.server.requests()
     monkeypatch.delenv("TRIALFOLIO_P123_API_ID")
     monkeypatch.delenv("TRIALFOLIO_P123_API_KEY")
 
-    outcome = experiments.run(EXAMPLE, out, "--repeat", f"baseline:{baseline['repeat_attempt_id']}")
+    outcome = experiments.run(EXAMPLE, out, "--repeat", f"baseline:{attempt}")
 
     assert outcome.exit_code == 6, outcome.stderr
     assert error_code(outcome) == "execution.partial"
     assert cli.server.requests() == received
     assert counts(outcome)["provider_requests"] == 7
+
+
+def test_without_a_terminal_a_resumes_overwrite_line_follows_its_budget(
+    cli: Cli, experiments: ExperimentBuilder[Outcome]
+) -> None:
+    """Without a terminal, a resume gives the plan hash, the plan it resumes, and the budget, with
+    what's counted so far across every run; then the line that the run overwrites
+    `ApiRankingSystem`, after the whole budget, and then how to see the full plan (plans with a
+    ranking definition, the display's wording)."""
+    cli.ready()
+    out = cli.tmp / "experiment"
+    refused_baseline(cli, experiments, out)
+
+    outcome = cli("run", EXAMPLE, "--out", out, "--json")
+
+    assert outcome.exit_code == 2, outcome.stderr
+    assert error_code(outcome) == "plan.approval_required"
+    lines = outcome.stderr.splitlines()
+    end = lines.index("Run the command in a terminal to see the full plan.")
+    assert lines[end - 2 : end] == [
+        (
+            "  Counted so far, across every run of the experiment: 7 provider requests and 1"
+            " authentication call, which leaves 1 provider request and 7 authentication calls."
+        ),
+        OVERWRITES,
+    ]
 
 
 # A snapshot as the baseline's ranking (R04-AC08)

@@ -440,8 +440,6 @@ def format_experiment_summary(run: ExperimentRun, *, full_plan_hint: bool) -> st
             else f"It's the experiment's current plan, plan {number}, which this run resumes."
         )
     lines += budget_lines(plan.budget)
-    if isinstance(plan, PlanV1_3):
-        lines.append(OVERWRITES)
     if run.experiment is not None:
         budget = plan.budget
         requests, calls = run.provider_requests, run.authentication_calls
@@ -452,6 +450,9 @@ def format_experiment_summary(run: ExperimentRun, *, full_plan_hint: bool) -> st
             f" {counted(max(0, budget.provider_requests - requests), 'provider request')} and"
             f" {counted(max(0, budget.authentication_calls - calls), 'authentication call')}."
         )
+    # After the whole budget, what's counted so far included, so it doesn't split the budget.
+    if isinstance(plan, PlanV1_3):
+        lines.append(OVERWRITES)
     if full_plan_hint:
         lines.append("Run the command in a terminal to see the full plan.")
     return "\n".join(lines) + "\n"
