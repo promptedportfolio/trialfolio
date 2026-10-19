@@ -106,6 +106,10 @@ COSTS = (
 )
 """An attempt's costs, from `rank-update.json`'s and `complete.json`'s `cost`."""
 
+INVENTED = "5 credits, as the invented response reports: nothing was charged"
+"""A synthetic attempt's backtest's cost, from `complete.json`'s `cost`, which the demo's client
+was given: the invented response's, never Portfolio123's (DSC-04)."""
+
 WRITTEN = (
     "{each} is written into the account's ApiRankingSystem, with its rank_update, just before its"
     " backtest, which ranks by that system's name."
@@ -149,11 +153,12 @@ def write_run(
     *,
     synthetic: bool = False,
     backtest: Reply | None = None,
+    invented: bytes | None = None,
 ) -> Path:
     """Writes the run of the screen configuration at `path` through the core: over the fake
     server, which answers its `rank_update` with `rank-update.json` and its backtest with
     `backtest`, `complete.json` by default; or, for a synthetic run, with the demo's client, and
-    no command."""
+    no command, which answers its backtest with `invented`, the demo's response by default."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     content = path.read_bytes()
     read = read_screen_configuration_v1_1(content, path.name, path)
@@ -182,7 +187,7 @@ def write_run(
         error = execution.run(
             content,
             (
-                (lambda: SyntheticScreenBacktestClient(response_bytes()))
+                (lambda: SyntheticScreenBacktestClient(invented or response_bytes()))
                 if synthetic
                 else (lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint))
             ),
@@ -234,10 +239,13 @@ def write_experiment(
     return out
 
 
-def write_synthetic_sessions(tmp_path: Path, names: Sequence[str]) -> Path:
+def write_synthetic_sessions(
+    tmp_path: Path, names: Sequence[str], invented: bytes | None = None
+) -> Path:
     """Writes an experiment through the core with the demo's client: a new one of the first of
     `names`, in `experiment-configs/`, then a revision into each of the others, in turn, one
-    session each."""
+    session each. The client answers each backtest with `invented`, the demo's response by
+    default."""
     out = tmp_path / "experiment"
     for number, name in enumerate(names, start=1):
         path = CONFIGS / name
@@ -257,7 +265,7 @@ def write_synthetic_sessions(tmp_path: Path, names: Sequence[str]) -> Path:
                 plan.plan_hash,
                 "not_required",
                 store,
-                SyntheticScreenBacktestClient(response_bytes()),
+                SyntheticScreenBacktestClient(invented or response_bytes()),
                 command=None,
                 clock=FixedClock(),
                 experiment=saved,
@@ -303,6 +311,20 @@ def limitations(document: Document) -> list[str]:
 
 def section(document: Document, section_id: str) -> Element:
     return document.root.by_id(section_id)
+
+
+def attempt_costs(document: Document) -> dict[str, set[str]]:
+    """The `Cost` cells of the attempts in a session's tables of attempts, by the plan each
+    attempt ran under."""
+    found: dict[str, set[str]] = {}
+    for table in document.root.find_all("table"):
+        heads, *rows = [[cell.text for cell in row] for row in document.rows(table)] or [[]]
+        if heads[:1] != ["Attempt"]:
+            continue
+        assert heads[-1] == "Cost"
+        for row in rows:
+            found.setdefault(row[heads.index("Plan")], set()).add(row[-1])
+    return found
 
 
 # A screen run's report
@@ -697,6 +719,24 @@ def test_a_synthetic_runs_report_says_its_values_are_invented_and_nothing_was_wr
     assert document.dd("Cost")[-1] == "rank_update: Not reported. screen_backtest: Not reported."
 
 
+def test_a_synthetic_runs_costs_are_its_invented_responses_never_portfolio123s(
+    tmp_path: Path, server: FakePortfolio123
+) -> None:
+    """The demo's client answers the backtest with `complete.json`, whose `cost` is 5, and its
+    `rank_update` with an empty object, which gives none."""
+    out = write_run(
+        tmp_path, server, synthetic=True, invented=(RESPONSES / "complete.json").read_bytes()
+    )
+
+    document = report(out)
+
+    assert document.dd("Cost") == [
+        "5 credits, as the invented responses report: nothing was charged",
+        f"rank_update: Not reported. screen_backtest: {INVENTED}.",
+    ]
+    assert "Portfolio123 reported" not in document.root.text
+
+
 def test_a_synthetic_experiments_report_says_nothing_was_written(tmp_path: Path) -> None:
     out = write_synthetic_sessions(tmp_path, ["ranking-example.yaml"])
 
@@ -705,3 +745,27 @@ def test_a_synthetic_experiments_report_says_nothing_was_written(tmp_path: Path)
     assert SYNTHETIC.format(kind="experiment") in limitations(document)
     assert cells(document, "The ranking's weights")[1:] == EXAMPLE_WEIGHTS
     assert "Every value, attempt, and count in it is invented" in document.root.text
+
+
+def test_a_synthetic_experiments_costs_are_its_invented_responses_never_portfolio123s(
+    tmp_path: Path,
+) -> None:
+    """A formula's plan, revised into a definition's, each case's backtest answered with
+    `complete.json`, whose `cost` is 5, and each `rank_update` with an empty object, which gives
+    none: ten attempts, five under each plan."""
+    out = write_synthetic_sessions(
+        tmp_path,
+        ["example.yaml", "revisions/ranking-from-formula.yaml"],
+        (RESPONSES / "complete.json").read_bytes(),
+    )
+
+    document = report(out, 2)
+
+    assert attempt_costs(document) == {
+        "1": {INVENTED},
+        "2": {f"rank_update: Not reported. screen_backtest: {INVENTED}."},
+    }
+    assert document.dd("Cost") == [
+        "50 credits, as the invented responses report: nothing was charged"
+    ]
+    assert "Portfolio123 reported" not in document.root.text

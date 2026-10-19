@@ -25,6 +25,7 @@ from trialfolio.report.fragments import (
     budget_limit,
     data_facts,
     inferred_defaults,
+    invented_cost,
     metric_definitions,
     metric_label,
     parsers_line,
@@ -489,8 +490,15 @@ def _case_facts(run: RunContext) -> list[tuple[str, str]]:
             ),
         ),
         ("Retries", str(counts.retries)),
-        ("Cost", reported_cost(counts.cost)),
+        ("Cost", _cost(run)),
     ]
+
+
+def _cost(run: RunContext) -> str:
+    cost = run.saved.manifest.counts.cost
+    if run.synthetic:
+        return invented_cost(cost, "the invented responses report")
+    return reported_cost(cost)
 
 
 def _versions(run: RunContext) -> list[tuple[str, str]]:
@@ -538,7 +546,7 @@ def _attempt(run: RunContext, attempt: SavedAttempt) -> list[str]:
         entries.append(("Started", moment(first.started_at)))
     if record is not None:
         entries.append(("Ended", moment(record.ended_at)))
-        entries.append(("Cost", costs(record)))
+        entries.append(("Cost", costs(record, synthetic=run.synthetic)))
     rows = [
         f"<tr><td>{index}</td><td>{code(exchange.request)}</td>"
         f"<td>{EXCHANGE_RESULTS[exchange.result]}</td>"

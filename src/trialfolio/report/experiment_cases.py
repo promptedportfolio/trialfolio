@@ -17,6 +17,7 @@ from trialfolio.report.evidence import CaseView, ExperimentContext, RetiredCaseV
 from trialfolio.report.fragments import (
     attempt_counts,
     budget_limit,
+    invented_cost,
     plan_versions,
     rendered_by,
     reported_cost,
@@ -121,8 +122,8 @@ def _session_facts(experiment: ExperimentContext) -> list[tuple[str, str]]:
 
 def _cost(experiment: ExperimentContext) -> str:
     cost = experiment.evidence.counts.cost
-    if cost is not None and experiment.synthetic:
-        return f"{cost} credits, as the invented responses report: nothing was charged"
+    if experiment.synthetic:
+        return invented_cost(cost, "the invented responses report")
     return reported_cost(cost)
 
 
@@ -328,7 +329,7 @@ def _attempt_row(
         f"<td>{moment(attempt.started_at)}</td><td>{code(attempt.outcome)}</td>"
         f"<td>{'Yes' if attempt.possibly_charged else 'No'}</td><td>{error}</td>"
         f'<td class="long">{repeats}</td><td>{exchanges}</td>'
-        + (f"<td>{costs(attempt)}</td>" if ranked else "")
+        + (f"<td>{costs(attempt, synthetic=experiment.synthetic)}</td>" if ranked else "")
         + "</tr>"
     )
 

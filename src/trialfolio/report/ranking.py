@@ -25,7 +25,7 @@ from trialfolio.contracts.plan import RankingSource
 from trialfolio.contracts.ranking_snapshot import RankingSnapshotRecord
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS_BY_NAME, DefinitionRankingSetting
 from trialfolio.report.evidence import CaseView
-from trialfolio.report.fragments import Setting, reported_cost, resolved_settings
+from trialfolio.report.fragments import Setting, invented_cost, reported_cost, resolved_settings
 from trialfolio.report.page import code, facts, moment, table
 from trialfolio.report.vocabulary import RANKING_METHODS
 
@@ -198,18 +198,31 @@ def experiment_sources(rankings: Sequence[tuple[int, str]]) -> list[str]:
 # 5. Cases and attempts
 
 
-def costs(record: AttemptRecord | AttemptRecordV1_1 | AttemptRecordV1_2 | AttemptRecordV1_3) -> str:
-    """The credits Portfolio123 reported charging for an attempt's requests: its `rank_update`'s
-    beside its backtest's, for an attempt that sends a definition."""
-    backtest = reported_cost(record.provider_metadata.cost)
+def costs(
+    record: AttemptRecord | AttemptRecordV1_1 | AttemptRecordV1_2 | AttemptRecordV1_3,
+    *,
+    synthetic: bool,
+) -> str:
+    """The credits Portfolio123 reported charging for an attempt's requests, or, for a
+    `synthetic` attempt, those its invented responses gave: its `rank_update`'s beside its
+    backtest's, for an attempt that sends a definition."""
+    backtest = _cost(record.provider_metadata.cost, synthetic=synthetic)
     update = (
         record.ranking_update if isinstance(record, AttemptRecordV1_2 | AttemptRecordV1_3) else None
     )
     if update is None:
         return backtest
     return (
-        f"<code>rank_update</code>: {reported_cost(update.provider_metadata.cost)}."
+        f"<code>rank_update</code>: {_cost(update.provider_metadata.cost, synthetic=synthetic)}."
         f" <code>screen_backtest</code>: {backtest}."
+    )
+
+
+def _cost(cost: int | None, *, synthetic: bool) -> str:
+    """One request's cost: as Portfolio123 reported it, or, being synthetic, as its invented
+    response gave it, which a synthetic report never calls Portfolio123's (DSC-04)."""
+    return (
+        invented_cost(cost, "the invented response reports") if synthetic else reported_cost(cost)
     )
 
 
