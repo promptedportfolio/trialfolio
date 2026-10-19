@@ -286,8 +286,10 @@ def ranking_lines(source: RankingSource, snapshot: RankingSnapshotRecord | None)
         ),
         (
             "  The ranking lock keeps other Trial Folio processes on this machine from writing"
-            " ApiRankingSystem meanwhile. Nothing keeps Portfolio123's website, or another"
-            " machine, from writing or using it at the same time."
+            " ApiRankingSystem meanwhile, but only those that lock the same file: not one that"
+            " sees another /tmp, such as in a container, or one with another TRIALFOLIO_LOCK_DIR."
+            " Nothing keeps Portfolio123's website, or another machine, from writing or using it"
+            " at the same time."
         ),
         f"The ranking definition's source: {where}",
     ]

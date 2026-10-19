@@ -156,7 +156,13 @@ def test_under_a_terminal_the_plan_shows_the_definition_and_nothing_is_sent_firs
     positions = [shown.index(line) for line in in_order]
     assert positions == sorted(positions)
     assert positions[-1] < prompt
-    assert "The ranking lock keeps other Trial Folio processes on this machine" in shown
+    # The lock keeps out only the processes that lock its file (the ranking lock, what it doesn't
+    # exclude).
+    assert (
+        "The ranking lock keeps other Trial Folio processes on this machine from writing"
+        " ApiRankingSystem meanwhile, but only those that lock the same file: not one that sees"
+        " another /tmp, such as in a container, or one with another TRIALFOLIO_LOCK_DIR."
+    ) in shown
     # nodes is shown as the definition's lines, not as one JSON string among the params.
     assert '"nodes"' not in shown
     assert exit_code == 0, terminal.shown()

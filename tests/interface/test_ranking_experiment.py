@@ -127,7 +127,10 @@ def test_under_a_terminal_the_plan_shows_each_cases_definition_and_nothing_is_se
         f"Experiment plan {expected_hash}",
         OVERWRITES,
         (
-            "Nothing keeps Portfolio123's website, or another machine, from writing or using it"
+            "The ranking lock keeps other Trial Folio processes on this machine from writing"
+            " ApiRankingSystem meanwhile, but only those that lock the same file: not one that"
+            " sees another /tmp, such as in a container, or one with another TRIALFOLIO_LOCK_DIR."
+            " Nothing keeps Portfolio123's website, or another machine, from writing or using it"
             " at the same time."
         ),
         f"The ranking definition's source: a file, by the definition's hash, {DEFINITION_HASH}.",

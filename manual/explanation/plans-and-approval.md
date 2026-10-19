@@ -43,7 +43,7 @@ When you run the same command again, to go on with an experiment, the plan also 
 
 From release 0.4.0, a screen or an experiment whose ranking is a ranking system's definition, in a file or a ranking snapshot, sends each case's definition to Portfolio123 before its backtest, so its plan shows more ([plans with a ranking definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#plans-with-a-ranking-definition)):
 
-- that the run overwrites `ApiRankingSystem`, a ranking system in your Portfolio123 account, with each case's definition, just before its backtest, which ranks by that system's name; that a lock keeps other Trial Folio processes on your machine from writing it meanwhile; and that nothing keeps Portfolio123's website, or another machine, from writing or using it at the same time;
+- that the run overwrites `ApiRankingSystem`, a ranking system in your Portfolio123 account, with each case's definition, just before its backtest, which ranks by that system's name; that a lock keeps other Trial Folio processes on your machine from writing it meanwhile, but only those that lock the same file, not one that sees another `/tmp`, such as in a container, or one with another `TRIALFOLIO_LOCK_DIR`; and that nothing keeps Portfolio123's website, or another machine, from writing or using it at the same time;
 - where the definition came from: a file, by the definition's hash, or a snapshot, by its system's name and when it was read;
 - each node's weight, among the baseline's settings, and each variant's change;
 - each case's `rank_update`, the request that writes its definition, with the whole definition, line by line, and its hash, before its backtest;
