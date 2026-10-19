@@ -800,6 +800,44 @@ def test_a_snapshot_with_a_ranking_method_says_why() -> None:
     assert "a snapshot records its system's ranking method" in message
 
 
+@pytest.mark.parametrize(
+    ("ranking", "kind"),
+    [
+        (
+            (
+                "ranking:\n  definition: '../experiment-configs/ranking/value-momentum.xml'\n"
+                "  ranking_method: percentile_nas_negative\n"
+            ),
+            "definition",
+        ),
+        ("ranking:\n  snapshot: 'snapshots/value-momentum'\n", "snapshot"),
+    ],
+    ids=["definition", "snapshot"],
+)
+def test_without_files_the_reader_reads_no_file_a_ranking_names(ranking: str, kind: str) -> None:
+    """The core reads the configuration of a plan without a ranking definition with `files`
+    false, so a ranking that names a file or a directory, given without its bytes, is a
+    `ValueError`, and nothing is read from where it leads, even where the file exists (R04-T12, a
+    configuration 1.1.0 ranked another way)."""
+    content = version_1_1(ranking)
+    if kind == "definition":
+        assert read_v1_1(content) is not None  # the file exists, and reads with files
+
+    with pytest.raises(ValueError, match="names a file"):
+        read_screen_configuration_v1_1(
+            content, "screen.yaml", FIXTURES / "screen.yaml", files=False
+        )
+
+
+def test_without_files_the_reader_reads_a_ranking_given_another_way() -> None:
+    content = version_1_1("ranking:\n  formula: 'EarnYield'\n  lower_is_better: false\n")
+
+    read = read_screen_configuration_v1_1(content, "screen.yaml", "screen.yaml", files=False)
+
+    assert (read.definition, read.snapshot) == (None, None)
+    assert read.configuration.schema_version == "1.1.0"
+
+
 def test_a_definition_s_path_and_method_may_be_written_without_quotes() -> None:
     """Neither is text Portfolio123 receives: the path names a file, and the method is a fixed
     word. The file's text is sent, read from the file."""

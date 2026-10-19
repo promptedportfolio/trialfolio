@@ -157,6 +157,8 @@ def test_under_a_terminal_the_plan_shows_the_definition_and_nothing_is_sent_firs
     assert positions == sorted(positions)
     assert positions[-1] < prompt
     assert "The ranking lock keeps other Trial Folio processes on this machine" in shown
+    # nodes is shown as the definition's lines, not as one JSON string among the params.
+    assert '"nodes"' not in shown
     assert exit_code == 0, terminal.shown()
     assert cli.server.requests() == ["POST /auth", "POST /rank", "POST /screen/backtest"]
     # The copy, and the definition sent, are the bytes the plan was built from.

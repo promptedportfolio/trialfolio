@@ -1353,6 +1353,23 @@ def test_a_1_1_0_variant_of_another_setting_names_the_ranking_among_those_it_can
     ) in ranking_rejection(content)
 
 
+def test_without_files_the_reader_reads_no_file_the_baselines_ranking_names() -> None:
+    """The core reads the configuration of a plan without a ranking definition with `files`
+    false: a baseline's definition named, without its bytes, is a `ValueError`, though the file
+    exists, while a baseline ranked another way reads (R04-T12)."""
+    assert read_v1_1(ranking_example()) is not None
+
+    with pytest.raises(ValueError, match="names a file"):
+        read_experiment_configuration_v1_1(
+            ranking_example().encode(), "experiment.yaml", FIXTURES / "experiment.yaml", files=False
+        )
+    formula = with_line("schema_version: 1.0.0", "schema_version: 1.1.0")
+    read = read_experiment_configuration_v1_1(
+        formula.encode(), "experiment.yaml", "experiment.yaml", files=False
+    )
+    assert (read.definition, read.configuration.schema_version) == (None, "1.1.0")
+
+
 def test_the_readers_name_the_versions_they_read() -> None:
     """0.3.0's reader reads 1.0.0 only, so a 1.1.0 file is a version it doesn't read; the reader
     of both versions, which `trialfolio run` reads with since R04-T12, names both."""

@@ -161,8 +161,9 @@ def test_under_a_terminal_the_plan_shows_each_cases_definition_and_nothing_is_se
     ) in shown
     for case in plan.cases:
         assert f"the definition {case.settings[3].model_dump()['value']['definition']}" in shown
-    # The definition, line by line, with its tabs.
+    # The definition, line by line, with its tabs, not as one JSON string among the params.
     assert '      \t<Composite Name="Value" Weight="60" RankType="Summation">' in shown
+    assert '"nodes"' not in shown
     assert pairs(cli.server.requests())
 
 
@@ -187,6 +188,22 @@ def test_without_approval_the_plan_hash_and_the_cases_are_given_and_nothing_is_w
     assert OVERWRITES in lines
     for text in ("<RankingSystem", "Composite", "Earnings Yield", "value-heavy", DEFINITION_HASH):
         assert text not in outcome.stderr
+
+
+def test_before_its_plan_the_summary_counts_the_ranking_variants_cases(cli: Cli) -> None:
+    """A failure after the configuration is read and before the plan is built, such as an output
+    path whose parent is a file, gives a new experiment's counts, each case not yet run, its
+    ranking variants' cases included (JSON summary, an experiment's counts)."""
+    cli.ready()
+    parent = cli.tmp / "a-file"
+    parent.write_bytes(b"not a directory\n")
+
+    outcome = cli("run", EXAMPLE, "--out", parent / "experiment", "--json")
+
+    assert outcome.exit_code == 4, outcome.stderr
+    assert "cases" not in outcome.summary
+    assert (counts(outcome)["cases_planned"], counts(outcome)["cases_not_yet_run"]) == (4, 4)
+    assert cli.server.requests() == []
 
 
 # The run, the resume, and a revision
@@ -279,6 +296,14 @@ def test_a_revised_definition_sends_only_the_cases_it_adds(
     assert counts(revised)["provider_requests"] == 12
     plan = read_plan(out, 2)
     assert plan.revises == read_plan(out).plan_hash
+    # The same command again, with the reason the revision recorded in its experiment.json
+    # 1.1.0, resumes the revised plan, and sends nothing (approving a revision).
+    received = cli.server.requests()
+    again = experiments.run(
+        DEFINITION_CHANGED, out, "--revision-reason", "The Value factors weigh 60 and 40."
+    )
+    assert again.exit_code == 0, again.stderr
+    assert cli.server.requests() == received
 
 
 # The repeat, with two requests a case
