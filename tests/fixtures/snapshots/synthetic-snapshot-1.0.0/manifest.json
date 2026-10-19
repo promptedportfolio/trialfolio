@@ -1,0 +1,126 @@
+{
+  "schema_version": "1.0.0",
+  "artifact_type": "ranking-snapshot",
+  "trialfolio_version": "0.4.0",
+  "created_at": "2026-10-03T14:00:03Z",
+  "command": null,
+  "synthetic": true,
+  "plan_hash": "sha256:b161526e724f173f277a4edd2da017af5806f9acd9da6333b3d61b7ba57a6fbe",
+  "approval": "not_required",
+  "outcome": "completed",
+  "error": null,
+  "artifacts": [
+    {
+      "path": "plan.json",
+      "artifact_id": "sha256:2b3329bdfad0a45deedd097dd05270e920441e34464f886c3e5dac433068ed26",
+      "size": 1210,
+      "role": "plan",
+      "schema_version": "1.0.0",
+      "source": null
+    },
+    {
+      "path": "configuration.yaml",
+      "artifact_id": "sha256:25ec70ccf9b8aadd9d6a2c1c667677e2497de4fa2c96b4734bac8e87d255cbcc",
+      "size": 74,
+      "role": "configuration",
+      "schema_version": "1.0.0",
+      "source": {
+        "acquired_at": "2026-10-03T14:00:00Z",
+        "format": "ranking-snapshot-configuration",
+        "format_version": "1.0.0",
+        "parser_version": null,
+        "provenance": "user_supplied",
+        "operation": null
+      }
+    },
+    {
+      "path": "attempts/d7830ff4-6253-40b0-95af-6c909275c0a1/request.json",
+      "artifact_id": "sha256:4bebc40dbebc1426ce26f73e4673e47e1a3682786baee343cf753ec8de9b888c",
+      "size": 35,
+      "role": "provider_request",
+      "schema_version": null,
+      "source": {
+        "acquired_at": "2026-10-03T14:00:01Z",
+        "format": "p123api-rank-get-request",
+        "format_version": "1",
+        "parser_version": null,
+        "provenance": "verified",
+        "operation": "rank_get"
+      }
+    },
+    {
+      "path": "attempts/d7830ff4-6253-40b0-95af-6c909275c0a1/started.json",
+      "artifact_id": "sha256:4659a8f20e7399bc489aebfabf751d287cbfb75734f3fa1fda08c1932491a93b",
+      "size": 553,
+      "role": "start_record",
+      "schema_version": "1.2.0",
+      "source": null
+    },
+    {
+      "path": "attempts/d7830ff4-6253-40b0-95af-6c909275c0a1/response.json",
+      "artifact_id": "sha256:329114ea692c40ea32e0cac32ee9cace7b695b9f503cc26aade94f9f4d07eaa2",
+      "size": 1498,
+      "role": "provider_response",
+      "schema_version": null,
+      "source": {
+        "acquired_at": "2026-10-03T14:00:02Z",
+        "format": "p123api-rank-get",
+        "format_version": "1",
+        "parser_version": 1,
+        "provenance": "verified",
+        "operation": "rank_get"
+      }
+    },
+    {
+      "path": "attempts/d7830ff4-6253-40b0-95af-6c909275c0a1/attempt.json",
+      "artifact_id": "sha256:fa708991f0e5b9d0520b6c54997aae9c6fd978aedc05352e34eabf2561d363a0",
+      "size": 1271,
+      "role": "attempt_record",
+      "schema_version": "1.2.0",
+      "source": null
+    },
+    {
+      "path": "definition.xml",
+      "artifact_id": "sha256:6bc59b992f83d5e4c245f37f187651ed18de6b9cb5949ac9f29b743273b26895",
+      "size": 1141,
+      "role": "ranking_definition",
+      "schema_version": null,
+      "source": {
+        "acquired_at": "2026-10-03T14:00:02Z",
+        "format": "ranking-definition",
+        "format_version": "1",
+        "parser_version": null,
+        "provenance": "verified",
+        "operation": "rank_get"
+      }
+    },
+    {
+      "path": "snapshot.json",
+      "artifact_id": "sha256:77f1edc42e3163139d218400e9ff7fa47c401ef789d8d741166702cf3808bb94",
+      "size": 605,
+      "role": "ranking_snapshot_record",
+      "schema_version": "1.0.0",
+      "source": null
+    }
+  ],
+  "parsers": [
+    {
+      "layout": "p123api-rank-get",
+      "layout_version": 1,
+      "parser_version": 1
+    }
+  ],
+  "license_id": "LicenseRef-NSPRL-1.1",
+  "notice_version": "1.0",
+  "counts": {
+    "attempts": {
+      "succeeded": 1,
+      "failed": 0,
+      "unknown": 0,
+      "running": 0
+    },
+    "provider_requests": 1,
+    "retries": 0,
+    "cost": 1
+  }
+}

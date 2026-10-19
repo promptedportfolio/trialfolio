@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.3.0",
+  "trialfolio_version": "0.4.0",
+  "attempt_id": "128f6471-3e35-4cab-adf3-aa662c7a57b6",
+  "case_id": "case-06eff3493ef2e50c",
+  "plan_hash": "sha256:2a5d3b41c8ca9133f9b36e8268136e1bd85f3754f40bfbfa1644bb986ba1fa80",
+  "session": 2,
+  "sequence": 1,
+  "operation": "rank_update",
+  "authenticated_by": "128f6471-3e35-4cab-adf3-aa662c7a57b6",
+  "repeat_of": null,
+  "started_at": "2026-10-03T14:00:09Z",
+  "provider_wrapper": {
+    "p123api": "3.1.0"
+  },
+  "transport": {
+    "requests": "2.34.2",
+    "urllib3": "2.8.0"
+  },
+  "exchanges": [
+    {
+      "request": "POST /auth",
+      "result": "response",
+      "status": 200,
+      "note": null
+    }
+  ]
+}

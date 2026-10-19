@@ -115,17 +115,23 @@ WRITTEN = (
     " backtest, which ranks by that system's name."
 )
 LOCK = (
-    "The ranking lock kept only other Trial Folio processes on the machine from writing"
-    " ApiRankingSystem between a definition's write and its backtest: Portfolio123's website, or"
-    " another machine, could have changed it between the two, and no record would show it."
+    "The ranking lock kept other Trial Folio processes on the machine from writing"
+    " ApiRankingSystem between a definition's write and its backtest, but only those that lock the"
+    " same file: not one that sees another /tmp, such as in a container, or one with another"
+    " TRIALFOLIO_LOCK_DIR. Portfolio123's website, or another machine, could have changed it"
+    " between the two, and no record would show it."
 )
 SYNTHETIC = (
     "This {kind} is synthetic, and sent nothing, so nothing was written into the account's"
     " ApiRankingSystem. A definition that's sent is written into it just before its backtest,"
-    " which ranks by that system's name, and the ranking lock keeps only other Trial Folio"
-    " processes on the machine from writing it between the two."
+    " which ranks by that system's name, and the ranking lock keeps other Trial Folio processes on"
+    " the machine from writing it between the two, but only those that lock the same file: not"
+    " one that sees another /tmp, such as in a container, or one with another"
+    " TRIALFOLIO_LOCK_DIR."
 )
-"""The limitations of a ranking given as a definition, as R04-T11 words them."""
+"""The limitations of a ranking given as a definition, as R04-T11 words them, with what the
+ranking lock doesn't exclude as R04-T13 words it, after the review of R04-T12's pull request found
+that the report named only Portfolio123's website and another machine."""
 
 
 def digest(path: Path) -> str:

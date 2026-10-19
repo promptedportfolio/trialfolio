@@ -1,0 +1,14 @@
+kind: review
+schema_version: 1.0.0
+title: Synthetic value-heavy weights
+purpose: Show a review of weight rows, between two synthetic runs ranked by definitions.
+baseline: synthetic
+results:
+  - label: synthetic
+    run: runs/synthetic
+  - label: synthetic-heavy
+    run: runs/synthetic-heavy
+    description: The synthetic run's definition, with weight moved to value.
+    intended_changes:
+      - setting: ranking
+        reason: More weight on value, taken equally from momentum and quality.

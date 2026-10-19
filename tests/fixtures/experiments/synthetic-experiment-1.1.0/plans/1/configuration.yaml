@@ -1,0 +1,36 @@
+# The synthetic experiment with a ranking definition, its first configuration: the demo's packaged
+# screen, ranked by ranking/synthetic.xml, with one weight variant. The synthetic experiment's
+# writer, in tests/support/, executes it with the demo's client, which sends nothing, and then
+# ranking-synthetic-revised.yaml as its revision.
+kind: experiment
+schema_version: 1.1.0
+experiment_id: synthetic-value-momentum
+title: 'Synthetic experiment: value, momentum, and quality weights'
+purpose: Shows an experiment's files and report offline, with ranking-weight variants, from invented values.
+prior_research:
+  status: complete
+  description: None. This experiment is invented for Trial Folio's tests, and no earlier work informed it.
+baseline:
+  universe: 'SP500'
+  rules:
+    - 'AvgDailyTot(30) > 1000000'
+  ranking:
+    definition: 'ranking/synthetic.xml'
+    ranking_method: percentile_nas_negative
+  max_holdings: 25
+  benchmark: 'SPY'
+  start_date: 2016-01-01
+  end_date: 2025-12-31
+  rebalance_weeks: 4
+  transaction_price: open
+  slippage_percent: 0.25
+  pit_method: complete
+  precision: 4
+variants:
+  ranking:
+    - key: value-heavy
+      description: More weight on value, taken equally from momentum and quality.
+      set: {'Value': 60, 'Momentum': 20, 'Quality': 20}
+  rebalance_weeks: []
+budget:
+  provider_requests: 4

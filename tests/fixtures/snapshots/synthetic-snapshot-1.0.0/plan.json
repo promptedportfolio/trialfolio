@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0.0",
+  "trialfolio_version": "0.4.0",
+  "canonicalization_version": 1,
+  "provider_wrapper": {
+    "p123api": "3.1.0"
+  },
+  "transport": {
+    "requests": "2.34.2",
+    "urllib3": "2.8.0"
+  },
+  "system": "Value and momentum",
+  "requests": [
+    {
+      "operation": "rank_get",
+      "params": {
+        "name": "Value and momentum"
+      }
+    }
+  ],
+  "budget": {
+    "provider_requests": 1,
+    "credits_per_request": 1,
+    "credits_per_request_source": {
+      "title": "API functions: Rank",
+      "url": "https://portfolio123.customerly.help/en/articles/43323-api-rank",
+      "checked": "2026-10-12"
+    },
+    "credits": 1,
+    "authentication_calls": 1
+  },
+  "retry_policy": {
+    "automatic_retries": 0,
+    "wrapper_attempts_per_call": 1,
+    "exchanges_per_call": 1
+  },
+  "data_sent": [
+    {
+      "category": "credentials",
+      "recipient": "Portfolio123",
+      "via": "p123api",
+      "settings": []
+    },
+    {
+      "category": "strategy_definition",
+      "recipient": "Portfolio123",
+      "via": "p123api",
+      "settings": [
+        "system"
+      ]
+    }
+  ],
+  "plan_hash": "sha256:b161526e724f173f277a4edd2da017af5806f9acd9da6333b3d61b7ba57a6fbe"
+}

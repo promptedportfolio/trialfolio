@@ -1,0 +1,39 @@
+kind: experiment
+schema_version: 1.1.0
+experiment_id: canary-experiment-1f2e3d4c
+title: canary-experiment-title-2c9f4e81
+purpose: canary-experiment-purpose-7b3d0a56
+prior_research:
+  status: partial
+  description: canary-prior-research-e4a19c37
+baseline:
+  universe: 'canary-experiment-universe-9d4c2b17'
+  rules:
+    - 'canary-experiment-rule-6e0f3a98'
+  ranking:
+    definition: 'ranking/canaries.xml'
+    ranking_method: percentile_nas_negative
+  max_holdings: 25
+  benchmark: 'canary-experiment-benchmark-4a7b9d20'
+  start_date: 2016-01-01
+  end_date: 2025-12-31
+  rebalance_weeks: 4
+  transaction_price: open
+  slippage_percent: 0.25
+  pit_method: complete
+  precision: 4
+variants:
+  ranking:
+    - key: canary-key-5a66f676
+      description: canary-variant-description-one-58c2f0b4
+      set: {'canary-node-one-86f2100d': 61.7283, 'canary-node-four-5f2f6c75': 19.1358, 'canary-node-seven-d426dda9': 19.1359}
+    - key: canary-key-0d3b7e19
+      description: canary-variant-description-two-a1e7d963
+      set: {'canary-node-one-86f2100d/canary-node-two-d7ace873': 71.4286, 'canary-node-one-86f2100d/canary-node-three-83b2c3ff': 28.5714}
+    - key: canary-key-c84f2a65
+      description: canary-variant-description-three-3f6b8e02
+      remove: 'canary-node-one-86f2100d/canary-node-three-83b2c3ff'
+      set: {'canary-node-one-86f2100d/canary-node-two-d7ace873': 100}
+  rebalance_weeks: []
+budget:
+  provider_requests: 8

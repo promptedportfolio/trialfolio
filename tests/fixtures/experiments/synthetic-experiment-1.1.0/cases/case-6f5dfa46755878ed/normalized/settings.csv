@@ -1,0 +1,34 @@
+label,setting,category,critical,value,unit,interpretation,provenance,inference_rule,original_key,original_value,source_artifact,flags,node
+case-6f5dfa46755878ed,universe,universe,true,SP500,,interpreted,verified,,baseline.universe,'SP500',sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,not_snapshotted,
+case-6f5dfa46755878ed,screen_type,universe,true,stock,,interpreted,verified,,,,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,rules,strategy,true,"[""AvgDailyTot(30) > 1000000""]",,interpreted,verified,,baseline.rules,- 'AvgDailyTot(30) > 1000000',sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,ranking,strategy,true,"{""definition"": ""sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc"", ""ranking_method"": ""percentile_nas_negative""}",,interpreted,verified,,baseline.ranking,"definition: 'ranking/synthetic.xml'
+    ranking_method: percentile_nas_negative",sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,ranking_weight,strategy,true,40,,interpreted,verified,,baseline.ranking.definition,40,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Value
+case-6f5dfa46755878ed,ranking_weight,strategy,true,50,,interpreted,verified,,baseline.ranking.definition,50,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Value/Earnings Yield
+case-6f5dfa46755878ed,ranking_weight,strategy,true,50,,interpreted,verified,,baseline.ranking.definition,50,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Value/Sales Yield
+case-6f5dfa46755878ed,ranking_weight,strategy,true,30,,interpreted,verified,,baseline.ranking.definition,30,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Momentum
+case-6f5dfa46755878ed,ranking_weight,strategy,true,50,,interpreted,verified,,baseline.ranking.definition,50,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Momentum/Six-Month Return
+case-6f5dfa46755878ed,ranking_weight,strategy,true,50,,interpreted,verified,,baseline.ranking.definition,50,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Momentum/Year Return
+case-6f5dfa46755878ed,ranking_weight,strategy,true,30,,interpreted,verified,,baseline.ranking.definition,30,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Quality
+case-6f5dfa46755878ed,ranking_weight,strategy,true,50,,interpreted,verified,,baseline.ranking.definition,50,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Quality/Return on Equity
+case-6f5dfa46755878ed,ranking_weight,strategy,true,50,,interpreted,verified,,baseline.ranking.definition,50,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Quality/Gross Margin
+case-6f5dfa46755878ed,max_holdings,strategy,true,25,count,interpreted,verified,,baseline.max_holdings,25,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,position_method,strategy,true,long,,interpreted,verified,,,,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,benchmark,benchmark,true,SPY,,interpreted,verified,,baseline.benchmark,'SPY',sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,currency,currency,true,USD,,interpreted,verified,,,,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,start_date,dates,true,2016-01-01,,interpreted,verified,,baseline.start_date,2016-01-01,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,end_date,dates,true,2025-12-31,,interpreted,verified,,baseline.end_date,2025-12-31,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,rebalance_weeks,execution,true,4,weeks,interpreted,verified,,baseline.rebalance_weeks,4,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,transaction_price,execution,true,open,,interpreted,verified,,baseline.transaction_price,open,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,slippage_percent,costs,true,0.25,percent,interpreted,verified,,baseline.slippage_percent,0.25,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,commission,costs,true,not_modeled,,interpreted,inferred,"Portfolio123's API: Screen page documents no commission parameter, and slippage is its only trading-cost input (checked 2026-10-01).",,,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,pit_method,data_source,true,complete,,interpreted,verified,,baseline.pit_method,complete,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,data_vendor,data_source,true,FactSet,,interpreted,inferred,"D-16: FactSet is the only supported data vendor. The endpoint documents no vendor parameter, so none is sent, and the response doesn't report the vendor.",,,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,inferred_default,
+case-6f5dfa46755878ed,precision,other,false,4,,interpreted,verified,,baseline.precision,4,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,risk_stats_period,other,false,monthly,,interpreted,inferred,"Portfolio123's documented default: the API: Screen page lists riskStatsPeriod's values as ['Monthly'] | 'Weekly' | 'Daily' (checked 2026-10-01), and the wrapper's documentation says an optional parameter defaults to the first value.",,,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,inferred_default,
+case-6f5dfa46755878ed,max_pos_pct,strategy,true,not_sent,,not_interpreted,unknown,,,,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,rank_tolerance,strategy,true,not_sent,,not_interpreted,unknown,,,,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,carry_cost,costs,true,not_sent,,not_interpreted,unknown,,,,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,long_weight,strategy,true,not_sent,,not_interpreted,unknown,,,,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
+case-6f5dfa46755878ed,short_weight,strategy,true,not_sent,,not_interpreted,unknown,,,,sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4,,
