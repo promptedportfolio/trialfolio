@@ -639,6 +639,12 @@ def test_each_plans_source_is_given_whether_its_ranking_is_a_definition_or_not(
     assert "The ranking's weights" not in [h.text for h in third.root.find_all("h3")]
     assert SYNTHETIC.format(kind="experiment") in limitations(third)
     assert cells(third, "Attempts")[0][-1] == "Cost"
+    # An attempt under a formula's plan, 1 or 3, sent no definition, so its cost is the
+    # backtest's alone; one under plan 2 gives its rank_update's beside it.
+    assert attempt_costs(third) == {
+        "1": {"Not reported"},
+        "2": {"rank_update: Not reported. screen_backtest: Not reported."},
+    }
     # Before the revision, no plan had a definition, so the first session's report has none of
     # it, as 0.3.0 wrote it.
     first = report(out, 1)
