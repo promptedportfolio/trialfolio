@@ -668,9 +668,12 @@ class _SessionAttempt[
     session's attempts share one client: an attempt sends with the token an earlier attempt
     obtained, or authenticates first, writing its authentication record, `authenticating.json`,
     durably before the call, so the budget counts the call even if the process is killed during
-    it. It then writes its files in a run's order: `request.json`, `started.json`, the response,
-    and `attempt.json`, whatever ended it. Its records name its session, its place in the
-    session, `sequence`, the attempt whose authentication gave its token, `authenticated_by`,
+    it. It then writes its files in its kind's order, and `attempt.json` whatever ended it. An
+    `ExperimentAttempt`'s are a run's: `request.json`, `started.json`, and the response. A
+    `RankingExperimentAttempt` writes its `rank_update`'s first, `rank-update-request.json`,
+    `updating.json`, and the response, then, only after a 200 the wrapper decoded, the
+    backtest's, as a run's (sending a definition). Its records name its session, its place in
+    the session, `sequence`, the attempt whose authentication gave its token, `authenticated_by`,
     and the attempt a repeat repeats, `repeat_of`.
 
     A file before the attempt record that the store published before its write failed, whatever
