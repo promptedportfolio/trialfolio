@@ -15,7 +15,12 @@ to exit codes (REQ-03). Commands:
   `--revision-reason` and `--repeat` (release 0.3.0; running an experiment). Given a ranking
   snapshot configuration, it reads the ranking system the configuration names, with one
   `rank_get`, into a ranking snapshot, once its plan is approved (release 0.4.0; ranking snapshot
-  output).
+  output). From release 0.4.0's R04-T12, it reads a screen's and an experiment's configuration
+  1.0.0 or 1.1.0, whose ranking may be a ranking system's definition, in a file or a snapshot:
+  each case's attempt then writes its definition into `ApiRankingSystem` with `rank_update`,
+  before its backtest, and the run holds the ranking lock, on the file `TRIALFOLIO_LOCK_DIR`,
+  `/tmp`, or `%ProgramData%` gives, which the CLI gives the core (sending a definition, the
+  ranking lock).
 - `trialfolio report <run-dir> --out <dir>` re-renders a saved run's report offline.
 - `trialfolio demo --out <dir>` writes a synthetic example run offline, labeled synthetic.
 - `trialfolio review <config> --out <dir>` compares saved runs with a baseline offline, as a
@@ -60,6 +65,8 @@ from pydantic import TypeAdapter, ValidationError
 from trialfolio import acknowledgment
 from trialfolio.approval import obtain_approval
 from trialfolio.configuration import (
+    ExperimentConfigurationRead,
+    ScreenConfigurationRead,
     read_review_configuration,
     read_run_configuration,
     read_screen_configuration,
@@ -73,15 +80,17 @@ from trialfolio.contracts.common import (
 )
 from trialfolio.contracts.experiment_configuration import (
     ExperimentConfiguration,
+    ExperimentConfigurationV1_1,
     configured_variants,
+    configured_variants_v1_1,
 )
 from trialfolio.contracts.experiment_manifest import (
     ExperimentCommandRecord,
     ExperimentManifestCounts,
 )
-from trialfolio.contracts.experiment_plan import PlanV1_1
+from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
 from trialfolio.contracts.manifest import CommandRecord
-from trialfolio.contracts.plan import Plan
+from trialfolio.contracts.plan import Plan, PlanV1_2
 from trialfolio.contracts.ranking_snapshot import RankingSnapshotPlan, SnapshotCommandRecord
 from trialfolio.contracts.ranking_snapshot_configuration import RankingSnapshotConfiguration
 from trialfolio.contracts.review_manifest import ReviewCommandRecord
@@ -99,7 +108,8 @@ from trialfolio.errors import EXIT_CODES, TrialFolioError, interrupted, reason_o
 from trialfolio.logs import LOGS_DIRECTORY, CommandLogs
 from trialfolio.notices import CONCISE_NOTICE, FULL_NOTICE, LICENSE_ID, LICENSE_NAME, NOTICE_VERSION
 from trialfolio.paths import existing_path
-from trialfolio.planning import build_plan, build_snapshot_plan, installed_versions
+from trialfolio.planning import build_plan, build_plan_v1_1, build_snapshot_plan, installed_versions
+from trialfolio.ranking_lock import ranking_lock_path
 from trialfolio.starter import CONFIGURATION, starter_files
 from trialfolio.storage import LOCK_PATH, ArtifactStore, LocalArtifactStore
 
@@ -112,6 +122,7 @@ if TYPE_CHECKING:
     from trialfolio.provider import Credentials, P123ScreenBacktestClient, ScreenBacktestClient
     from trialfolio.review import Review
     from trialfolio.snapshot_execution import SnapshotExecution
+    from trialfolio.snapshots import SnapshotFiles
 
 _logger = logging.getLogger(__name__)
 
@@ -385,13 +396,13 @@ def _json(parser: argparse.ArgumentParser) -> None:
 class _Experiment:
     """What `run` has done so far with an experiment's configuration, for its summary."""
 
-    configuration: ExperimentConfiguration
+    configuration: ExperimentConfiguration | ExperimentConfigurationV1_1
     resume: bool = False
     """Whether the output directory holds the experiment, which the run resumes or revises."""
     experiment: "SavedExperiment | None" = None
     """The experiment's records, once a resume has read and checked them, and found them this
     configuration's experiment's, and not synthetic (running an experiment, step 4)."""
-    plan: PlanV1_1 | None = None
+    plan: PlanV1_1 | PlanV1_3 | None = None
     """The plan this run builds, once it's built: the current plan, or its revision."""
     run: "ExperimentRun | None" = None
     execution: "ExperimentExecution | None" = None
@@ -564,7 +575,7 @@ class _Invocation:
         attempt = None if ran is None else ran.attempt
         result = None if ran is None else ran.result
         if attempt is not None and (
-            attempt.start_record is not None or (result is not None and result.recorded)
+            _start_records(attempt) or (result is not None and result.recorded)
         ):
             ids["attempt_id"] = attempt.attempt_id
         return ids
@@ -628,15 +639,18 @@ class _Invocation:
         cost: int | None = None
         ran = self._ran()
         if ran is not None and ran.attempt is not None:
-            from trialfolio.attempts import provider_requests
+            from trialfolio.attempts import provider_requests, reported_cost
 
             result = ran.result
             if result is not None and result.recorded:
                 attempts, sent = 1, provider_requests(result.record)
-                cost = result.record.provider_metadata.cost
-            elif ran.attempt.start_record is not None:
-                # It reads as running: one possible send (uncertain completion).
-                attempts, sent = 1, 1
+                # Each rank_update's cost too, for a run with a ranking definition.
+                cost = reported_cost(result.record)
+            elif _start_records(ran.attempt):
+                # It reads as running: one possible send for each start record it wrote, its
+                # update record and its start record (uncertain completion, counting the
+                # requests).
+                attempts, sent = 1, _start_records(ran.attempt)
         if self.execution is not None and self.execution.tables is not None:
             unavailable = self.execution.tables.metrics_unavailable
         return RunCounts(
@@ -694,11 +708,13 @@ class _Invocation:
         saved = experiment.experiment
         if saved is None:  # a new experiment's, before anything is sent
             plan = experiment.plan
-            planned = (
-                len(plan.cases)
-                if plan is not None
-                else len(configured_variants(experiment.configuration)) + 1
+            configuration = experiment.configuration
+            variants = (
+                configured_variants_v1_1(configuration)
+                if isinstance(configuration, ExperimentConfigurationV1_1)
+                else configured_variants(configuration)
             )
+            planned = len(plan.cases) if plan is not None else len(variants) + 1
             return ExperimentCounts(
                 cases_planned=planned,
                 cases_succeeded=0,
@@ -715,7 +731,7 @@ class _Invocation:
                 metrics_unavailable=0,
                 warnings=warnings,
             )
-        plan = saved.plan if experiment.plan is None else experiment.plan
+        plan = saved.current.plan if experiment.plan is None else experiment.plan
         return _flattened(saved.counts(plan), saved.metrics_unavailable(plan), warnings)
 
     def _ran(self) -> "Execution | SnapshotExecution | None":
@@ -780,6 +796,15 @@ class _Invocation:
         holds the lock of: logs go there from now. Its summary's `output_dir` comes from its
         session record."""
         self.log.attach(Path(os.path.abspath(out)) / LOGS_DIRECTORY)
+
+
+def _start_records(attempt: object) -> int:
+    """How many start records a screen run's, or a snapshot's, attempt has written: its update
+    record, before a definition's `rank_update`, and its start record, before its request. An
+    attempt without its attempt record counts one possible send for each (counting the
+    requests)."""
+    written = (getattr(attempt, "update_record", None), getattr(attempt, "start_record", None))
+    return sum(record is not None for record in written)
 
 
 def _event(name: str, terminal: bool) -> dict[str, object]:
@@ -861,20 +886,24 @@ def _run(invocation: _Invocation) -> TrialFolioError | None:
     _require_acknowledgment(invocation)
     started_at = _started(invocation)
     content = _read_input(args.config)
-    configuration = read_run_configuration(content, _shown(args.config))
-    if isinstance(configuration, ExperimentConfiguration):
+    # Release 0.4.0's readers, which read 1.0.0 or 1.1.0, and the definition file, or the
+    # snapshot, a ranking names, in step 2, before the output directory is checked (R04-T12).
+    configuration = read_run_configuration(content, _shown(args.config), args.config)
+    if isinstance(configuration, ExperimentConfigurationRead):
         return _run_experiment(invocation, configuration, content, started_at)
     if isinstance(configuration, RankingSnapshotConfiguration):
         return _run_snapshot(invocation, configuration, content, started_at)
     store = invocation.store_factory(args.out)
     store.check_empty()
-    plan = _plan(invocation, build_plan(configuration, installed_versions()))
+    plan = _plan(invocation, build_plan_v1_1(configuration, installed_versions()))
+    snapshot = configuration.snapshot
     approval = obtain_approval(
         plan,
         args.approve,
         stdin=invocation.stdin,
         stderr=invocation.stderr,
         refused=_experiment_options(args),
+        snapshot=None if snapshot is None else snapshot.record,
     )
     _logger.info(
         "Plan approved (%s).",
@@ -897,16 +926,47 @@ def _run(invocation: _Invocation) -> TrialFolioError | None:
             started_at=started_at,
         ),
         clock=invocation.clock,
+        ranking_lock=_ranking_lock(invocation, plan),
     )
     invocation.execution = execution
+    definition, files = _definition_bytes(configuration)
     error = execution.run(
         content,
         lambda: _provider_client(invocation, credentials),
+        definition=definition,
+        snapshot=files,
         on_claimed=lambda: invocation.claimed(args.out),
     )
     if error is None:
         invocation.result = _run_result(args.out, plan, execution, synthetic=False)
     return error
+
+
+def _ranking_lock(
+    invocation: _Invocation, plan: Plan | PlanV1_2 | PlanV1_1 | PlanV1_3
+) -> Path | None:
+    """The ranking lock's file, which the CLI gives the core for a plan with a ranking
+    definition, and only for one: `trialfolio-ranking.lock`, in `TRIALFOLIO_LOCK_DIR` when it's
+    set and not empty, and otherwise in `/tmp`, or in `%ProgramData%` on Windows (the ranking
+    lock). The core takes it, and gives `experiment.locked` or `storage.write_failed` when it
+    can't."""
+    if not isinstance(plan, PlanV1_2 | PlanV1_3):
+        return None
+    return ranking_lock_path(invocation.environ)
+
+
+def _definition_bytes(
+    read: ScreenConfigurationRead | ExperimentConfigurationRead,
+) -> tuple[bytes | None, "SnapshotFiles | None"]:
+    """The bytes the core copies, as `definition.xml`, and `snapshot.json` for a snapshot, beside
+    the plan's `configuration.yaml`: the definition file's that the reader read in step 2, or
+    the two files' of the snapshot it read; neither for a ranking given another way. They're the
+    bytes the configuration was validated with, never read again (ranking definitions)."""
+    if read.snapshot is not None:
+        return None, read.snapshot.files
+    if read.definition is not None:
+        return read.definition.content, None
+    return None, None
 
 
 def _run_snapshot(
@@ -1004,7 +1064,7 @@ def _experiment_options(args: argparse.Namespace, run: str = "A screen's run") -
 
 def _run_experiment(  # noqa: PLR0915 - RF-T08 shortens it.
     invocation: _Invocation,
-    configuration: ExperimentConfiguration,
+    read: ExperimentConfigurationRead,
     content: bytes,
     started_at: datetime,
 ) -> TrialFolioError | None:
@@ -1013,8 +1073,11 @@ def _run_experiment(  # noqa: PLR0915 - RF-T08 shortens it.
     when it holds `experiment.lock`, whose lock the store takes before anything else is read,
     and holds until the command ends. The installed versions are checked once it's taken, before
     the records are read, since the modules that read them import `p123api`, `requests`, and
-    `urllib3`."""
+    `urllib3`. From release 0.4.0's R04-T12, the configuration is read by 0.4.0's reader, and the
+    records with `ranking`, so a plan 1.3.0, whose baseline's ranking is a definition, is planned,
+    resumed, and revised too, and its execution is given the ranking lock's file."""
     args = invocation.args
+    configuration = read.configuration
     invocation.ids["experiment_id"] = configuration.experiment_id
     state = _Experiment(configuration)
     invocation.experiment = state
@@ -1038,11 +1101,11 @@ def _run_experiment(  # noqa: PLR0915 - RF-T08 shortens it.
     from trialfolio.experiment_approval import ExperimentRun, RepeatOption, approve_experiment
     from trialfolio.experiment_execution import ExperimentExecution
     from trialfolio.experiment_records import read_experiment
-    from trialfolio.planning import build_experiment_plan, plan_revision
+    from trialfolio.planning import build_experiment_plan_v1_1, plan_revision_v1_1
 
     changes = None
     if state.resume:
-        saved = read_experiment(store)
+        saved = read_experiment(store, ranking=True)
         if saved.synthetic:
             raise TrialFolioError(
                 "output.not_empty",
@@ -1051,20 +1114,21 @@ def _run_experiment(  # noqa: PLR0915 - RF-T08 shortens it.
                 " an experiment. Nothing was sent or written. Run the configuration into another"
                 " output directory.",
             )
-        revision = plan_revision(configuration, versions, saved.plan)
+        revision = plan_revision_v1_1(read, versions, saved.current.plan)
         # Only now are the records this experiment's: a synthetic experiment, or another
         # experiment, in the directory has counts that aren't this configuration's.
         state.experiment = saved
-        plan = saved.plan if revision is None else revision.plan
+        plan = saved.current.plan if revision is None else revision.plan
         changes = None if revision is None else revision.changes
     else:
         saved = None
-        plan = build_experiment_plan(configuration, versions)
+        plan = build_experiment_plan_v1_1(read, versions)
     state.plan = plan
     invocation.ids["plan_hash"] = plan.plan_hash
     _logger.info("Built the plan.", extra={**_event("plan.created", False), **invocation.ids})
     repeats = tuple(RepeatOption(key, attempt) for key, attempt in args.repeat or ())
-    run = ExperimentRun(plan, saved, changes, args.revision_reason, repeats)
+    snapshot = None if read.snapshot is None else read.snapshot.record
+    run = ExperimentRun(plan, saved, changes, args.revision_reason, repeats, snapshot)
     state.run = run
     approved = approve_experiment(
         run, args.approve, stdin=invocation.stdin, stderr=invocation.stderr
@@ -1096,11 +1160,15 @@ def _run_experiment(  # noqa: PLR0915 - RF-T08 shortens it.
         experiment=saved,
         reason=args.revision_reason,
         repeats=approved.repeats,
+        ranking_lock=_ranking_lock(invocation, plan),
     )
     state.execution = execution
+    definition, files = _definition_bytes(read)
     try:
         error = execution.run(
             content,
+            definition=definition,
+            snapshot=files,
             on_claimed=lambda: (
                 invocation.resuming(args.out) if state.resume else invocation.claimed(args.out)
             ),
@@ -1152,7 +1220,7 @@ class _NothingToSend:
 
 
 def _with_repeat_options(
-    error: TrialFolioError, plan: PlanV1_1, repeat_attempts: dict[str, uuid.UUID]
+    error: TrialFolioError, plan: PlanV1_1 | PlanV1_3, repeat_attempts: dict[str, uuid.UUID]
 ) -> TrialFolioError:
     """`execution.partial`, with the exact `--repeat` option for each case awaiting a repeat."""
     awaiting = [case for case in plan.cases if case.case_id in repeat_attempts]
@@ -1187,7 +1255,9 @@ def _with_report(
     )
 
 
-def _experiment_result(out: str, plan: PlanV1_1, execution: "ExperimentExecution") -> list[str]:
+def _experiment_result(
+    out: str, plan: PlanV1_1 | PlanV1_3, execution: "ExperimentExecution"
+) -> list[str]:
     report = execution.report
     lines = [
         f"Experiment completed: {out}",
@@ -1386,7 +1456,7 @@ def _shown(path: str | os.PathLike[str]) -> str:
     return visible(os.fspath(path))
 
 
-def _plan(invocation: _Invocation, plan: Plan) -> Plan:
+def _plan[P: Plan | PlanV1_2](invocation: _Invocation, plan: P) -> P:
     invocation.ids["plan_hash"] = plan.plan_hash
     invocation.ids["case_id"] = plan.cases[0].case_id
     _logger.info("Built the plan.", extra={**_event("plan.created", False), **invocation.ids})
@@ -1419,7 +1489,9 @@ def _credentials(environ: MutableMapping[str, str]) -> "Credentials":
     return Credentials(api_id, api_key)
 
 
-def _run_result(out: str, plan: Plan, execution: "Execution", *, synthetic: bool) -> list[str]:
+def _run_result(
+    out: str, plan: Plan | PlanV1_2, execution: "Execution", *, synthetic: bool
+) -> list[str]:
     report = execution.report
     lines = (
         [

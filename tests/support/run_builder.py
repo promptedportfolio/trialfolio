@@ -15,11 +15,11 @@ R02-T06 wrote it ahead of R02-T09, for the comparison core's tests, R02-T07 adde
 synthetic run, for the review report's, and R02-T09 added `canaries.yaml`'s runs.
 
 From release 0.4.0, a screen configuration 1.1.0's run, whose ranking is a definition, is
-written through the core, as `trialfolio run` will write it, approved with its plan's hash: the
-fake server answers its `POST /rank` with `rank-update.json`, before its backtest, and the run
-takes the ranking lock on a file in the builder's temporary home. `trialfolio run` reads a 1.1.0
-file only from R04-T12, which then writes these runs through the CLI. R04-T11 added them, for
-the review's weight rows.
+written with `trialfolio run` too, approved with its plan's hash: the fake server answers its
+`POST /rank` with `rank-update.json`, before its backtest, and the run takes the ranking lock on a
+file in the builder's temporary home, which `TRIALFOLIO_LOCK_DIR` names. R04-T11 added them, for
+the review's weight rows, written through the core until R04-T12 made `trialfolio run` read a
+1.1.0 file; since then, they're written through the CLI.
 """
 
 import io
@@ -37,13 +37,9 @@ from tests.support.environment import VARIABLES
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
 from trialfolio.cli import API_ID_VARIABLE, API_KEY_VARIABLE, main
-from trialfolio.configuration import read_screen_configuration, read_screen_configuration_v1_1
-from trialfolio.contracts.manifest import CommandRecord
-from trialfolio.execution import Execution
-from trialfolio.planning import build_plan, build_plan_v1_1, installed_versions
-from trialfolio.provider import Credentials, P123ScreenBacktestClient
-from trialfolio.ranking_lock import LOCK_FILE
-from trialfolio.storage import LocalArtifactStore
+from trialfolio.configuration import read_screen_configuration_v1_1
+from trialfolio.planning import build_plan_v1_1, installed_versions
+from trialfolio.ranking_lock import LOCK_DIRECTORY_VARIABLE
 
 FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
 SCREEN_CONFIGS: Final = FIXTURES / "screen-configs"
@@ -53,6 +49,9 @@ REVIEW_CONFIGS: Final = FIXTURES / "review-configs"
 SYNTHETIC_RUN: Final = FIXTURES / "runs" / "synthetic-run-1.0.0"
 """The committed run `trialfolio demo` wrote, labeled synthetic. A review gets a copy of it at the
 `run` path that names it."""
+
+RANK_UPDATED: Final = Reply(200, (RESPONSES / "rank-update.json").read_bytes())
+"""Portfolio123's answer to a `rank_update` that wrote the definition."""
 
 REJECTED: Final = Reply(400, b"Unsupported value")
 """Portfolio123's 400 for a request the provider path doesn't support. The run saves no
@@ -171,22 +170,25 @@ class RunBuilder:
         self._home = home
 
     def run(self, run: Run, out: Path) -> Path:
-        """Writes `run` into the new output directory `out`, and returns it."""
+        """Writes `run` into the new output directory `out`, and returns it. A run whose ranking
+        is a definition gets `rank-update.json`'s 200 to its `POST /rank` first."""
         path = SCREEN_CONFIGS / run.configuration
-        if b"\nschema_version: 1.1.0\n" in path.read_bytes():
-            return self._run_with_definition(run, out)
-        configuration = read_screen_configuration(path.read_bytes(), run.configuration)
-        plan_hash = build_plan(configuration, installed_versions()).plan_hash
+        read = read_screen_configuration_v1_1(path.read_bytes(), run.configuration, path)
+        plan_hash = build_plan_v1_1(read, installed_versions()).plan_hash
         server = FakePortfolio123()
         stderr = io.StringIO()
         try:
             server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+            if read.definition is not None:
+                server.reply("/rank", RANK_UPDATED, method="POST")
             server.reply("/screen/backtest", run.reply)
             with self._monkeypatch.context() as patch:
                 self._home.mkdir(parents=True, exist_ok=True)
                 patch.setenv("HOME", str(self._home))
                 for name in VARIABLES:
                     patch.delenv(name, raising=False)
+                # The ranking lock's file is in the builder's home, never the machine's.
+                patch.setenv(LOCK_DIRECTORY_VARIABLE, str(self._home))
                 patch.setenv(ACCEPT_VARIABLE, ACCEPT_VALUE)
                 patch.setenv(API_ID_VARIABLE, canaries.API_ID)
                 patch.setenv(API_KEY_VARIABLE, canaries.API_KEY)
@@ -202,43 +204,6 @@ class RunBuilder:
             server.close()
         # A run that fails still writes its manifest, so it's complete, and can be reviewed.
         assert (out / "manifest.json").is_file(), stderr.getvalue()
-        return out
-
-    def _run_with_definition(self, run: Run, out: Path) -> Path:
-        """Writes the run of a screen configuration 1.1.0, whose ranking is a definition, through
-        the core, until `trialfolio run` reads one (release 0.4.0's R04-T12)."""
-        path = SCREEN_CONFIGS / run.configuration
-        content = path.read_bytes()
-        read = read_screen_configuration_v1_1(content, path.name, path)
-        assert read.definition is not None
-        plan = build_plan_v1_1(read, installed_versions())
-        server = FakePortfolio123()
-        credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-        clock = FixedClock()
-        try:
-            server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
-            update = Reply(200, (RESPONSES / "rank-update.json").read_bytes())
-            server.reply("/rank", update, method="POST")
-            server.reply("/screen/backtest", run.reply)
-            self._home.mkdir(parents=True, exist_ok=True)
-            with LocalArtifactStore(out) as store:
-                error = Execution(
-                    plan,
-                    plan.plan_hash,
-                    "option",
-                    store,
-                    CommandRecord(name="run", options={}, started_at=clock()),
-                    clock=clock,
-                    ranking_lock=self._home / LOCK_FILE,
-                ).run(
-                    content,
-                    lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint),
-                    definition=read.definition.content,
-                )
-        finally:
-            server.close()
-        # A run that fails still writes its manifest, as through the CLI.
-        assert (out / "manifest.json").is_file(), error
         return out
 
     def review(self, name: str, directory: Path) -> Path:

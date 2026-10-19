@@ -137,7 +137,6 @@ from trialfolio.configuration import (
     ExperimentConfigurationRead,
     experiment_original_values,
     experiment_original_values_v1_1,
-    read_experiment_configuration,
     read_experiment_configuration_v1_1,
 )
 from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3
@@ -147,6 +146,7 @@ from trialfolio.contracts.common import (
     ErrorDetail,
     RevisionReason,
 )
+from trialfolio.contracts.experiment_configuration import ExperimentConfigurationV1_1
 from trialfolio.contracts.experiment_manifest import (
     EXPERIMENT_CONFIGURATION_FORMAT,
     ExperimentArtifact,
@@ -229,7 +229,6 @@ from trialfolio.planning import (
     PlanRevision,
     PlanRevisionV1_1,
     Versions,
-    build_experiment_plan,
     build_experiment_plan_v1_1,
     check_approval,
     first_experiment_record_v1_1,
@@ -994,10 +993,17 @@ class ExperimentExecution:
             return
         if definition is not None or snapshot is not None:
             raise ValueError("only an experiment with a ranking definition is given one")
-        read = read_experiment_configuration(configuration, source_name)
-        if build_experiment_plan(read, versions, plan.revises) != plan:
+        # A configuration 1.1.0 whose baseline is ranked by a formula, a name, or an ID gives a
+        # plan 1.1.0 too, so release 0.4.0's reader, which reads either version, reads it, and
+        # keeps it for its cases' original values (R04-T12).
+        read = read_experiment_configuration_v1_1(
+            configuration, source_name, source_name, files=False
+        )
+        if build_experiment_plan_v1_1(read, versions, plan.revises) != plan:
             raise ValueError("the configuration doesn't give the plan")
-        self._configuration_version = read.schema_version
+        if isinstance(read.configuration, ExperimentConfigurationV1_1):
+            self._read = read
+        self._configuration_version = read.configuration.schema_version
 
     def _next_plan(self) -> int:
         return 1 if self._experiment is None else self._experiment.next_plan
@@ -1390,7 +1396,8 @@ class ExperimentExecution:
             originals, weights = experiment_original_values_v1_1(
                 plan.configuration, configuration_file.path, plan.read, case.case_key
             )
-            ranking = RankingOriginals(weights, files["ranking_definition"])
+            if plan.read.definition is not None:
+                ranking = RankingOriginals(weights, files["ranking_definition"])
         try:
             tables = write_case_tables(
                 self._store,

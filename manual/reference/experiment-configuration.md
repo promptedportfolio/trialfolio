@@ -60,7 +60,7 @@ The Key, Required, and Value columns of each table on this page are generated fr
 | Key | Required | Value | What it's for |
 |---|---|---|---|
 | `kind` | Yes | `experiment` | Marks the file as an experiment configuration |
-| `schema_version` | Yes | `1.0.0` | The version of the configuration's format. Any other value fails with `config.invalid`, and the message names the supported versions. |
+| `schema_version` | Yes | `1.0.0` | The version of the configuration's format. Any other value fails with `config.invalid`, and the message names the supported versions. From release 0.4.0, `trialfolio run` also reads `1.1.0`, which adds a baseline ranked by a ranking system's definition, and ranking variants ([experiment configuration](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#experiment-configuration)). |
 | `experiment_id` | Yes | Lowercase letters, digits, `-`, and `_`, starting with a letter or a digit, at most 64 characters, not a name Windows reserves: `con`, `prn`, `aux`, `nul`, `com1` to `com9`, or `lpt1` to `lpt9`. The experiment's identity. | The experiment's name, as [the research context](#the-research-context) describes |
 | `title` | Yes | Text, 1 to 200 characters, not all whitespace | It heads the report |
 | `purpose` | Yes | Text, 1 to 2,000 characters, not all whitespace. The question the experiment addresses. Required: it's part of the research history. | The question the experiment addresses |

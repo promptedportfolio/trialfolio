@@ -167,5 +167,5 @@ These rules hold for every configuration: a screen's, a [review's](review-config
 
 - A misspelled key, a missing required key, or an unsupported value fails with `config.invalid`, exit code 3. The message lists every problem, and nothing is sent or created. For example, `rebalance_weeks: 2` gives "`rebalance_weeks` input should be 1 or 4."
 - A rule without quotes, such as `- AvgDailyTot(30) > 1000000`, fails the same way, with "`rules[0]` is text Portfolio123 receives, written without quotes." So does `universe: SP500`, naming `universe`.
-- A `schema_version` other than `1.0.0` fails with `config.invalid`, and the message names the supported versions.
+- A `schema_version` other than `1.0.0`, which this page describes, fails with `config.invalid`, and the message names the supported versions. From release 0.4.0, `trialfolio run` also reads `1.1.0`, which adds a ranking given as a ranking system's definition, in a file or a ranking snapshot ([ranking forms](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#ranking-forms)), and tells a `1.0.0` file that gives one that it needs `1.1.0`.
 - A message names each key with a problem, and never its value.

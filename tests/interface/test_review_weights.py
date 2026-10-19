@@ -7,9 +7,9 @@ system named by name; and the review writes `differences.csv` 1.1.0, with `node`
 output).
 
 Traces to R04-AC04's review part, through the CLI: `ranking-weights.yaml`, `ranking-undeclared
-.yaml`, and `ranking-other-forms.yaml`, whose runs the run builder writes. Until release 0.4.0's
-R04-T12 builds `trialfolio run` for a definition, the builder writes a run with a definition
-through the core, as `run` will write it. R04-T11 wrote these ahead of R04-T13, which the test
+.yaml`, and `ranking-other-forms.yaml`, whose runs the run builder writes, with `trialfolio run`
+since release 0.4.0's R04-T12 built `run` for a definition, and through the core until then.
+R04-T11 wrote these ahead of R04-T13, which the test
 pairing gives `tests/interface/test_review_weights.py`, since they check R04-T11's review. A
 synthetic run the core writes with the demo's client is named as such in the review's report,
 not as the demo's (DSC-04). Every expected value is written here by hand.

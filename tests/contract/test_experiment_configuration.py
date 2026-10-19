@@ -16,10 +16,10 @@ invalid configuration fails with `config.invalid`, and the message names a ranki
 `set` entry by its place, never by its path; a 1.0.0 file with a ranking variant, or a baseline
 ranked by a definition, says they need 1.1.0; and a budget is at least two requests a case. Also
 to the ranking example's structure, which the configuration's reader accepts. R04-T05 wrote
-them, with the reader of both versions, which the invalid files' test uses. Until R04-T12,
-`trialfolio run` reads with the 1.0.0 reader, which refuses 1.1.0, so that reader's messages for
-such a file stay 0.3.0's, as the R04-T05 details in release 0.4.0's changes after sign-off give
-them. What a path names in the definition, and the example's cases, are R04-T06's: since then,
+them, with the reader of both versions, which the invalid files' test uses. The 1.0.0 reader's
+messages for such a file stay 0.3.0's, as the R04-T05 details in release 0.4.0's changes after
+sign-off give them; since R04-T12, `trialfolio run` reads with the reader of both versions, so its
+messages are that reader's. What a path names in the definition, and the example's cases, are R04-T06's: since then,
 the reader of both versions reads the baseline's definition file, from the configuration's
 directory, so it's given the configuration's path, and applies each ranking variant, and the
 invalid files' test reads the ranking variants' cases that depend on the definition too.
@@ -1234,19 +1234,38 @@ def test_a_1_0_0_file_can_t_vary_the_ranking() -> None:
     ],
     ids=["ranking-variant", "baseline-definition"],
 )
-@pytest.mark.parametrize(
-    "reader", [read_experiment_configuration, read_run_configuration], ids=["experiment", "run"]
-)
-def test_run_s_reader_gives_a_1_0_0_file_0_3_0_s_message(
-    name: str, problem: str, reader: Callable[[bytes, str], object]
-) -> None:
-    """`trialfolio run` refuses a 1.1.0 file until R04-T12, so it doesn't send a 1.0.0 file to
-    1.1.0: its message is the one 0.3.0 gave."""
+def test_the_1_0_0_reader_gives_a_1_0_0_file_0_3_0_s_message(name: str, problem: str) -> None:
+    """0.3.0's reader, which reads 1.0.0 only, keeps 0.3.0's message for such a file."""
     path = INVALID / name
 
-    message = rejection(path.read_bytes(), path.name, reader)
+    message = rejection(path.read_bytes(), path.name)
 
     assert message == f"{name} isn't a valid configuration:\n- {problem}"
+
+
+def run_reader(directory: Path) -> Callable[[bytes, str], object]:
+    """`trialfolio run`'s reader, as if the file were in `directory`."""
+    return lambda content, name: read_run_configuration(content, name, directory / name)
+
+
+@pytest.mark.parametrize(
+    ("name", "later"),
+    [
+        ("variant-ranking.yaml", "`variants.ranking` needs schema_version 1.1.0"),
+        ("baseline-definition-in-1.0.0.yaml", "a form that needs schema_version 1.1.0"),
+    ],
+    ids=["ranking-variant", "baseline-definition"],
+)
+def test_run_s_reader_tells_a_1_0_0_file_its_key_needs_1_1_0(name: str, later: str) -> None:
+    """Since R04-T12, `trialfolio run` reads 1.1.0, with the reader of both versions, so it tells
+    a 1.0.0 file that gives a key of 1.1.0 that the key needs that version, as the release's
+    changes after sign-off give it (R04-T05's review)."""
+    path = INVALID / name
+
+    message = rejection(path.read_bytes(), path.name, run_reader(INVALID))
+
+    assert later in message
+    assert message == rejection(path.read_bytes(), path.name, read_v1_1)
 
 
 RANKED_BY_SALES = (
@@ -1283,23 +1302,43 @@ NOT_A_VARIANT_SETTING = (
     ],
     ids=["unquoted-path", "unquoted-remove", "path-twice", "credential-word"],
 )
-@pytest.mark.parametrize(
-    "reader", [read_experiment_configuration, read_run_configuration], ids=["experiment", "run"]
-)
-def test_run_s_reader_reads_a_1_0_0_ranking_variant_s_keys_as_0_3_0_did(
-    variant: str, problem: str, reader: Callable[[bytes, str], object]
+def test_the_1_0_0_reader_reads_a_1_0_0_ranking_variant_s_keys_as_0_3_0_did(
+    variant: str, problem: str
 ) -> None:
-    """`trialfolio run` refuses a 1.1.0 file until R04-T12, so its reader has no node paths: it
-    reads a ranking variant's keys as any other, as 0.3.0 did, and asks for no quotes a 1.0.0
-    file can't use. Its message is the one 0.3.0 gave."""
+    """0.3.0's reader has no node paths: it reads a ranking variant's keys as any other, as 0.3.0
+    did, and asks for no quotes a 1.0.0 file can't use. Its message is the one 0.3.0 gave."""
     path = INVALID / "variant-ranking.yaml"
     content = path.read_text(encoding="utf-8")
     assert content.count(RANKED_BY_SALES) == 1
     content = content.replace(RANKED_BY_SALES, f"  ranking:\n    - key: weights\n{variant}")
 
-    message = rejection(content, path.name, reader)
+    message = rejection(content, path.name)
 
     assert message == f"{path.name} isn't a valid configuration:\n- {problem}"
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "      set:\n        Value: 100\n",
+        "      set:\n        'Value': 1\n        'Value': 2\n",
+        "      set:\n        'api_key': 1\n",
+    ],
+    ids=["unquoted-path", "path-twice", "credential-word"],
+)
+def test_run_s_reader_reads_a_1_0_0_ranking_variant_s_keys_as_node_paths(variant: str) -> None:
+    """Since R04-T12, `trialfolio run` reads with the reader of both versions, which reads a
+    ranking variant's keys as node paths in either version, and names a `set` entry by its
+    place, never by its path."""
+    path = INVALID / "variant-ranking.yaml"
+    content = path.read_text(encoding="utf-8")
+    content = content.replace(RANKED_BY_SALES, f"  ranking:\n    - key: weights\n{variant}")
+
+    message = rejection(content, path.name, run_reader(INVALID))
+
+    assert message == rejection(content, path.name, read_v1_1)
+    assert "variants.ranking[0].set." not in message
+    assert "api_key" not in message
 
 
 def test_a_1_1_0_variant_of_another_setting_names_the_ranking_among_those_it_can() -> None:
@@ -1315,11 +1354,14 @@ def test_a_1_1_0_variant_of_another_setting_names_the_ranking_among_those_it_can
 
 
 def test_the_readers_name_the_versions_they_read() -> None:
-    """`trialfolio run` reads with the 1.0.0 reader until R04-T12 builds its path for a
-    definition, so a 1.1.0 file is a version it doesn't read yet."""
+    """0.3.0's reader reads 1.0.0 only, so a 1.1.0 file is a version it doesn't read; the reader
+    of both versions, which `trialfolio run` reads with since R04-T12, names both."""
     assert "Supported versions: 1.0.0." in rejection(ranking_example())
     unsupported = with_line("schema_version: 1.0.0", "schema_version: 2.0.0")
     assert "Supported versions: 1.0.0, 1.1.0." in ranking_rejection(unsupported)
+    assert "Supported versions: 1.0.0, 1.1.0." in rejection(
+        unsupported, "experiment.yaml", run_reader(FIXTURES)
+    )
 
 
 def test_the_reader_of_both_versions_reads_1_0_0_as_before() -> None:

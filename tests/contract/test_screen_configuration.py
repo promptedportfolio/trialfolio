@@ -9,9 +9,9 @@ Screen configuration 1.1.0's tests, at the end, trace to R04-AC02's ranking form
 0.4.0's test pairing gives them for `test_screen_configuration.py`: each invalid ranking form
 fails with `config.invalid`, and a 1.0.0 file with `definition` or `snapshot` says they need
 1.1.0. R04-T05 wrote them, with the reader of both versions, which the invalid files' test uses.
-Until R04-T12, `trialfolio run` reads with the 1.0.0 reader, which refuses 1.1.0, so that reader's
-message for such a file stays 0.3.0's, as the R04-T05 details in release 0.4.0's changes after
-sign-off give it. Since R04-T06, the reader of both versions reads a definition's file too, from
+The 1.0.0 reader's message for such a file stays 0.3.0's, as the R04-T05 details in release
+0.4.0's changes after sign-off give it; since R04-T12, `trialfolio run` reads with the reader of
+both versions, so its message is that reader's. Since R04-T06, the reader of both versions reads a definition's file too, from
 the configuration's directory, so it's given the configuration's path; what it reads there is
 tested in tests/contract/test_ranking_definitions.py.
 """
@@ -702,14 +702,20 @@ def test_the_reader_of_both_versions_reads_1_0_0_as_before() -> None:
     assert type(configuration) is ScreenConfiguration
 
 
+def run_reader(content: bytes, source_name: str) -> object:
+    """`trialfolio run`'s reader, as if the file were in the fixtures' directory."""
+    return read_run_configuration(content, source_name, FIXTURES / source_name)
+
+
 def test_the_readers_name_the_versions_they_read() -> None:
-    """`trialfolio run` reads with the 1.0.0 reader until R04-T12 builds its path for a
-    definition, so a 1.1.0 file is a version it doesn't read yet."""
+    """0.3.0's reader reads 1.0.0 only, so a 1.1.0 file is a version it doesn't read; the reader
+    of both versions, which `trialfolio run` reads with since R04-T12, names both."""
     content = version_1_1("ranking:\n  formula: 'EarnYield'\n  lower_is_better: false\n")
     unsupported = with_line("schema_version: 1.0.0", "schema_version: 2.0.0")
 
     assert "Supported versions: 1.0.0." in rejection(content)
     assert "Supported versions: 1.0.0, 1.1.0." in rejection(unsupported, reader=read_v1_1)
+    assert "Supported versions: 1.0.0, 1.1.0." in rejection(unsupported, reader=run_reader)
 
 
 @pytest.mark.parametrize("form", ["definition", "snapshot"])
@@ -722,17 +728,11 @@ def test_a_1_0_0_file_with_a_later_form_says_it_needs_1_1_0(form: str) -> None:
 
 
 @pytest.mark.parametrize("form", ["definition", "snapshot"])
-@pytest.mark.parametrize(
-    "reader", [read_screen_configuration, read_run_configuration], ids=["screen", "run"]
-)
-def test_run_s_reader_gives_a_later_form_in_1_0_0_0_3_0_s_message(
-    form: str, reader: Callable[[bytes, str], object]
-) -> None:
-    """`trialfolio run` refuses a 1.1.0 file until R04-T12, so it doesn't send a 1.0.0 file to
-    1.1.0: its message is the one 0.3.0 gave."""
+def test_the_1_0_0_reader_gives_a_later_form_in_1_0_0_0_3_0_s_message(form: str) -> None:
+    """0.3.0's reader, which reads 1.0.0 only, keeps 0.3.0's message for such a file."""
     path = INVALID / f"{form}-in-1.0.0.yaml"
 
-    message = rejection(path.read_bytes(), path.name, reader)
+    message = rejection(path.read_bytes(), path.name)
 
     assert message == (
         f"{path.name} isn't a valid configuration:\n"
@@ -741,26 +741,47 @@ def test_run_s_reader_gives_a_later_form_in_1_0_0_0_3_0_s_message(
     )
 
 
-@pytest.mark.parametrize(
-    "reader", [read_screen_configuration, read_run_configuration], ids=["screen", "run"]
-)
-def test_run_s_reader_names_a_key_under_variants_as_0_3_0_did(
-    reader: Callable[[bytes, str], object],
-) -> None:
-    """`trialfolio run`'s reader has no node paths until R04-T12, so it names a key under a
-    ranking variant's `set` by its key, as 0.3.0 did, where 0.4.0's readers name it by its
-    place."""
+@pytest.mark.parametrize("form", ["definition", "snapshot"])
+def test_run_s_reader_says_a_later_form_in_1_0_0_needs_1_1_0(form: str) -> None:
+    """Since R04-T12, `trialfolio run` reads 1.1.0, with the reader of both versions, so it tells
+    a 1.0.0 file that gives a later form that the form needs that version (R04-T05's review)."""
+    path = INVALID / f"{form}-in-1.0.0.yaml"
+
+    message = rejection(path.read_bytes(), path.name, run_reader)
+
+    assert f"`ranking` gives {form}, a form that needs schema_version 1.1.0." in message
+    assert message == rejection(path.read_bytes(), path.name, read_v1_1)
+
+
+def test_the_1_0_0_reader_names_a_key_under_variants_as_0_3_0_did() -> None:
+    """0.3.0's reader has no node paths, so it names a key under a ranking variant's `set` by its
+    key, as 0.3.0 did."""
     path = FIXTURES / "formula.yaml"
     content = (
         path.read_bytes() + b"variants:\n  ranking:\n    - set:\n        'A': 1\n        'A': 2\n"
     )
 
-    message = rejection(content, path.name, reader)
+    message = rejection(content, path.name)
 
     assert message == (
         f"{path.name} isn't a valid configuration:\n"
         "- `variants.ranking[0].set.A` appears more than once."
     )
+
+
+def test_run_s_reader_names_a_key_under_variants_by_its_place() -> None:
+    """Since R04-T12, `trialfolio run` reads with node paths, as 0.4.0's readers do, so it names
+    a key under a ranking variant's `set` by its place, never by its path."""
+    path = FIXTURES / "formula.yaml"
+    content = (
+        path.read_bytes() + b"variants:\n  ranking:\n    - set:\n        'A': 1\n        'A': 2\n"
+    )
+
+    message = rejection(content, path.name, run_reader)
+
+    assert message == rejection(content, path.name, read_v1_1)
+    assert "`variants.ranking[0].set[1]`" in message
+    assert "set.A" not in message
 
 
 def test_nodes_or_xml_in_1_1_0_point_to_a_definition_file() -> None:

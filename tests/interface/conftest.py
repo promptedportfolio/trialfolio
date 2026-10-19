@@ -40,8 +40,8 @@ from tests.support.storage_faults import StorageFaults
 from tests.support.terminal import Terminal
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
 from trialfolio.cli import API_ID_VARIABLE, API_KEY_VARIABLE, main
-from trialfolio.configuration import read_screen_configuration
-from trialfolio.planning import build_plan, installed_versions
+from trialfolio.configuration import read_screen_configuration_v1_1
+from trialfolio.planning import build_plan_v1_1, installed_versions
 from trialfolio.provider import REQUEST_TIMEOUT_SECONDS
 from trialfolio.ranking_lock import LOCK_DIRECTORY_VARIABLE
 from trialfolio.storage import ArtifactStore, LocalArtifactStore
@@ -307,6 +307,7 @@ def plan_hash_of(outcome: Outcome) -> str:
 
 def plan_hash_for(path: Path) -> str:
     """The hash of the plan the configuration at `path` resolves to with the installed versions,
-    as `trialfolio run` shows it."""
-    configuration = read_screen_configuration(path.read_bytes(), str(path))
-    return build_plan(configuration, installed_versions()).plan_hash
+    as `trialfolio run` shows it: read by release 0.4.0's reader, as `run` reads it from R04-T12,
+    so a screen configuration 1.1.0's too."""
+    read = read_screen_configuration_v1_1(path.read_bytes(), str(path), path)
+    return build_plan_v1_1(read, installed_versions()).plan_hash

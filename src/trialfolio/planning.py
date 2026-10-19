@@ -26,7 +26,7 @@ revisions):
   plan: the experiment as the plan declares it, its retired cases, and the history of its plans.
 
 Release 0.4.0's plans with a ranking definition (docs/contracts.md, plans with a ranking
-definition), which `trialfolio run` builds once its path for them is built (R04-T10 and R04-T12).
+definition), which `trialfolio run` builds from R04-T10, for a snapshot, and R04-T12.
 Each takes what 0.4.0's configuration readers read, the definition included, so it reads no file:
 
 - `build_plan_v1_1` builds a screen's plan: 1.2.0 when its ranking is a definition, with the
