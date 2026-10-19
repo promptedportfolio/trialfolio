@@ -22,6 +22,15 @@ Text from the configuration, and the reason, is shown with its control and forma
 characters escaped. Each error's loggable message names a case by its `case_id`, never by its
 key, which is the user's text.
 
+From release 0.4.0, a plan 1.3.0, whose baseline's ranking is a definition, shows more (plans with
+a ranking definition, the display): that the run overwrites `ApiRankingSystem`, what the ranking
+lock does and doesn't exclude, the definition's source, each node's weight among the baseline's
+settings, each ranking variant's change, each case's `rank_update` with its whole definition as
+text, and the budget with each operation's documented cost, what a case's attempt costs, and, in
+a resume, the most the requests counted so far can have cost apart from the most the remaining
+ones can cost. Each case's attempt sends two requests, so the budget the display and the repeat's
+prompt count covers half as many cases (R04-T12).
+
 It imports the modules that read an experiment's records, which import `p123api`, so the CLI
 imports it only once `installed_versions` has checked them.
 """
@@ -33,10 +42,13 @@ from typing import Final, TextIO
 
 from trialfolio.approval import (
     APPROVE_ANSWER,
+    OVERWRITES,
     Approval,
     budget_lines,
     counted,
     data_sent_lines,
+    most_credits,
+    ranking_lines,
     read_answer,
     request_lines,
     retry_lines,
@@ -45,12 +57,29 @@ from trialfolio.approval import (
     write_shown,
 )
 from trialfolio.case_state import case_outcome, confirmation_used, described, repeatable
-from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1, PlanVariant
-from trialfolio.contracts.experiment_record import PlanChanges, RetiredCase
+from trialfolio.contracts.experiment_plan import (
+    ExperimentPlanCase,
+    ExperimentPlanCaseV1_3,
+    PlanV1_1,
+    PlanV1_3,
+    PlanVariant,
+    PlanVariantV1_3,
+)
+from trialfolio.contracts.experiment_record import PlanChanges, PlanChangesV1_1, RetiredCaseV1_1
+from trialfolio.contracts.ranking_snapshot import RankingSnapshotRecord
+from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError
 from trialfolio.experiment_execution import Repeat
-from trialfolio.experiment_records import SavedCase, SavedExperiment, SavedExperimentAttempt
-from trialfolio.planning import plan_hash, retired_cases
+from trialfolio.experiment_records import (
+    SavedCase,
+    SavedExperiment,
+    SavedExperimentAttempt,
+    SavedRankingCase,
+)
+from trialfolio.planning import plan_hash, retired_cases_v1_1
+
+type AnySavedCase = SavedCase | SavedRankingCase
+"""A case of the plan, 1.1.0's or 1.3.0's, and what the experiment's records say of it."""
 
 REPEAT_ANSWER: Final = "repeat"
 """What the user types to confirm the repeats shown. Any other answer is a refusal."""
@@ -71,31 +100,45 @@ class ExperimentRun:
     for a resume, the experiment's records, with what changed when the plan revises the current
     one. `reason` and `repeats` are `--revision-reason` and `--repeat`, as given."""
 
-    plan: PlanV1_1
+    plan: PlanV1_1 | PlanV1_3
     experiment: SavedExperiment | None
-    changes: PlanChanges | None
+    changes: PlanChanges | PlanChangesV1_1 | None
     """What the plan changed from the current plan; None for a new experiment, or when the plan
     is the current plan, which the run resumes."""
     reason: str | None
     repeats: tuple[RepeatOption, ...]
+    snapshot: RankingSnapshotRecord | None = None
+    """The record of the snapshot the baseline's ranking names, for a plan 1.3.0 whose
+    `ranking_source` is a snapshot, which the full display gives as the definition's source."""
 
     @property
     def revision(self) -> bool:
         return self.changes is not None
 
     @property
-    def cases(self) -> tuple[SavedCase, ...]:
-        """Each case of the plan, in its order, with what the records say of it."""
-        if self.experiment is None:
-            return tuple(SavedCase(case, (), True) for case in self.plan.cases)
-        return self.experiment.cases(self.plan)
+    def requests_per_case(self) -> int:
+        """The requests each attempt sends: a `rank_update` and a backtest for a plan with a
+        ranking definition, and a backtest alone otherwise."""
+        return 2 if isinstance(self.plan, PlanV1_3) else 1
 
     @property
-    def retired(self) -> tuple[RetiredCase, ...]:
+    def cases(self) -> tuple[AnySavedCase, ...]:
+        """Each case of the plan, in its order, with what the records say of it."""
+        plan = self.plan
+        if self.experiment is None:
+            if isinstance(plan, PlanV1_3):
+                return tuple(SavedRankingCase(case, (), True) for case in plan.cases)
+            return tuple(SavedCase(case, (), True) for case in plan.cases)
+        if isinstance(plan, PlanV1_3):
+            return self.experiment.cases(plan)
+        return self.experiment.cases(plan)
+
+    @property
+    def retired(self) -> tuple[RetiredCaseV1_1, ...]:
         """The experiment's retired cases once the plan is its current plan."""
         if self.experiment is None:
             return ()
-        return retired_cases(self.experiment.record, self.plan)
+        return retired_cases_v1_1(self.experiment.current.record, self.plan)
 
     @property
     def provider_requests(self) -> int:
@@ -106,7 +149,7 @@ class ExperimentRun:
     def authentication_calls(self) -> int:
         return 0 if self.experiment is None else self.experiment.authentication_calls
 
-    def awaiting_repeat(self) -> list[tuple[SavedCase, SavedExperimentAttempt]]:
+    def awaiting_repeat(self) -> list[tuple[AnySavedCase, SavedExperimentAttempt]]:
         """Each case of the plan awaiting a repeat, with its latest possibly charged attempt,
         whose `attempt_id` confirms the repeat."""
         return [
@@ -115,7 +158,7 @@ class ExperimentRun:
             if saved.state == "awaiting_repeat" and (attempt := saved.latest_charged) is not None
         ]
 
-    def sends(self) -> list[ExperimentPlanCase]:
+    def sends(self) -> list[ExperimentPlanCase | ExperimentPlanCaseV1_3]:
         """The cases this run would send, in the plan's order, as the core picks them: each
         that's due, and each awaiting a repeat that `--repeat` names, by its key alone or with
         an attempt ID whose confirmation isn't used. A used one repeats nothing (repeating a
@@ -132,15 +175,37 @@ class ExperimentRun:
             )
         ]
 
-    def uncovered(self) -> list[ExperimentPlanCase]:
+    def uncovered(self) -> list[ExperimentPlanCase | ExperimentPlanCaseV1_3]:
         """The cases this run would send that the remaining budget can't cover, in the plan's
-        order. The run authenticates before its first send, so with no authentication call
-        left, it covers none."""
+        order, each with its requests: two for a case with a ranking definition, whose attempt
+        starts only when both fit. The run authenticates before its first send, so with no
+        authentication call left, it covers none."""
         sends = self.sends()
         budget = self.plan.budget
         if self.authentication_calls >= budget.authentication_calls:
             return sends
-        return sends[max(0, budget.provider_requests - self.provider_requests) :]
+        remaining = max(0, budget.provider_requests - self.provider_requests)
+        return sends[remaining // self.requests_per_case :]
+
+    def counted_credits(self) -> int | None:
+        """For a plan with a ranking definition, the most the requests counted so far can have
+        cost, each at its operation's documented cost in the plan: an attempt that sends a
+        definition counts its `rank_update` first, and then its backtest, and any other attempt's
+        requests are backtests. None for any other plan (plans with a ranking definition, the
+        display)."""
+        plan = self.plan
+        if not isinstance(plan, PlanV1_3):
+            return None
+        rank_update, backtest = plan.budget.costs
+        total = 0
+        for attempt in () if self.experiment is None else self.experiment.attempts:
+            sent = attempt.provider_requests
+            if attempt.version == "1.3.0":
+                total += min(sent, 1) * rank_update.credits_per_request
+                total += max(0, sent - 1) * backtest.credits_per_request
+            else:
+                total += sent * backtest.credits_per_request
+        return total
 
 
 @dataclass(frozen=True)
@@ -160,9 +225,17 @@ class ExperimentApproval:
 # The display
 
 
-def _change(variant: PlanVariant | None) -> str:
+def _change(variant: PlanVariant | PlanVariantV1_3 | None) -> str:
     if variant is None:
         return "the baseline"
+    if isinstance(variant, PlanVariantV1_3) and variant.setting == "ranking":
+        weights = ", ".join(
+            f"{visible(change.node)} to {change.weight}" for change in variant.set or ()
+        )
+        removed = (
+            "" if variant.remove is None else f"removes the factor {visible(variant.remove)}, and "
+        )
+        return f"ranking: {removed}sets the weights of {weights}"
     if variant.value is not None:
         default = ", the default rebalance variant" if variant.default else ""
         return f"{variant.setting} set to {shown(str(variant.value))}{default}"
@@ -171,11 +244,11 @@ def _change(variant: PlanVariant | None) -> str:
     return f"replaces the rule {shown(variant.replace or '')} with {shown(variant.with_ or '')}"
 
 
-def _option(saved: SavedCase, attempt: SavedExperimentAttempt) -> str:
+def _option(saved: AnySavedCase, attempt: SavedExperimentAttempt) -> str:
     return f"--repeat {saved.case.case_key}:{attempt.attempt_id}"
 
 
-def _so_far(saved: SavedCase) -> str:
+def _so_far(saved: AnySavedCase) -> str:
     """The case's outcome so far, and what this run does with it."""
     outcome = described(saved.attempts, valid=saved.valid)
     tried = counted(len(saved.attempts), "attempt")
@@ -190,11 +263,15 @@ def _so_far(saved: SavedCase) -> str:
         )
     attempt = saved.latest_charged
     assert attempt is not None  # a case awaiting a repeat has one
-    return (
-        f"{outcome}, after {tried}. Its request may have reached Portfolio123, and may have been"
-        " charged, so it's sent again only by a repeat, which may be charged again:"
-        f" {_option(saved, attempt)}"
+    requests = (
+        "Its rank_update, or its backtest, may have reached Portfolio123, and may have been"
+        " charged, so it's sent again only by a repeat, which sends both again, and may be"
+        " charged again"
+        if isinstance(saved, SavedRankingCase)
+        else "Its request may have reached Portfolio123, and may have been charged, so it's sent"
+        " again only by a repeat, which may be charged again"
     )
+    return f"{outcome}, after {tried}. {requests}: {_option(saved, attempt)}"
 
 
 def _retired_outcome(experiment: SavedExperiment, case_id: str) -> str:
@@ -203,7 +280,7 @@ def _retired_outcome(experiment: SavedExperiment, case_id: str) -> str:
     return f"{outcome.replace('_', ' ')}, after {counted(len(attempts), 'attempt')}"
 
 
-def _changes_lines(changes: PlanChanges) -> list[str]:
+def _changes_lines(changes: PlanChanges | PlanChangesV1_1) -> list[str]:
     lines = [
         f"  {change.package} from {change.previous} to {change.current}"
         for change in changes.versions
@@ -231,6 +308,16 @@ def _counted_lines(run: ExperimentRun) -> list[str]:
             f" {counted(max(0, budget.authentication_calls - calls), 'authentication call')}."
         )
     ]
+    spent = run.counted_credits()
+    if spent is not None and isinstance(run.plan, PlanV1_3):
+        remaining = max(0, budget.provider_requests - requests)
+        lines.append(
+            "  At the documented costs, the requests counted so far can have cost at most"
+            f" {counted(spent, 'credit')}, and the"
+            f" {counted(remaining, 'provider request')}"
+            f" {'that remains' if remaining == 1 else 'that remain'} at most"
+            f" {counted(most_credits(run.plan.budget, remaining), 'credit')}."
+        )
     uncovered = run.uncovered()
     if uncovered:
         named = ", ".join(case.case_key for case in uncovered)
@@ -288,6 +375,8 @@ def format_experiment_plan(run: ExperimentRun) -> str:
                 " this run resumes."
             ),
         ]
+    if isinstance(plan, PlanV1_3):
+        lines += ["", *ranking_lines(plan.ranking_source, run.snapshot)]
     baseline = plan.cases[0]
     lines += ["", "The baseline's settings, with the provenance each value will have once sent:"]
     for row in baseline.settings:
@@ -362,6 +451,9 @@ def format_experiment_summary(run: ExperimentRun, *, full_plan_hint: bool) -> st
             f" {counted(max(0, budget.provider_requests - requests), 'provider request')} and"
             f" {counted(max(0, budget.authentication_calls - calls), 'authentication call')}."
         )
+    # After the whole budget, what's counted so far included, so it doesn't split the budget.
+    if isinstance(plan, PlanV1_3):
+        lines.append(OVERWRITES)
     if full_plan_hint:
         lines.append("Run the command in a terminal to see the full plan.")
     return "\n".join(lines) + "\n"
@@ -442,7 +534,7 @@ def _reason_problem(run: ExperimentRun) -> TrialFolioError | None:
         return None
     if run.experiment is None:
         problem = "A new experiment has no plan to revise."
-    elif run.reason == run.experiment.record.plans[-1].reason:
+    elif run.reason == run.experiment.current.record.plans[-1].reason:
         return None
     else:
         problem = (
@@ -530,7 +622,7 @@ class _CheckedRepeats:
     reports and doesn't make."""
     made: bool = False
     """Whether one of `confirmed` is to be made: its confirmation isn't used."""
-    to_ask: tuple[tuple[SavedCase, SavedExperimentAttempt], ...] = ()
+    to_ask: tuple[tuple[AnySavedCase, SavedExperimentAttempt], ...] = ()
     """Cases awaiting a repeat that `--repeat` names by key alone, for the CLI to confirm."""
     notes: tuple[str, ...] = ()
     """Why a repeat named isn't made, for each that doesn't fail."""
@@ -550,7 +642,7 @@ def _check_repeats(run: ExperimentRun, *, asks: bool) -> _CheckedRepeats:  # noq
     cases = {saved.case.case_key: saved for saved in run.cases}
     confirmed: list[Repeat] = []
     made = False
-    to_ask: list[tuple[SavedCase, SavedExperimentAttempt]] = []
+    to_ask: list[tuple[AnySavedCase, SavedExperimentAttempt]] = []
     notes: list[str] = []
     for option in run.repeats:
         saved = cases.get(option.case_key)
@@ -647,7 +739,7 @@ def _not_repeated(run: ExperimentRun, message: str, log_message: str) -> TrialFo
 
 def _ask_repeats(
     run: ExperimentRun,
-    cases: Sequence[tuple[SavedCase, SavedExperimentAttempt]],
+    cases: Sequence[tuple[AnySavedCase, SavedExperimentAttempt]],
     *,
     stdin: TextIO,
     stderr: TextIO,
@@ -664,17 +756,23 @@ def _ask_repeats(
     budget = run.plan.budget
     remaining = max(0, budget.provider_requests - run.provider_requests)
     # Every send of the run: these repeats, the cases that are due, and the repeats an attempt
-    # ID confirmed, as the core runs them.
-    sends = len(run.sends())
+    # ID confirmed, as the core runs them, each case with its requests: two for a case with a
+    # ranking definition.
+    sends = len(run.sends()) * run.requests_per_case
     left = remaining - sends
     leaves = (
         f"which leaves {counted(left, 'provider request')}"
         if left >= 0
         else "more than remain, so the cases the budget can't cover won't start"
     )
+    what = (
+        "the case's rank_update and its backtest again, two requests,"
+        if run.requests_per_case == 2
+        else "the case's request again,"
+    )
     lines += [
         (
-            f"A repeat sends the case's request again, as a new attempt of the case. It may be"
+            f"A repeat sends {what} as a new attempt of the case. It may be"
             f" charged again, and it counts against the experiment's budget: of its"
             f" {counted(budget.provider_requests, 'provider request')},"
             f" {remaining} {'remains' if remaining == 1 else 'remain'}, and this run sends"

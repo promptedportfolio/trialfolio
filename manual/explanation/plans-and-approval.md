@@ -41,6 +41,14 @@ For an experiment, the plan shows the whole experiment at once:
 
 When you run the same command again, to go on with an experiment, the plan also shows each case's outcome so far and what this run will do with it, the retired cases, and the budget counted so far ([experiment plans and revisions](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#experiment-plans-and-revisions)).
 
+From release 0.4.0, a screen or an experiment whose ranking is a ranking system's definition, in a file or a ranking snapshot, sends each case's definition to Portfolio123 before its backtest, so its plan shows more ([plans with a ranking definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#plans-with-a-ranking-definition)):
+
+- that the run overwrites `ApiRankingSystem`, a ranking system in your Portfolio123 account, with each case's definition, just before its backtest, which ranks by that system's name; that a lock keeps other Trial Folio processes on your machine from writing it meanwhile, but only those that lock the same file, not one that sees another `/tmp`, such as in a container, or one with another `TRIALFOLIO_LOCK_DIR`; and that nothing keeps Portfolio123's website, or another machine, from writing or using it at the same time;
+- where the definition came from: a file, by the definition's hash, or a snapshot, by its system's name and when it was read;
+- each node's weight, among the baseline's settings, and each variant's change;
+- each case's `rank_update`, the request that writes its definition, with the whole definition, line by line, and its hash, before its backtest;
+- the budget: two requests a case, a `rank_update` at 1 credit and a backtest at 5, at Portfolio123's documented costs, so 6 credits a case.
+
 ## The plan hash
 
 The plan hash is `sha256:` followed by 64 lowercase hex digits: the SHA-256 of the plan's canonical form, under [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html) ([plan hashing](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#plan-hashing)). It's the plan's identity, and it's what you approve.
@@ -74,7 +82,7 @@ Without a match, the command fails with `plan.approval_required`, exit code 2, o
 
 The full plan holds your configuration's values and formulas, which Trial Folio keeps out of its logs ([REQ-06](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#enduring-requirements)). So the plan display is written directly to stderr, the command's error output, never through logging, and Trial Folio shows the full plan only when that output is a terminal.
 
-When the error output isn't a terminal, as in a script or a CI job whose output may be kept, Trial Folio shows only the plan hash and the budget, never the formulas, and says that running the command in a terminal shows the full plan. For an experiment it also gives, when you go on with one, whether the plan is the current plan or a revision of it, and the counts so far: nothing from the configuration. With a matching `--approve`, the plan is already approved, so Trial Folio shows only the hash and the budget there too.
+When the error output isn't a terminal, as in a script or a CI job whose output may be kept, Trial Folio shows only the plan hash and the budget, never the formulas, and says that running the command in a terminal shows the full plan. For an experiment it also gives, when you go on with one, whether the plan is the current plan or a revision of it, and the counts so far: nothing from the configuration. With a matching `--approve`, the plan is already approved, so Trial Folio shows only the hash and the budget there too. For a plan with a ranking definition, both add one line, that the run overwrites `ApiRankingSystem` in your account, which holds nothing from the configuration.
 
 When the input isn't a terminal, Trial Folio doesn't ask. Without `--approve`, the command fails with `plan.approval_required`, or `plan.changed` for a revision, and the message gives the exact `--approve` option for this plan, with `--revision-reason` for a revision. With `--json`, the summary's `ids` hold the plan hash ([JSON summary](../reference/json-summary.md)). So a script can get a plan's hash without sending anything ([using Trial Folio from a script](../how-to/use-from-a-script.md)).
 

@@ -1363,8 +1363,8 @@ def test_a_record_0_4_0_adds_without_a_reader_fails_the_check(
 
 
 def test_without_ranking_the_records_check_reads_0_3_0s_versions_only(lab: Lab) -> None:
-    # As `trialfolio run` reads an experiment's records until release 0.4.0's R04-T12, so it
-    # refuses one with a definition by its version, as before.
+    # As `trialfolio run` read an experiment's records until release 0.4.0's R04-T12, which
+    # reads them with `ranking`: without it, one with a definition is refused by its version.
     _completed(lab)
 
     with LocalArtifactStore(lab.out) as store, pytest.raises(TrialFolioError) as caught:

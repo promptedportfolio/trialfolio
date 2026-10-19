@@ -68,7 +68,6 @@ from trialfolio.attempts import (
 from trialfolio.configuration import (
     ScreenConfigurationRead,
     original_values,
-    read_screen_configuration,
     read_screen_configuration_v1_1,
     screen_original_values_v1_1,
 )
@@ -375,12 +374,16 @@ class Execution:
         configuration with the definition's bytes, or the snapshot's files', which it checks are
         the plan's definition, and its snapshot, so `definition.xml` and `snapshot.json` hold
         what the plan was built from."""
-        # Validated already, when the plan was built from it.
+        # Validated already, when the plan was built from it. A configuration 1.1.0 whose ranking
+        # is a formula, a name, or an ID gives a plan 1.0.0 too, so release 0.4.0's reader, which
+        # reads either version, reads it (R04-T12).
         if not isinstance(self._plan, PlanV1_2):
             if definition is not None or snapshot is not None:
                 raise ValueError("only a run with a ranking definition is given one")
-            read = read_screen_configuration(configuration, CONFIGURATION_PATH)
-            self._configuration_version = read.schema_version
+            read = read_screen_configuration_v1_1(
+                configuration, CONFIGURATION_PATH, CONFIGURATION_PATH, files=False
+            )
+            self._configuration_version = read.configuration.schema_version
             return
         source = self._plan.ranking_source
         if (definition is None) == (snapshot is None) or (snapshot is None) != (

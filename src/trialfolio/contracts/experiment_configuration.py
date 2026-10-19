@@ -53,8 +53,8 @@ from trialfolio.contracts.screen_configuration import (
 ExperimentSchemaVersion = Literal["1.0.0"]
 
 EXPERIMENT_SCHEMA_VERSIONS: Final = get_args(ExperimentSchemaVersion)
-"""The experiment configuration versions `trialfolio run` reads, until its path for a ranking
-definition is built (release 0.4.0's R04-T12)."""
+"""The experiment configuration versions 0.3.0's reader reads. `trialfolio run` reads with
+release 0.4.0's reader from R04-T12, which reads 1.1.0 too."""
 
 EXPERIMENT_SCHEMA_VERSIONS_V1_1: Final = ("1.0.0", "1.1.0")
 """The experiment configuration versions 0.4.0's readers read: 1.0.0, and 1.1.0, which adds a

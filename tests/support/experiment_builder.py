@@ -11,7 +11,10 @@ directory. Its values are invented, but nothing labels them synthetic, so it's n
 command its `store_factory`.
 
 R03-T13 wrote it for the command's tests. R03-T11 added `kill`, which stops a run with `SIGKILL`
-under the test launcher, in a new process, while the fake server holds a reply.
+under the test launcher, in a new process, while the fake server holds a reply. From release
+0.4.0's R04-T12, the plan is built by 0.4.0's reader and planner, so an experiment whose baseline's
+ranking is a definition is built too, and the server answers each case's `POST /rank` from a
+script of its own, `ranks`, before its backtest (release 0.4.0, test pairing).
 """
 
 import os
@@ -25,9 +28,9 @@ from typing import Final, Protocol
 
 from tests.support import canaries, launcher
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
-from trialfolio.configuration import read_experiment_configuration
+from trialfolio.configuration import read_experiment_configuration_v1_1
 from trialfolio.experiment_records import read_experiment
-from trialfolio.planning import build_experiment_plan, installed_versions, plan_revision
+from trialfolio.planning import build_experiment_plan_v1_1, installed_versions, plan_revision_v1_1
 from trialfolio.provider import REQUEST_TIMEOUT_SECONDS
 from trialfolio.storage import ArtifactStore, LocalArtifactStore
 
@@ -44,6 +47,9 @@ UNAVAILABLE: Final = Reply(503, b"")
 REJECTED: Final = Reply(400, b"Unsupported value")
 """A 400 to a case's request: `failed`, possibly charged, with
 `provider.unsupported_capability`."""
+
+RANK_UPDATED: Final = Reply(200, (RESPONSES / "rank-update.json").read_bytes())
+"""Portfolio123's answer to a case's `rank_update` that wrote its definition."""
 
 REFUSED: Final = Reply(401, b"")
 """A 401 to Trial Folio's authentication call: `provider.auth_failed`, nothing sent."""
@@ -71,14 +77,15 @@ def returns(name: str = "complete.json") -> Reply:
 def plan_hash(config: Path, out: Path) -> str:
     """The hash of the plan `trialfolio run` builds from `config` into `out`, with the installed
     versions: a new experiment's, or, when `out` holds an experiment, its current plan's, or the
-    revision's. It reads the records without taking the lock."""
-    configuration = read_experiment_configuration(config.read_bytes(), str(config))
+    revision's. It reads the records without taking the lock, as release 0.4.0's `trialfolio run`
+    reads them, an experiment with a ranking definition's included."""
+    read = read_experiment_configuration_v1_1(config.read_bytes(), str(config), config)
     versions = installed_versions()
     if not (out / "experiment.lock").is_file():
-        return build_experiment_plan(configuration, versions).plan_hash
-    saved = read_experiment(LocalArtifactStore(out))
-    revision = plan_revision(configuration, versions, saved.plan)
-    return saved.plan.plan_hash if revision is None else revision.plan.plan_hash
+        return build_experiment_plan_v1_1(read, versions).plan_hash
+    saved = read_experiment(LocalArtifactStore(out), ranking=True)
+    revision = plan_revision_v1_1(read, versions, saved.current.plan)
+    return saved.current.plan.plan_hash if revision is None else revision.plan.plan_hash
 
 
 class Ran(Protocol):
@@ -120,17 +127,20 @@ class ExperimentBuilder[R: Ran]:
         *options: str,
         sends: Sequence[Reply] = (),
         authenticates: Sequence[Reply] | None = None,
+        ranks: Sequence[Reply] = (),
         approve: bool = True,
         store_factory: Callable[[str], ArtifactStore] = LocalArtifactStore,
         clock: Callable[[], datetime] | None = None,
     ) -> R:
         """Runs `config` into `out` with `--json` and `options`, and with `--approve` and the hash
         of the plan the run builds, unless `approve` is false. The server first gets `sends`, the
-        replies to the cases' requests, in order, and `authenticates`, the replies to Trial
+        replies to the cases' backtests, in order, `ranks`, the replies to their `rank_update`s,
+        for an experiment with a ranking definition, and `authenticates`, the replies to Trial
         Folio's authentication calls: one success when it isn't given and a case is sent."""
         if authenticates is None:
-            authenticates = (AUTHENTICATED,) if sends else ()
+            authenticates = (AUTHENTICATED,) if sends or ranks else ()
         self.server.reply("/auth", *authenticates)
+        self.server.reply("/rank", *ranks, method="POST")
         self.server.reply("/screen/backtest", *sends)
         argv: list[str | Path] = ["run", config, "--out", out, "--json", *options]
         if approve:
@@ -144,6 +154,7 @@ class ExperimentBuilder[R: Ran]:
         *options: str,
         sends: Sequence[Reply] = (),
         authenticates: Sequence[Reply] | None = None,
+        ranks: Sequence[Reply] = (),
         received: int,
         timeout: int = REQUEST_TIMEOUT_SECONDS,
     ) -> None:
@@ -156,8 +167,9 @@ class ExperimentBuilder[R: Ran]:
         Fails the test if the process ends before then, or the requests don't arrive within a
         minute. POSIX only: Windows has no `SIGKILL`."""
         if authenticates is None:
-            authenticates = (AUTHENTICATED,) if sends else ()
+            authenticates = (AUTHENTICATED,) if sends or ranks else ()
         self.server.reply("/auth", *authenticates)
+        self.server.reply("/rank", *ranks, method="POST")
         self.server.reply("/screen/backtest", *sends)
         before = len(self.server.received)
         argv = ["run", config, "--out", out, "--json", *options]

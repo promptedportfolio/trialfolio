@@ -9,11 +9,11 @@ Release 0.4.0's readers read its versions too: `read_screen_configuration_v1_1` 
 configuration 1.0.0 or 1.1.0, `read_experiment_configuration_v1_1` an experiment configuration
 1.0.0 or 1.1.0, each by its `schema_version`, and `read_ranking_snapshot_configuration` a
 `kind: ranking-snapshot` file. Version 1.1.0 adds a ranking given as a ranking system's
-definition or a ranking snapshot, and ranking variants. `trialfolio run` reads a ranking
-snapshot configuration from R04-T10. Until its path for a screen or an experiment of 1.1.0 is
-built (R04-T12), it reads those with 0.3.0's readers, which read 1.0.0 only, and give 0.3.0's
-messages: only 0.4.0's readers tell a 1.0.0 file that a key it gives needs 1.1.0, since `run`
-refuses 1.1.0 until then, and only they read a ranking variant's node paths, below.
+definition or a ranking snapshot, and ranking variants. `trialfolio run` reads a screen's and an
+experiment's configuration with 0.4.0's readers, from release 0.4.0's R04-T12, so it reads 1.1.0
+too, and tells a 1.0.0 file that a key it gives needs 1.1.0; and a ranking snapshot
+configuration from R04-T10. 0.3.0's readers, which read 1.0.0 only, give 0.3.0's messages, and
+only 0.4.0's readers read a ranking variant's node paths, below.
 
 0.4.0's readers of a screen and an experiment take the configuration file's path too, and read
 the definition file its `ranking.definition`, or its baseline's, names, from the configuration's
@@ -204,8 +204,8 @@ def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfigu
 
     Raises `TrialFolioError` with `config.invalid` when the file breaks any rule of the screen
     configuration. The message lists each problem, names its key, and includes no value. It's
-    0.3.0's, for a ranking given as a definition or a snapshot too, since `trialfolio run`, which
-    reads with this reader until R04-T12, refuses 1.1.0.
+    0.3.0's, for a ranking given as a definition or a snapshot too: `read_screen_configuration_v1_1`
+    is release 0.4.0's, which `trialfolio run` reads with.
     """
     document, plain = _read_document(content, source_name, "screen", SCREEN_SCHEMA_VERSIONS)
     return _validated(ScreenConfiguration, document, source_name, _unquoted(plain, _is_sent_text))
@@ -249,6 +249,7 @@ def read_screen_configuration_v1_1(
     *,
     definition: bytes | None = None,
     snapshot: SnapshotFiles | None = None,
+    files: bool = True,
 ) -> ScreenConfigurationRead:
     """Reads a screen configuration of a version release 0.4.0 reads, 1.0.0 or 1.1.0, by its
     `schema_version`, from the bytes of the file at `path`, named `source_name` in messages.
@@ -268,7 +269,9 @@ def read_screen_configuration_v1_1(
     two files of the snapshot `ranking.snapshot` names, read when the configuration was
     validated: they're read in their place, and no file is read. Raises `ValueError` when either
     is given for a configuration whose ranking doesn't name its kind, or a snapshot's files
-    given can't be a ranking.
+    given can't be a ranking. With `files` false, as the core reads the configuration of a plan
+    without a ranking definition, it reads no file either: a ranking given as a definition, or
+    named by a snapshot, without their bytes, is a `ValueError` (release 0.4.0's R04-T12).
     """
     document, plain = _read_document(
         content, source_name, "screen", SCREEN_SCHEMA_VERSIONS_V1_1, node_paths=True
@@ -281,6 +284,7 @@ def read_screen_configuration_v1_1(
         _no_definition_given(definition, snapshot)
         return ScreenConfigurationRead(configuration, None)
     read = _validated(ScreenConfigurationV1_1, document, source_name, unquoted)
+    _no_files(read.ranking, files, definition, snapshot)
     ranking = _ranking_read(read.ranking, "ranking", source_name, path, definition, snapshot)
     return ScreenConfigurationRead(read, *ranking)
 
@@ -304,8 +308,8 @@ def read_experiment_configuration(content: bytes, source_name: str) -> Experimen
     configuration. The message lists each problem, names its key, or a variant by its place, such
     as `variants.max_holdings[0]`, and includes no value: never a variant's key either, which is
     the user's text. It's 0.3.0's, for a ranking variant, or a baseline ranked by a definition or a
-    snapshot, too, and so is how it reads a ranking variant's keys, since `trialfolio run`, which
-    reads with this reader until R04-T12, refuses 1.1.0.
+    snapshot, too, and so is how it reads a ranking variant's keys:
+    `read_experiment_configuration_v1_1` is release 0.4.0's, which `trialfolio run` reads with.
     """
     document, plain = _read_document(content, source_name, "experiment", EXPERIMENT_SCHEMA_VERSIONS)
     unquoted = _unquoted(plain, _is_sent_experiment_text)
@@ -319,6 +323,7 @@ def read_experiment_configuration_v1_1(
     *,
     definition: bytes | None = None,
     snapshot: SnapshotFiles | None = None,
+    files: bool = True,
 ) -> ExperimentConfigurationRead:
     """Reads an experiment configuration of a version release 0.4.0 reads, 1.0.0 or 1.1.0, by its
     `schema_version`, from the bytes of the file at `path`, named `source_name` in messages.
@@ -334,7 +339,8 @@ def read_experiment_configuration_v1_1(
     `schema_version` 1.1.0.
 
     `definition` is the bytes of the baseline's definition file, and `snapshot` those of its
-    snapshot's two files, as `read_screen_configuration_v1_1` takes a screen's.
+    snapshot's two files, as `read_screen_configuration_v1_1` takes a screen's, and `files` is
+    as that function takes it.
     """
     document, plain = _read_document(
         content, source_name, "experiment", EXPERIMENT_SCHEMA_VERSIONS_V1_1, node_paths=True
@@ -353,6 +359,7 @@ def read_experiment_configuration_v1_1(
         unquoted,
         variant_settings=VARIANT_SETTINGS_V1_1,
     )
+    _no_files(read.baseline.ranking, files, definition, snapshot)
     baseline, read_snapshot = _ranking_read(
         read.baseline.ranking, "baseline.ranking", source_name, path, definition, snapshot
     )
@@ -366,6 +373,16 @@ def _no_definition_given(definition: bytes | None, snapshot: SnapshotFiles | Non
         raise ValueError("a definition's bytes are given only for a ranking given as a definition")
     if snapshot is not None:
         raise ValueError("a snapshot's files are given only for a ranking named by a snapshot")
+
+
+def _no_files(
+    ranking: RankingV1_1, files: bool, definition: bytes | None, snapshot: SnapshotFiles | None
+) -> None:
+    """Without `files`, a ranking that names a file or a directory, given without its bytes, is a
+    `ValueError`, so the reader reads no file."""
+    named = isinstance(ranking, DefinitionRanking | SnapshotRanking)
+    if not files and named and definition is None and snapshot is None:
+        raise ValueError("the configuration's ranking names a file, which isn't read here")
 
 
 def _ranking_read(
@@ -602,22 +619,29 @@ def _unquoted(plain: list[KeyPath], quoted: Callable[[KeyPath], bool]) -> list[s
 
 
 def read_run_configuration(
-    content: bytes, source_name: str
-) -> ScreenConfiguration | ExperimentConfiguration | RankingSnapshotConfiguration:
-    """Reads the configuration `trialfolio run` takes, from the bytes of a file named
-    `source_name` in messages: a screen configuration, an experiment configuration, or, from
-    release 0.4.0, a ranking snapshot configuration, by its `kind` (D-24, D-36).
+    content: bytes, source_name: str, path: str | os.PathLike[str]
+) -> ScreenConfigurationRead | ExperimentConfigurationRead | RankingSnapshotConfiguration:
+    """Reads the configuration `trialfolio run` takes, from the bytes of the file at `path`,
+    named `source_name` in messages: a screen configuration or an experiment configuration, 1.0.0
+    or 1.1.0, with release 0.4.0's readers, which read the definition file, or the snapshot's
+    directory, its ranking names, from `path`'s directory; or, from release 0.4.0, a ranking
+    snapshot configuration; by its `kind` (D-24, D-36). Release 0.4.0's R04-T12 made it read the
+    screen's and the experiment's with 0.4.0's readers, where it had read them with 0.3.0's.
 
-    Raises `TrialFolioError` with `config.invalid` as the reader of its kind does. A file that
-    breaks a YAML rule, isn't a mapping, or whose `kind` is missing or is none of them, such as
-    `review`, fails before any reads it, and the message names the three kinds.
+    Raises `TrialFolioError` as the reader of its kind does. A file that breaks a YAML rule, isn't
+    a mapping, or whose `kind` is missing or is none of them, such as `review`, fails with
+    `config.invalid` before any reads it, and the message names the three kinds.
     """
-    document, _ = _read_kind(content, source_name, ("screen", "experiment", "ranking-snapshot"))
+    # Read with node paths, as 0.4.0's readers read, so a ranking variant's `set` keys follow
+    # their rules here too, and a message names an entry by its place, never by its path.
+    document, _ = _read_kind(
+        content, source_name, ("screen", "experiment", "ranking-snapshot"), node_paths=True
+    )
     if document["kind"] == "experiment":
-        return read_experiment_configuration(content, source_name)
+        return read_experiment_configuration_v1_1(content, source_name, path)
     if document["kind"] == "ranking-snapshot":
         return read_ranking_snapshot_configuration(content, source_name)
-    return read_screen_configuration(content, source_name)
+    return read_screen_configuration_v1_1(content, source_name, path)
 
 
 def experiment_schema_version(content: bytes, source_name: str) -> object:

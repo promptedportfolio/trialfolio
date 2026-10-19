@@ -42,8 +42,8 @@ from trialfolio.contracts.common import (
 ScreenSchemaVersion = Literal["1.0.0"]
 
 SCREEN_SCHEMA_VERSIONS: Final = get_args(ScreenSchemaVersion)
-"""The screen configuration versions `trialfolio run` reads, until its path for a ranking
-definition is built (release 0.4.0's R04-T12)."""
+"""The screen configuration versions 0.3.0's reader reads. `trialfolio run` reads with release
+0.4.0's reader from R04-T12, which reads 1.1.0 too."""
 
 SCREEN_SCHEMA_VERSIONS_V1_1: Final = ("1.0.0", "1.1.0")
 """The screen configuration versions 0.4.0's readers read: 1.0.0, and 1.1.0, which adds a
@@ -66,9 +66,9 @@ RANKING_FORMS_MESSAGE_V1_1: Final = (
 
 LATER_VERSIONS: Final = "later_versions"
 """The validation context's key that makes a 1.0.0 model say which of a file's keys need
-schema_version 1.1.0, as 0.4.0's readers read a 1.0.0 file. Without it, a 1.0.0 model gives 0.3.0's
-messages, as 0.3.0's readers do: `trialfolio run` reads with them, and refuses 1.1.0, until its
-path for a ranking definition is built (release 0.4.0's R04-T12)."""
+schema_version 1.1.0, as 0.4.0's readers read a 1.0.0 file, which `trialfolio run` reads with from
+release 0.4.0's R04-T12. Without it, a 1.0.0 model gives 0.3.0's messages, as 0.3.0's readers
+do."""
 
 
 def _factset_only(value: object) -> object:

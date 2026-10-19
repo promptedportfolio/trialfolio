@@ -60,10 +60,11 @@ its `rank_update`, or after it and before its backtest was sent: it reads as ste
 either way, with one provider request (sending a definition). A plan whose baseline's ranking
 a snapshot names also holds the copy of the snapshot's record, `snapshot.json`, which, with its
 `definition.xml`, is the snapshot its `ranking_source` names, by their `artifact_id`s (release
-0.4.0's R04-T10); a plan whose ranking is a definition's file holds none.
-Without
-`ranking`, as `trialfolio run` reads the records until release 0.4.0's R04-T12, it reads 0.3.0's
-versions only.
+0.4.0's R04-T10); a plan whose ranking is a definition's file holds none. With `ranking`, a
+plan 1.1.0's configuration may also be version 1.1.0, whose baseline is ranked by a formula, a
+name, or an ID, which release 0.4.0's reader reads, without reading any file. Without `ranking`,
+it reads 0.3.0's versions only. `trialfolio run` reads with `ranking` from release 0.4.0's
+R04-T12.
 
 Nothing here writes, sends, or logs. A refusal is `input.not_a_run`, or
 `artifact.unknown_schema_version` for a record whose schema version has no reader, and its
@@ -300,7 +301,7 @@ _READABLE: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
     "settings": ("settings.csv", (TABLES_SCHEMA_VERSION,)),
 }
 """The schema versions this version reads, for each kind of record, with what they're called in
-messages: 0.3.0's, as `trialfolio run` reads them until release 0.4.0's R04-T12."""
+messages: 0.3.0's, as a read without `ranking` reads them."""
 
 _RANKING_READABLE: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
     "experiment_record": ("experiment records", ("1.0.0", "1.1.0")),
@@ -343,7 +344,10 @@ class SavedPlan:
     """Its `snapshot.json`, for a plan 1.3.0 whose baseline's ranking a snapshot names."""
     read: ExperimentConfigurationRead | None = None
     """For a plan 1.3.0, its configuration as release 0.4.0's reader read it, with its
-    `definition.xml`, from which its cases' weight rows take their originals."""
+    `definition.xml`, from which its cases' weight rows take their originals; and, read with
+    `ranking`, for a plan 1.1.0 whose configuration is version 1.1.0, ranked by a formula, a
+    name, or an ID, its configuration as that reader read it, from which its cases' tables take
+    their original values (R04-T12)."""
 
     def case(self, case_id: str) -> AnyPlanCase:
         """The plan's case with this `case_id`. Raises `KeyError` when it has none."""
@@ -879,9 +883,10 @@ class SavedExperiment:
 
     @property
     def plan(self) -> PlanV1_1:
-        """The current plan of an experiment without a ranking definition, which `trialfolio run`
-        resumes until release 0.4.0's R04-T12; `current` gives any experiment's. Raises
-        `TypeError` for a plan 1.3.0, which only a read with `ranking` reads."""
+        """The current plan of an experiment without a ranking definition, as 0.3.0's
+        experiments have; `current` gives any experiment's, which `trialfolio run` resumes from
+        release 0.4.0's R04-T12. Raises `TypeError` for a plan 1.3.0, which only a read with
+        `ranking` reads."""
         plan = self.current.plan
         if not isinstance(plan, PlanV1_1):
             raise TypeError("the current plan has a ranking definition: read it from `current`")
@@ -1352,8 +1357,11 @@ def _with_version(
         if entry is not None and entry.schema_version is not None:
             version = entry.schema_version
         return replace(saved, configuration_version=version, read=read)
+    unranked = _unranked_configuration(reader, content, path)
     if entry is not None and entry.schema_version is not None:
-        return replace(saved, configuration_version=entry.schema_version)
+        return replace(saved, configuration_version=entry.schema_version, read=unranked)
+    if unranked is not None:
+        return replace(saved, configuration_version=_V1_1, read=unranked)
     try:
         read = read_experiment_configuration(content, path)
     except TrialFolioError:
@@ -1362,6 +1370,26 @@ def _with_version(
         return replace(saved, configuration_version=read.schema_version)
     _check_configuration_version(reader, content, path)
     raise _refused(f"{named(path)} isn't an experiment configuration this version reads.")
+
+
+_V1_1: Final = "1.1.0"
+
+
+def _unranked_configuration(
+    reader: _Reader, content: bytes, path: str
+) -> ExperimentConfigurationRead | None:
+    """The configuration of a plan without a ranking definition, when it's version 1.1.0, whose
+    baseline is ranked by a formula, a name, or an ID, as release 0.4.0's reader reads it, which
+    reads no file, and the plan's cases' original values come from (R04-T12); None for any other,
+    and when the read doesn't take `ranking`, as `trialfolio run` read 0.3.0's versions only."""
+    if not reader.ranking:
+        return None
+    try:
+        if experiment_schema_version(content, path) != _V1_1:
+            return None
+        return read_experiment_configuration_v1_1(content, path, path, files=False)
+    except (TrialFolioError, ValueError):
+        return None
 
 
 def _ranked_configuration(reader: _Reader, saved: SavedPlan) -> ExperimentConfigurationRead:
@@ -2204,10 +2232,12 @@ def _originals(
     for a plan 1.3.0, its weight rows' originals, with the plan's `definition.xml`."""
     path = saved.configuration.path
     try:
-        if saved.read is not None and saved.definition is not None:
+        if saved.read is not None:
             originals, weights = experiment_original_values_v1_1(
                 saved.configuration_content, path, saved.read, case_key
             )
+            if saved.definition is None:  # a configuration 1.1.0 ranked another way
+                return originals, None
             return originals, RankingOriginals(weights, saved.definition)
         return experiment_original_values(saved.configuration_content, path, case_key), None
     except (TrialFolioError, ValueError):

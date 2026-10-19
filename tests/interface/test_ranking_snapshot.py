@@ -13,7 +13,8 @@ snapshot sends. The CLI's entry function runs in the test process, with the fake
 `urllib3`, the fixed clock, and the terminal through the test launcher.
 
 R04-AC08's checks that a screen's or an experiment's configuration naming a snapshot builds its
-plan through `trialfolio run` wait for R04-T12, which makes `run` read configurations 1.1.0;
+plan through `trialfolio run` are in `tests/interface/test_ranking_run.py` and
+`test_ranking_experiment.py`, which R04-T12 wrote when it made `run` read configurations 1.1.0;
 `tests/core/test_ranking_snapshot.py` makes them at the core.
 """
 

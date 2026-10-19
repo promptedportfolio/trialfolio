@@ -124,6 +124,8 @@ def test_a_screen_configuration_is_not_a_snapshot() -> None:
 def test_run_reads_a_snapshot_configuration() -> None:
     """`trialfolio run` takes `kind: ranking-snapshot` from R04-T10, which builds a snapshot's
     run. R04-T05 held that its reader refused the kind until then, naming the two kinds it ran."""
-    configuration = read_run_configuration(documented_example().encode(), "snapshot.yaml")
+    configuration = read_run_configuration(
+        documented_example().encode(), "snapshot.yaml", "snapshot.yaml"
+    )
 
     assert configuration == read(documented_example())
