@@ -314,7 +314,8 @@ def _counted_lines(run: ExperimentRun) -> list[str]:
         lines.append(
             "  At the documented costs, the requests counted so far can have cost at most"
             f" {counted(spent, 'credit')}, and the"
-            f" {counted(remaining, 'provider request')} that remain at most"
+            f" {counted(remaining, 'provider request')}"
+            f" {'that remains' if remaining == 1 else 'that remain'} at most"
             f" {counted(most_credits(run.plan.budget, remaining), 'credit')}."
         )
     uncovered = run.uncovered()

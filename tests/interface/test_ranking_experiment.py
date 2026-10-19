@@ -40,6 +40,7 @@ from tests.support.experiment_builder import (
 )
 from tests.support.fake_portfolio123 import Reply
 from tests.support.snapshot_builder import SnapshotBuilder, naming
+from tests.support.terminal import PseudoTerminal
 from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
 from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 
@@ -407,6 +408,33 @@ def test_a_remaining_budget_of_one_request_covers_no_case(
     assert error_code(outcome) == "execution.partial"
     assert cli.server.requests() == received
     assert counts(outcome)["provider_requests"] == 7
+
+
+@posix_only
+def test_a_lone_counted_request_costs_what_a_rank_update_costs(
+    cli: Cli, experiments: ExperimentBuilder[Outcome]
+) -> None:
+    """An attempt that sends a definition counts its `rank_update` first, and then its backtest,
+    so the baseline's refused `rank_update` can have cost 1 credit, not a backtest's 5: 1 and 3
+    attempts at 6 make 19 (plans with a ranking definition, the display's wording, the budget)."""
+    cli.ready()
+    out = cli.tmp / "experiment"
+    refused_baseline(cli, experiments, out)
+    received = cli.server.requests()
+
+    with PseudoTerminal() as terminal:
+        terminal.press("no\n")
+        outcome = cli(
+            "run", EXAMPLE, "--out", out, "--json", stdin=terminal.stdin, stderr=terminal.stderr
+        )
+    shown = terminal.shown()
+
+    assert outcome.exit_code == 2, shown
+    assert (
+        "At the documented costs, the requests counted so far can have cost at most 19 credits,"
+        " and the 1 provider request that remains at most 1 credit."
+    ) in shown
+    assert cli.server.requests() == received
 
 
 def test_without_a_terminal_a_resumes_overwrite_line_follows_its_budget(
