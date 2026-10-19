@@ -10,8 +10,13 @@ fields, later runs don't ask, and another license identifier or notice version a
 including license 1.0's, which 0.1.0 and 0.2.0 recorded, as release 0.2.1 gives); and R01-AC22 (the exact `<license_id>/<notice_version>` acknowledges for the
 process without a record, and any other value is rejected); to release 0.3.0's other checks in the
 default suite, which R03-T13 wrote ahead of R03-T11: `run` with an experiment's configuration,
-new or resumed, needs the acknowledgment too; and to docs/contracts.md, license acknowledgment. Through the CLI's entry function in the test process, with the per-user
-directories under a temporary home; the terminal is a real pseudo-terminal.
+new or resumed, needs the acknowledgment too; to release 0.4.0's, which R04-T13 wrote: `run` of a
+screen configuration and of an experiment configuration ranked by a definition, without an
+acknowledgment and without a terminal, fails with `license.not_acknowledged`, exit 2, and writes
+nothing, not even the ranking lock's file (a snapshot's `run` is in
+`tests/interface/test_ranking_snapshot.py`, which R04-T10 wrote ahead of this task); and to
+docs/contracts.md, license acknowledgment. Through the CLI's entry function in the test process,
+with the per-user directories under a temporary home; the terminal is a real pseudo-terminal.
 """
 
 import json
@@ -27,6 +32,7 @@ from tests.support.run_builder import REVIEW_CONFIGS
 from tests.support.terminal import PseudoTerminal
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
 from trialfolio.notices import CONCISE_NOTICE, FULL_NOTICE, LICENSE_ID, NOTICE_VERSION
+from trialfolio.ranking_lock import LOCK_FILE
 from trialfolio.userdirs import config_directory
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -124,6 +130,27 @@ def test_without_an_acknowledgment_an_experiment_fails_and_writes_nothing(
     assert error_code(outcome.stdout) == "license.not_acknowledged"
     assert snapshot(cli.tmp) == before
     assert len(cli.server.received) == received
+
+
+@pytest.mark.parametrize(
+    "path",
+    [config("definition.yaml"), experiment_config("ranking-example.yaml")],
+    ids=["screen", "experiment"],
+)
+def test_without_an_acknowledgment_a_run_with_a_definition_fails_and_writes_nothing(
+    cli: Cli, path: Path
+) -> None:
+    cli.credentials()
+    out = cli.tmp / "out"
+
+    outcome = cli("run", path, "--out", out, "--json")
+
+    assert outcome.exit_code == 2
+    assert error_code(outcome.stdout) == "license.not_acknowledged"
+    assert not out.exists()
+    assert snapshot(cli.tmp) == {"home": None}
+    assert not (cli.locks / LOCK_FILE).exists()
+    assert cli.server.requests() == []
 
 
 def test_version_and_help_work_without_an_acknowledgment(cli: Cli) -> None:

@@ -14,13 +14,24 @@ break changes real files of a real run or experiment.
   manifest lists break an experiment the experiment builder writes, with the same functions:
   `edit_record`, `edit_attempt`, `copy_attempt`, and `another_parser`.
 
+- **`BROKEN_RANKING_RUNS`** and **`BROKEN_RANKING_EXPERIMENTS`** hold release 0.4.0's R04-AC12
+  breaks of the records with a ranking definition: of a copy of the committed
+  `runs/synthetic-run-1.1.0/`, which `trialfolio report` refuses, and of a copy of the committed
+  `experiments/synthetic-experiment-1.1.0/`, which a resume refuses, each with the problem the
+  records check's message gives for it. **`UNKNOWN_RANKING_RUN_SCHEMA_VERSIONS`** and
+  **`UNKNOWN_RANKING_EXPERIMENT_SCHEMA_VERSIONS`** hold each record 0.4.0 adds, whose schema
+  version can have no reader. The break that needs a token a 401 or 403 to a `rank_update`
+  dropped breaks an experiment the experiment builder writes, with `copy_attempt`.
+
 A break that edits a file the manifest lists, with `rewrite` or `edit_json`, updates its manifest
-entry to match, so only the checks beyond the hashes can tell. An experiment's break, with
+entry to match, so only the checks beyond the hashes can tell, and one that removes such a file,
+with `unlist` or `unlist_record`, removes its entry too. An experiment's break, with
 `rewrite_record` or `edit_record`, does the same for the latest manifest, and for the
 `artifact_id` that each plan's `experiment.json` records for a plan's files, as release 0.3.0's
 broken experiments require. R02-T10 moved the runs' breaks here from
 `tests/core/test_review_inputs.py` and `tests/interface/test_report_command.py`, so the review's
-interface checks could share them; R03-T11 added the experiments'.
+interface checks could share them; R03-T11 added the experiments', and R04-T13 those with a
+ranking definition.
 """
 
 import json
@@ -32,7 +43,16 @@ from pathlib import Path
 from typing import Any, Final, cast
 
 from trialfolio.canonical import sha256_hex
-from trialfolio.tables import metrics_csv, read_metrics_csv
+from trialfolio.contracts.attempt import AttemptRecordV1_1
+from trialfolio.tables import (
+    metrics_csv,
+    read_metrics_csv,
+    read_settings_csv_v1_1,
+    settings_csv_v1_1,
+)
+
+FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
+DEFINITIONS: Final = FIXTURES / "experiment-configs" / "ranking"
 
 type Json = dict[str, Any]
 
@@ -72,6 +92,15 @@ def path_of(run: Path, role: str) -> str:
 
 def remove(run: Path, path: str) -> None:
     (run / path).unlink()
+
+
+def unlist(run: Path, path: str) -> None:
+    """Removes a file of a saved run, and its manifest entry, so only the checks of what a run
+    must hold can tell."""
+    (run / path).unlink()
+    manifest = json.loads((run / "manifest.json").read_bytes())
+    manifest["artifacts"] = [a for a in manifest["artifacts"] if a["path"] != path]
+    write_manifest(run, manifest)
 
 
 def change_bytes(run: Path, path: str) -> None:
@@ -210,8 +239,9 @@ def case_of(out: Path, key: str) -> str:
     return case_id
 
 
-_ATTEMPT_RECORDS: Final = ("authenticating.json", "started.json", "attempt.json")
-"""An attempt's records, in the order it writes them. Each holds its `session` and `sequence`."""
+_ATTEMPT_RECORDS: Final = ("authenticating.json", "updating.json", "started.json", "attempt.json")
+"""An attempt's records, in the order it writes them: an update record only when it sends a
+definition. Each holds its `session` and `sequence`."""
 
 
 def attempts_of(out: Path, key: str) -> list[str]:
@@ -262,9 +292,13 @@ def copy_attempt(out: Path, directory: str, case_id: str | None = None, **fields
         if record.get("authenticated_by") == record["attempt_id"]:
             record["authenticated_by"] = attempt_id
         record.update(case_id=case_id, attempt_id=attempt_id, **fields)
-        for reference in ("request", "response"):
-            if record.get(reference):
-                record[reference]["path"] = f"{copy}/{record[reference]['path'].rsplit('/', 1)[-1]}"
+        # A record 1.3.0 references its rank_update's files too.
+        for holder in (record, record.get("ranking_update") or {}):
+            for reference in ("request", "response"):
+                if holder.get(reference):
+                    holder[reference]["path"] = (
+                        f"{copy}/{holder[reference]['path'].rsplit('/', 1)[-1]}"
+                    )
         path.write_bytes(_json_bytes(record))
     return copy
 
@@ -422,3 +456,253 @@ UNKNOWN_EXPERIMENT_SCHEMA_VERSIONS: Final[dict[str, Callable[[Path], str]]] = {
 }
 """R03-AC17's records whose schema version may have no reader, by the path of each in a copy of
 the committed synthetic experiment, for `edit_record` to give it `unreadable`'s version."""
+
+
+# Broken runs and experiments with a ranking definition (release 0.4.0's R04-AC12)
+
+
+def unlist_record(out: Path, path: str) -> None:
+    """Removes a file of the experiment in `out`, and the latest manifest's entry for it, so only
+    the checks of what an experiment must hold can tell."""
+    (out / path).unlink()
+    latest = _numbered(out, "sessions/*/manifest.json")[-1]
+    manifest = json.loads(latest.read_bytes())
+    manifest["artifacts"] = [a for a in manifest["artifacts"] if a["path"] != path]
+    latest.write_bytes(_json_bytes(manifest))
+
+
+def _transport_changed(record: Json) -> None:
+    record["transport"]["urllib3"] = "0.0.1"
+
+
+def _rank_update_status(status: int) -> Callable[[Json], None]:
+    """Gives a record's `POST /rank` exchange another status."""
+
+    def change(record: Json) -> None:
+        (rank,) = [e for e in record["exchanges"] if e["request"] == "POST /rank"]
+        rank["status"] = status
+
+    return change
+
+
+def _backtest_after_a_failed_rank_update(record: Json) -> None:
+    """Gives an attempt record's `POST /rank` exchange a 500, and no saved `rank_update`
+    response, which follows only a 200, so the record shows a backtest sent after a `rank_update`
+    that didn't get its 200, and nothing else wrong."""
+    _rank_update_status(500)(record)
+    record["ranking_update"]["response"] = None
+
+
+def _another_weight(content: bytes, node: str) -> bytes:
+    """A `settings.csv` 1.1.0 with the weight row of `node` given another weight, 45."""
+    rows = read_settings_csv_v1_1(content, "settings.csv")
+    assert any(row.node == node for row in rows)
+    changed = [row.model_copy(update={"value": "45"}) if row.node == node else row for row in rows]
+    return settings_csv_v1_1(changed)
+
+
+def attempt_directory(run: Path) -> str:
+    """The directory of a run's one attempt, from the attempt record its manifest lists."""
+    return path_of(run, "attempt_record").rsplit("/", 1)[0]
+
+
+def _run_attempt_file(name: str) -> Callable[[Path], str]:
+    return lambda run: f"{attempt_directory(run)}/{name}"
+
+
+BROKEN_RANKING_RUNS: Final[dict[str, tuple[Callable[[Path], None], str]]] = {
+    "an attempt with started.json and no updating.json": (
+        lambda run: unlist(run, _run_attempt_file("updating.json")(run)),
+        "wrote its update record first",
+    ),
+    "an update record that disagrees with its start record": (
+        lambda run: edit_json(run, _run_attempt_file("updating.json")(run), _transport_changed),
+        "doesn't hold the update record's values and exchanges",
+    ),
+    "a started.json whose exchanges don't end with POST /rank and its 200": (
+        lambda run: edit_json(
+            run, _run_attempt_file("started.json")(run), _rank_update_status(500)
+        ),
+        "isn't a valid start record",
+    ),
+    # The manifest's entry is updated to match, so only the attempt record's reference catches
+    # it.
+    "a rank-update-request.json whose bytes aren't what the attempt record records": (
+        lambda run: rewrite(run, _run_attempt_file("rank-update-request.json")(run), b"{}\n"),
+        "which its manifest doesn't list as that file",
+    ),
+    "an attempt record 1.0.0 under a plan 1.2.0": (
+        lambda run: edit_json(
+            run,
+            _run_attempt_file("attempt.json")(run),
+            lambda record: record.update(schema_version="1.0.0"),
+        ),
+        "isn't the version an attempt under its plan writes",
+    ),
+    "a POST /screen/backtest exchange that doesn't follow a POST /rank with a 200": (
+        lambda run: edit_json(
+            run, _run_attempt_file("attempt.json")(run), _backtest_after_a_failed_rank_update
+        ),
+        "isn't a valid attempt record",
+    ),
+    "a run whose definition.xml is missing": (
+        lambda run: unlist(run, "definition.xml"),
+        "doesn't list definition.xml as the run's one ranking_definition",
+    ),
+    "a run whose definition isn't its ranking_source's": (
+        lambda run: rewrite(
+            run, "definition.xml", (DEFINITIONS / "synthetic-heavy.xml").read_bytes()
+        ),
+        "isn't its plan's ranking definition",
+    ),
+    "a weight row that isn't its definition's": (
+        lambda run: rewrite(
+            run,
+            "normalized/settings.csv",
+            _another_weight((run / "normalized/settings.csv").read_bytes(), "Value"),
+        ),
+        "weight rows aren't its definition's",
+    ),
+}
+"""R04-AC12's breaks of a copy of the committed run with a ranking definition, which
+`trialfolio report` refuses, each with the problem the message gives. Its one attempt, the
+baseline's, authenticated, so its `started.json` holds `POST /auth` and `POST /rank`."""
+
+UNKNOWN_RANKING_RUN_SCHEMA_VERSIONS: Final[dict[str, tuple[Callable[[Path], str], bool]]] = {
+    "run manifest 1.1.0": (lambda run: "manifest.json", False),
+    "plan 1.2.0": (lambda run: "plan.json", False),
+    "an update record": (_run_attempt_file("updating.json"), False),
+    "a start record 1.2.0": (_run_attempt_file("started.json"), False),
+    "an attempt record 1.2.0": (_run_attempt_file("attempt.json"), False),
+    "settings.csv 1.1.0's entry": (lambda run: "normalized/settings.csv", True),
+}
+"""R04-AC12's records of a run with a ranking definition whose schema version may have no
+reader, by the path of each in a copy of the committed run, and whether the version is the one the
+manifest's entry gives, which is the only one a table has, or the file's own."""
+
+
+def _experiment_attempt_file(key: str, name: str) -> Callable[[Path], str]:
+    return lambda out: f"{attempt_of(out, key)}/{name}"
+
+
+def _record_1_1_0(out: Path) -> None:
+    """An attempt record 1.1.0, valid, of an attempt of the baseline that ended before it
+    authenticated, under the current plan 1.3.0, in a new attempt's directory of session 2, which
+    no manifest lists."""
+    record = json.loads((out / attempt_of(out, "baseline") / "attempt.json").read_bytes())
+    attempt_id = str(uuid.uuid4())
+    # Validated from its JSON, as the strict model reads a file.
+    old = AttemptRecordV1_1.model_validate_json(
+        json.dumps(
+            {
+                "schema_version": "1.1.0",
+                "trialfolio_version": record["trialfolio_version"],
+                "attempt_id": attempt_id,
+                "case_id": record["case_id"],
+                "plan_hash": record["plan_hash"],
+                "session": 2,
+                "sequence": 9,
+                "authenticated_by": None,
+                "repeat_of": None,
+                "started_at": record["started_at"],
+                "provider_wrapper": record["provider_wrapper"],
+                "transport": record["transport"],
+                "ended_at": record["started_at"],
+                "outcome": "failed",
+                "error": {"code": "command.interrupted", "message": "Interrupted."},
+                "exchanges": [],
+                "possibly_charged": False,
+                "request": None,
+                "response": None,
+                "provider_metadata": {"cost": None, "quota_remaining": None},
+            }
+        )
+    )
+    directory = out / "cases" / record["case_id"] / "attempts" / attempt_id
+    directory.mkdir()
+    (directory / "attempt.json").write_bytes(old.model_dump_json(indent=2).encode())
+
+
+def _experiment_weight_changed(out: Path) -> None:
+    path = f"cases/{case_of(out, 'value-heavy')}/normalized/settings.csv"
+    rewrite_record(out, path, _another_weight((out / path).read_bytes(), "Value/Earnings Yield"))
+
+
+BROKEN_RANKING_EXPERIMENTS: Final[dict[str, tuple[Callable[[Path], object], str]]] = {
+    "an attempt with started.json and no updating.json": (
+        lambda out: unlist_record(out, _experiment_attempt_file("baseline", "updating.json")(out)),
+        "without the update record written before it",
+    ),
+    "an update record that disagrees with its start record": (
+        lambda out: edit_record(
+            out, _experiment_attempt_file("value-heavy", "updating.json")(out), _transport_changed
+        ),
+        "the start record doesn't hold the update record's values",
+    ),
+    "a started.json whose exchanges don't end with POST /rank and its 200": (
+        lambda out: edit_record(
+            out,
+            _experiment_attempt_file("value-heavy", "started.json")(out),
+            _rank_update_status(500),
+        ),
+        "isn't a valid start record",
+    ),
+    # The latest manifest's entry is updated to match, so only the attempt record's reference
+    # catches it.
+    "a rank-update-request.json whose bytes aren't what the attempt record records": (
+        lambda out: rewrite_record(
+            out,
+            _experiment_attempt_file("no-sales-yield", "rank-update-request.json")(out),
+            b"{}\n",
+        ),
+        "doesn't match the artifact_id its attempt record gives it",
+    ),
+    "an attempt record 1.1.0 under a plan 1.3.0": (
+        _record_1_1_0,
+        "aren't the version an attempt under their plan writes",
+    ),
+    "a POST /screen/backtest exchange that doesn't follow a POST /rank with a 200": (
+        lambda out: edit_record(
+            out,
+            _experiment_attempt_file("no-sales-yield", "attempt.json")(out),
+            _backtest_after_a_failed_rank_update,
+        ),
+        "isn't a valid attempt record",
+    ),
+    "a plan whose definition.xml is missing": (
+        lambda out: unlist_record(out, "plans/1/definition.xml"),
+        "`plans/1/definition.xml` is missing",
+    ),
+    "a plan whose definition isn't its ranking_source's": (
+        lambda out: rewrite_record(
+            out, "plans/2/definition.xml", (DEFINITIONS / "synthetic-heavy.xml").read_bytes()
+        ),
+        "isn't its plan's ranking definition",
+    ),
+    "a weight row that isn't its definition's": (
+        _experiment_weight_changed,
+        "weight rows aren't its case's definition's",
+    ),
+}
+"""R04-AC12's breaks of a copy of the committed synthetic experiment with a ranking definition,
+each with the problem the records check's message gives. Its current plan is `plans/2/`, and its
+latest manifest `sessions/2/manifest.json`. `baseline` authenticated in session 1, and
+`value-heavy` sent with its token after it; `no-sales-yield`, which the revision added,
+authenticated in session 2."""
+
+UNKNOWN_RANKING_EXPERIMENT_SCHEMA_VERSIONS: Final[dict[str, tuple[Callable[[Path], str], bool]]] = {
+    "experiment.json 1.1.0": (lambda out: "plans/2/experiment.json", False),
+    "plan 1.3.0": (lambda out: "plans/2/plan.json", False),
+    "an update record": (_experiment_attempt_file("value-heavy", "updating.json"), False),
+    "a start record 1.3.0": (_experiment_attempt_file("value-heavy", "started.json"), False),
+    "an attempt record 1.3.0": (_experiment_attempt_file("value-heavy", "attempt.json"), False),
+    "experiment manifest 1.1.0": (lambda out: "sessions/2/manifest.json", False),
+    "settings.csv 1.1.0's entry": (
+        lambda out: f"cases/{case_of(out, 'baseline')}/normalized/settings.csv",
+        True,
+    ),
+}
+"""R04-AC12's records of an experiment with a ranking definition whose schema version may have no
+reader, by the path of each in a copy of the committed synthetic experiment, and whether the
+version is the one the latest manifest's entry gives, which is the only one a table has, or the
+file's own."""

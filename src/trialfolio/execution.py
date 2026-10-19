@@ -430,7 +430,7 @@ class Execution:
             or (self._ranking and self._definition is None)
             or (self._snapshot_named and self._snapshot is None)
         ):
-            return error
+            return self._without_manifest(result, error)
         with EndingWithoutManifest(after="the attempt ended") as ended:
             error = self._normalize(configuration, result, error)
             self._write_ending(result.record, error)
@@ -444,6 +444,20 @@ class Execution:
             extra=self._log_fields("case.completed"),
         )
         return error
+
+    def _without_manifest(
+        self, result: AttemptResult, error: TrialFolioError | None
+    ) -> TrialFolioError | None:
+        """The error of a run whose attempt ended without the run writing its manifest, with what
+        the run's records say, as an experiment session's says it: an attempt's own error says
+        what happened to its requests once its attempt record is written, so it gets only what
+        the records say of the manifest (R04-AC13)."""
+        if error is None:
+            return None
+        detail = self._manifest.detail if result.recorded else self.ending_detail()
+        if error.message.endswith(detail):
+            return error
+        return error.with_detail(detail)
 
     def _new_attempt(self) -> Attempt | RankingAttempt:
         if isinstance(self._plan, PlanV1_2):

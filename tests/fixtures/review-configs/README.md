@@ -76,4 +76,5 @@ Each run is a screen configuration in [`screen-configs/`](../screen-configs/READ
 | `ranking-without-tables.yaml` | `runs/definition` | `definition.yaml` | `complete.json` |
 | | `runs/value-heavy` | `value-heavy.yaml` | A 400 |
 | `ranking-removal.yaml` | `runs/positions` | `positions.yaml` | `complete.json` |
+| `synthetic-ranking.yaml` | Two synthetic runs with a ranking definition: `synthetic`, the baseline, at `runs/synthetic`, and `synthetic-heavy`, at `runs/synthetic-heavy`, which declares `ranking` | The source of [`reviews/synthetic-ranking-review-1.0.0/`](../reviews/README.md), which the synthetic writer, `tests/support/synthetic_experiment.py`, reviews with `trialfolio review`, beside a copy of the committed `runs/synthetic-run-1.1.0/` and a synthetic run of `screen-configs/synthetic-heavy.yaml`: [artifact compatibility](../../../docs/contracts.md#artifact-compatibility) |
 | | `runs/without-first-yield` | `positions-without-first-yield.yaml` | `changed-metrics.json` |

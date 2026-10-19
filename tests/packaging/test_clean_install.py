@@ -11,7 +11,11 @@ of two runs the installed `trialfolio demo` wrote exits 0 under the network guar
 packaging part of R03-AC01 (the installed `trialfolio run` of `example.yaml`, without
 `--approve`, gives the summary the interface check gives: `plan.approval_required`, exit 2, no
 output directory, and `ids.plan_hash` and `cases`, with every case's key and `case_id`, with the
-plan hash the test computes with the core). The
+plan hash the test computes with the core); and to the packaging part of release 0.4.0's
+R04-AC01, which R04-T13 wrote: the installed `trialfolio run` of `ranking-example.yaml`, whose
+baseline is ranked by a definition, without `--approve`, gives the same summary, with the plan
+hash the test computes with the core, and the line that the run overwrites `ApiRankingSystem`,
+and sends nothing, takes no ranking lock, and creates no output directory. The
 locked runtime dependencies are exported with their hashes as `pylock.toml`, installed from uv's
 cache, which `uv sync` filled, and the wheel then without dependencies, so the versions come from
 `uv.lock` and nothing is downloaded. The environment is installed once for the module. The
@@ -32,10 +36,18 @@ import pytest
 from tests.packaging.conftest import ROOT, run_uv
 from tests.support.html_report import parse
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
-from trialfolio.configuration import read_experiment_configuration
+from trialfolio.configuration import (
+    read_experiment_configuration,
+    read_experiment_configuration_v1_1,
+)
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.contracts.review_manifest import ReviewManifest
-from trialfolio.planning import build_experiment_plan, installed_versions
+from trialfolio.planning import (
+    build_experiment_plan,
+    build_experiment_plan_v1_1,
+    installed_versions,
+)
+from trialfolio.ranking_lock import LOCK_DIRECTORY_VARIABLE
 from trialfolio.userdirs import CONFIG_DIRECTORY_VARIABLE, LOG_DIRECTORY_VARIABLE
 
 pytestmark = pytest.mark.packaging
@@ -230,3 +242,53 @@ def test_the_installed_run_of_an_experiment_without_approval_gives_its_plan_and_
     # Without a terminal, the plan is shown by its hash and its budget.
     assert f"Plan hash: {plan.plan_hash}" in result.stderr
     assert "Budget: at most 6 provider requests" in result.stderr
+
+
+RANKING_EXAMPLE = ROOT / "tests" / "fixtures" / "experiment-configs" / "ranking-example.yaml"
+
+
+def test_the_installed_run_of_a_ranking_experiment_without_approval_gives_its_plan(
+    environment: Path, tmp_path: Path
+) -> None:
+    env = demo_environment(tmp_path)
+    # The ranking lock's directory is the test's own, so a lock taken by mistake isn't the
+    # machine's.
+    locks = tmp_path / "locks"
+    locks.mkdir()
+    env[LOCK_DIRECTORY_VARIABLE] = str(locks)
+    out = tmp_path / "experiment"
+    content = RANKING_EXAMPLE.read_bytes()
+    read = read_experiment_configuration_v1_1(content, str(RANKING_EXAMPLE), RANKING_EXAMPLE)
+    plan = build_experiment_plan_v1_1(read, installed_versions())
+
+    result = run(
+        [command(environment, "trialfolio"), "run", RANKING_EXAMPLE, "--out", out, "--json"],
+        tmp_path,
+        env,
+    )
+
+    assert result.returncode == 2, result.stderr
+    summary = json.loads(result.stdout)
+    assert (summary["command"], summary["outcome"], summary["exit_code"]) == ("run", "failed", 2)
+    assert summary["error"]["code"] == "plan.approval_required"
+    assert summary["ids"] == {
+        "experiment_id": "value-momentum-weights",
+        "plan_hash": plan.plan_hash,
+    }
+    assert [(case["case_key"], case["case_id"], case["outcome"]) for case in summary["cases"]] == [
+        (case.case_key, case.case_id, "not_yet_run") for case in plan.cases
+    ]
+    assert [case["case_key"] for case in summary["cases"]] == [
+        "baseline",
+        "value-heavy",
+        "tilt-earnings-yield",
+        "no-sales-yield",
+    ]
+    assert summary["output_dir"] is None
+    assert not out.exists()
+    # Without a terminal, the plan is shown by its hash and its budget, and the line that the
+    # run overwrites ApiRankingSystem.
+    assert f"Plan hash: {plan.plan_hash}" in result.stderr
+    assert "Budget: at most 8 provider requests" in result.stderr
+    assert "overwrites ApiRankingSystem" in result.stderr
+    assert list(locks.iterdir()) == []

@@ -8,6 +8,6 @@ Synthetic ranking snapshot configurations for Trial Folio's tests ([fixtures](..
 
 | File | Contents | Criteria |
 |---|---|---|
-| `example.yaml` | The [snapshot example](../../../docs/contracts.md#ranking-snapshot-configuration), byte for byte | R04-AC08 |
-| `api-ranking-system.yaml` | The live check's snapshot: `system: 'ApiRankingSystem'`, the system Trial Folio writes | R04-AC07, R04-AC08 |
-| `canaries.yaml` | A canary string as the system's name | R04-AC11 |
+| `example.yaml` | The [snapshot example](../../../docs/contracts.md#ranking-snapshot-configuration), byte for byte | R04-AC08; the source of [`snapshots/synthetic-snapshot-1.0.0/`](../snapshots/README.md), which the synthetic writer takes with the demo's client |
+| `api-ranking-system.yaml` | The live check's snapshot: `system: 'ApiRankingSystem'`, the system Trial Folio writes | R04-AC07 and R04-AC08, in the live check, `tests/live/test_ranking.py` |
+| `canaries.yaml` | A canary string as the system's name, which `responses/rank-get-canaries.json` answers | R04-AC11, in `tests/interface/test_logs.py` |

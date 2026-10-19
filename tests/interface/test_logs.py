@@ -29,6 +29,20 @@ experiment's logs are only under `<out>/logs/`, and the run that found the lock 
 waiting at its approval prompt in another process under the terminal, wrote none. Each experiment
 is written with the experiment builder, and the revision's configuration is `canaries.yaml` with
 one variant's value and the budget changed, written in the test's directory.
+
+A ranking definition's runs follow them too. Those checks trace to R04-AC11, as release 0.4.0's
+test pairing gives it for `tests/interface/test_logs.py`: with canary values in a ranking
+definition's names, formulas, and weights, `experiment-configs/ranking/canaries.xml`, in a
+ranking variant's paths and weights, `ranking-canaries.yaml`, in a snapshot's system name,
+`ranking-snapshot-configs/canaries.yaml`, and in the responses, `rank-get-canaries.json` and a
+`rank_update`'s 400 whose message holds one, no canary appears in any log file after a screen run
+and an experiment with a definition, a resume, a repeat, a revision whose reason holds one, a
+snapshot, and a run that finds the ranking lock held, which writes none. Every canary does reach
+the records, so the scan means something. A `rank_update`'s events name the operation, its case's
+`case_id`, and its `attempt_id`, and a snapshot's events its plan hash and attempt ID, never the
+system's name or ID. The screen run's configuration is `screen-configs/canaries.yaml`, as schema
+version 1.1.0, ranked by `canaries.xml`, written in the test's directory beside a copy of it.
+R04-T13 wrote them.
 """
 
 import json
@@ -52,14 +66,18 @@ from tests.interface.conftest import (
 )
 from tests.support import canaries
 from tests.support.experiment_builder import (
+    RANK_UPDATED,
     UNAVAILABLE,
     ExperimentBuilder,
     experiment_config,
+    plan_hash,
     returns,
 )
 from tests.support.fake_portfolio123 import Reply
-from trialfolio.contracts.attempt import AttemptRecordV1_1
-from trialfolio.contracts.experiment_plan import PlanV1_1
+from tests.support.snapshot_builder import rank_get, snapshot_plan_hash
+from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3
+from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
+from trialfolio.ranking_lock import LOCK_FILE, RankingLock
 from trialfolio.storage import LocalArtifactStore, StoredFile
 from trialfolio.userdirs import log_directory
 
@@ -575,3 +593,249 @@ def test_a_run_that_finds_the_experiment_locked_writes_no_log(
     assert cast("dict[str, str]", locked.summary["error"])["code"] == "experiment.locked"
     assert found == ([log], before, False)
     assert logged_canaries(cli) == []
+
+
+# A ranking definition (R04-AC11)
+
+RANKING_EXPERIMENT = experiment_config("ranking-canaries.yaml")
+"""Its cases, in order: the baseline; the top-level weights' variant; the variant of the first
+composite's factors' weights; and the removal of that composite's second factor."""
+
+CANARY_DEFINITION = experiment_config("ranking/canaries.xml")
+SNAPSHOT_CANARIES = CONFIGS.parent / "ranking-snapshot-configs" / "canaries.yaml"
+
+TILT_KEY = "canary-key-0d3b7e19"
+"""The variant of the first composite's factors' weights, whose key is a canary: the third
+case's."""
+
+REJECTED_DEFINITION = Reply(400, f"Unsupported value: {canaries.RANK_UPDATE_MESSAGE}".encode())
+"""A 400 to a `rank_update` whose message holds a canary: the case is `failed`, possibly charged,
+and its backtest isn't sent."""
+
+RANK_UPDATE_STARTED = "attempt.rank_update.started"
+
+
+def ranking_screen(cli: Cli) -> Path:
+    """`screen-configs/canaries.yaml` as schema version 1.1.0, ranked by `canaries.xml`, written
+    in the test's directory beside a copy of it, and its path."""
+    text = CANARY_CONFIGURATION.read_text(encoding="utf-8")
+    text = text.replace("schema_version: 1.0.0", "schema_version: 1.1.0")
+    formula = "  formula: 'canary-formula-d29a1e87'\n  lower_is_better: false\n"
+    assert text.count(formula) == 1
+    text = text.replace(
+        formula, "  definition: 'canaries.xml'\n  ranking_method: percentile_nas_negative\n"
+    )
+    shutil.copyfile(CANARY_DEFINITION, cli.tmp / "canaries.xml")
+    path = cli.tmp / "ranking-screen.yaml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def reached(out: Path, *names: str) -> str:
+    """The text of every file under `out` whose name is one of `names`, logs left out."""
+    return "".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(out.rglob("*"))
+        if path.name in names and "logs" not in path.relative_to(out).parts
+    )
+
+
+def ranked(cli: Cli, experiments: Builder, *, ranks: list[Reply], sends: list[Reply]) -> Outcome:
+    """Runs `ranking-canaries.yaml` into the test's `experiment/` directory."""
+    cli.ready()
+    return experiments.run(RANKING_EXPERIMENT, cli.tmp / "experiment", ranks=ranks, sends=sends)
+
+
+def test_a_screen_run_with_a_definition_logs_no_canary_and_names_its_rank_update(
+    cli: Cli,
+) -> None:
+    cli.ready()
+    config = ranking_screen(cli)
+    cli.server.reply("/auth", AUTHENTICATED)
+    cli.server.reply("/rank", RANK_UPDATED, method="POST")
+    cli.server.reply("/screen/backtest", answered())
+    out = cli.tmp / "run"
+
+    outcome = cli("run", config, "--out", out, "--approve", plan_hash_for(config), "--json")
+
+    assert outcome.exit_code == 0, outcome.stderr
+    assert_logged_only_under(cli, out)
+    # Every canary of the definition reaches the run's records: its copy, the rank_update's
+    # request, and the plan, so the scan of the logs means something.
+    records = reached(out, "definition.xml", "rank-update-request.json", "plan.json")
+    assert all(canary in records for canary in canaries.RANKING_DEFINITION)
+    # The rank_update's event names the operation, the case, and the attempt.
+    events = lines(experiment_log(out))
+    (started,) = (event for event in events if event["event"] == RANK_UPDATE_STARTED)
+    summary = cast("dict[str, dict[str, str]]", outcome.summary)
+    assert started["case_id"] == summary["ids"]["case_id"]
+    assert started["attempt_id"] == summary["ids"]["attempt_id"]
+    assert started["plan_hash"] == summary["ids"]["plan_hash"]
+    assert "rank_update" in str(started["message"])
+
+
+def test_an_experiment_with_a_definition_logs_no_canary_of_its_definition_or_message(
+    cli: Cli, experiments: Builder
+) -> None:
+    """The tilt variant's `rank_update` gets a 400 whose message holds a canary, so its case
+    fails, and its backtest isn't sent."""
+    outcome = ranked(
+        cli,
+        experiments,
+        ranks=[RANK_UPDATED, RANK_UPDATED, REJECTED_DEFINITION, RANK_UPDATED],
+        sends=[answered(), answered(), answered()],
+    )
+
+    assert outcome.exit_code == 6, outcome.stderr
+    out = cli.tmp / "experiment"
+    assert_logged_only_under(cli, out)
+    records = reached(out, "definition.xml", "plan.json", "configuration.yaml")
+    assert all(canary in records for canary in canaries.RANKING_DEFINITION)
+    assert all(canary in records for canary in canaries.RANKING_VARIANT[:5])
+    failed = [
+        AttemptRecordV1_3.model_validate_json(path.read_bytes())
+        for path in out.glob("cases/*/attempts/*/attempt.json")
+    ]
+    (rejected,) = (record for record in failed if record.outcome == "failed")
+    assert rejected.error is not None
+    assert canaries.RANK_UPDATE_MESSAGE in rejected.error.message
+    # Each of the four rank_updates' events names its case and its attempt, by their IDs.
+    plan = PlanV1_3.model_validate_json((out / "plans/1/plan.json").read_bytes())
+    started = [e for e in lines(experiment_log(out)) if e["event"] == RANK_UPDATE_STARTED]
+    assert [event["case_id"] for event in started] == [case.case_id for case in plan.cases]
+    assert all("attempt_id" in event for event in started)
+    text = experiment_log(out).read_text(encoding="utf-8")
+    assert all(case.case_key not in text for case in plan.cases)
+
+
+def test_a_resume_with_a_definition_logs_no_canary(
+    cli: Cli, experiments: Builder, faults: FaultyStores
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    # The first case's attempt record can't be written, once its response is saved, so the run
+    # stops, and the resume writes the record from the saved response.
+    faults.fail_os("attempt.json")
+    stopped = experiments.run(
+        RANKING_EXPERIMENT, out, ranks=[RANK_UPDATED], sends=[answered()], store_factory=faults
+    )
+    assert stopped.exit_code == 4, stopped.stderr
+
+    resumed = experiments.run(
+        RANKING_EXPERIMENT, out, ranks=[RANK_UPDATED] * 3, sends=[answered()] * 3
+    )
+
+    assert resumed.exit_code == 0, resumed.stderr
+    assert_logged_only_under(cli, out)
+    events = [event["event"] for event in lines(experiment_log(out))]
+    assert "experiment.resumed" in events
+    assert events.count(RANK_UPDATE_STARTED) == 4
+
+
+def written(cli: Cli, text: str, name: str) -> Path:
+    """`text`, an experiment configuration ranked by `ranking/canaries.xml`, written in the
+    test's directory, beside a copy of the definition, and its path."""
+    (cli.tmp / "ranking").mkdir(exist_ok=True)
+    shutil.copyfile(CANARY_DEFINITION, cli.tmp / "ranking" / "canaries.xml")
+    path = cli.tmp / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_repeat_with_a_definition_logs_no_canary(cli: Cli, experiments: Builder) -> None:
+    # A budget of 10, so the repeat's two requests fit beside the 8 the first run sends.
+    text = RANKING_EXPERIMENT.read_text(encoding="utf-8")
+    config = written(cli, text.replace("provider_requests: 8", "provider_requests: 10"), "r.yaml")
+    cli.ready()
+    out = cli.tmp / "experiment"
+    first = experiments.run(
+        config,
+        out,
+        ranks=[RANK_UPDATED] * 4,
+        sends=[answered(), answered(), UNAVAILABLE, answered()],
+    )
+    assert first.exit_code == 6, first.stderr
+    case = cast("list[dict[str, str]]", first.summary["cases"])[2]
+    assert (case["case_key"], case["outcome"]) == (TILT_KEY, "unknown")
+    option = f"{TILT_KEY}:{case['repeat_attempt_id']}"
+
+    repeated = experiments.run(
+        config, out, "--repeat", option, ranks=[RANK_UPDATED], sends=[answered()]
+    )
+
+    assert repeated.exit_code == 0, repeated.stderr
+    assert_logged_only_under(cli, out)
+    events = [event["event"] for event in lines(experiment_log(out))]
+    assert "experiment.repeat.started" in events
+    assert events.count(RANK_UPDATE_STARTED) == 5
+
+
+def test_a_revision_with_a_definition_logs_no_canary_and_not_its_reason(
+    cli: Cli, experiments: Builder
+) -> None:
+    first = ranked(cli, experiments, ranks=[RANK_UPDATED] * 4, sends=[answered()] * 4)
+    assert first.exit_code == 0, first.stderr
+    # The tilt variant's weights changed, which adds a case and retires one, and a budget of 10.
+    text = RANKING_EXPERIMENT.read_text(encoding="utf-8")
+    for before, after in (("71.4286", "71.4285"), ("28.5714", "28.5715")):
+        assert text.count(before) == 1
+        text = text.replace(before, after)
+    revised = written(
+        cli, text.replace("provider_requests: 8", "provider_requests: 10"), "revised.yaml"
+    )
+    out = cli.tmp / "experiment"
+
+    outcome = experiments.run(
+        revised,
+        out,
+        "--revision-reason",
+        canaries.REVISION_REASON,
+        ranks=[RANK_UPDATED],
+        sends=[answered()],
+    )
+
+    assert outcome.exit_code == 0, outcome.stderr
+    assert_logged_only_under(cli, out)
+    events = [event["event"] for event in lines(experiment_log(out))]
+    assert events.count("experiment.plan.recorded") == 2
+    record = (out / "plans/2/experiment.json").read_text(encoding="utf-8")
+    assert canaries.REVISION_REASON in record
+    assert all(weight in reached(out, "plan.json") for weight in ("71.4285", "28.5715"))
+
+
+def test_a_snapshot_logs_no_canary_and_names_only_its_plan_and_attempt(cli: Cli) -> None:
+    cli.ready()
+    cli.server.reply("/auth", AUTHENTICATED)
+    cli.server.reply("/rank", rank_get("rank-get-canaries.json"), method="GET")
+    out = cli.tmp / "snapshot"
+    approve = snapshot_plan_hash("canaries.yaml")
+
+    outcome = cli("run", SNAPSHOT_CANARIES, "--out", out, "--approve", approve, "--json")
+
+    assert outcome.exit_code == 0, outcome.stderr
+    assert_logged_only_under(cli, out)
+    # The system's name and the response reach the snapshot's records.
+    records = reached(out, "snapshot.json", "definition.xml", "response.json", "plan.json")
+    assert all(canary in records for canary in canaries.SNAPSHOT[:2])
+    assert all(canary in records for canary in canaries.RANKING_DEFINITION)
+    events = lines(experiment_log(out))
+    (ended,) = (event for event in events if event["event"] == "snapshot.completed")
+    ids = cast("dict[str, str]", outcome.summary["ids"])
+    assert (ended["plan_hash"], ended["attempt_id"]) == (approve, ids["attempt_id"])
+    assert all("case_id" not in event for event in events)
+
+
+def test_a_run_that_finds_the_ranking_lock_held_writes_no_log(cli: Cli) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    approve = plan_hash(RANKING_EXPERIMENT, out)
+
+    with RankingLock(cli.locks / LOCK_FILE):
+        locked = cli("run", RANKING_EXPERIMENT, "--out", out, "--approve", approve, "--json")
+
+    assert locked.exit_code == 4, locked.stderr
+    assert cast("dict[str, str]", locked.summary["error"])["code"] == "experiment.locked"
+    assert not out.exists()
+    assert log_files(cli) == []
+    assert not log_directory(os.environ).exists()
+    assert cli.server.received == ()
