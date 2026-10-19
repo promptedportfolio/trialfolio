@@ -1038,6 +1038,35 @@ def test_the_evidence_needs_each_result_in_order_and_not_the_report(review: Revi
 # Weight rows (R04-AC04)
 
 
+WEIGHT_ROWS = [
+    (
+        "A weight row compares one node's weight, named beside ranking_weight by its canonical"
+        " path: the baseline's nodes, in its definition's order, then the result's other nodes,"
+        " in its. A node is the same node in both runs when its canonical path is the same. A run"
+        " that doesn't have the node gives absent when its record shows its ranking in full, as a"
+        " definition or a formula, and leaves the weight unknown when it names a ranking system"
+        " by name or ID, whose definition wasn't captured. A result that declares ranking"
+        " declares each weight that differs, with its reason. A weight that's the same isn't"
+        " flagged as a declared change that wasn't observed: the declaration is of the ranking,"
+        " which its own row shows."
+    ),
+    (
+        "A removal shifts the positions of the nodes after the factor it removes, so a node"
+        " without a name, or with a sibling's name, may have another canonical path in the other"
+        " run, and be compared with another node, or with absent."
+    ),
+]
+"""How a review with weight rows says, in section 2, how they're compared, where `absent` and an
+unknown weight come from, and the alignment's limit, as R04-T11 words it."""
+
+
+def weight_rows_text(document: Document) -> list[str]:
+    """Section 2's paragraphs from the first of `WEIGHT_ROWS` on, as many as it has."""
+    paragraphs = [p.text for p in document.root.by_id("definitions").find_all("p")]
+    start = paragraphs.index(WEIGHT_ROWS[0])
+    return paragraphs[start : start + len(WEIGHT_ROWS)]
+
+
 def test_a_review_with_weight_rows_names_each_by_its_node_beside_its_setting(
     review: Review,
 ) -> None:
@@ -1058,13 +1087,19 @@ def test_a_review_with_weight_rows_names_each_by_its_node_beside_its_setting(
         "the rules of screen-run-differences version 2: its 23 settings, with a weight row after"
         " ranking for each node of either run's ranking definition, and then its 20 metrics."
     ) in definitions.text
-    assert "A weight row compares one node's weight, named beside ranking_weight by its" in (
-        definitions.text
-    )
+    assert weight_rows_text(document) == WEIGHT_ROWS
     assert "The settings that read the same as the baseline's: 28 of 32 for value-heavy." in (
         definitions.text
     )
     assert document.dd("Method") == ["screen-run-differences version 2"]
+
+
+def test_a_review_of_a_removal_states_the_alignments_limit(review: Review) -> None:
+    """`without-first-yield`'s removal shifts the positions of the nodes after the factor it
+    removes, the limit section 2 states."""
+    document = review("ranking-removal.yaml").document
+
+    assert weight_rows_text(document) == WEIGHT_ROWS
 
 
 def test_the_baselines_settings_hold_its_weight_rows(review: Review) -> None:
