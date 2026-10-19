@@ -27,10 +27,13 @@ Its steps are the live check's, in [release 0.4.0](docs/releases/0.4.0-ranking-w
    requests and 6 credits, after `ApiRankingSystem` held `earnings-heavy`'s definition. Its
    `case_id` is the baseline's, and every value of its `metrics.csv` equals the baseline case's.
 3. **The snapshot,** `ranking-snapshot-configs/api-ranking-system.yaml`: one `rank_get` of
-   `ApiRankingSystem`, 1 request and 1 credit. Its `definition.xml` is the restore's definition,
-   byte for byte, and `snapshot.json` gives ranking method 2, `USD`, and `Stock`. The restore's
-   configuration, with the snapshot in place of its definition, then plans offline, without
-   credentials, and its case is the restore's.
+   `ApiRankingSystem`, 1 request and 1 credit. Its `definition.xml` is the restore's definition
+   as XML, by its canonical form, and `snapshot.json` gives ranking method 2, `USD`, and `Stock`:
+   Portfolio123 stores a definition as equivalent XML, in its own serialization, so not always
+   byte for byte, as R04-T13's first live check found, and the owner decided on 2026-10-19. The
+   restore's configuration, with the snapshot in place of its definition, then plans offline,
+   without credentials, with the restore's weights; its case is the restore's exactly when the
+   snapshot holds the definition's bytes, since a case is identified by its definition's bytes.
 4. **The resume:** the experiment's command again, under the full guard and without the
    credentials. It resumes, sends nothing, takes no ranking lock, and writes `sessions/2/`.
 
@@ -51,6 +54,7 @@ Trial Folio reads no list of the account's ranking systems. The run record,
 
 import json
 import os
+import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -107,6 +111,17 @@ def metric_values(path: Path) -> dict[tuple[str, str], tuple[str | None, str]]:
     available. Read as plain values, never shown."""
     rows = read_metrics_csv(path.read_bytes(), path.name)
     return {(row.subject, row.metric_id): (row.value, row.availability) for row in rows}
+
+
+def canonical(content: bytes) -> str:
+    """A definition as XML, by its canonical form (C14N 2.0): its elements, attributes, values,
+    and text, whatever the order of its attributes, and whatever lies outside its root."""
+    return ET.canonicalize(content.decode("utf-8"))
+
+
+def weights(plan: PlanV1_2) -> list[tuple[str | None, object]]:
+    """Each weight row of a screen run's plan: its node's canonical path, and its weight."""
+    return [(row.node, row.value) for row in plan.cases[0].settings if row.node is not None]
 
 
 def events(log: Path) -> list[str]:
@@ -246,23 +261,36 @@ def test_a_live_weight_variant_changes_a_metric_and_the_baselines_definition_res
     assert isinstance(cost, int), "Portfolio123 reported no cost"
     spent += cost
     assert spent <= budget, f"the requests used {spent} credits, over the budget of {budget}"
-    read_back = (snapshot / "definition.xml").read_bytes() == DEFINITION.read_bytes()
+    # Portfolio123 stores a definition as equivalent XML, in its own serialization, so the
+    # snapshot gives the restore's definition as XML, not always byte for byte.
+    read_back = (snapshot / "definition.xml").read_bytes()
+    as_xml = canonical(read_back) == canonical(DEFINITION.read_bytes())
+    same_bytes = read_back == DEFINITION.read_bytes()
     system = RankingSnapshotRecord.model_validate_json(
         (snapshot / "snapshot.json").read_bytes()
     ).system
     as_sent = (system.ranking_method, system.currency, system.type) == (2, "USD", "Stock")
-    assert read_back, "the snapshot's definition.xml isn't the definition the restore sent"
+    assert as_xml, "the snapshot's definition.xml isn't, as XML, the definition the restore sent"
     assert as_sent, "snapshot.json doesn't give ranking method 2, USD, and Stock"
-    # The restore's configuration, with the snapshot in place of its definition, plans offline.
+    # The restore's configuration, with the snapshot in place of its definition, plans offline,
+    # with the restore's weights. A case is identified by its definition's bytes, so its case is
+    # the restore's exactly when the snapshot holds the definition's bytes.
     named = naming(RESTORE, snapshot, PAYLOADS / f"named-{stamp}")
+    named_plan = build_plan_v1_1(
+        read_screen_configuration_v1_1(named.read_bytes(), str(named), named), versions
+    )
+    assert isinstance(named_plan, PlanV1_2)
     exit_code, summary = trialfolio(
         "run", named, "--out", PAYLOADS / f"unsent-{stamp}", env=offline
     )
 
     assert exit_code == 2
     assert error_code(summary) == "plan.approval_required"
-    assert summary["ids"]["case_id"] == baseline.case_id
+    assert summary["ids"]["case_id"] == named_plan.cases[0].case_id
+    assert weights(named_plan) == weights(restore_plan)
+    assert (named_plan.cases[0].case_id == baseline.case_id) == same_bytes
     assert not (PAYLOADS / f"unsent-{stamp}").exists()
+    print(f"The snapshot held the definition's bytes: {'yes' if same_bytes else 'no'}.")
 
     # 4. The resume, under the full guard: localhost only, and no credentials.
     exit_code, summary = trialfolio(*command, env=offline)
