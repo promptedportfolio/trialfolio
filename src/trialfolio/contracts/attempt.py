@@ -17,8 +17,7 @@ before the `rank_update`, and `started.json` before the backtest. Its attempt re
 records 1.2.0 too, with the one request `rank_get`, and no case.
 """
 
-from datetime import datetime
-from typing import Annotated, Literal, Protocol, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, StringConstraints, model_validator
 
@@ -169,54 +168,24 @@ class AttemptRecord(_AttemptIdentity):
         return self
 
 
-class _Ending(Protocol):
-    """What `check_ending` reads of an attempt record, of either version."""
+type _OneRequest = AttemptRecord | AttemptRecordV1_1 | AttemptRecordV1_2
+"""An attempt record of an attempt with one request, whose ending `check_ending` checks: 1.0.0,
+1.1.0, and a snapshot's 1.2.0."""
 
-    @property
-    def started_at(self) -> datetime: ...
-    @property
-    def ended_at(self) -> datetime: ...
-    @property
-    def outcome(self) -> Literal["succeeded", "failed", "unknown"]: ...
-    @property
-    def error(self) -> ErrorDetail | None: ...
-    @property
-    def exchanges(self) -> tuple[Exchange, ...]: ...
-    @property
-    def possibly_charged(self) -> bool: ...
-    @property
-    def request(self) -> ArtifactReference | None: ...
-    @property
-    def response(self) -> SavedResponse | None: ...
+type _AnyRecord = _OneRequest | AttemptRecordV1_3
 
 
-def check_ending(record: _Ending) -> tuple[list[Exchange], list[Exchange]]:  # noqa: C901 - RF-T06 shortens it.
+def check_ending(record: _OneRequest) -> tuple[list[Exchange], list[Exchange]]:
     """Raises `ValueError` unless the attempt record's ending is consistent, by the rules both
     versions share: its outcome, error, files, and `possibly_charged` follow its exchanges, as
     0.1.0's failure table gives them. Returns its request's exchanges and its authentication
     exchanges, for the rule of its version."""
-    if record.ended_at < record.started_at:
-        raise ValueError("ended_at must not be before started_at")
-    if (record.error is None) != (record.outcome == "succeeded"):
-        raise ValueError("error must be given exactly when the outcome isn't succeeded")
+    _check_ended(record)
     if record.request is not None and record.request.path.rsplit("/", 1)[-1] != "request.json":
         raise ValueError("the redacted request is saved as request.json")
     if (record.response is not None) != (record.outcome == "succeeded"):
         raise ValueError("a response is saved exactly when the attempt succeeded")
-    sends = [e for e in record.exchanges if e.request != AUTHENTICATION_REQUEST]
-    if len(sends) > 1:
-        raise ValueError("the request is sent at most once, so it has at most one exchange")
-    authentication = [e for e in record.exchanges if e.request == AUTHENTICATION_REQUEST]
-    if len(authentication) > 1:
-        raise ValueError("an attempt has at most one authentication exchange")
-    if authentication and record.exchanges[0] != authentication[0]:
-        raise ValueError("authentication must precede the request")
-    if sends and record.request is None:
-        raise ValueError("a request exchange requires its saved request reference")
-    if any(e.note is not None for e in authentication):
-        raise ValueError("only the request's exchange can carry a note")
-    if any(e.note is not None for e in sends) and record.outcome != "succeeded":
-        raise ValueError("a note marks a restarted attempt that succeeded")
+    sends, authentication = _one_request_exchanges(record)
     outcomes = _outcomes_of(sends[0] if sends else None, saved=record.response is not None)
     if record.outcome not in outcomes:
         raise ValueError(
@@ -231,6 +200,37 @@ def check_ending(record: _Ending) -> tuple[list[Exchange], list[Exchange]]:  # n
             "the request may have reached Portfolio123: an exchange other than "
             "authentication that isn't not_connected"
         )
+    return sends, authentication
+
+
+def _check_ended(record: _AnyRecord) -> None:
+    """Raises `ValueError` unless the attempt record ends after it starts, with an error exactly
+    when it didn't succeed: the first rules of every version's ending."""
+    if record.ended_at < record.started_at:
+        raise ValueError("ended_at must not be before started_at")
+    if (record.error is None) != (record.outcome == "succeeded"):
+        raise ValueError("error must be given exactly when the outcome isn't succeeded")
+
+
+def _one_request_exchanges(record: _OneRequest) -> tuple[list[Exchange], list[Exchange]]:
+    """Raises `ValueError` unless the attempt record's exchanges are its authentication's, at
+    most once and first, and its request's, at most once, with its saved request, and a note
+    only on a restarted request's that succeeded. Returns the request's and the
+    authentication's."""
+    sends = [e for e in record.exchanges if e.request != AUTHENTICATION_REQUEST]
+    if len(sends) > 1:
+        raise ValueError("the request is sent at most once, so it has at most one exchange")
+    authentication = [e for e in record.exchanges if e.request == AUTHENTICATION_REQUEST]
+    if len(authentication) > 1:
+        raise ValueError("an attempt has at most one authentication exchange")
+    if authentication and record.exchanges[0] != authentication[0]:
+        raise ValueError("authentication must precede the request")
+    if sends and record.request is None:
+        raise ValueError("a request exchange requires its saved request reference")
+    if any(e.note is not None for e in authentication):
+        raise ValueError("only the request's exchange can carry a note")
+    if any(e.note is not None for e in sends) and record.outcome != "succeeded":
+        raise ValueError("a note marks a restarted attempt that succeeded")
     return sends, authentication
 
 
@@ -501,55 +501,48 @@ class RankingUpdate(ContractModel):
         return self
 
 
-class _RankingEnding(Protocol):
-    """What `check_ranking_ending` reads of an attempt record 1.2.0 or 1.3.0."""
-
-    @property
-    def started_at(self) -> datetime: ...
-    @property
-    def ended_at(self) -> datetime: ...
-    @property
-    def operation(self) -> RankingOperation: ...
-    @property
-    def outcome(self) -> Literal["succeeded", "failed", "unknown"]: ...
-    @property
-    def error(self) -> ErrorDetail | None: ...
-    @property
-    def exchanges(self) -> tuple[Exchange, ...]: ...
-    @property
-    def possibly_charged(self) -> bool: ...
-    @property
-    def ranking_update(self) -> RankingUpdate | None: ...
-    @property
-    def request(self) -> ArtifactReference | None: ...
-    @property
-    def response(self) -> SavedResponse | None: ...
+type _Ranking = AttemptRecordV1_2 | AttemptRecordV1_3
+"""An attempt record whose ending `check_ranking_ending` checks: 1.2.0, a screen run's that
+sends a definition or a snapshot's, and 1.3.0."""
 
 
-def check_ranking_ending(record: _RankingEnding) -> list[Exchange]:  # noqa: C901 - RF-T06 shortens it.
+def check_ranking_ending(record: _Ranking) -> list[Exchange]:
     """Raises `ValueError` unless an attempt record 1.2.0's or 1.3.0's ending is consistent, as
     sending a definition gives it: a snapshot's `rank_get` by 0.1.0's rules; and an attempt with a
     definition's exchanges in order, its authentication's, then `POST /rank`, then
     `POST /screen/backtest`, each at most once, with its outcome, error, files, and
     `possibly_charged` following them. Returns its exchanges other than authentication's."""
     if record.operation == "rank_get":
-        if record.ranking_update is not None:
-            raise ValueError("a snapshot's attempt sends no rank_update")
-        sends, _ = check_ending(record)
-        if any(exchange.request != RANK_GET_REQUEST for exchange in sends):
-            raise ValueError("a snapshot's attempt sends one GET /rank, and nothing else")
-        return sends
+        return _check_snapshot_ending(record)
     update = record.ranking_update
     if update is None:
         raise ValueError("an attempt that sends a definition records its rank_update")
-    if record.ended_at < record.started_at:
-        raise ValueError("ended_at must not be before started_at")
-    if (record.error is None) != (record.outcome == "succeeded"):
-        raise ValueError("error must be given exactly when the outcome isn't succeeded")
+    _check_ended(record)
     if record.request is not None and record.request.path.rsplit("/", 1)[-1] != "request.json":
         raise ValueError("the backtest's redacted request is saved as request.json")
     if (record.response is not None) != (record.outcome == "succeeded"):
         raise ValueError("the backtest's response is saved exactly when the attempt succeeded")
+    rank, backtest = _definition_exchanges(record)
+    _check_rank_update(update, rank, backtest)
+    _check_backtest_and_notes(record, rank, backtest)
+    return _check_definition_outcome(record, update, rank, backtest)
+
+
+def _check_snapshot_ending(record: "AttemptRecordV1_2") -> list[Exchange]:
+    """Raises `ValueError` unless a snapshot's attempt record ends by 0.1.0's rules, with its one
+    `GET /rank` and no `rank_update`. Returns its request's exchanges."""
+    if record.ranking_update is not None:
+        raise ValueError("a snapshot's attempt sends no rank_update")
+    sends, _ = check_ending(record)
+    if any(exchange.request != RANK_GET_REQUEST for exchange in sends):
+        raise ValueError("a snapshot's attempt sends one GET /rank, and nothing else")
+    return sends
+
+
+def _definition_exchanges(record: _Ranking) -> tuple[Exchange | None, Exchange | None]:
+    """Raises `ValueError` unless an attempt with a definition's exchanges come in order, each at
+    most once, with no note on its authentication's. Returns its `rank_update`'s exchange and its
+    backtest's, each None when it made none."""
     order = (AUTHENTICATION_REQUEST, RANK_UPDATE_REQUEST, SCREEN_BACKTEST_REQUEST)
     if any(exchange.request not in order for exchange in record.exchanges):
         raise ValueError("an attempt that sends a definition sends POST /rank, then its backtest")
@@ -561,10 +554,16 @@ def check_ranking_ending(record: _RankingEnding) -> list[Exchange]:  # noqa: C90
         )
     found = {exchange.request: exchange for exchange in record.exchanges}
     authentication = found.get(AUTHENTICATION_REQUEST)
-    rank, backtest = found.get(RANK_UPDATE_REQUEST), found.get(SCREEN_BACKTEST_REQUEST)
     if authentication is not None and authentication.note is not None:
         raise ValueError("only a request's exchange can carry a note")
-    _check_rank_update(update, rank, backtest)
+    return found.get(RANK_UPDATE_REQUEST), found.get(SCREEN_BACKTEST_REQUEST)
+
+
+def _check_backtest_and_notes(
+    record: _Ranking, rank: Exchange | None, backtest: Exchange | None
+) -> None:
+    """Raises `ValueError` unless a backtest's exchange comes with its saved request, and a note
+    on either request's exchange marks the outcome a resume records with it."""
     if backtest is not None and record.request is None:
         raise ValueError("a backtest's exchange requires its saved request reference")
     if backtest is not None and backtest.note is not None and record.outcome != "succeeded":
@@ -574,6 +573,13 @@ def check_ranking_ending(record: _RankingEnding) -> list[Exchange]:  # noqa: C90
             "a note on the rank_update marks an attempt a resume recorded as failed, from its "
             "update record and the rank_update's saved response"
         )
+
+
+def _check_definition_outcome(
+    record: _Ranking, update: RankingUpdate, rank: Exchange | None, backtest: Exchange | None
+) -> list[Exchange]:
+    """Raises `ValueError` unless an attempt with a definition's outcome and `possibly_charged`
+    follow its two requests' exchanges. Returns those exchanges."""
     # `started.json` is written after the rank_update's decoded response and the backtest's
     # request are saved, so only an attempt that shows both can have been resumed from it.
     started = (
