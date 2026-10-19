@@ -1,0 +1,12 @@
+kind: review
+schema_version: 1.0.0
+title: Nodes named by their positions, without the first yield
+baseline: positions
+results:
+  - label: positions
+    run: runs/positions
+  - label: without-first-yield
+    run: runs/without-first-yield
+    intended_changes:
+      - setting: ranking
+        reason: Removes the first of the two yield factors.

@@ -534,12 +534,14 @@ class Execution:
         report, then `manifest.json`, which lists the report too. `record` is the attempt's
         record, and `error` the run's."""
         created_at = utc(self._clock())
+        snapshot = None if self._read is None else self._read.snapshot
         saved = SavedRun(
             manifest=self._build_manifest(record, error, created_at),
             plan=self._plan,
             attempts=(SavedAttempt(start=self._started(), record=record),),
             metrics=None if self._tables is None else self._tables.metrics_rows,
             settings=None if self._tables is None else self._tables.settings_rows,
+            snapshot=None if snapshot is None else snapshot.record,
         )
         report = write_report(self._store, saved, HtmlReportRenderer(self._version))
         self._report = report

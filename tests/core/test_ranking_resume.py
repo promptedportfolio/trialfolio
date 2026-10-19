@@ -1508,16 +1508,17 @@ def test_report_reads_a_run_whose_definition_has_windows_line_endings(
     assert saved.plan.ranking_source.definition != copy
 
 
-def test_a_reviews_check_still_reads_0_3_0s_runs_only(
+def test_a_reviews_check_reads_a_run_with_a_definition_as_report_does(
     tmp_path: Path, server: FakePortfolio123
 ) -> None:
-    # A review compares weight rows only from release 0.4.0's R04-T11.
+    # A review compares weight rows from release 0.4.0's R04-T11, so its check reads the run, as
+    # `read_run` does, where R04-T09's refused it by its manifest's version.
     run = write_screen(tmp_path, server)
 
-    with pytest.raises(TrialFolioError) as caught:
-        check_run(LocalArtifactStore(run.out))
+    checked = check_run(LocalArtifactStore(run.out))
 
-    assert caught.value.code == "artifact.unknown_schema_version"
+    assert checked.saved == read_run(LocalArtifactStore(run.out))
+    assert checked.contents["manifest.json"] == (run.out / "manifest.json").read_bytes()
 
 
 def _run_weight_row_changed(run: Screen) -> None:

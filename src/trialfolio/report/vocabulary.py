@@ -8,7 +8,12 @@ review and the experiment report share most of them, then the review's, then the
 
 from typing import Final, Literal
 
-from trialfolio.contracts.common import Approval, PriorResearchStatus, UnavailableReason
+from trialfolio.contracts.common import (
+    Approval,
+    PriorResearchStatus,
+    RankingMethod,
+    UnavailableReason,
+)
 from trialfolio.contracts.experiment_manifest import ExperimentArtifactRoleV1_1
 from trialfolio.contracts.manifest import ArtifactRoleV1_1
 from trialfolio.contracts.review_manifest import ReviewArtifactRole
@@ -137,6 +142,12 @@ APPROVALS: Final[dict[str, str]] = {
     "not_required": "Not required: the synthetic run sends nothing.",
 }
 """How the plan was approved, as HTML."""
+
+RANKING_METHODS: Final[dict[RankingMethod, str]] = {
+    "percentile_nas_negative": "Percentile NAs Negative, sent as <code>rankingMethod</code> 2",
+    "percentile_nas_neutral": "Percentile NAs Neutral, sent as <code>rankingMethod</code> 4",
+}
+"""What each ranking method of a ranking definition is, as HTML (ranking definitions)."""
 
 type _RankingRole = Literal[
     "ranking_definition",

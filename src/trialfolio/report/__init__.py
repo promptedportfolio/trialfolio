@@ -53,6 +53,8 @@ The package's modules, each importing only those before it:
 - `vocabulary`: the tables from the codes in the records to the report's words for them.
 - `fragments`: the parts more than one kind of report shows the same way, word for word.
 - `evidence`: what each kind of report is rendered from, and the context its sections read.
+- `ranking`: what a ranking given as a definition adds to a run's and an experiment session's
+  report: its weights, its source, its calls' costs, and its limitations (release 0.4.0).
 - `run`, `review`, and `experiment`: each kind of report, section by section, with two sections
   long enough for modules of their own: `review_settings`, the review's comparison of settings,
   and `experiment_cases`, the experiment's case ledger.
@@ -67,6 +69,7 @@ from trialfolio.report.evidence import (
     REPORT_PATH,
     CaseView,
     ExperimentEvidence,
+    PlanRanking,
     RetiredCaseView,
     ReviewEvidence,
     experiment_manifest_path,
@@ -90,6 +93,7 @@ __all__ = [
     "CaseView",
     "ExperimentEvidence",
     "HtmlReportRenderer",
+    "PlanRanking",
     "ReportRenderer",
     "RetiredCaseView",
     "ReviewEvidence",

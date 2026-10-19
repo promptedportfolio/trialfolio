@@ -1,0 +1,9 @@
+kind: review
+schema_version: 1.0.0
+title: The ranking example against its value-heavy weights, undeclared
+baseline: definition
+results:
+  - label: definition
+    run: runs/definition
+  - label: value-heavy
+    run: runs/value-heavy

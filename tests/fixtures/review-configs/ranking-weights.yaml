@@ -1,0 +1,13 @@
+kind: review
+schema_version: 1.0.0
+title: The ranking example against its value-heavy weights
+purpose: Check whether moving weight to value changes the screen's result.
+baseline: definition
+results:
+  - label: definition
+    run: runs/definition
+  - label: value-heavy
+    run: runs/value-heavy
+    intended_changes:
+      - setting: ranking
+        reason: More weight on value, taken equally from momentum and quality.

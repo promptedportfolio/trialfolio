@@ -6,7 +6,12 @@ metrics aren't differenced across them), R02-AC04 (a missing metric is unavailab
 R02-AC07 (intended changes and unexplained mismatches), R02-AC08 (units, and never more precision
 than the source), R02-AC11 (a declared change that isn't observed), R02-AC15 (a run without
 tables), R02-AC17 (byte-identical responses), and R02-AC18 (the table's format, rows, order, and
-counts). The interface checks are R02-T10's.
+counts). The interface checks are R02-T10's. From release 0.4.0, it also traces to R04-AC04 at
+the core (docs/contracts.md, differences between screen runs, weight rows): a review of runs whose
+ranking is a definition compares each node's weight, a declared `ranking` declares each weight
+that differs, a node one run doesn't have is `absent` or unknown by its ranking's form, and a
+removal that shifts a node's position compares it by its new path, the alignment's limit.
+R04-T11 wrote those cases.
 
 The run builder writes each run a review configuration names, with `trialfolio run` over the
 fake server, and the input check reads them, as a review does. Every expected value is written
@@ -26,10 +31,15 @@ import pytest
 from tests.support.run_builder import RunBuilder
 from trialfolio.configuration import read_review_configuration
 from trialfolio.contracts.review_configuration import ReviewConfiguration
-from trialfolio.contracts.tables import DifferencesRow
-from trialfolio.differences import ComparedRun, Differences, compare
+from trialfolio.contracts.tables import DifferencesRow, DifferencesRowV1_1
+from trialfolio.differences import AnyDifferencesRow, ComparedRun, Differences, compare
 from trialfolio.review_inputs import check_review_inputs, local_run_stores
-from trialfolio.tables import differences_csv, read_differences_csv
+from trialfolio.tables import (
+    differences_csv,
+    differences_csv_v1_1,
+    read_differences_csv,
+    read_differences_csv_v1_1,
+)
 
 COLUMNS = (
     "label",
@@ -192,7 +202,14 @@ def review(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Review]:
         yield get
 
 
-def setting(differences: Differences, label: str, name: str) -> DifferencesRow:
+def unweighted(differences: Differences) -> list[DifferencesRow]:
+    """The rows of a review without weight rows, as `differences.csv` 1.0.0 holds them."""
+    rows = [row for row in differences.rows if isinstance(row, DifferencesRow)]
+    assert len(rows) == len(differences.rows)
+    return rows
+
+
+def setting(differences: Differences, label: str, name: str) -> AnyDifferencesRow:
     (row,) = (
         row
         for row in differences.rows
@@ -201,11 +218,11 @@ def setting(differences: Differences, label: str, name: str) -> DifferencesRow:
     return row
 
 
-def settings(differences: Differences, label: str) -> list[DifferencesRow]:
+def settings(differences: Differences, label: str) -> list[AnyDifferencesRow]:
     return [row for row in differences.rows if (row.label, row.kind) == (label, "setting")]
 
 
-def metric(differences: Differences, label: str, number: int) -> DifferencesRow:
+def metric(differences: Differences, label: str, number: int) -> AnyDifferencesRow:
     subject, name, _ = METRICS[number]
     (row,) = (
         row
@@ -215,7 +232,7 @@ def metric(differences: Differences, label: str, number: int) -> DifferencesRow:
     return row
 
 
-def metrics(differences: Differences, label: str) -> list[DifferencesRow]:
+def metrics(differences: Differences, label: str) -> list[AnyDifferencesRow]:
     return [row for row in differences.rows if (row.label, row.kind) == (label, "metric")]
 
 
@@ -664,7 +681,7 @@ REVIEWS = ["example.yaml", "coverage.yaml", "shared-response.yaml", "without-tab
 
 @pytest.mark.parametrize("name", REVIEWS)
 def test_differences_csv_follows_the_format_rules(review: Review, name: str) -> None:
-    content = differences_csv(review(name).differences.rows)
+    content = differences_csv(unweighted(review(name).differences))
 
     assert not content.startswith(b"\xef\xbb\xbf")
     assert b"\r" not in content
@@ -679,7 +696,9 @@ def test_each_result_has_its_setting_rows_then_its_metric_rows_in_order(
     review: Review, name: str
 ) -> None:
     reviewed = review(name)
-    records = list(csv.DictReader(io.StringIO(differences_csv(reviewed.differences.rows).decode())))
+    records = list(
+        csv.DictReader(io.StringIO(differences_csv(unweighted(reviewed.differences)).decode()))
+    )
 
     labels = [result.label for result in reviewed.configuration.results]
     compared = [label for label in labels if label != reviewed.configuration.baseline]
@@ -697,7 +716,7 @@ def test_each_result_has_its_setting_rows_then_its_metric_rows_in_order(
 
 @pytest.mark.parametrize("name", REVIEWS)
 def test_a_cell_is_empty_only_where_its_column_allows(review: Review, name: str) -> None:
-    content = differences_csv(review(name).differences.rows)
+    content = differences_csv(unweighted(review(name).differences))
 
     for record in csv.DictReader(io.StringIO(content.decode())):
         setting_row = record["kind"] == "setting"
@@ -735,7 +754,7 @@ def test_a_cell_is_empty_only_where_its_column_allows(review: Review, name: str)
     "name", [*REVIEWS, "undeclared.yaml", "not-observed.yaml", "coverage-and-benchmark.yaml"]
 )
 def test_flagged_follows_the_flags_that_need_attention(review: Review, name: str) -> None:
-    content = differences_csv(review(name).differences.rows)
+    content = differences_csv(unweighted(review(name).differences))
 
     for record in csv.DictReader(io.StringIO(content.decode())):
         flags = set(record["flags"].split(";")) if record["flags"] else set[str]()
@@ -748,13 +767,15 @@ def test_reviewing_the_same_runs_again_gives_the_same_table(review: Review, name
 
     again = reviewed(first.path)
 
-    assert differences_csv(again.differences.rows) == differences_csv(first.differences.rows)
+    assert differences_csv(unweighted(again.differences)) == differences_csv(
+        unweighted(first.differences)
+    )
 
 
 @pytest.mark.parametrize("name", [*REVIEWS, "undeclared.yaml", "not-observed.yaml"])
 def test_the_counts_are_the_tables(review: Review, name: str) -> None:
     differences = review(name).differences
-    records = list(csv.DictReader(io.StringIO(differences_csv(differences.rows).decode())))
+    records = list(csv.DictReader(io.StringIO(differences_csv(unweighted(differences)).decode())))
 
     counted = Counter((r["kind"], r["classification"]) for r in records)
     flagged = Counter(r["kind"] for r in records if r["flagged"] == "true")
@@ -786,6 +807,227 @@ def test_the_undeclared_reviews_counts(review: Review) -> None:
 
 @pytest.mark.parametrize("name", REVIEWS)
 def test_differences_csv_reads_back_as_its_rows(review: Review, name: str) -> None:
-    rows = review(name).differences.rows
+    rows = unweighted(review(name).differences)
 
-    assert read_differences_csv(differences_csv(rows), "differences.csv") == rows
+    assert read_differences_csv(differences_csv(rows), "differences.csv") == tuple(rows)
+
+
+# Weight rows (R04-AC04)
+
+NODES = (
+    "Value",
+    "Value/Earnings Yield",
+    "Value/Sales Yield",
+    "Momentum",
+    "Momentum/Six-Month Return",
+    "Momentum/Year Return",
+    "Quality",
+    "Quality/Return on Equity",
+    "Quality/Gross Margin",
+)
+"""`value-momentum.xml`'s nodes, by their canonical paths, in its order."""
+
+EXAMPLE_WEIGHTS = ("40", "50", "50", "30", "50", "50", "30", "50", "50")
+VALUE_HEAVY_WEIGHTS = ("60", "50", "50", "20", "50", "50", "20", "50", "50")
+"""`value-momentum.xml`'s and `value-heavy.xml`'s weights, node by node."""
+
+VALUE_HEAVY_REASON = "More weight on value, taken equally from momentum and quality."
+"""`ranking-weights.yaml`'s reason for `value-heavy`'s change to `ranking`."""
+
+
+def weights(differences: Differences, label: str) -> list[DifferencesRowV1_1]:
+    """A result's weight rows, in order."""
+    return [
+        row
+        for row in differences.rows
+        if isinstance(row, DifferencesRowV1_1) and row.label == label and row.node is not None
+    ]
+
+
+def test_a_declared_ranking_declares_each_weight_that_differs(review: Review) -> None:
+    differences = review("ranking-weights.yaml").differences
+
+    rows = weights(differences, "value-heavy")
+
+    assert [(row.node, row.baseline_value, row.value) for row in rows] == list(
+        zip(NODES, EXAMPLE_WEIGHTS, VALUE_HEAVY_WEIGHTS, strict=True)
+    )
+    for row in rows:
+        assert (row.name, row.category, row.critical, row.unit) == (
+            "ranking_weight",
+            "strategy",
+            True,
+            None,
+        )
+        if row.baseline_value != row.value:
+            assert (row.classification, row.declared_reason) == (
+                "intended_change",
+                VALUE_HEAVY_REASON,
+            )
+        else:
+            # The declaration is of the ranking, which its own row shows: a weight that's the
+            # same isn't a declared change that wasn't observed.
+            assert (row.classification, row.declared_reason) == ("same", None)
+        assert (row.flags, row.flagged) == ((), False)
+    assert sum(row.classification == "intended_change" for row in rows) == 3
+    ranking = setting(differences, "value-heavy", "ranking")
+    assert (ranking.classification, ranking.declared_reason) == (
+        "intended_change",
+        VALUE_HEAVY_REASON,
+    )
+
+
+def test_the_weight_rows_follow_ranking_and_only_they_have_a_node(review: Review) -> None:
+    differences = review("ranking-weights.yaml").differences
+
+    rows = settings(differences, "value-heavy")
+
+    assert [row.name for row in rows] == [
+        *SETTINGS[:4],
+        *(["ranking_weight"] * len(NODES)),
+        *SETTINGS[4:],
+    ]
+    assert all(isinstance(row, DifferencesRowV1_1) for row in differences.rows)
+    assert [row.node for row in differences.rows if isinstance(row, DifferencesRowV1_1)] == [
+        *([None] * 4),
+        *NODES,
+        *([None] * (len(SETTINGS) - 4 + len(METRICS))),
+    ]
+
+
+def test_an_undeclared_weight_that_differs_is_a_flagged_unexplained_mismatch(
+    review: Review,
+) -> None:
+    differences = review("ranking-undeclared.yaml").differences
+
+    rows = weights(differences, "value-heavy")
+
+    for row, before, after in zip(rows, EXAMPLE_WEIGHTS, VALUE_HEAVY_WEIGHTS, strict=True):
+        assert row.declared_reason is None
+        if before != after:
+            assert (row.classification, row.flags, row.flagged) == (
+                "unexplained_mismatch",
+                ("critical_unexplained_mismatch",),
+                True,
+            )
+        else:
+            assert (row.classification, row.flags, row.flagged) == ("same", (), False)
+
+
+def test_a_formulas_run_has_no_node_and_a_named_systems_weights_are_unknown(
+    review: Review,
+) -> None:
+    """A formula's run records its ranking in full, without nodes, so each node is `absent`
+    there; a ranking system named by name wasn't captured, so each weight is unknown."""
+    differences = review("ranking-other-forms.yaml").differences
+
+    formula = weights(differences, "formula")
+    named = weights(differences, "ranking-name")
+
+    assert [(row.node, row.baseline_value, row.value) for row in formula] == [
+        (node, weight, "absent") for node, weight in zip(NODES, EXAMPLE_WEIGHTS, strict=True)
+    ]
+    for row in formula:
+        assert (row.classification, row.declared_reason, row.flagged) == (
+            "intended_change",
+            "One formula in place of the ranking system.",
+            False,
+        )
+    assert [(row.node, row.baseline_value, row.value) for row in named] == [
+        (node, weight, None) for node, weight in zip(NODES, EXAMPLE_WEIGHTS, strict=True)
+    ]
+    for row in named:
+        assert (row.classification, row.declared_reason, row.flags, row.flagged) == (
+            "unknown",
+            None,
+            ("critical_unknown",),
+            True,
+        )
+
+
+def test_a_removal_that_shifts_a_nodes_position_compares_it_by_its_new_path(
+    review: Review,
+) -> None:
+    """The alignment's limit: removing the first of `Value P/E`'s two Yield factors leaves the
+    second the only one, named `Value P\\/E/Yield`, where the baseline names it by its position,
+    `#2`. So the review compares `#2` with `absent`, and gives the node a row of its own, after
+    the baseline's nodes."""
+    differences = review("ranking-removal.yaml").differences
+
+    rows = weights(differences, "without-first-yield")
+
+    assert [(row.node, row.baseline_value, row.value) for row in rows] == [
+        (r"Value P\/E", "25", "25"),
+        (r"Value P\/E/#1", "40", "absent"),
+        (r"Value P\/E/#2", "40", "absent"),
+        (r"Value P\/E/Cash Flow", "20", "40"),
+        ("#2", "10", "10"),
+        ("#3", "10", "10"),
+        (r"Price\\Book", "20", "20"),
+        (r"Price\\Book/Book Yield", "100", "100"),
+        (r"\#Momentum", "15", "15"),
+        (r"\#Momentum/Short Return", "50", "50"),
+        (r"\#Momentum/Long Return", "50", "50"),
+        ("Secret Sauce", "20", "20"),
+        ("Secret Sauce/Margin", "60", "60"),
+        ("Secret Sauce/Turnover", "40", "40"),
+        (r"Value P\/E/Yield", "absent", "60"),
+    ]
+    changed = [row.node for row in rows if row.classification == "intended_change"]
+    assert changed == [
+        r"Value P\/E/#1",
+        r"Value P\/E/#2",
+        r"Value P\/E/Cash Flow",
+        r"Value P\/E/Yield",
+    ]
+
+
+def test_a_run_without_tables_is_compared_by_its_plans_weights(review: Review) -> None:
+    differences = review("ranking-without-tables.yaml").differences
+
+    rows = weights(differences, "value-heavy")
+
+    assert [(row.node, row.baseline_value, row.value) for row in rows] == list(
+        zip(NODES, EXAMPLE_WEIGHTS, VALUE_HEAVY_WEIGHTS, strict=True)
+    )
+    assert sum(row.classification == "intended_change" for row in rows) == 3
+
+
+@pytest.mark.parametrize("name", ["ranking-weights.yaml", "ranking-other-forms.yaml"])
+def test_a_review_with_weight_rows_is_differences_csv_1_1_0_and_version_2(
+    review: Review, name: str
+) -> None:
+    differences = review(name).differences
+    rows = [row for row in differences.rows if isinstance(row, DifferencesRowV1_1)]
+
+    content = differences_csv_v1_1(rows)
+
+    assert (differences.schema_version, differences.method_version) == ("1.1.0", 2)
+    records = list(csv.reader(io.StringIO(content.decode("utf-8"), newline="")))
+    assert tuple(records[0]) == (*COLUMNS, "node")
+    for record in records[1:]:
+        assert (record[-1] != "") == (record[2:4] == ["setting", "ranking_weight"])
+    assert read_differences_csv_v1_1(content, "differences.csv") == tuple(rows)
+
+
+def test_a_review_without_weight_rows_is_differences_csv_1_0_0_and_version_1(
+    review: Review,
+) -> None:
+    differences = review("example.yaml").differences
+
+    assert all(type(row) is DifferencesRow for row in differences.rows)
+    assert (differences.schema_version, differences.method_version) == ("1.0.0", 1)
+
+
+def test_the_counts_count_the_weight_rows(review: Review) -> None:
+    differences = review("ranking-undeclared.yaml").differences
+
+    # The `ranking` row and the three weights that differ, each a flagged unexplained mismatch,
+    # and the other 22 settings and 6 weights, the same.
+    assert differences.setting_counts.model_dump() == {
+        "same": 28,
+        "intended_change": 0,
+        "unexplained_mismatch": 4,
+        "unknown": 0,
+        "flagged": 4,
+    }

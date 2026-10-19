@@ -292,6 +292,21 @@ def reported_cost(cost: int | None) -> str:
     return "Not reported" if cost is None else f"{cost} credits, as Portfolio123 reported"
 
 
+def invented_cost(cost: int | None, reported: str) -> str:
+    """A synthetic result's cost, as `reported`, such as "the invented response reports", gives
+    it, with nothing charged, or that it gave none: a synthetic report never calls a value
+    Portfolio123's (DSC-04)."""
+    return "Not reported" if cost is None else f"{cost} credits, as {reported}: nothing was charged"
+
+
+def synthetic_writer(manifest: RunManifest | RunManifestV1_1) -> str:
+    """What wrote a synthetic run, as HTML: `trialfolio demo`, or, for a run without a command,
+    Trial Folio's core, with the demo's client (release 0.4.0)."""
+    if manifest.command is None:
+        return "Trial Folio's core, with the demo's client,"
+    return "<code>trialfolio demo</code>"
+
+
 def run_written_by(manifest: RunManifest | RunManifestV1_1) -> tuple[str, str]:
     """The Trial Folio version and command that wrote a run, and when the command started; or,
     for a run the core wrote with the demo's client, that no command did."""

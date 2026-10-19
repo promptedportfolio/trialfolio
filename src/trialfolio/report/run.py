@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from typing import Final
 
 from trialfolio.contracts.attempt import SavedResponse
+from trialfolio.contracts.plan import PlanV1_2
 from trialfolio.contracts.tables import MetricsRow
 from trialfolio.normalization import LAYOUT
 from trialfolio.report.evidence import RunContext
@@ -24,6 +25,7 @@ from trialfolio.report.fragments import (
     budget_limit,
     data_facts,
     inferred_defaults,
+    invented_cost,
     metric_definitions,
     metric_label,
     parsers_line,
@@ -35,9 +37,11 @@ from trialfolio.report.fragments import (
     run_written_by,
     settings_table,
     status,
+    synthetic_writer,
     unavailable,
 )
 from trialfolio.report.page import code, facts, moment, page, table, text
+from trialfolio.report.ranking import costs, limitations, run_source, run_weights
 from trialfolio.report.vocabulary import (
     APPROVALS,
     ATTEMPT_OUTCOMES,
@@ -99,8 +103,8 @@ def _synthetic_banner(run: RunContext) -> list[str]:
     return [
         (
             '<p class="synthetic"><strong>Synthetic example.</strong> This run was written by'
-            " <code>trialfolio demo</code> from invented values. None of them comes from"
-            " Portfolio123, and nothing was sent to it.</p>"
+            f" {synthetic_writer(run.saved.manifest)} from invented values. None of them comes"
+            " from Portfolio123, and nothing was sent to it.</p>"
         )
     ]
 
@@ -171,6 +175,7 @@ def _definitions(run: RunContext) -> list[str]:
             "<p>Unavailable: a single run has no baseline, so no setting is classified as an"
             " intended change or an unexplained mismatch.</p>"
         ),
+        *run_weights(run.settings),
     ]
 
 
@@ -188,8 +193,14 @@ def _data(run: RunContext) -> list[str]:
     )
     layouts = parsers_line(manifest.parsers) or "Unavailable: no response was read."
     meanings = PROVENANCE | ({"verified": SYNTHETIC_VERIFIED} if manifest.synthetic else {})
+    plan = run.saved.plan
     return [
         *data_facts(source, layouts, run.by_name),
+        *(
+            run_source(plan.ranking_source, run.saved.snapshot)
+            if isinstance(plan, PlanV1_2)
+            else ()
+        ),
         "<h3>Coverage</h3>",
         *_coverage(run),
         *provenance(meanings, _provenances(run)),
@@ -479,8 +490,15 @@ def _case_facts(run: RunContext) -> list[tuple[str, str]]:
             ),
         ),
         ("Retries", str(counts.retries)),
-        ("Cost", reported_cost(counts.cost)),
+        ("Cost", _cost(run)),
     ]
+
+
+def _cost(run: RunContext) -> str:
+    cost = run.saved.manifest.counts.cost
+    if run.synthetic:
+        return invented_cost(cost, "the invented responses report")
+    return reported_cost(cost)
 
 
 def _versions(run: RunContext) -> list[tuple[str, str]]:
@@ -528,7 +546,7 @@ def _attempt(run: RunContext, attempt: SavedAttempt) -> list[str]:
         entries.append(("Started", moment(first.started_at)))
     if record is not None:
         entries.append(("Ended", moment(record.ended_at)))
-        entries.append(("Cost", reported_cost(record.provider_metadata.cost)))
+        entries.append(("Cost", costs(record, synthetic=run.synthetic)))
     rows = [
         f"<tr><td>{index}</td><td>{code(exchange.request)}</td>"
         f"<td>{EXCHANGE_RESULTS[exchange.result]}</td>"
@@ -647,6 +665,10 @@ def _limitations(run: RunContext) -> list[str]:
         items.append(
             "Portfolio123's data and engines change, so running the configuration again may"
             " give different results. A rerun is a new attempt, never a replacement."
+        )
+    if isinstance(run.saved.plan, PlanV1_2):
+        items.extend(
+            limitations(synthetic=manifest.synthetic, each="The run's definition", kind="run")
         )
     items.extend(inferred_defaults(run.settings))
     mismatched = [setting.name for setting in run.settings if "coverage_mismatch" in setting.flags]

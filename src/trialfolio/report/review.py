@@ -8,8 +8,7 @@ compares; it ranks no result, and never links a run.
 
 from typing import Final
 
-from trialfolio.contracts.tables import DifferencesRow
-from trialfolio.differences import METHOD, METHOD_VERSION
+from trialfolio.differences import METHOD, AnyDifferencesRow
 from trialfolio.normalization import LAYOUT, METRICS
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
 from trialfolio.report.evidence import ReviewContext
@@ -29,6 +28,7 @@ from trialfolio.report.fragments import (
     run_written_by,
     setting_brief,
     status,
+    synthetic_writer,
     unavailable,
 )
 from trialfolio.report.page import code, facts, moment, page, table, text
@@ -61,6 +61,27 @@ _SECTIONS: Final = (
 )
 """A review report's sections: a run report's, with the same `id`s, and headings for a
 review."""
+
+_WEIGHT_ROWS: Final = (
+    (
+        "<p>A weight row compares one node's weight, named beside <code>ranking_weight</code> by"
+        " its canonical path: the baseline's nodes, in its definition's order, then the"
+        " result's other nodes, in its. A node is the same node in both runs when its canonical"
+        " path is the same. A run that doesn't have the node gives <code>absent</code> when its"
+        " record shows its ranking in full, as a definition or a formula, and leaves the weight"
+        " unknown when it names a ranking system by name or ID, whose definition wasn't"
+        " captured. A result that declares <code>ranking</code> declares each weight that"
+        " differs, with its reason. A weight that's the same isn't flagged as a declared change"
+        " that wasn't observed: the declaration is of the ranking, which its own row"
+        " shows.</p>"
+    ),
+    (
+        "<p>A removal shifts the positions of the nodes after the factor it removes, so a node"
+        " without a name, or with a sibling's name, may have another canonical path in the"
+        " other run, and be compared with another node, or with <code>absent</code>.</p>"
+    ),
+)
+"""How a review compares weight rows, in section 2 of a review with any (R04-T11)."""
 
 
 def render_review(review: ReviewContext) -> str:
@@ -101,11 +122,22 @@ def _synthetic_banner(review: ReviewContext) -> list[str]:
     if not review.synthetic:
         return []
     one = len(review.synthetic) == 1
+    writers = {
+        synthetic_writer(checked.run.manifest)
+        for checked in review.evidence.inputs
+        if checked.run.manifest.synthetic
+    }
+    # Runs trialfolio demo wrote, those Trial Folio's core wrote with the demo's client, or both.
+    writer = (
+        writers.pop()
+        if len(writers) == 1
+        else "<code>trialfolio demo</code>, or Trial Folio's core with the demo's client,"
+    )
     return [
         (
             '<p class="synthetic"><strong>Synthetic results.</strong>'
             f" {review.labels(review.synthetic)} {'is' if one else 'are'} synthetic: written by"
-            " <code>trialfolio demo</code> from invented values. None of"
+            f" {writer} from invented values. None of"
             f" {'its' if one else 'their'} values comes from Portfolio123, and nothing was"
             f" sent to it. {'It is' if one else 'Each is'} marked synthetic wherever its"
             " values appear.</p>"
@@ -166,12 +198,19 @@ def _objective(review: ReviewContext) -> list[str]:
 
 
 def _definitions(review: ReviewContext) -> list[str]:
+    differences = review.evidence.differences
+    weights = (
+        ", with a weight row after <code>ranking</code> for each node of either run's ranking"
+        " definition"
+        if differences.weighted
+        else ""
+    )
     return [
         (
             f"<p>Each result is compared with the baseline, {review.name(review.baseline)}, by"
-            f" the rules of {code(METHOD)} version {METHOD_VERSION}: its 23 settings, and"
-            " then its 20 metrics. <code>normalized/differences.csv</code> holds a row for"
-            " each.</p>"
+            f" the rules of {code(METHOD)} version {differences.method_version}: its 23"
+            f" settings{weights}, and then its 20 metrics."
+            " <code>normalized/differences.csv</code> holds a row for each.</p>"
         ),
         "<h3>How settings are compared</h3>",
         "<ul>",
@@ -184,6 +223,7 @@ def _definitions(review: ReviewContext) -> list[str]:
             " unknown value in one is flagged. An intended change to one is shown, but not as"
             " a defect.</p>"
         ),
+        *(_WEIGHT_ROWS if differences.weighted else ()),
         "<h3>How metrics are compared</h3>",
         "<ul>",
         *(f"<li>{code(name)}: {meaning}</li>" for name, meaning in METRIC_CLASSES),
@@ -255,7 +295,7 @@ def _sources(review: ReviewContext) -> list[str]:
         manifest = checked.run.manifest
         if manifest.synthetic:
             source = (
-                "Invented values, written by <code>trialfolio demo</code> in the layout of"
+                f"Invented values, written by {synthetic_writer(manifest)} in the layout of"
                 " Portfolio123's screen backtest response. Nothing was sent to Portfolio123."
             )
         else:
@@ -503,7 +543,7 @@ def _metric_value(review: ReviewContext, label: str, subject: str, metric_id: st
     return value
 
 
-def _comparison(row: DifferencesRow) -> str:
+def _comparison(row: AnyDifferencesRow) -> str:
     if row.classification == "differenced":
         return "Differenced"
     reason = row.reason or "input_unavailable"
@@ -526,7 +566,7 @@ def _cases(review: ReviewContext) -> list[str]:
             ),
         ),
         ("Review ID", code(str(evidence.review_id))),
-        ("Method", f"{code(METHOD)} version {METHOD_VERSION}"),
+        ("Method", f"{code(METHOD)} version {evidence.differences.method_version}"),
         (
             "License and notice",
             f"Recorded with the review: {code(LICENSE_ID)}, notice version {NOTICE_VERSION}",

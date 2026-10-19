@@ -1,0 +1,17 @@
+kind: review
+schema_version: 1.0.0
+title: The ranking example against the other ranking forms
+baseline: definition
+results:
+  - label: definition
+    run: runs/definition
+  - label: formula
+    run: runs/formula
+    intended_changes:
+      - setting: ranking
+        reason: One formula in place of the ranking system.
+  - label: ranking-name
+    run: runs/ranking-name
+    intended_changes:
+      - setting: ranking
+        reason: A saved ranking system in place of the definition.

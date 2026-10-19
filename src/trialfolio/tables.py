@@ -28,10 +28,12 @@ from pydantic import BaseModel, ValidationError
 from trialfolio.contracts.common import INTEGER_PATTERN, valid_date_text
 from trialfolio.contracts.tables import (
     DIFFERENCES_COLUMNS,
+    DIFFERENCES_COLUMNS_V1_1,
     METRICS_COLUMNS,
     SETTINGS_COLUMNS,
     SETTINGS_COLUMNS_V1_1,
     DifferencesRow,
+    DifferencesRowV1_1,
     MetricsRow,
     SettingsRow,
     SettingsRowV1_1,
@@ -66,6 +68,13 @@ def settings_csv_v1_1(rows: Sequence[SettingsRowV1_1]) -> bytes:
 def differences_csv(rows: Sequence[DifferencesRow]) -> bytes:
     """`differences.csv`, with `rows` in the order given."""
     return _write(DIFFERENCES_COLUMNS, rows)
+
+
+def differences_csv_v1_1(rows: Sequence[DifferencesRowV1_1]) -> bytes:
+    """`differences.csv` 1.1.0, a review's in which any result has weight rows: 1.0.0's columns,
+    then `node`, with `rows` in the order given (differences between screen runs, weight
+    rows)."""
+    return _write(DIFFERENCES_COLUMNS_V1_1, rows)
 
 
 def _write(columns: tuple[str, ...], rows: Sequence[BaseModel]) -> bytes:
@@ -116,6 +125,13 @@ def read_differences_csv(content: bytes, source_name: str) -> tuple[DifferencesR
     """Reads `differences.csv` from its bytes, as `read_metrics_csv` reads `metrics.csv`. Its
     `critical` is empty on a metric's row."""
     return _read(content, source_name, DIFFERENCES_COLUMNS, DifferencesRow, _DIFFERENCES_READERS)
+
+
+def read_differences_csv_v1_1(content: bytes, source_name: str) -> tuple[DifferencesRowV1_1, ...]:
+    """Reads `differences.csv` 1.1.0 from its bytes, as `read_differences_csv` reads 1.0.0."""
+    return _read(
+        content, source_name, DIFFERENCES_COLUMNS_V1_1, DifferencesRowV1_1, _DIFFERENCES_READERS
+    )
 
 
 def _read[M: BaseModel](

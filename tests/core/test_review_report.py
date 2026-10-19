@@ -10,7 +10,10 @@ the copied metrics.csv's own reason, never zero), R02-AC07 (the intended change 
 unexplained mismatches), R02-AC09 (the notices, the links, no scripts, "Not assessed", and no
 `run` path), R02-AC15 (why a run has no tables), R02-AC16 (synthetic results named before any
 result, and labeled wherever their values appear), and R02-AC17 (the results that share each
-response). The interface checks are R02-T10's.
+response). The interface checks are R02-T10's. From release 0.4.0, it also traces to R04-AC04's
+report part, at the core: a review's report shows each weight row as any setting row, named by
+its setting and its node's canonical path, with the method's version 2 (docs/contracts.md, a
+ranking definition in a report). R04-T11 wrote those cases.
 
 The run builder writes each run a review configuration names, the input check reads them, and
 the comparison core compares them, as a review does. The test writes the review's files and its
@@ -45,8 +48,8 @@ from trialfolio.contracts.review_manifest import (
     ReviewManifest,
     ReviewManifestCounts,
 )
-from trialfolio.contracts.tables import TABLES_SCHEMA_VERSION
-from trialfolio.differences import DIFFERENCES_PATH, METHOD, METHOD_VERSION, ComparedRun, compare
+from trialfolio.contracts.tables import DifferencesRow, DifferencesRowV1_1
+from trialfolio.differences import DIFFERENCES_PATH, METHOD, ComparedRun, compare
 from trialfolio.notices import (
     CONCISE_NOTICE,
     FULL_NOTICE,
@@ -68,7 +71,7 @@ from trialfolio.report import (
 from trialfolio.review_inputs import check_review_inputs, local_run_stores
 from trialfolio.runs import MANIFEST_PATH
 from trialfolio.storage import LocalArtifactStore, StoredFile
-from trialfolio.tables import differences_csv
+from trialfolio.tables import differences_csv, differences_csv_v1_1
 
 VERSION = "0.2.0"
 REVIEW_ID = UUID("6f1c2a4e-8b3d-4c5e-9f60-718293a4b5c6")
@@ -154,11 +157,14 @@ def write_review(path: Path, out: Path) -> Written:
             )
             for copy in checked.copies
         )
+    weighted = [row for row in differences.rows if isinstance(row, DifferencesRowV1_1)]
+    unweighted = [row for row in differences.rows if isinstance(row, DifferencesRow)]
+    table = differences_csv_v1_1(weighted) if weighted else differences_csv(unweighted)
     artifacts.append(
         _artifact(
-            store.write(DIFFERENCES_PATH, differences_csv(differences.rows)),
+            store.write(DIFFERENCES_PATH, table),
             role="differences",
-            schema_version=TABLES_SCHEMA_VERSION,
+            schema_version=differences.schema_version,
         )
     )
     evidence = ReviewEvidence(
@@ -178,7 +184,7 @@ def write_review(path: Path, out: Path) -> Written:
         baseline=configuration.baseline,
         results=tuple(checked.reviewed for checked in inputs),
         artifacts=(*artifacts, _artifact(report, role="report", schema_version=None)),
-        methods=(Method(name=METHOD, version=METHOD_VERSION),),
+        methods=(Method(name=METHOD, version=differences.method_version),),
         license_id=LICENSE_ID,
         notice_version=NOTICE_VERSION,
         capabilities=ReviewCapabilities(
@@ -1027,3 +1033,132 @@ def test_the_evidence_needs_each_result_in_order_and_not_the_report(review: Revi
             STARTED,
             (*evidence.artifacts, report),
         )
+
+
+# Weight rows (R04-AC04)
+
+
+WEIGHT_ROWS = [
+    (
+        "A weight row compares one node's weight, named beside ranking_weight by its canonical"
+        " path: the baseline's nodes, in its definition's order, then the result's other nodes,"
+        " in its. A node is the same node in both runs when its canonical path is the same. A run"
+        " that doesn't have the node gives absent when its record shows its ranking in full, as a"
+        " definition or a formula, and leaves the weight unknown when it names a ranking system"
+        " by name or ID, whose definition wasn't captured. A result that declares ranking"
+        " declares each weight that differs, with its reason. A weight that's the same isn't"
+        " flagged as a declared change that wasn't observed: the declaration is of the ranking,"
+        " which its own row shows."
+    ),
+    (
+        "A removal shifts the positions of the nodes after the factor it removes, so a node"
+        " without a name, or with a sibling's name, may have another canonical path in the other"
+        " run, and be compared with another node, or with absent."
+    ),
+]
+"""How a review with weight rows says, in section 2, how they're compared, where `absent` and an
+unknown weight come from, and the alignment's limit, as R04-T11 words it."""
+
+
+def weight_rows_text(document: Document) -> list[str]:
+    """Section 2's paragraphs from the first of `WEIGHT_ROWS` on, as many as it has."""
+    paragraphs = [p.text for p in document.root.by_id("definitions").find_all("p")]
+    start = paragraphs.index(WEIGHT_ROWS[0])
+    return paragraphs[start : start + len(WEIGHT_ROWS)]
+
+
+def test_a_review_with_weight_rows_names_each_by_its_node_beside_its_setting(
+    review: Review,
+) -> None:
+    document = review("ranking-weights.yaml").document
+    definitions = document.root.by_id("definitions")
+
+    rows = table_after(document, "Intended changes")
+
+    reason = "More weight on value, taken equally from momentum and quality."
+    assert [row[:5] for row in rows[1:]] == [
+        ["value-heavy", "ranking_weight Value", "40", "60", ""],
+        ["value-heavy", "ranking_weight Momentum", "30", "20", ""],
+        ["value-heavy", "ranking_weight Quality", "30", "20", ""],
+    ]
+    assert rows[0][:2] == ["value-heavy", "ranking"]
+    assert all(row[5:7] == [reason, "Yes: the values differ."] for row in rows)
+    assert (
+        "the rules of screen-run-differences version 2: its 23 settings, with a weight row after"
+        " ranking for each node of either run's ranking definition, and then its 20 metrics."
+    ) in definitions.text
+    assert weight_rows_text(document) == WEIGHT_ROWS
+    assert "The settings that read the same as the baseline's: 28 of 32 for value-heavy." in (
+        definitions.text
+    )
+    assert document.dd("Method") == ["screen-run-differences version 2"]
+
+
+def test_a_review_of_a_removal_states_the_alignments_limit(review: Review) -> None:
+    """`without-first-yield`'s removal shifts the positions of the nodes after the factor it
+    removes, the limit section 2 states."""
+    document = review("ranking-removal.yaml").document
+
+    assert weight_rows_text(document) == WEIGHT_ROWS
+
+
+def test_the_baselines_settings_hold_its_weight_rows(review: Review) -> None:
+    document = review("ranking-weights.yaml").document
+
+    rows = table_after(document, "The baseline's settings")
+
+    assert [row[0] for row in rows[3:14]] == [
+        "ranking",
+        "ranking_weight Value",
+        "ranking_weight Value/Earnings Yield",
+        "ranking_weight Value/Sales Yield",
+        "ranking_weight Momentum",
+        "ranking_weight Momentum/Six-Month Return",
+        "ranking_weight Momentum/Year Return",
+        "ranking_weight Quality",
+        "ranking_weight Quality/Return on Equity",
+        "ranking_weight Quality/Gross Margin",
+        "max_holdings",
+    ]
+    assert [row[2] for row in rows[4:13]] == ["40", "50", "50", "30", "50", "50", "30", "50", "50"]
+
+
+def test_an_undeclared_weight_is_an_unexplained_mismatch_named_by_its_node(
+    review: Review,
+) -> None:
+    rows = table_after(review("ranking-undeclared.yaml").document, "Unexplained mismatches")
+
+    assert [row[:5] for row in rows[1:]] == [
+        ["value-heavy", "ranking_weight Value", "strategy", "40", "60"],
+        ["value-heavy", "ranking_weight Momentum", "strategy", "30", "20"],
+        ["value-heavy", "ranking_weight Quality", "strategy", "30", "20"],
+    ]
+    for row in rows:
+        assert row[6].startswith("Flagged. critical_unexplained_mismatch:")
+
+
+def test_a_node_a_run_doesnt_have_is_absent_or_unknown(review: Review) -> None:
+    document = review("ranking-other-forms.yaml").document
+
+    declared = table_after(document, "Intended changes")
+    unknown = table_after(document, "Unknown settings")
+
+    absent = [row for row in declared if row[0] == "formula" and row[1] != "ranking"]
+    assert [row[1:4] for row in absent][:2] == [
+        ["ranking_weight Value", "40", "absent"],
+        ["ranking_weight Value/Earnings Yield", "50", "absent"],
+    ]
+    assert len(absent) == 9
+    assert [row[:5] for row in unknown][:2] == [
+        ["ranking-name", "ranking_weight Value", "strategy", "40", "Missing"],
+        ["ranking-name", "ranking_weight Value/Earnings Yield", "strategy", "50", "Missing"],
+    ]
+    assert len(unknown) == 9
+    assert all(row[5].startswith("Flagged. critical_unknown:") for row in unknown)
+
+
+def test_a_review_without_weight_rows_names_the_methods_version_1(review: Review) -> None:
+    document = review("example.yaml").document
+
+    assert document.dd("Method") == ["screen-run-differences version 1"]
+    assert "A weight row compares" not in document.root.text

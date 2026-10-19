@@ -11,15 +11,12 @@
 from collections.abc import Callable, Sequence
 from typing import Final
 
-from trialfolio.contracts.tables import DifferencesRow
+from trialfolio.differences import AnyDifferencesRow
 from trialfolio.display import series
-from trialfolio.report.evidence import ReviewContext
+from trialfolio.report.evidence import ReviewContext, node_of
 from trialfolio.report.fragments import flag_list, settings_table, unit
 from trialfolio.report.page import code, table, text
 from trialfolio.report.vocabulary import SYNTHETIC_NOT_SENT, TOKENS
-
-_SETTING_COUNT: Final = 23
-"""The screen settings each result's rows compare."""
 
 _COMPARISON_FLAGS: Final = frozenset(
     {"critical_unexplained_mismatch", "critical_unknown", "intended_change_not_observed"}
@@ -34,9 +31,9 @@ _OBSERVED: Final[dict[str, str]] = {
 }
 """Whether a declared change is observed, by its row's classification."""
 
-_CELLS: Final[dict[str, Callable[[ReviewContext, DifferencesRow], str]]] = {
+_CELLS: Final[dict[str, Callable[[ReviewContext, AnyDifferencesRow], str]]] = {
     "result": lambda review, row: review.name(row.label),
-    "setting": lambda review, row: code(row.name),
+    "setting": lambda review, row: _setting(row),
     "category": lambda review, row: code(row.category or ""),
     "baseline": lambda review, row: _value(row.baseline_value),
     "value": lambda review, row: _value(row.value),
@@ -81,7 +78,7 @@ def benchmarks(review: ReviewContext) -> list[str]:
     ]
 
 
-def _setting_comparison(row: DifferencesRow) -> str:
+def _setting_comparison(row: AnyDifferencesRow) -> str:
     meanings = {
         "same": "Same",
         "intended_change": "Differs: an intended change",
@@ -110,12 +107,12 @@ def changes(review: ReviewContext) -> list[str]:
     ]
 
 
-def _setting_rows(review: ReviewContext) -> list[DifferencesRow]:
+def _setting_rows(review: ReviewContext) -> list[AnyDifferencesRow]:
     return [row for row in review.evidence.differences.rows if row.kind == "setting"]
 
 
 def _change_table(
-    review: ReviewContext, rows: Sequence[DifferencesRow], columns: Sequence[str]
+    review: ReviewContext, rows: Sequence[AnyDifferencesRow], columns: Sequence[str]
 ) -> list[str]:
     """A table of setting rows, with `columns`, from `_CELLS`. The baseline's column names it,
     so a synthetic baseline's values are marked there too."""
@@ -176,7 +173,7 @@ def _same(review: ReviewContext) -> list[str]:
     rows = _setting_rows(review)
     counts = [
         f"{sum(row.label == label and row.classification == 'same' for row in rows)}"
-        f" of {_SETTING_COUNT} for {review.name(label)}"
+        f" of {sum(row.label == label for row in rows)} for {review.name(label)}"
         for label in (checked.result.label for checked in review.others)
     ]
     flagged = [
@@ -209,15 +206,21 @@ def _baseline_settings(review: ReviewContext) -> list[str]:
     return [
         f"<h3>The baseline's settings, {review.name(review.baseline)}</h3>",
         f"<p>{intro}</p>",
-        *settings_table(review.settings[review.baseline].values(), expected=expected, notes=None),
+        *settings_table(review.resolved[review.baseline], expected=expected, notes=None),
     ]
+
+
+def _setting(row: AnyDifferencesRow) -> str:
+    """A setting row's setting, and a weight row's node, by its canonical path, beside it."""
+    node = node_of(row)
+    return code(row.name) + ("" if node is None else f" {code(node)}")
 
 
 def _value(value: str | None) -> str:
     return "Missing" if value is None else code(value)
 
 
-def _flags(row: DifferencesRow) -> str:
+def _flags(row: AnyDifferencesRow) -> str:
     if not row.flags:
         return ""
     flags = flag_list(row.flags)
