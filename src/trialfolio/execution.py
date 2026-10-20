@@ -430,7 +430,7 @@ class Execution:
             or (self._ranking and self._definition is None)
             or (self._snapshot_named and self._snapshot is None)
         ):
-            return self._without_manifest(result, error)
+            return self._without_manifest(error)
         with EndingWithoutManifest(after="the attempt ended") as ended:
             error = self._normalize(configuration, result, error)
             self._write_ending(result.record, error)
@@ -445,16 +445,16 @@ class Execution:
         )
         return error
 
-    def _without_manifest(
-        self, result: AttemptResult, error: TrialFolioError | None
-    ) -> TrialFolioError | None:
+    def _without_manifest(self, error: TrialFolioError | None) -> TrialFolioError | None:
         """The error of a run whose attempt ended without the run writing its manifest, with what
-        the run's records say, as an experiment session's says it: an attempt's own error says
-        what happened to its requests once its attempt record is written, so it gets only what
-        the records say of the manifest (R04-AC13)."""
+        the records say of the manifest (what a run writes after its attempt, R04-AC13). The
+        attempt's own error already says what happened to its requests, its attempt record
+        written or not: when the record's write fails, the attempt adds its ending's detail. So
+        the start record's detail, which then reads as running, isn't added too: `run` never
+        resumes a run, so nothing reads it, unlike an experiment session's."""
         if error is None:
             return None
-        detail = self._manifest.detail if result.recorded else self.ending_detail()
+        detail = self._manifest.detail
         if error.message.endswith(detail):
             return error
         return error.with_detail(detail)

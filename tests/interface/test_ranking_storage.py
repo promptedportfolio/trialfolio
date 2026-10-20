@@ -11,9 +11,10 @@ snapshot's, since `run` resumes neither, or in a new experiment's plan, which wa
 
 A snapshot's message says it has no manifest after a fault at its `configuration.yaml` or its
 attempt's files too, as a run's does. And a storage failure at the attempt record, which leaves
-the start record running, ends a run's message, or a snapshot's, with what the attempt's own
-error says of its requests, then what the start record says of them, and that the output has no
-manifest: for a run without a definition too, since the rule is 0.1.0's.
+the start record running, ends a run's message, or a snapshot's, with one detail of its
+requests, the attempt's own, then that the output has no manifest: for a run without a
+definition too, since the rule is 0.1.0's. Neither is resumed, so what the start record says
+isn't added, as it is to an experiment session's message, whose resume reads it.
 
 Traces to R04-AC13, as release 0.4.0's test pairing gives it for
 `tests/interface/test_ranking_storage.py`, and to docs/contracts.md, sending a definition (the
@@ -497,8 +498,11 @@ def test_a_fault_before_a_snapshots_attempt_record_says_it_has_no_manifest(
 # An attempt record that can't be written
 
 
-RUNNING: Final = (
-    "may have been sent, and may have been charged: the attempt's start record reads as running."
+CHECK_SPACE: Final = "Check the output directory's free space and permissions."
+"""How a storage failure's own message ends, before the details of the requests."""
+BOTH_SUCCEEDED: Final = (
+    "The rank_update request, which writes the case's ranking definition into ApiRankingSystem,"
+    " and the screen backtest request succeeded, and their responses were saved."
 )
 
 UNRECORDED_ATTEMPTS: Final = {
@@ -506,43 +510,31 @@ UNRECORDED_ATTEMPTS: Final = {
         config("formula.yaml"),
         [AUTH, BACKTEST],
         "The screen backtest request succeeded, and its response was saved.",
-        f"The screen backtest request {RUNNING} Trial Folio never retries it automatically.",
         RUN_INCOMPLETE,
     ),
     "screen run with a definition": (
         DEFINITION,
         [AUTH, RANK, BACKTEST],
-        (
-            "The rank_update request, which writes the case's ranking definition into"
-            " ApiRankingSystem, and the screen backtest request succeeded, and their responses"
-            " were saved."
-        ),
-        (
-            "The rank_update request, which writes the case's ranking definition into"
-            " ApiRankingSystem, reached Portfolio123, and may have been charged. Its screen"
-            f" backtest request {RUNNING} Trial Folio never retries either automatically."
-        ),
+        BOTH_SUCCEEDED,
         RUN_INCOMPLETE,
     ),
     "snapshot": (
         SNAPSHOT,
         [AUTH, RANK_GET],
         "The rank_get request succeeded, and its response was saved.",
-        f"The rank_get request {RUNNING} Trial Folio never retries it automatically.",
         SNAPSHOT_INCOMPLETE,
     ),
 }
 """For a run without a definition, one with a definition, and a snapshot, each as written by
 hand: the requests it sends, each answered with a 200; what the attempt's own error says of them;
-what its records say, without the attempt record, by its start record; and that the output has no
-manifest."""
+and that the output has no manifest."""
 
 
 @pytest.mark.parametrize("what", UNRECORDED_ATTEMPTS)
-def test_a_storage_failure_at_the_attempt_record_says_what_the_attempt_and_its_records_say(
+def test_a_storage_failure_at_the_attempt_record_gives_the_attempts_detail_then_the_manifests(
     cli: Cli, faults: FaultyStores, what: str
 ) -> None:
-    configuration, requests, attempt_said, records_say, incomplete = UNRECORDED_ATTEMPTS[what]
+    configuration, requests, attempt_said, incomplete = UNRECORDED_ATTEMPTS[what]
     faults.fail_os("attempt.json")
     cli.ready()
     cli.server.reply("/auth", AUTHENTICATED)
@@ -556,10 +548,38 @@ def test_a_storage_failure_at_the_attempt_record_says_what_the_attempt_and_its_r
         "run", configuration, "--out", out, "--approve", approve, "--json", store_factory=faults
     )
 
+    # One detail of the requests, the attempt's own, between the storage failure's message and
+    # the manifest's: not the start record's too, which reads as running, since neither a run
+    # nor a snapshot is resumed.
     message = failed(outcome, "storage")
-    assert message.endswith(f"{attempt_said} {records_say} {incomplete}")
+    assert message.endswith(f"{CHECK_SPACE} {attempt_said} {incomplete}")
+    assert "reads as running" not in message
     assert sent(cli) == requests
     (attempt,) = out.glob("**/attempts/*")
     assert (attempt / "started.json").is_file()
     assert not (attempt / "attempt.json").exists()
     assert not (out / "manifest.json").exists()
+
+
+def test_an_experiments_storage_failure_at_the_attempt_record_gives_its_start_records_detail_too(
+    cli: Cli, experiments: Builder, faults: FaultyStores
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    faults.fail_os(f"{case_id_of(EXAMPLE, 'baseline')}/attempt.json")
+
+    stopped = experiments.run(
+        EXAMPLE, out, ranks=[RANK_UPDATED] * 4, sends=[returns()] * 4, store_factory=faults
+    )
+
+    # The resume reads the start record, so the session's message says what it says too.
+    message = failed(stopped, "storage")
+    assert message.endswith(
+        f"{CHECK_SPACE} {BOTH_SUCCEEDED} The rank_update request of the last attempt, which"
+        " writes the case's ranking definition into ApiRankingSystem, reached Portfolio123, and"
+        " may have been charged. Its screen backtest request may have been sent, and may have"
+        " been charged: its start record reads as running. Trial Folio never retries either"
+        f" automatically. The attempts recorded so far are kept. {SESSION_INCOMPLETE}"
+    )
+    assert sent(cli) == [AUTH, RANK, BACKTEST]
+    assert not (out / "sessions/1/manifest.json").exists()

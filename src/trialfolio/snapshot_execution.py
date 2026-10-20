@@ -251,7 +251,7 @@ class SnapshotExecution:
             # Every manifest lists the configuration, so without it there's none to write.
             or self._configuration is None
         ):
-            return self._without_manifest(result, error)
+            return self._without_manifest(error)
         record = result.record
         if not isinstance(record, AttemptRecordV1_2):  # a snapshot's attempt writes 1.2.0
             raise TypeError("a snapshot's attempt record is version 1.2.0")
@@ -275,16 +275,15 @@ class SnapshotExecution:
         attempt's records read, and whether the snapshot has its manifest."""
         return f"{self._request_detail()} {self._manifest.detail}"
 
-    def _without_manifest(
-        self, result: AttemptResult, error: TrialFolioError | None
-    ) -> TrialFolioError | None:
+    def _without_manifest(self, error: TrialFolioError | None) -> TrialFolioError | None:
         """The error of a snapshot whose attempt ended without the snapshot writing its manifest,
-        with what its records say, as a screen run's says it (`Execution`): the attempt's own
-        error says what happened to its `rank_get` once its attempt record is written, so it gets
-        only what the records say of the manifest."""
+        with what the records say of the manifest, as a screen run's says it (`Execution`): the
+        attempt's own error already says what happened to its `rank_get`, its attempt record
+        written or not, and a snapshot is never resumed, so nothing reads a start record left
+        running."""
         if error is None:
             return None
-        detail = self._manifest.detail if result.recorded else self.ending_detail()
+        detail = self._manifest.detail
         if error.message.endswith(detail):
             return error
         return error.with_detail(detail)
