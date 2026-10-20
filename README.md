@@ -10,6 +10,7 @@ Trial Folio is a command-line tool for investors who research strategies in [Por
 
 - Run backtests through the Portfolio123 API, with every setting recorded next to its result.
 - Run a small, planned experiment: a baseline screen and a few variants of it, under one approval and one budget, which you can resume safely.
+- Vary a ranking system's weights, or remove one of its factors, as an experiment's variants, with each case's whole ranking definition recorded.
 - Compare runs and see exactly which settings differ between them.
 - Keep a durable, inspectable record of what you tested, including the tests that failed.
 
@@ -17,7 +18,7 @@ Portfolio123 does the backtesting. Trial Folio plans each request, records exact
 
 ## Status
 
-**Pre-release. Nothing is installable yet.** Release 0.1.0 is built, has passed its tests, including a live run through the Portfolio123 API, and is in private use. Release 0.2.0, which compares saved runs, is built, has passed its tests, including reviews of real runs, and is in private use too. Release 0.2.1 changes only the license, to version 1.1. Release 0.3.0, which runs experiments, is built, has passed its tests, including a live experiment through the Portfolio123 API, and is in private use too. All four are tagged, with every release requirement met, but none has been released.
+**Pre-release. Nothing is installable yet.** Release 0.1.0 is built, has passed its tests, including a live run through the Portfolio123 API, and is in private use. Release 0.2.0, which compares saved runs, is built, has passed its tests, including reviews of real runs, and is in private use too. Release 0.2.1 changes only the license, to version 1.1. Release 0.3.0, which runs experiments, is built, has passed its tests, including a live experiment through the Portfolio123 API, and is in private use too. All four are tagged, with every release requirement met, but none has been released. Release 0.4.0, which varies a ranking system's weights, is built, and has passed its tests, including a live check through the Portfolio123 API, but it isn't in private use or tagged yet.
 
 | Capability | Planned release | Status |
 |---|---|---|
@@ -25,7 +26,7 @@ Portfolio123 does the backtesting. Trial Folio plans each request, records exact
 | Compare saved runs, offline, against a baseline | [0.2.0](docs/releases/0.2.0-review.md) | Implemented: built, tested, and used privately; not yet released |
 | Version 1.1 of the license: your own trust, retirement accounts, and single-member LLC count as you | [0.2.1](docs/releases/0.2.1-license.md) | Ready: signed off, tagged, and every release requirement met; not yet released |
 | Run a small, planned experiment of screen variants, with safe resume | [0.3.0](docs/releases/0.3.0-experiments.md) | Implemented: built, tested, used privately, tagged, and every release requirement met; not yet released |
-| Vary a ranking system's weights, at the top level or within a composite, or remove a factor, as an experiment's variants | [0.4.0](docs/releases/0.4.0-ranking-weights.md) | Specified (Ready). Live calls verified Portfolio123's support (R04-T01), and its contracts, tests, and tasks are specified (R04-T02 to R04-T04) |
+| Vary a ranking system's weights, at the top level or within a composite, or remove a factor, as an experiment's variants, and record a saved ranking system's definition with a snapshot | [0.4.0](docs/releases/0.4.0-ranking-weights.md) | Built and tested, with a live check; not yet in private use, tagged, or released |
 | Descriptive return analytics, statistical evaluation, grid search, robustness diagnostics, forward tracking | [Roadmap](docs/roadmap.md) | Not specified |
 
 **Supported inputs:** release 0.1.0 runs one long-only stock screen backtest through the Portfolio123 API, described in a YAML file. It accepts only the settings and values that live calls have verified:
@@ -47,17 +48,24 @@ Release 0.3.0 runs an experiment: a baseline screen, with the settings above, an
 - rebalancing every week or every 4 weeks. Unless the configuration lists its own, Trial Folio adds a variant for whichever of the two the baseline doesn't use.
 - the slippage
 
-The universe, the ranking, the benchmark, and the dates are the baseline's in every case. [The experiment configuration](docs/contracts.md#experiment-configuration) gives every key, with an example.
+The universe, the ranking, the benchmark, and the dates are the baseline's in every case, but for a ranking variant's ranking, from release 0.4.0. [The experiment configuration](docs/contracts.md#experiment-configuration) gives every key, with an example.
+
+Release 0.4.0 adds a ranking given as a ranking system's definition: the XML that Portfolio123's website shows in the ranking system's Text Editor, in a file beside the configuration, or in a ranking snapshot, which `trialfolio run` reads from a system saved in your account with one request, and writes nothing to it. An experiment whose baseline is ranked that way may have ranking variants:
+
+- the weights of one parent's nodes, the top level or one composite, which keep their sum
+- the removal of one factor, with the weights of the factors left beside it
+
+Each case writes its definition into `ApiRankingSystem`, a ranking system in your account, then backtests ranked by it. Trial Folio writes no other ranking system. [Ranking definitions](docs/contracts.md#ranking-definitions) and [ranking variants](docs/contracts.md#ranking-variants) give the rules, with an example.
 
 Statistical validation and trading readiness are **not assessed** by any planned release before the statistical evaluation increment.
 
 ## Installation
 
-No installation is available yet. When 0.1.0 is released, this section will give the verified installation steps. Releases will be downloaded from [promptedportfolio.com](https://promptedportfolio.com), not from PyPI, and installed with `uv` or `pipx`. Until then, you can run Trial Folio from a copy of this repository, as the [user guide](docs/user-guide.md#1-set-up) describes.
+No installation is available yet. When 0.1.0 is released, this section will give the verified installation steps. Releases will be downloaded from [promptedportfolio.com](https://promptedportfolio.com), not from PyPI, and installed with `uv` or `pipx`. Until then, you can run Trial Folio from a copy of this repository, as the user manual's [first tutorial](https://promptedportfolio.github.io/trialfolio/tutorials/first-backtest/) describes.
 
 ## Usage
 
-These are the commands of releases 0.1.0 to 0.3.0. The [user guide](docs/user-guide.md) walks through each workflow, from setting up to reading the report, with what to check at each step. Put your Portfolio123 API ID and API key in the environment variables `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`. The user guide's [credentials section](docs/user-guide.md#6-set-your-credentials) shows how to keep the key in your system's keychain or password manager, never in a file or your shell's history. Then run a screen configuration:
+These are the commands of releases 0.1.0 to 0.4.0. The [user manual](https://promptedportfolio.github.io/trialfolio/) walks through each workflow, from setting up to reading the report, with what to check at each step. Put your Portfolio123 API ID and API key in the environment variables `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`. [Store your credentials](https://promptedportfolio.github.io/trialfolio/how-to/store-credentials/) shows how to keep the key in your system's keychain or password manager, never in a file or your shell's history. Then run a screen configuration:
 
 ```text
 trialfolio run screen.yaml --out runs/baseline/
@@ -86,6 +94,14 @@ The plan shows every case, its request, and the experiment's budget, and one app
 
 The report shows every case with its outcome, and its metrics beside the other cases', without ranking them.
 
+From release 0.4.0, `trialfolio run` also reads a ranking system saved in your account into a ranking snapshot, given a ranking snapshot configuration, which names the system:
+
+```text
+trialfolio run snapshot.yaml --out runs/snapshots/value-momentum/
+```
+
+A screen's or an experiment's configuration can then rank by the snapshot, or by a definition in a file, and an experiment's variants can change its weights. The plan shows each case's whole definition, and that the run overwrites `ApiRankingSystem` in your account with it, just before each backtest. A lock keeps two Trial Folio runs on one machine from interleaving their cases. [Vary a ranking system's weights](https://promptedportfolio.github.io/trialfolio/how-to/vary-a-ranking-systems-weights/) gives the steps.
+
 The other commands:
 
 ```text
@@ -107,14 +123,16 @@ Add `--json` to any command for one JSON summary on stdout.
 ## Limitations
 
 - **Summary statistics can't show everything.** Trial Folio reports what Portfolio123 returns. It doesn't reconstruct returns, drawdowns, or confidence intervals from summary statistics.
-- **Runs cost API credits.** Each backtest uses Portfolio123 API credits: 5 for a screen backtest, as Portfolio123 documents, and so 5 for each case of an experiment. Trial Folio shows the documented cost and a request budget before sending anything. Whether Portfolio123 charges for a failed request is unknown, so any request that may have reached Portfolio123 is recorded as possibly charged.
+- **Runs cost API credits.** Each backtest uses Portfolio123 API credits: 5 for a screen backtest, as Portfolio123 documents, and so 5 for each case of an experiment. With a ranking definition, each case also writes its definition, with a `rank_update`, at 1 credit, so it costs 6, and a ranking snapshot's one request costs 1. Trial Folio shows the documented cost and a request budget before sending anything. Whether Portfolio123 charges for a failed request is unknown, so any request that may have reached Portfolio123 is recorded as possibly charged.
 - **No proxy.** Trial Folio connects to Portfolio123's API directly. It ignores proxy settings, such as `HTTPS_PROXY`, certificate-bundle settings, such as `REQUESTS_CA_BUNDLE`, and `.netrc`, so nothing in your environment can redirect your credentials. If you can reach the internet only through a proxy, release 0.1.0 can't run your backtests.
 - **Reruns can differ.** A Portfolio123 rerun can give different results as its data and engine change, so Trial Folio treats each run as a new attempt.
+- **`ApiRankingSystem` is shared.** A run with a ranking definition overwrites `ApiRankingSystem` in your account before each case's backtest. Its lock keeps Trial Folio's own runs on one machine from interleaving, but nothing keeps Portfolio123's website, or another machine, from writing that system at the same time.
 - **A backtest is a simulation.** See [research limitations](docs/disclaimers.md).
 
 ## Your data stays on your machine
 
 - Trial Folio contacts Portfolio123 only for requests you approve.
+- The only object it changes in your Portfolio123 account is `ApiRankingSystem`, a ranking system it writes for a run with a ranking definition. A ranking snapshot only reads the system you name.
 - Your API ID and key go only to Portfolio123's API, and are never saved or logged. If `SSLKEYLOGFILE` is set, `trialfolio run` ignores it, with a warning, and removes it from its own environment, so the TLS session keys that would let someone decrypt its traffic, your API key included, are never written to a file. Your shell keeps the setting.
 - Re-rendering reports, the demo, and reviews run offline.
 - Logs stay local and never contain credentials, strategy definitions, configuration values, or results. A command with an output directory writes its log, `trialfolio.log`, to `logs/` inside that directory. `trialfolio init`, commands without an output directory, such as `trialfolio license`, and an internal error before the output directory is ready write to a per-user log directory instead: `~/.local/state/trialfolio/logs` on Linux (or `$XDG_STATE_HOME/trialfolio/logs`), `~/Library/Logs/trialfolio` on macOS, and `%LOCALAPPDATA%\trialfolio\logs` on Windows, unless `TRIALFOLIO_LOG_DIR` names another. A log file is rotated at 1 MB, and the 3 older files are kept. Delete those directories to delete the logs.
@@ -147,7 +165,7 @@ The full notice is in [docs/disclaimers.md](docs/disclaimers.md).
 ## Documentation
 
 - [The user manual](https://promptedportfolio.github.io/trialfolio/): how to set up and use Trial Folio, in tutorials, how-to guides, reference, and explanation. Its source is in [manual/](manual/).
-- [docs/user-guide.md](docs/user-guide.md): how to set up and use Trial Folio, workflow by workflow. The user manual replaces it at release 0.4.0.
+- [docs/user-guide.md](docs/user-guide.md): the user guide, which the user manual replaced at release 0.4.0. It points to the manual's pages.
 - [docs/README.md](docs/README.md): a map of the specifications.
 - [AGENTS.md](AGENTS.md): instructions for coding agents.
 - [docs/ai-development.md](docs/ai-development.md): how AI is used to build Trial Folio.

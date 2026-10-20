@@ -8,6 +8,7 @@ Trial Folio is a command-line tool for investors who research strategies in [Por
 
 - Run backtests through the Portfolio123 API, with every setting recorded next to its result.
 - Run a small, planned experiment: a baseline screen and a few variants of it, under one approval and one budget, which you can resume safely.
+- Vary a ranking system's weights, or remove one of its factors, as an experiment's variants, with each case's whole ranking definition recorded.
 - Compare runs and see exactly which settings differ between them.
 - Keep a durable, inspectable record of what you tested, including the tests that failed.
 
@@ -21,7 +22,7 @@ The demo runs without one. `trialfolio demo` writes a complete example run from 
 
 This manual describes Trial Folio as it is on the `main` branch of [its repository](https://github.com/promptedportfolio/trialfolio), until the first release is distributed. Until then, you run Trial Folio from a copy of the repository, as the [first tutorial](tutorials/first-backtest.md) shows.
 
-The latest tagged version is `v0.3.0`. A tagged version can lack behavior this manual describes. If you run a tagged copy, follow the user guide at its tag instead, such as [the user guide at `v0.3.0`](https://github.com/promptedportfolio/trialfolio/blob/v0.3.0/docs/user-guide.md).
+The latest tagged version is `v0.3.0`. A tagged version can lack behavior this manual describes: release 0.4.0's ranking definitions and snapshots are on `main`, and in no tag yet. If you run a tagged copy, follow the documentation at its tag instead: for `v0.3.0` and earlier tags, the user guide, such as [the user guide at `v0.3.0`](https://github.com/promptedportfolio/trialfolio/blob/v0.3.0/docs/user-guide.md); for a later tag, this manual's pages as that tag holds them, in its `manual/` folder.
 
 The manual describes Trial Folio's behavior; it doesn't define it. The [specifications](https://github.com/promptedportfolio/trialfolio/blob/main/docs/README.md) define it. Where the manual and a specification disagree, the specification wins, and the manual is the one to fix.
 
@@ -48,6 +49,8 @@ The steps for a task you already have.
 - [Recover from an interrupt](how-to/recover-from-an-interrupt.md)
 - [Repeat a case](how-to/repeat-a-case.md)
 - [Revise an experiment](how-to/revise-an-experiment.md)
+- [Vary a ranking system's weights](how-to/vary-a-ranking-systems-weights.md)
+- [Take a ranking snapshot](how-to/take-a-ranking-snapshot.md)
 - [Use Trial Folio from a script](how-to/use-from-a-script.md)
 
 ### Reference
@@ -58,6 +61,8 @@ Exact descriptions of the commands, configurations, outputs, and errors, to look
 - [Screen configuration](reference/screen-configuration.md)
 - [Review configuration](reference/review-configuration.md)
 - [Experiment configuration](reference/experiment-configuration.md)
+- [Ranking definitions](reference/ranking-definitions.md)
+- [Ranking snapshot configuration](reference/ranking-snapshot-configuration.md)
 - [Outputs](reference/outputs.md)
 - [Errors](reference/errors.md)
 - [JSON summary](reference/json-summary.md)
@@ -70,6 +75,7 @@ Why Trial Folio works as it does, with links to the specifications behind it.
 - [Credits and uncertain charges](explanation/credits-and-uncertain-charges.md)
 - [Reproducibility](explanation/reproducibility.md)
 - [What a backtest can support](explanation/what-a-backtest-can-support.md)
+- [`ApiRankingSystem` and the ranking lock](explanation/apirankingsystem-and-the-ranking-lock.md)
 - [The research method, step by step](explanation/the-research-method.md)
 - [Where Trial Folio is going](explanation/where-trial-folio-is-going.md)
 

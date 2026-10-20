@@ -19,4 +19,4 @@
 - Compare saved runs with a baseline you choose: write a review configuration, and run `trialfolio review`.
 - Run an experiment, a baseline screen and a few variants of it under one plan and one budget: write an experiment configuration, and run it into a folder under `runs/`, such as `trialfolio run experiment.yaml --out runs/study/`. Running the same command again resumes it.
 
-The [user guide for this version](https://github.com/promptedportfolio/trialfolio/blob/v{version}/docs/user-guide.md) explains each step, how to set your credentials without saving the key in your shell's history, and what to check.
+The [user manual](https://promptedportfolio.github.io/trialfolio/) explains each step, how to set your credentials without saving the key in your shell's history, and what to check. It describes Trial Folio as its repository's `main` branch has it. The manual's pages for this version, {version}, are [at its tag](https://github.com/promptedportfolio/trialfolio/blob/v{version}/manual/index.md).

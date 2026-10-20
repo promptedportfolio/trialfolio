@@ -5,7 +5,7 @@ These are the specifications for Trial Folio. Each release file's **Status** lin
 ## Where to start
 
 - **Implementing:** read [AGENTS.md](../AGENTS.md), then the assigned release, whose **Status** line says where it stands.
-- **Using Trial Folio:** read the [user manual](https://promptedportfolio.github.io/trialfolio/), whose pages are in `manual/` at the repository's root ([user-manual.md](user-manual.md)), or the [user guide](user-guide.md), which the manual replaces at 0.4.0's documentation task. Until then, a change to behavior both describe updates both.
+- **Using Trial Folio:** read the [user manual](https://promptedportfolio.github.io/trialfolio/), whose pages are in `manual/` at the repository's root ([user-manual.md](user-manual.md)). It replaced the [user guide](user-guide.md) at 0.4.0's documentation task, R04-T14, which turned the guide into a page that points to it.
 - **Understanding the product:** read [spec.md](spec.md), then [roadmap.md](roadmap.md).
 - **Planning a release:** follow [Product direction (D-23)](spec.md#product-direction) and the [release planning requirements](roadmap.md#release-planning-requirements), then write or complete its release specification. Roadmap targets are not implementation assignments.
 - **Checking permissions or notices:** read [../LICENSE](../LICENSE), [licensing-policy.md](licensing-policy.md), and [disclaimers.md](disclaimers.md).
@@ -44,7 +44,7 @@ These are the specifications for Trial Folio. Each release file's **Status** lin
 | [refactoring.md](refactoring.md) | The readability refactor of `src/trialfolio`, outside any release ([D-39](spec.md#decisions)): what it doesn't change, its constraints, findings, criteria, and tasks (RF) |
 | [related-tools.md](related-tools.md) | The survey of tools related to Trial Folio (UM-T03): dated, sourced facts behind the manual's claims about other tools, and the claims they support. It owns no requirement. |
 | [written-permission-template.md](written-permission-template.md) | The form a written permission grant takes |
-| [user-guide.md](user-guide.md) | How to set up and use Trial Folio, workflow by workflow, with what to check at each step. It owns no requirement: where it disagrees with an owning document, the guide is fixed. |
+| [user-guide.md](user-guide.md) | A page that points to the user manual, which replaced the guide at 0.4.0's documentation task, R04-T14, with a heading for each of the guide's former sections. It owns no requirement. The guide at a tag up to `v0.3.0` describes that version. |
 | [ai-development.md](ai-development.md) | How AI is used to build Trial Folio, in plain language |
 | [spec-authoring-guide.md](spec-authoring-guide.md) | Bootstrap context used to write these documents. Superseded wherever an owning document says otherwise |
 

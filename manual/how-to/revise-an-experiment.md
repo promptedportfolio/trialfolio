@@ -11,6 +11,7 @@ Use this page when you've changed an experiment's configuration after it ran, su
 
 1. Change the configuration. These revise the plan:
     - a change to a case's settings, an added or removed variant, a change to the budget, the title, the purpose, the prior research, a case's key or description, or the order of one setting's variants;
+    - with a ranking definition, a change to the definition's file, its ranking method, or its source, such as a snapshot in the file's place;
     - a new version of Trial Folio, `p123api`, `requests`, or `urllib3`, even with the same configuration.
 
     A change the plan doesn't record, such as a comment, doesn't. Another `experiment_id`, or a baseline with another universe, is [another experiment](#another-experiment), not a revision.
@@ -37,6 +38,8 @@ Use this page when you've changed an experiment's configuration after it ran, su
 
 - **A case whose settings didn't change** keeps its `case_id` and its attempts, whatever its key, so a case that succeeded isn't sent again.
 - **A case whose settings changed** is a new case, with a new `case_id`, even under the same key. The old case is retired: it and its attempts stay in the record, the report lists it, and the budget still counts its attempts.
+- **With a ranking definition,** a changed definition changes every case whose definition changes with it: the baseline, each variant of another setting, and each ranking variant whose definition is then different. A ranking variant whose definition stays the same, byte for byte, keeps its case. A changed ranking method changes every case. A snapshot of the same definition in a file's place changes no case, and the revision records the new source ([plans with a ranking definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#plans-with-a-ranking-definition)).
+- **A ranking given another way,** such as a definition in a formula's place, is a changed setting of the baseline: the revision needs `schema_version: 1.1.0`, and its budget at least two requests a case.
 
 A revision that raises the budget lets a [repeat](repeat-a-case.md) the budget couldn't cover go ahead, with the same option.
 

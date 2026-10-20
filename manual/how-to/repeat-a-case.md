@@ -10,7 +10,7 @@ A case awaiting a repeat is sent again only when `--repeat` names it and you con
 ## Before you start
 
 - **The case's option.** The plan display, the message of a run that leaves such a case, the report, and the [JSON summary](../reference/json-summary.md) each give its exact option, `--repeat <case-key>:<attempt-id>`.
-- **Room in the budget.** A repeat counts against the experiment's budget.
+- **Room in the budget.** A repeat counts against the experiment's budget: one request, or, with a ranking definition, two, since it sends the case's `rank_update` and its backtest again.
 - **Your credentials,** since a repeat sends the request again ([store your credentials](store-credentials.md)).
 
 ## Steps

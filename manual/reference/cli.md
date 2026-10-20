@@ -83,7 +83,7 @@ It writes three files:
 | File | What it is |
 |---|---|
 | `screen.yaml` | A starter [screen configuration](screen-configuration.md), with a comment on each key |
-| `README.md` | The next steps |
+| `README.md` | The next steps, with links to this manual |
 | `.gitignore` | Keeps credential files, runs, reports, and reviews out of Git, if you keep the folder in a repository, as [outputs that hold Portfolio123 data](outputs.md#outputs-that-hold-portfolio123-data) lists |
 
 - **The folder must be new or empty.** Running it again on the same folder fails with `output.not_empty`, exit code 4, and changes nothing.
@@ -112,7 +112,11 @@ trialfolio run [-h] --out DIR [--approve PLAN_HASH]
 
 <!-- end generated: cli-command-run -->
 
-`config` is a [screen](screen-configuration.md) or an [experiment](experiment-configuration.md) configuration: its `kind` says which. A screen's run sends one request, which costs 5 API credits. An experiment sends one request for each case, at 5 credits each, within its [budget](experiment-configuration.md#the-budget).
+`config` is a [screen](screen-configuration.md), an [experiment](experiment-configuration.md), or, from release 0.4.0, a [ranking snapshot](ranking-snapshot-configuration.md) configuration: its `kind` says which.
+
+- **A screen's run** sends one request, which costs 5 API credits. When its ranking is a ranking system's definition, in a file or a snapshot, it first writes the definition into `ApiRankingSystem` in your account, with a `rank_update`, at 1 credit, so it sends two requests, 6 credits ([`ApiRankingSystem` and the ranking lock](../explanation/apirankingsystem-and-the-ranking-lock.md)).
+- **An experiment** sends one request for each case, at 5 credits each, or, with a ranking definition, two, at 6 credits a case, within its [budget](experiment-configuration.md#the-budget).
+- **A ranking snapshot** sends one `rank_get`, at 1 credit, which reads a ranking system saved in your account, and writes nothing to it ([take a ranking snapshot](../how-to/take-a-ranking-snapshot.md)).
 
 ### The plan and its approval
 
@@ -128,7 +132,7 @@ trialfolio run [-h] --out DIR [--approve PLAN_HASH]
 ### `--out`
 
 - **For a screen,** it names a new or an empty directory. Trial Folio never overwrites anything. A directory that isn't empty fails with `output.not_empty`, exit code 4, before the plan is shown, and nothing in it changes.
-- **For a new experiment,** it names a new or an empty directory too.
+- **For a new experiment, and for a ranking snapshot,** it names a new or an empty directory too. A snapshot is never added to: a later one goes into a directory of its own.
 - **For an existing experiment,** it names the experiment's own directory, which holds `experiment.lock`. Running the same configuration into it resumes the experiment, or revises it after you change the configuration. A configuration with another `experiment_id`, or whose baseline has another universe, is another experiment, and fails there with `output.not_empty`.
 
 [Recovering from an interrupt](../how-to/recover-from-an-interrupt.md) and [revising an experiment](../how-to/revise-an-experiment.md) give the steps.
@@ -142,7 +146,8 @@ trialfolio run [-h] --out DIR [--approve PLAN_HASH]
 
 ### `--repeat`
 
-- **For an existing experiment's case awaiting a repeat** only: one whose request may have reached Portfolio123, and none of whose attempts succeeded. With a screen, or a new experiment, it fails with `plan.approval_required`.
+- **For an existing experiment's case awaiting a repeat** only: one whose request may have reached Portfolio123, and none of whose attempts succeeded. With a screen, a ranking snapshot, or a new experiment, it fails with `plan.approval_required`.
+- **With a ranking definition,** a repeat sends the case's `rank_update` and its backtest again, two requests from the budget.
 - **Give it once for each case** you repeat. A case key given twice is a usage error, exit code 2.
 - **With the attempt ID,** `--repeat <case-key>:<attempt-id>`, the option is the confirmation, and Trial Folio doesn't ask. With `--approve`, or from a script, a repeat needs it.
 - **With the key alone,** in a terminal without `--approve`, it asks you to type `repeat`, once you've approved the plan.
@@ -155,6 +160,16 @@ trialfolio run [-h] --out DIR [--approve PLAN_HASH]
 - **`run` reads your API ID and key** from `TRIALFOLIO_P123_API_ID` and `TRIALFOLIO_P123_API_KEY`, once the plan is approved, when it has a request to send.
 - **Without them,** an approved plan fails with `provider.auth_failed`, exit code 5. The message names the missing variables, and says nothing was sent and no output was created.
 - **A resumed experiment that sends nothing,** because no case is due and no repeat is to be made, needs no credentials.
+- **A configuration ranked by a snapshot** is planned from the snapshot's files, offline, so reviewing its plan needs no credentials either.
+
+### The ranking lock
+
+A run that writes `ApiRankingSystem`, a screen or an experiment ranked by a definition, takes the ranking lock once its plan is approved, before it writes anything, and holds it until it ends, so no other Trial Folio process on the machine writes the system meanwhile. Its file is `trialfolio-ranking.lock`, in `/tmp` on Linux and macOS, and in `%ProgramData%` on Windows, unless `TRIALFOLIO_LOCK_DIR` names another directory.
+
+- **Held by another process,** the run fails with `experiment.locked`, exit code 4, before anything is sent.
+- **When the file can't be opened or locked,** it fails with `storage.write_failed`, exit code 4, before anything is sent, and the message names the file.
+
+[`ApiRankingSystem` and the ranking lock](../explanation/apirankingsystem-and-the-ranking-lock.md#the-ranking-lock) explains which runs take it, and what it can't exclude.
 
 [Storing your credentials](../how-to/store-credentials.md) gives ways to set them.
 
@@ -290,6 +305,7 @@ Before you acknowledge, `trialfolio demo --out demo/` from a script, or with its
 | `TRIALFOLIO_LOG_LEVEL` | The level the log files record: `DEBUG`, `INFO`, `WARNING`, or `ERROR`. `INFO` by default. Any other value is ignored, with a warning on stderr. |
 | `TRIALFOLIO_LOG_DIR` | The per-user log directory, in place of the [default](errors.md#logs) |
 | `TRIALFOLIO_CONFIG_DIR` | The per-user configuration directory, which holds the acknowledgment's [record](#the-record), in place of the default |
+| `TRIALFOLIO_LOCK_DIR` | The directory of the [ranking lock](#the-ranking-lock)'s file, in place of `/tmp`, or `%ProgramData%` on Windows. Every Trial Folio process that uses the same Portfolio123 account must name the same one. An empty value counts as unset. |
 
 **Your API ID and key:**
 
