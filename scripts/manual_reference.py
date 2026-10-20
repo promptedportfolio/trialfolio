@@ -11,7 +11,7 @@ Everything outside them is hand-written. This script holds the registry of regio
 generates each:
 
 - manual/reference/cli.md: the usage lines, commands, arguments, and options, from the CLI's
-  parser, `_parser` in src/trialfolio/cli.py;
+  parser, `parser` in src/trialfolio/cli/arguments.py, which `trialfolio.cli` gives as `_parser`;
 - the four configuration pages: each object's keys, from the configuration's schema in schemas/;
 - outputs.md: the columns of metrics.csv, settings.csv, and differences.csv, from their row
   schemas;
