@@ -10,7 +10,7 @@ Live calls verified that route before it was built: a backtest ranked by the sys
 
 ## Why `ApiRankingSystem`, and only it
 
-`rank_update` without an ID writes `ApiRankingSystem`, a ranking system Portfolio123 keeps for the API, and creates it in your account the first time. Trial Folio writes only that system. It never gives `rank_update` an ID, never calls `rank_create`, and never writes a system you saved, or the one a snapshot reads: a snapshot only reads ([D-36](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#decisions)). A test checks the body of every `rank_update` Trial Folio sends for it.
+`rank_update` without an ID writes `ApiRankingSystem`, a ranking system Portfolio123 keeps for the API, and creates it in your account the first time. Trial Folio writes only that system. It never gives `rank_update` an ID, never calls `rank_create`, and never writes a system you saved, or the one a snapshot reads: a snapshot only reads ([D-36](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#decisions)). Trial Folio's tests check that no `rank_update` it sends carries an ID.
 
 So the ranking systems you keep are never changed by Trial Folio, and `ApiRankingSystem` holds the definition the last case wrote. The plan says that the run overwrites it, before you approve. Three things follow:
 

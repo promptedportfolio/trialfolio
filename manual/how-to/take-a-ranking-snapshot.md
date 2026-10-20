@@ -38,7 +38,7 @@ Ranking by the system's name, `ranking: {name: ...}`, ranks by whatever the syst
     Its definition, ranking method, currency, and type can be a ranking: name the snapshot's directory as ranking.snapshot in a screen's or an experiment's configuration, schema version 1.1.0.
     ```
 
-    When it can't, the message lists each rule it breaks, such as a currency other than USD, or a node of a kind Trial Folio doesn't send. The snapshot is still kept, as a record of what the system held.
+    When it can't, stdout says so, with a line for each rule it breaks, such as a currency other than USD, or a node of a kind Trial Folio doesn't send. The snapshot is still kept, as a record of what the system held.
 
 4. Name the snapshot's directory in a screen's or an experiment's `ranking`, in a configuration with `schema_version: 1.1.0`, in place of `definition` and `ranking_method`:
 
