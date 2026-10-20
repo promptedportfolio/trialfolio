@@ -7,7 +7,9 @@ column kept by each row's key, and the error codes cross-checked with `EXIT_CODE
 write a small manual by hand, with regions the test registers, and run `scripts/manual_reference.py`
 on it. The last ones run it on the real pages and sources, as scripts/check does, and check that
 each JSON file the page of output fields names is at the version Trial Folio writes, by the schema
-whose region is in the file's section.
+whose region is in the file's section. Release 0.4.0's documentation task, R04-T14, added the
+files of a run and an experiment with a ranking definition, and of a ranking snapshot, and the
+words for an object of any keys and for a tuple of different items, which their schemas need.
 """
 
 import fnmatch
@@ -25,7 +27,12 @@ import pytest
 
 from tests.support.clock import FixedClock
 from tests.support.environment import VARIABLES
-from tests.support.synthetic_experiment import write_synthetic_experiment
+from tests.support.synthetic_experiment import (
+    write_synthetic_experiment,
+    write_synthetic_ranking_experiment,
+    write_synthetic_run,
+    write_synthetic_snapshot,
+)
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
 from trialfolio.cli import main as trialfolio
 from trialfolio.contracts.schema_files import SCHEMA_FILES
@@ -407,7 +414,9 @@ def _schemas(tmp_path: Path, name: str, change: Any) -> Path:
     return schemas
 
 
-SCREEN = "screen-configuration-1.0.0.schema.json"
+# The screen configuration page gives version 1.1.0 since release 0.4.0's R04-T14, so the
+# changes are made to its schema, where they were made to 1.0.0's.
+SCREEN = "screen-configuration-1.1.0.schema.json"
 RUN_MANIFEST = "run-manifest-1.0.0.schema.json"
 
 
@@ -451,13 +460,62 @@ def _options(schema: Any) -> Any:
             "command.options's keys use enum, which the generator can't put in plain words",
             id="a keyword in a mapping's keys",
         ),
+        # Since release 0.4.0's R04-T14, an object of any keys, each a number, is put in words, as
+        # a ranking variant's `set` needs; its values still can't be objects.
         pytest.param(
             SCREEN,
             lambda schema: schema["properties"].update(
-                universe={"type": "object", "additionalProperties": {"type": "number"}}
+                universe={
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "properties": {"a": {"type": "string"}},
+                        "additionalProperties": False,
+                    },
+                }
             ),
-            "universe allows any key",
-            id="an object of any keys, each a number",
+            "universe maps names to objects",
+            id="an object of any keys, each an object",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["properties"].update(
+                universe={"type": "object", "additionalProperties": False, "minProperties": 1}
+            ),
+            "universe is an object the generator can't",
+            id="an empty object with at least one key",
+        ),
+        pytest.param(
+            RUN_MANIFEST,
+            lambda schema: _options(schema).update(minProperties=1),
+            "options is a mapping the generator can't",
+            id="a mapping of patterns with at least one key",
+        ),
+        pytest.param(
+            SCREEN,
+            lambda schema: schema["properties"].update(
+                universe={
+                    "type": "array",
+                    "prefixItems": [{"type": "string"}, {"type": "integer"}],
+                    "minItems": 2,
+                    "maxItems": 3,
+                }
+            ),
+            "universe is a tuple the generator can't",
+            id="a tuple of different items, without a fixed length",
+        ),
+        pytest.param(
+            "settings-row-1.1.0.schema.json",
+            lambda schema: schema["properties"].update(
+                flags={
+                    "type": "array",
+                    "prefixItems": [{"type": "string"}, {"type": "integer"}],
+                    "minItems": 2,
+                    "maxItems": 2,
+                }
+            ),
+            "flags is a tuple in a table",
+            id="a tuple of different items in a table's row",
         ),
         pytest.param(
             SCREEN,
@@ -483,7 +541,7 @@ def _options(schema: Any) -> Any:
         # narrow what they give, and one that's not its kind's would be dropped.
         pytest.param(
             SCREEN,
-            lambda schema: schema["$defs"]["Ranking"]["anyOf"][0].update(
+            lambda schema: schema["$defs"]["RankingV1_1"]["anyOf"][0].update(
                 allOf=[{"properties": {"formula": {"maxLength": 1}}}]
             ),
             "ranking-formula uses allOf, which the generator can't put in plain words",
@@ -556,6 +614,98 @@ def test_a_schema_the_generator_cant_put_in_plain_words_fails(
         )
 
     assert str(raised.value) == f"{name}: {problem}"
+
+
+_ITEM_A = {
+    "type": "object",
+    "properties": {"a": {"type": "string"}},
+    "required": ["a"],
+    "additionalProperties": False,
+}
+_ITEM_B = {
+    "type": "object",
+    "properties": {"b": {"type": "integer"}},
+    "required": ["b"],
+    "additionalProperties": False,
+}
+
+
+def _words(page: Any, properties: dict[str, Any]) -> str:
+    """The text of the one region a small schema of `properties` generates on `page`, with
+    `$defs` for the two items above."""
+    schema = {
+        "type": "object",
+        "properties": properties,
+        "required": list(properties),
+        "additionalProperties": False,
+        "$defs": {"A": _ITEM_A, "B": _ITEM_B},
+    }
+    (region,) = manual_reference.schema_regions(page, schema).values()
+    return manual_reference.render(region)
+
+
+def test_an_object_of_any_keys_is_put_in_words_by_its_values() -> None:
+    """Since release 0.4.0's R04-T14: an experiment configuration 1.1.0's ranking variant's
+    `set`, node paths each with a weight, is an object of any keys whose values are numbers."""
+    page = manual_reference.SchemaPage("p", "p.schema.json", key="Field", split=False)
+    weights = {"type": "number", "exclusiveMinimum": 0}
+
+    text = _words(
+        page,
+        {
+            "set": {"type": "object", "additionalProperties": weights, "minProperties": 1},
+            "any": {"type": "object", "additionalProperties": weights},
+        },
+    )
+
+    assert (
+        "| `set` | Yes | An object with at least one key, each with a value that's a number,"
+        " more than 0 | |"
+    ) in text
+    assert (
+        "| `any` | Yes | An object whose keys each have a value that's a number, more than 0 |"
+        in (text)
+    )
+
+
+def test_a_tuple_of_different_items_names_each_by_its_position() -> None:
+    """Since release 0.4.0's R04-T14: a plan 1.2.0's case has two requests, a `rank_update`
+    and a backtest, each an object of its own."""
+    page = manual_reference.SchemaPage("p", "p.schema.json", key="Field", split=False)
+    pair = {
+        "type": "array",
+        "prefixItems": [{"$ref": "#/$defs/A"}, {"$ref": "#/$defs/B"}],
+        "minItems": 2,
+        "maxItems": 2,
+    }
+
+    text = _words(page, {"requests": pair})
+
+    assert (
+        "| `requests` | Yes | A list of exactly 2 items, in this order: an [object](#p-requests-0),"
+        " then an [object](#p-requests-1) | |"
+    ) in text
+    assert "### `requests[0]` { #p-requests-0 }" in text
+    assert "### `requests[1]` { #p-requests-1 }" in text
+    assert "| `a` | Yes | Text | |" in text
+    assert "| `b` | Yes | An integer | |" in text
+
+
+def test_a_tuple_whose_items_take_one_schema_reads_as_a_list() -> None:
+    """Since release 0.4.0's R04-T14: a plan 1.2.0's two costs, and a snapshot plan's two kinds
+    of data sent, are each one object's shape, in their order."""
+    page = manual_reference.SchemaPage("p", "p.schema.json", key="Field", split=False)
+    pair = {
+        "type": "array",
+        "prefixItems": [{"$ref": "#/$defs/A"}, {"$ref": "#/$defs/A"}],
+        "minItems": 2,
+        "maxItems": 2,
+    }
+
+    text = _words(page, {"costs": pair})
+
+    assert "| `costs` | Yes | A list of exactly 2 [objects](#p-costs) | |" in text
+    assert "### Each of `costs` { #p-costs }" in text
 
 
 def test_the_commands_dont_depend_on_the_terminal_or_the_language(
@@ -648,8 +798,47 @@ EXPERIMENT_FILES = {
     "cases/*/attempts/*/authenticating.json": "`authenticating.json`",
 }
 REVIEW_FILES = {"manifest.json": "A review's `manifest.json`"}
-# The files that have no schema: the request without credentials, and Portfolio123's response.
-UNSCHEMED = {"request.json", "response.json"}
+# From release 0.4.0, a run's and an experiment's files with a ranking definition, and a ranking
+# snapshot's, which R04-T14 added to the page.
+RANKING_RUN_START = (
+    "`started.json` and `updating.json` 1.2.0, of a run with a ranking definition or a snapshot"
+)
+RANKING_RUN_ATTEMPT = "`attempt.json` 1.2.0, of a run with a ranking definition or a snapshot"
+RANKING_RUN_FILES = {
+    "manifest.json": "A run's `manifest.json` 1.1.0, with a ranking definition",
+    "plan.json": "A run's `plan.json` 1.2.0, with a ranking definition",
+    "cases/*/attempts/*/started.json": RANKING_RUN_START,
+    "cases/*/attempts/*/updating.json": RANKING_RUN_START,
+    "cases/*/attempts/*/attempt.json": RANKING_RUN_ATTEMPT,
+}
+RANKING_EXPERIMENT_START = (
+    "An experiment's `started.json` and `updating.json` 1.3.0, with a ranking definition"
+)
+RANKING_EXPERIMENT_FILES = {
+    "plans/*/plan.json": "An experiment's `plans/<n>/plan.json` 1.3.0, with a ranking definition",
+    "plans/*/experiment.json": "`plans/<n>/experiment.json` 1.1.0, with a ranking definition",
+    "sessions/*/session.json": "`sessions/<s>/session.json`",
+    "sessions/*/manifest.json": "`sessions/<s>/manifest.json` 1.1.0, with a ranking definition",
+    "cases/*/attempts/*/started.json": RANKING_EXPERIMENT_START,
+    "cases/*/attempts/*/updating.json": RANKING_EXPERIMENT_START,
+    "cases/*/attempts/*/attempt.json": "An experiment's `attempt.json` 1.3.0, with a ranking definition",
+    "cases/*/attempts/*/authenticating.json": "`authenticating.json`",
+}
+SNAPSHOT_FILES = {
+    "plan.json": "A ranking snapshot's `plan.json`",
+    "snapshot.json": "A ranking snapshot's `snapshot.json`",
+    "manifest.json": "A ranking snapshot's `manifest.json`",
+    "attempts/*/started.json": RANKING_RUN_START,
+    "attempts/*/attempt.json": RANKING_RUN_ATTEMPT,
+}
+# The files that have no schema: the request without credentials, and Portfolio123's response,
+# and, from 0.4.0, a `rank_update`'s.
+UNSCHEMED = {
+    "request.json",
+    "response.json",
+    "rank-update-request.json",
+    "rank-update-response.json",
+}
 
 
 def _cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *argv: str | Path) -> None:
@@ -743,3 +932,48 @@ def test_each_file_the_commands_write_is_at_its_pages_schema_version(
     assert all(written == expected for written, expected in run.values())
     assert all(written == expected for written, expected in experiment.values())
     assert review["manifest.json"][0] == review["manifest.json"][1]
+
+
+def test_each_file_with_a_ranking_definition_is_at_its_pages_schema_version(
+    tmp_path: Path,
+) -> None:
+    """From release 0.4.0 (R04-T14): a run and an experiment with a ranking definition, and a
+    ranking snapshot, which the core writes with the demo's client, as no command does offline.
+    Each JSON file is at the version of the schema its section of output-fields.md gives."""
+    write_synthetic_run(tmp_path / "run")
+    write_synthetic_ranking_experiment(tmp_path / "experiment")
+    write_synthetic_snapshot(tmp_path / "snapshot")
+
+    run = _schema_versions(tmp_path / "run", RANKING_RUN_FILES)
+    experiment = _schema_versions(tmp_path / "experiment", RANKING_EXPERIMENT_FILES)
+    snapshot = _schema_versions(tmp_path / "snapshot", SNAPSHOT_FILES)
+
+    assert {name.rsplit("/", 1)[-1] for name in run} == {
+        "manifest.json",
+        "plan.json",
+        "started.json",
+        "updating.json",
+        "attempt.json",
+    }
+    assert {name.rsplit("/", 1)[-1] for name in experiment} == {
+        "plan.json",
+        "experiment.json",
+        "session.json",
+        "manifest.json",
+        "started.json",
+        "updating.json",
+        "attempt.json",
+        "authenticating.json",
+    }
+    assert set(snapshot) == {
+        "plan.json",
+        "snapshot.json",
+        "manifest.json",
+        *(name for name in snapshot if name.startswith("attempts/")),
+    }
+    assert {name.rsplit("/", 1)[-1] for name in snapshot if name.startswith("attempts/")} == {
+        "started.json",
+        "attempt.json",
+    }
+    for found in (run, experiment, snapshot):
+        assert all(written == expected for written, expected in found.values())

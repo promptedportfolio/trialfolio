@@ -12,10 +12,11 @@ generates each:
 
 - manual/reference/cli.md: the usage lines, commands, arguments, and options, from the CLI's
   parser, `parser` in src/trialfolio/cli/arguments.py, which `trialfolio.cli` gives as `_parser`;
-- the three configuration pages: each object's keys, from the configuration's schema in schemas/;
+- the four configuration pages: each object's keys, from the configuration's schema in schemas/;
 - outputs.md: the columns of metrics.csv, settings.csv, and differences.csv, from their row
   schemas;
-- output-fields.md: the fields of each JSON file Trial Folio writes, from its schema;
+- output-fields.md: the fields of each JSON file Trial Folio writes, at each version it writes,
+  from its schema;
 - json-summary.md: the summary's keys, from json-summary-1.2.0.schema.json;
 - errors.md: the error codes, from docs/contracts.md's "Errors" table, which must agree with
   `EXIT_CODES` in src/trialfolio/errors.py, and the exit codes, from the exit-code table in its
@@ -47,7 +48,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from trialfolio.cli import _parser
 from trialfolio.errors import EXIT_CODES
@@ -459,6 +460,10 @@ PATTERNS: Final[Mapping[str, tuple[str, str]]] = {
         "`pp`, `ratio`, `count`, `days`, or `currency:` and three capital letters",
     ),
     "^https://[^\\s]+$": ("form", "an `https://` address, without spaces"),
+    "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$": (
+        "form",
+        "a decimal written as text, in plain notation, without trailing zeros, such as `12.5`",
+    ),
 }
 FORMATS: Final[Mapping[str, str]] = {
     "date": "a date, `YYYY-MM-DD`",
@@ -481,7 +486,8 @@ _NUMBER: Final = frozenset({"type", "minimum", "maximum", "exclusiveMinimum", "e
 # The keywords each kind of value may use, by the kind `_Walk.kind` gives it: those its words cover.
 # Any other fails the generator, rather than being dropped. So a schema reaches a value inside it
 # only where the words do: through `$ref`, `anyOf`, an object's `properties`, an array's `items`
-# and `prefixItems`, a mapping's `patternProperties` and `propertyNames`, and a string's `not`.
+# and `prefixItems`, a mapping's `patternProperties`, `propertyNames`, and `additionalProperties`,
+# and a string's `not`.
 # Beside `$ref` or `anyOf`, only the annotations: any other keyword there would narrow the value
 # the reference or the alternatives give, unseen.
 KEYWORDS: Final[Mapping[str, frozenset[str]]] = {
@@ -499,7 +505,14 @@ KEYWORDS: Final[Mapping[str, frozenset[str]]] = {
         "null": frozenset({"type"}),
         "array": frozenset({"type", "items", "prefixItems", "minItems", "maxItems"}),
         "mapping": frozenset(
-            {"type", "properties", "patternProperties", "propertyNames", "additionalProperties"}
+            {
+                "type",
+                "properties",
+                "patternProperties",
+                "propertyNames",
+                "additionalProperties",
+                "minProperties",
+            }
         ),
     }.items()
 }
@@ -619,9 +632,15 @@ class _Walk:
                 else:
                     self.visit(option, path)
         elif kind == "array":
-            for item in [node.get("items"), *node.get("prefixItems", [])]:
-                if item is not None:
-                    self.visit(item, f"{path}[]")
+            prefix: Sequence[Mapping[str, Any]] = node.get("prefixItems", [])
+            if _positional(prefix):
+                # A tuple whose items differ: each is named by its position.
+                for index, item in enumerate(prefix):
+                    self.visit(item, f"{path}[{index}]")
+            else:
+                for item in [node.get("items"), *prefix]:
+                    if item is not None:
+                        self.visit(item, f"{path}[]")
         elif kind == "mapping":
             unknown = sorted(node.get("propertyNames", {}).keys() - NAME_KEYWORDS)
             if unknown:
@@ -629,7 +648,11 @@ class _Walk:
                     f"{self.page.schema}: {path}'s keys use {', '.join(unknown)}, which the"
                     " generator can't put in plain words"
                 )
-            for value in node.get("patternProperties", {}).values():
+            values = list(node.get("patternProperties", {}).values())
+            additional = node.get("additionalProperties")
+            if isinstance(additional, Mapping):
+                values.append(cast("Mapping[str, Any]", additional))
+            for value in values:
                 if self.is_object(value) or value.get("type") in ("array", "object"):
                     raise GenerationError(f"{self.page.schema}: {path} maps names to objects")
                 self.visit(value, f"{path}.*")
@@ -796,9 +819,11 @@ class _Walk:
         least, most = node.get("minItems"), node.get("maxItems")
         items = node.get("items")
         if "prefixItems" in node:
-            prefix = node["prefixItems"]
-            if items is not None or len(prefix) != 1 or least != 1 or most != 1:
+            prefix: Sequence[Mapping[str, Any]] = node["prefixItems"]
+            if items is not None or not prefix or least != len(prefix) or most != len(prefix):
                 raise GenerationError(f"{self.page.schema}: {path} is a tuple the generator can't")
+            if _positional(prefix):
+                return self.tuple(prefix, path)
             items = prefix[0]
         if items is None:
             raise GenerationError(f"{self.page.schema}: {path} is a list without its items")
@@ -829,17 +854,38 @@ class _Walk:
             f"a list of {count} {noun}, each {words}" if count else f"a list of items, each {words}"
         )
 
+    def tuple(self, prefix: Sequence[Mapping[str, Any]], path: str) -> str:
+        """A list of a fixed number of items, each with a schema of its own, in their order."""
+        if self.page.csv:
+            raise GenerationError(f"{self.page.schema}: {path} is a tuple in a table")
+        words = [
+            f"an {self.link(item, 'object')}"
+            if self.is_object(item)
+            else self.phrase(item, f"{path}[{index}]")
+            for index, item in enumerate(prefix)
+        ]
+        return (
+            f"a list of exactly {_count(len(prefix))} items, in this order: {', then '.join(words)}"
+        )
+
     def mapping(self, node: Mapping[str, Any], path: str) -> str:
         patterns: Mapping[str, Any] = node.get("patternProperties", {})
+        additional = node.get("additionalProperties", True)
         if not patterns:
             if node.get("properties") or "propertyNames" in node:
                 raise GenerationError(
                     f"{self.page.schema}: {path} is an object the generator can't"
                 )
-            if node.get("additionalProperties", True) is not False:
+            if isinstance(additional, Mapping):
+                return self.values(node, cast("Mapping[str, Any]", additional), path)
+            if additional is not False:
                 raise GenerationError(f"{self.page.schema}: {path} allows any key")
+            if "minProperties" in node:
+                raise GenerationError(
+                    f"{self.page.schema}: {path} is an object the generator can't"
+                )
             return "an empty object, `{}`"
-        if len(patterns) != 1 or node.get("additionalProperties", True) is not True:
+        if len(patterns) != 1 or additional is not True or "minProperties" in node:
             raise GenerationError(f"{self.page.schema}: {path} is a mapping the generator can't")
         ((pattern, value),) = patterns.items()
         names = self.string({"type": "string", **node.get("propertyNames", {})}, f"{path} keys")
@@ -848,6 +894,15 @@ class _Walk:
             f"an object whose keys are {names}; each key that's {matching.removeprefix('text, ')}"
             f" has a value that's {self.phrase(value, f'{path}.*')}"
         )
+
+    def values(self, node: Mapping[str, Any], value: Mapping[str, Any], path: str) -> str:
+        """An object whose keys are any text, each with a value that `value` describes."""
+        words = self.phrase(value, f"{path}.*")
+        least = node.get("minProperties")
+        if least:
+            keys = f"at least {_count(least)} {'key' if least == 1 else 'keys'}"
+            return f"an object with {keys}, each with a value that's {words}"
+        return f"an object whose keys each have a value that's {words}"
 
     # The tables
 
@@ -910,6 +965,12 @@ class _Walk:
         return {self.page.prefix: Region(tuple(blocks))}
 
 
+def _positional(prefix: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether a tuple's items differ, so that each is named by its position. A tuple whose items
+    all take one schema, such as one of exactly one item, reads as a list of them."""
+    return len(prefix) > 1 and any(item != prefix[0] for item in prefix)
+
+
 def schema_regions(page: SchemaPage, schema: Mapping[str, Any]) -> dict[str, Region]:
     """The regions one schema generates, as `page` lays them out."""
     return _Walk(page, schema).regions()
@@ -927,20 +988,31 @@ def _csv(prefix: str, schema: str) -> SchemaPage:
     return SchemaPage(prefix, schema, key="Column", required=False, csv=True)
 
 
-# Each schema's page, by its regions' prefix. The output files are those Trial Folio writes, each
-# at the version it writes now: a screen run's plan and records stay 1.0.0, and an experiment's
-# are 1.1.0 (src/trialfolio/contracts/schema_files.py).
+# Each schema's page, by its regions' prefix. A configuration's page gives its latest version, which
+# `trialfolio run` reads beside the earlier one: 1.1.0 adds keys to 1.0.0, and removes none. The
+# output files are those Trial Folio writes, each at each version it writes now: a screen run's
+# plan and records are 1.0.0, and an experiment's 1.1.0, unless its ranking is a ranking system's
+# definition, when they're 1.2.0 and 1.3.0; and a ranking snapshot's are its own
+# (src/trialfolio/contracts/schema_files.py). The CSV files' pages give 1.1.0's columns, which
+# are 1.0.0's and `node`.
 SCHEMA_PAGES: Final = (
-    _configuration("screen-configuration", "screen-configuration-1.0.0.schema.json"),
+    _configuration("screen-configuration", "screen-configuration-1.1.0.schema.json"),
     _configuration("review-configuration", "review-configuration-1.0.0.schema.json"),
-    _configuration("experiment-configuration", "experiment-configuration-1.0.0.schema.json"),
+    _configuration("experiment-configuration", "experiment-configuration-1.1.0.schema.json"),
+    _configuration(
+        "ranking-snapshot-configuration", "ranking-snapshot-configuration-1.0.0.schema.json"
+    ),
     _csv("outputs-metrics-csv", "metrics-row-1.0.0.schema.json"),
-    _csv("outputs-settings-csv", "settings-row-1.0.0.schema.json"),
-    _csv("outputs-differences-csv", "differences-row-1.0.0.schema.json"),
+    _csv("outputs-settings-csv", "settings-row-1.1.0.schema.json"),
+    _csv("outputs-differences-csv", "differences-row-1.1.0.schema.json"),
     _output_file("output-fields-run-manifest", "run-manifest-1.0.0.schema.json"),
     _output_file("output-fields-run-plan", "plan-1.0.0.schema.json"),
     _output_file("output-fields-run-start-record", "start-record-1.0.0.schema.json"),
     _output_file("output-fields-run-attempt-record", "attempt-record-1.0.0.schema.json"),
+    _output_file("output-fields-ranking-run-manifest", "run-manifest-1.1.0.schema.json"),
+    _output_file("output-fields-ranking-run-plan", "plan-1.2.0.schema.json"),
+    _output_file("output-fields-ranking-run-start-record", "start-record-1.2.0.schema.json"),
+    _output_file("output-fields-ranking-run-attempt-record", "attempt-record-1.2.0.schema.json"),
     _output_file("output-fields-experiment-start-record", "start-record-1.1.0.schema.json"),
     _output_file("output-fields-experiment-attempt-record", "attempt-record-1.1.0.schema.json"),
     _output_file("output-fields-authentication-record", "authentication-record-1.0.0.schema.json"),
@@ -948,6 +1020,16 @@ SCHEMA_PAGES: Final = (
     _output_file("output-fields-experiment-record", "experiment-record-1.0.0.schema.json"),
     _output_file("output-fields-session-record", "session-record-1.0.0.schema.json"),
     _output_file("output-fields-session-manifest", "experiment-manifest-1.0.0.schema.json"),
+    _output_file("output-fields-ranking-experiment-start-record", "start-record-1.3.0.schema.json"),
+    _output_file(
+        "output-fields-ranking-experiment-attempt-record", "attempt-record-1.3.0.schema.json"
+    ),
+    _output_file("output-fields-ranking-experiment-plan", "plan-1.3.0.schema.json"),
+    _output_file("output-fields-ranking-experiment-record", "experiment-record-1.1.0.schema.json"),
+    _output_file("output-fields-ranking-session-manifest", "experiment-manifest-1.1.0.schema.json"),
+    _output_file("output-fields-snapshot-plan", "ranking-snapshot-plan-1.0.0.schema.json"),
+    _output_file("output-fields-snapshot-record", "ranking-snapshot-record-1.0.0.schema.json"),
+    _output_file("output-fields-snapshot-manifest", "ranking-snapshot-manifest-1.0.0.schema.json"),
     _output_file("output-fields-review-manifest", "review-manifest-1.0.0.schema.json"),
     _output_file("output-fields-acknowledgment", "license-acknowledgment.schema.json"),
     SchemaPage(

@@ -55,6 +55,8 @@ After an interrupt, such as Ctrl-C, a storage failure, or a crash, the attempts 
 
 If the first run was interrupted before its plan was recorded, nothing was sent, and the message says to remove the directory and run the command again.
 
+With a ranking definition, each attempt writes a start record before each of its two requests: `updating.json` before its `rank_update`, and `started.json` before its backtest. So a resume finds which of the two may have gone out. An attempt stopped during its `rank_update`, or after it and before its backtest was sent, is recorded as possibly charged, and its case awaits a [repeat](repeat-a-case.md), since sending it again sends the `rank_update` again ([sending a definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#sending-a-definition)).
+
 ### After a run that ends with `execution.partial`
 
 An experiment that ends with a planned case that didn't succeed exits 6, with `execution.partial`, and its message lists each such case, with Portfolio123's own message for each it gave one, and where the session's report is. Run the same command again to send the cases that are due, and repeat each case awaiting a repeat with the option the message gives.
@@ -72,6 +74,8 @@ If a record is missing or changed, as after an incomplete copy, the resume fails
 ### One process at a time
 
 While one command runs the experiment, or waits for your approval, another fails with `experiment.locked`, exit code 4. Wait for the first to end, and run the command again.
+
+With a ranking definition, a resume that sends a case also takes the [ranking lock](../explanation/apirankingsystem-and-the-ranking-lock.md#the-ranking-lock), so it fails the same way while another Trial Folio process on the machine is writing `ApiRankingSystem`. A resume that sends nothing doesn't take it.
 
 [Running an experiment](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#running-an-experiment) gives the rules.
 

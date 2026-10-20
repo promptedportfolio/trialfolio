@@ -44,6 +44,16 @@ It doesn't rank the runs, or say which strategy is better.
 
 3. Open `reviews/holdings/report.html` in a browser. [Outputs](../reference/outputs.md) describes what a review's directory holds, and what its report shows.
 
+## Runs ranked by a definition
+
+When either run's ranking is a ranking system's definition, given in a file or by a snapshot, the review compares its weights node by node: `differences.csv` has a `ranking_weight` row for each node, right after `ranking`, named by its path in the `node` column.
+
+- **Declare `ranking`** in `intended_changes` to show the changed weights as the change you meant. Each weight that differs is then `intended_change`, with `ranking`'s reason. Without the declaration, each is an `unexplained_mismatch`, flagged as critical.
+- **A node one run's definition lacks** is `absent` in that run, or `unknown` against a ranking by name or ID, whose definition wasn't recorded.
+- **Such a review** writes `differences.csv` 1.1.0, with its `node` column, and its report says how the weights are compared.
+
+[Vary a ranking system's weights](vary-a-ranking-systems-weights.md#compare-runs-weights) shows an example. A removal shifts the positions of the nodes after it, so a node without a name may be compared with another node: an experiment's report, which aligns each case's weights by the baseline's nodes, doesn't have that limit ([differences between screen runs](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#differences-between-screen-runs)).
+
 ## Try it with two demo runs
 
 You can try a review without credentials, on two demo runs.

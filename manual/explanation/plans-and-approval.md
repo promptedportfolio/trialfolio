@@ -41,7 +41,7 @@ For an experiment, the plan shows the whole experiment at once:
 
 When you run the same command again, to go on with an experiment, the plan also shows each case's outcome so far and what this run will do with it, the retired cases, and the budget counted so far ([experiment plans and revisions](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#experiment-plans-and-revisions)).
 
-From release 0.4.0, a screen or an experiment whose ranking is a ranking system's definition, in a file or a ranking snapshot, sends each case's definition to Portfolio123 before its backtest, so its plan shows more ([plans with a ranking definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#plans-with-a-ranking-definition)):
+From release 0.4.0, a screen or an experiment whose ranking is a ranking system's definition, in a file or a ranking snapshot, sends each case's definition to Portfolio123 before its backtest, so its plan shows more ([plans with a ranking definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#plans-with-a-ranking-definition), [`ApiRankingSystem` and the ranking lock](apirankingsystem-and-the-ranking-lock.md)):
 
 - that the run overwrites `ApiRankingSystem`, a ranking system in your Portfolio123 account, with each case's definition, just before its backtest, which ranks by that system's name; that a lock keeps other Trial Folio processes on your machine from writing it meanwhile, but only those that lock the same file, not one that sees another `/tmp`, such as in a container, or one with another `TRIALFOLIO_LOCK_DIR`; and that nothing keeps Portfolio123's website, or another machine, from writing or using it at the same time;
 - where the definition came from: a file, by the definition's hash, or a snapshot, by its system's name and when it was read;
@@ -60,6 +60,7 @@ Comments aren't part of the plan, so adding or changing one doesn't change the h
 Anything the plan does hold changes the hash, and needs a new approval:
 
 - a setting, the title, or the purpose;
+- a ranking definition, byte for byte, and where it came from: a file, or a snapshot;
 - for an experiment, its prior research, its budget, a case's key or description, or the order of one setting's variants;
 - the version of Trial Folio, `p123api`, `requests`, or `urllib3`. So after you upgrade any of them, the same configuration needs approving again ([reproducibility](reproducibility.md#the-plans-package-versions)).
 

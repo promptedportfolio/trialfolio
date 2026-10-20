@@ -188,7 +188,7 @@ ranking:
   id: 12345
 ```
 
-A ranking system, like the universe, can change in your account after the run, and Trial Folio doesn't save its definition. So the run records it as not snapshotted, and its reproducibility as incomplete. A formula ranking is recorded completely. [Reproducibility](../explanation/reproducibility.md) explains why that matters, and [the screen configuration reference](../reference/screen-configuration.md) gives every key's rules.
+A ranking system, like the universe, can change in your account after the run, and Trial Folio doesn't save its definition. So the run records it as not snapshotted, and its reproducibility as incomplete. A formula ranking is recorded completely. So, from release 0.4.0, is a ranking system's definition, which a configuration with `schema_version: 1.1.0` can give in a file, or by a ranking snapshot: [vary a ranking system's weights](../how-to/vary-a-ranking-systems-weights.md) shows how. [Reproducibility](../explanation/reproducibility.md) explains why that matters, and [the screen configuration reference](../reference/screen-configuration.md) gives every key's rules.
 
 Now see how Trial Folio reports a mistake:
 

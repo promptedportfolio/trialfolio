@@ -6,8 +6,8 @@ it: it's where the user starts, and Trial Folio never looks for it.
 
 - `screen.yaml` is the documented example without its purpose, with comments on each key. Its
   settings resolve to the request Portfolio123 accepted in R01-T01.
-- `README.md` says what the folder holds, and the next commands, with a link to the user guide
-  at the version's release tag, which works once the version is tagged.
+- `README.md` says what the folder holds, and the next commands, with links to the user manual,
+  and to its pages at the version's release tag, which works once the version is tagged.
 - `.gitignore` keeps credential files, and the runs, reports, and reviews, which hold Portfolio123
   data, out of Git, for a user who keeps the folder in a repository.
 
@@ -31,7 +31,8 @@ _FILES: Final = (
 
 def starter_files(trialfolio_version: str) -> tuple[tuple[str, bytes], ...]:
     """Each starter file's name and bytes, in the order `trialfolio init` writes them, with the
-    configuration first. The README links to the user guide of `trialfolio_version`."""
+    configuration first. The README links to the user manual's pages at `trialfolio_version`'s
+    tag."""
     return tuple((name, _packaged(source, trialfolio_version)) for name, source in _FILES)
 
 

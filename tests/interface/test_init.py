@@ -168,13 +168,18 @@ def test_init_without_a_directory_sets_up_the_current_one(
     assert outcome.summary["outputs"] == {"configuration": "screen.yaml"}
 
 
-def test_the_readme_links_to_this_versions_user_guide() -> None:
+def test_the_readme_links_to_the_manual_and_this_versions_pages() -> None:
+    """Since release 0.4.0's R04-T14, the README points at the user manual, at its address, and
+    at the manual's pages at this version's tag, where it pointed at the user guide at the tag,
+    which became a page that points to the manual (D-35)."""
     readme = STARTER["README.md"].decode()
 
+    assert "(https://promptedportfolio.github.io/trialfolio/)" in readme
     assert (
-        f"https://github.com/promptedportfolio/trialfolio/blob/v{VERSION}/docs/user-guide.md"
+        f"(https://github.com/promptedportfolio/trialfolio/blob/v{VERSION}/manual/index.md)"
         in readme
     )
+    assert "user-guide" not in readme
     assert "{version}" not in readme
 
 

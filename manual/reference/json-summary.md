@@ -61,6 +61,7 @@ The identifiers the command created, in version 1.2.0: 1.1.0's, and an experimen
 |---|---|
 | `run` with a screen configuration, and `demo` | `plan_hash` and `case_id`, once the plan is built, even if it isn't approved; and `attempt_id`, once the attempt has a record |
 | `run` with an experiment configuration | `experiment_id`; `plan_hash`, the hash of the plan the command built, even if it isn't approved; and `session`, the session's number; once each is known |
+| `run` with a ranking snapshot configuration | `plan_hash`, once the plan is built; and `attempt_id`, once the attempt has a record. A snapshot has no case, so no `case_id`. |
 | `review` | `review_id`, once the review has claimed its output directory |
 | `init`, `report`, and `license` | None |
 
@@ -91,12 +92,13 @@ An experiment's summary gives only the session's `manifest` and `report`: each c
 
 | Command | `counts` |
 |---|---|
-| `run` with a screen configuration, and `demo` | `attempts`; `provider_requests`, the sends of the request that may have reached Portfolio123, never the authentication call; `metrics_unavailable`; `warnings`; and `cost`, the credits Portfolio123 reported, or `null` when it reported none |
+| `run` with a screen configuration, and `demo` | `attempts`; `provider_requests`, the sends of the request that may have reached Portfolio123, never the authentication call: with a ranking definition, its `rank_update` and its backtest; `metrics_unavailable`; `warnings`; and `cost`, the credits Portfolio123 reported, the `rank_update`'s included, or `null` when it reported none |
+| `run` with a ranking snapshot configuration | A run's: `attempts`; `provider_requests`, 0 or 1, its `rank_get`; `metrics_unavailable`, 0; `warnings`; and `cost` |
 | `review` | `results`; `settings_flagged`, the flagged setting rows; `metrics_unavailable`, the unavailable metric rows; and `warnings` |
 | `run` with an experiment configuration | The experiment's counts, across every run of it: the cases by outcome, `cases_planned`, `cases_succeeded`, `cases_failed`, `cases_skipped`, `cases_unknown`, and `cases_not_yet_run`; the retired cases, `cases_retired`; the attempts and the repeats, `attempts` and `repeats`; the provider requests and authentication calls, `provider_requests` and `authentication_calls`; the `cost`; the unavailable metric rows, `metrics_unavailable`; and this command's `warnings` |
 | `init`, `report`, and `license` | `{}` |
 
-An experiment's `counts` is `{}` until its counts are known, as after `experiment.locked`.
+An experiment's `counts` is `{}` until its counts are known, as after `experiment.locked`, whether it found the experiment lock held or the [ranking lock](cli.md#the-ranking-lock). With a ranking definition, its `provider_requests` count both kinds of request, and its `cost` each one's.
 
 <!-- generated: json-summary-counts-attempts -->
 
