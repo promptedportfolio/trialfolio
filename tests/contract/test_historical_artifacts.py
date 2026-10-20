@@ -9,11 +9,21 @@ passes the records check a resume makes, and each plan, each attempt, and each f
 manifest lists has its `artifact_id`, with every listed file in the schema version 0.3.0 defines
 for its role.
 
+Release 0.4.0's, which the synthetic writer wrote through the core with the demo's client, read
+the same way (R04-T13): `runs/synthetic-run-1.1.0/` reads as a complete run, synthetic, its run
+manifest 1.1.0 with the approval `not_required` and `command` null; `experiments/
+synthetic-experiment-1.1.0/` passes the records check a resume makes of an experiment with a
+ranking definition; `reviews/synthetic-ranking-review-1.0.0/`, which `trialfolio review` wrote
+of two synthetic runs with a definition, gives each of its results `synthetic` true, and reads
+with `differences.csv` 1.1.0 and `screen-run-differences` version 2; and
+`snapshots/synthetic-snapshot-1.0.0/` reads as reading a snapshot checks it, complete, with its
+manifest's `synthetic` true, so a configuration that names it fails with `config.invalid`.
+
 Traces to docs/contracts.md, artifact compatibility, and to the test pairings' "other checks" in
-releases 0.1.0, 0.2.0, and 0.3.0, `tests/contract/test_historical_artifacts.py`. Each fixture
-changes only with a stated reason, so a reader that stops reading it fails here, not in a user's
-saved run, review, or experiment. Each is read from a copy, so a reader that wrote anything
-couldn't change the committed files.
+releases 0.1.0, 0.2.0, 0.3.0, and 0.4.0, `tests/contract/test_historical_artifacts.py`. Each
+fixture changes only with a stated reason, so a reader that stops reading it fails here, not in a
+user's saved run, review, experiment, or snapshot. Each is read from a copy, so a reader that
+wrote anything couldn't change the committed files. Every expected value is written by hand.
 """
 
 import hashlib
@@ -23,24 +33,59 @@ from pathlib import Path
 
 import pytest
 
-from trialfolio.configuration import read_experiment_configuration, read_review_configuration
-from trialfolio.contracts.attempt import AttemptRecordV1_1, AuthenticationRecord, StartRecordV1_1
-from trialfolio.contracts.experiment_manifest import ExperimentManifest
-from trialfolio.contracts.experiment_plan import PlanV1_1
-from trialfolio.contracts.experiment_record import ExperimentRecord, SessionRecord
-from trialfolio.contracts.manifest import RunManifest
-from trialfolio.contracts.plan import Plan
+from tests.support.snapshot_builder import naming
+from trialfolio.configuration import (
+    read_experiment_configuration,
+    read_experiment_configuration_v1_1,
+    read_review_configuration,
+    read_screen_configuration_v1_1,
+)
+from trialfolio.contracts.attempt import (
+    AttemptRecordV1_1,
+    AttemptRecordV1_2,
+    AttemptRecordV1_3,
+    AuthenticationRecord,
+    StartRecordV1_1,
+    StartRecordV1_2,
+    StartRecordV1_3,
+)
+from trialfolio.contracts.experiment_manifest import ExperimentManifest, ExperimentManifestV1_1
+from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
+from trialfolio.contracts.experiment_record import (
+    ExperimentRecord,
+    ExperimentRecordV1_1,
+    SessionRecord,
+)
+from trialfolio.contracts.manifest import RunManifest, RunManifestV1_1
+from trialfolio.contracts.plan import Plan, PlanV1_2
+from trialfolio.contracts.ranking_snapshot import (
+    RankingSnapshotManifest,
+    RankingSnapshotPlan,
+    RankingSnapshotRecord,
+)
 from trialfolio.contracts.review_manifest import ReviewManifest
+from trialfolio.errors import TrialFolioError
 from trialfolio.experiment_records import read_experiment
 from trialfolio.planning import plan_hash
 from trialfolio.runs import SavedRun, read_run
+from trialfolio.snapshots import SYNTHETIC_PROBLEM, NotARanking, SnapshotName, read_snapshot
 from trialfolio.storage import LocalArtifactStore
-from trialfolio.tables import read_differences_csv, read_metrics_csv, read_settings_csv
+from trialfolio.tables import (
+    read_differences_csv,
+    read_differences_csv_v1_1,
+    read_metrics_csv,
+    read_settings_csv,
+    read_settings_csv_v1_1,
+)
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 FIXTURE = FIXTURES / "runs" / "synthetic-run-1.0.0"
 REVIEW_FIXTURE = FIXTURES / "reviews" / "synthetic-review-1.0.0"
 EXPERIMENT_FIXTURE = FIXTURES / "experiments" / "synthetic-experiment-1.0.0"
+RANKING_RUN_FIXTURE = FIXTURES / "runs" / "synthetic-run-1.1.0"
+RANKING_EXPERIMENT_FIXTURE = FIXTURES / "experiments" / "synthetic-experiment-1.1.0"
+RANKING_REVIEW_FIXTURE = FIXTURES / "reviews" / "synthetic-ranking-review-1.0.0"
+SNAPSHOT_FIXTURE = FIXTURES / "snapshots" / "synthetic-snapshot-1.0.0"
 
 SCHEMA_VERSIONS = {
     "plan": "1.0.0",
@@ -317,3 +362,268 @@ def test_each_plan_and_each_attempt_of_the_experiment_names_its_files_by_their_a
         for reference in (attempt.request, attempt.response):
             assert reference is not None
             assert reference.artifact_id == artifact_id(experiment / reference.path)
+
+
+# Release 0.4.0's fixtures, with a ranking definition.
+
+RANKING_RUN_SCHEMA_VERSIONS = {
+    "plan": "1.2.0",
+    "configuration": "1.1.0",
+    "ranking_definition": None,
+    "rank_update_request": None,
+    "update_record": "1.2.0",
+    "rank_update_response": None,
+    "provider_request": None,
+    "start_record": "1.2.0",
+    "provider_response": None,
+    "attempt_record": "1.2.0",
+    "metrics": "1.0.0",
+    "settings": "1.1.0",
+    "report": None,
+}
+"""The schema version the run with a definition's manifest gives each role: plan 1.2.0, start,
+update, and attempt records 1.2.0, the screen configuration and `settings.csv` 1.1.0, and none for
+the definition's copy, the provider's requests and responses, or the report."""
+
+WEIGHT_NODES = (
+    "Value",
+    "Value/Earnings Yield",
+    "Value/Sales Yield",
+    "Momentum",
+    "Momentum/Six-Month Return",
+    "Momentum/Year Return",
+    "Quality",
+    "Quality/Return on Equity",
+    "Quality/Gross Margin",
+)
+"""`synthetic.xml`'s nodes, by canonical path, in its order."""
+
+
+def test_the_run_with_a_definition_reads_as_a_complete_synthetic_run(tmp_path: Path) -> None:
+    copy = tmp_path / "synthetic-run-1.1.0"
+    shutil.copytree(RANKING_RUN_FIXTURE, copy)
+
+    run = read_run(LocalArtifactStore(copy))
+
+    assert isinstance(run.manifest, RunManifestV1_1)
+    assert (run.manifest.schema_version, run.manifest.outcome) == ("1.1.0", "completed")
+    assert (run.manifest.synthetic, run.manifest.approval, run.manifest.command) == (
+        True,
+        "not_required",
+        None,
+    )
+    assert isinstance(run.plan, PlanV1_2)
+    assert run.plan.ranking_source.form == "definition"
+    assert run.plan.ranking_source.definition == artifact_id(copy / "definition.xml")
+    (attempt,) = run.attempts
+    assert isinstance(attempt.update, StartRecordV1_2)
+    assert isinstance(attempt.start, StartRecordV1_2)
+    assert isinstance(attempt.record, AttemptRecordV1_2)
+    assert (attempt.update.operation, attempt.start.operation) == ("rank_update", "screen_backtest")
+    assert [exchange.request for exchange in attempt.record.exchanges] == [
+        "POST /auth",
+        "POST /rank",
+        "POST /screen/backtest",
+    ]
+    assert attempt.status.outcome == "succeeded"
+    assert run.settings is not None and run.metrics is not None
+    assert {artifact.role: artifact.schema_version for artifact in run.manifest.artifacts} == (
+        RANKING_RUN_SCHEMA_VERSIONS
+    )
+    settings = read_settings_csv_v1_1(
+        (copy / "normalized" / "settings.csv").read_bytes(), "settings.csv"
+    )
+    assert tuple(row.node for row in settings if row.node is not None) == WEIGHT_NODES
+    assert len(settings) == len(run.settings) == 23 + len(WEIGHT_NODES)
+
+
+RANKING_EXPERIMENT_SCHEMA_VERSIONS = {
+    "configuration": "1.1.0",
+    "ranking_definition": None,
+    "plan": "1.3.0",
+    "experiment_record": "1.1.0",
+    "authentication_record": "1.0.0",
+    "rank_update_request": None,
+    "update_record": "1.3.0",
+    "rank_update_response": None,
+    "provider_request": None,
+    "start_record": "1.3.0",
+    "provider_response": None,
+    "attempt_record": "1.3.0",
+    "metrics": "1.0.0",
+    "settings": "1.1.0",
+    "session_record": "1.0.0",
+    "report": None,
+}
+"""The schema version release 0.4.0 defines for each role the experiment with a definition's
+latest manifest lists: plan 1.3.0, `experiment.json` 1.1.0, start, update, and attempt records
+1.3.0, and `settings.csv` and the configuration 1.1.0."""
+
+
+@pytest.fixture
+def ranking_experiment(tmp_path: Path) -> Path:
+    copy = tmp_path / "synthetic-experiment-1.1.0"
+    shutil.copytree(RANKING_EXPERIMENT_FIXTURE, copy)
+    return copy
+
+
+def test_the_experiment_with_a_definition_passes_the_records_check_a_resume_makes(
+    ranking_experiment: Path,
+) -> None:
+    saved = read_experiment(LocalArtifactStore(ranking_experiment), ranking=True)
+
+    assert [(p.number, p.plan.schema_version, p.record.schema_version) for p in saved.plans] == [
+        (1, "1.3.0", "1.1.0"),
+        (2, "1.3.0", "1.1.0"),
+    ]
+    assert [(s.session, s.schema_version) for s in saved.sessions] == [(1, "1.0.0"), (2, "1.0.0")]
+    assert saved.synthetic
+    for saved_plan in saved.plans:
+        assert {entry.approval for entry in saved_plan.record.plans} == {"not_required"}
+    manifest = saved.manifest
+    assert isinstance(manifest, ExperimentManifestV1_1)
+    assert (manifest.session, manifest.plan) == (2, 2)
+    assert manifest.plan_hash == saved.current.plan.plan_hash
+    assert (manifest.synthetic, manifest.approval, manifest.command) == (True, "not_required", None)
+    current = saved.current.plan
+    assert isinstance(current, PlanV1_3)
+    cases = saved.cases(current)
+    assert [(case.case.case_key, case.outcome, len(case.attempts)) for case in cases] == [
+        ("baseline", "succeeded", 1),
+        ("value-heavy", "succeeded", 1),
+        ("no-sales-yield", "succeeded", 1),
+    ]
+    # Each attempt wrote its definition, then backtested: its update record, its start record,
+    # and its attempt record are 1.3.0, and each session authenticated once.
+    for attempt in saved.attempts:
+        assert isinstance(attempt.update, StartRecordV1_3)
+        assert isinstance(attempt.start, StartRecordV1_3)
+        assert isinstance(attempt.record, AttemptRecordV1_3)
+        assert attempt.record.outcome == "succeeded"
+        assert attempt.rank_response is not None
+    assert [
+        attempt.session for attempt in saved.attempts if attempt.authentication is not None
+    ] == [1, 2]
+    assert manifest.counts.provider_requests == 6
+    assert (manifest.counts.cases.planned, manifest.counts.cases.succeeded) == (3, 3)
+
+
+def test_each_file_the_experiment_with_a_definition_lists_has_its_artifact_id_and_version(
+    ranking_experiment: Path,
+) -> None:
+    manifest = ExperimentManifestV1_1.model_validate_json(
+        (ranking_experiment / "sessions" / "2" / "manifest.json").read_bytes()
+    )
+    records: dict[str, Callable[[bytes], str]] = {
+        "plan": lambda data: PlanV1_3.model_validate_json(data).schema_version,
+        "experiment_record": lambda data: (
+            ExperimentRecordV1_1.model_validate_json(data).schema_version
+        ),
+        "update_record": lambda data: StartRecordV1_3.model_validate_json(data).schema_version,
+        "start_record": lambda data: StartRecordV1_3.model_validate_json(data).schema_version,
+        "attempt_record": lambda data: AttemptRecordV1_3.model_validate_json(data).schema_version,
+    }
+
+    assert {(a.role, a.schema_version) for a in manifest.artifacts} == set(
+        RANKING_EXPERIMENT_SCHEMA_VERSIONS.items()
+    )
+    for artifact in manifest.artifacts:
+        data = (ranking_experiment / artifact.path).read_bytes()
+        assert artifact.artifact_id == "sha256:" + hashlib.sha256(data).hexdigest(), artifact.path
+        if artifact.role in records:
+            assert records[artifact.role](data) == artifact.schema_version, artifact.path
+        if artifact.role == "settings":
+            read_settings_csv_v1_1(data, "settings.csv")
+        if artifact.role == "configuration":
+            # Read with its plan's copy of the definition, as a resume reads it.
+            path = ranking_experiment / artifact.path
+            definition = (path.parent / "definition.xml").read_bytes()
+            read = read_experiment_configuration_v1_1(
+                data, "configuration.yaml", path, definition=definition
+            )
+            assert read.configuration.schema_version == artifact.schema_version, artifact.path
+
+
+def test_the_ranking_review_reads_with_the_current_readers(tmp_path: Path) -> None:
+    review = tmp_path / "synthetic-ranking-review-1.0.0"
+    shutil.copytree(RANKING_REVIEW_FIXTURE, review)
+    manifest = ReviewManifest.model_validate_json((review / "manifest.json").read_bytes())
+    rows = read_differences_csv_v1_1(
+        (review / "normalized" / "differences.csv").read_bytes(), "differences.csv"
+    )
+
+    assert manifest.synthetic
+    assert [(result.label, result.synthetic) for result in manifest.results] == [
+        ("synthetic", True),
+        ("synthetic-heavy", True),
+    ]
+    assert [(method.name, method.version) for method in manifest.methods] == [
+        ("screen-run-differences", 2)
+    ]
+    weights = {row.node: row.classification for row in rows if row.node is not None}
+    assert weights == {
+        node: "intended_change" if node in ("Value", "Momentum", "Quality") else "same"
+        for node in WEIGHT_NODES
+    }
+    readers = {
+        "run_manifest": lambda data: RunManifestV1_1.model_validate_json(data),
+        "plan": lambda data: PlanV1_2.model_validate_json(data),
+        "metrics": lambda data: read_metrics_csv(data, "metrics.csv"),
+        "settings": lambda data: read_settings_csv_v1_1(data, "settings.csv"),
+    }
+    assert {artifact.role: artifact.schema_version for artifact in manifest.artifacts} == {
+        "configuration": "1.0.0",
+        "run_manifest": "1.1.0",
+        "plan": "1.2.0",
+        "metrics": "1.0.0",
+        "settings": "1.1.0",
+        "differences": "1.1.0",
+        "report": None,
+    }
+    for artifact in manifest.artifacts:
+        data = (review / artifact.path).read_bytes()
+        assert artifact.artifact_id == "sha256:" + hashlib.sha256(data).hexdigest(), artifact.path
+        if artifact.role in readers:
+            readers[artifact.role](data)
+    for result in manifest.results:
+        copied = RunManifestV1_1.model_validate_json(
+            (review / "inputs" / result.label / "manifest.json").read_bytes()
+        )
+        assert (copied.synthetic, copied.command, copied.approval) == (True, None, "not_required")
+
+
+def test_the_synthetic_snapshot_is_complete_and_cant_be_named_as_a_ranking(
+    tmp_path: Path,
+) -> None:
+    snapshot = tmp_path / "synthetic-snapshot-1.0.0"
+    shutil.copytree(SNAPSHOT_FIXTURE, snapshot)
+    manifest = RankingSnapshotManifest.model_validate_json(
+        (snapshot / "manifest.json").read_bytes()
+    )
+    record = RankingSnapshotRecord.model_validate_json((snapshot / "snapshot.json").read_bytes())
+    plan = RankingSnapshotPlan.model_validate_json((snapshot / "plan.json").read_bytes())
+    (attempt,) = (snapshot / "attempts").iterdir()
+
+    assert (manifest.outcome, manifest.synthetic, manifest.approval, manifest.command) == (
+        "completed",
+        True,
+        "not_required",
+        None,
+    )
+    assert manifest.plan_hash == plan.plan_hash == plan_hash(plan)
+    assert record.definition == artifact_id(snapshot / "definition.xml")
+    start = StartRecordV1_2.model_validate_json((attempt / "started.json").read_bytes())
+    finished = AttemptRecordV1_2.model_validate_json((attempt / "attempt.json").read_bytes())
+    assert (start.operation, finished.operation, finished.case_id) == ("rank_get", "rank_get", None)
+    for artifact in manifest.artifacts:
+        data = (snapshot / artifact.path).read_bytes()
+        assert artifact.artifact_id == "sha256:" + hashlib.sha256(data).hexdigest(), artifact.path
+    # Complete, so reading it finds only that it's synthetic, which no ranking may be.
+    with pytest.raises(NotARanking) as refused:
+        read_snapshot(LocalArtifactStore(snapshot), SnapshotName(shown="it", logged="it"))
+    assert refused.value.problems == (SYNTHETIC_PROBLEM,)
+    named = naming(FIXTURES / "screen-configs" / "definition.yaml", snapshot, tmp_path / "configs")
+    with pytest.raises(TrialFolioError) as invalid:
+        read_screen_configuration_v1_1(named.read_bytes(), named.name, named)
+    assert invalid.value.code == "config.invalid"
+    assert "synthetic" in invalid.value.message

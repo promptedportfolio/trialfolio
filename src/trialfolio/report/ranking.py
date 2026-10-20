@@ -240,8 +240,9 @@ def limitations(*, synthetic: bool, each: str, kind: str) -> list[str]:
                 f"This {kind} is synthetic, and sent nothing, so nothing was written into the"
                 f" account's {_SYSTEM}. A definition that's sent is written into it just before"
                 " its backtest, which ranks by that system's name, and the ranking lock keeps"
-                " only other Trial Folio processes on the machine from writing it between the"
-                " two."
+                " other Trial Folio processes on the machine from writing it between the two, but"
+                " only those that lock the same file: not one that sees another <code>/tmp</code>,"
+                " such as in a container, or one with another <code>TRIALFOLIO_LOCK_DIR</code>."
             )
         ]
     return [
@@ -251,9 +252,11 @@ def limitations(*, synthetic: bool, each: str, kind: str) -> list[str]:
             " name."
         ),
         (
-            "The ranking lock kept only other Trial Folio processes on the machine from writing"
-            f" {_SYSTEM} between a definition's write and its backtest: Portfolio123's website,"
-            " or another machine, could have changed it between the two, and no record would"
-            " show it."
+            "The ranking lock kept other Trial Folio processes on the machine from writing"
+            f" {_SYSTEM} between a definition's write and its backtest, but only those that lock"
+            " the same file: not one that sees another <code>/tmp</code>, such as in a"
+            " container, or one with another <code>TRIALFOLIO_LOCK_DIR</code>. Portfolio123's"
+            " website, or another machine, could have changed it between the two, and no record"
+            " would show it."
         ),
     ]

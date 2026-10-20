@@ -19,7 +19,7 @@ snapshot output; release 0.4.0's R04-T10).
 Step 5 follows any attempt whose record was written, so a failed `rank_get` is accounted for,
 unless an interrupt or a storage failure decided the error code, or the attempt ended before
 `configuration.yaml` was saved: the output then stays visibly incomplete, without a manifest, as a
-run's does (endings that decide the error code).
+run's does (endings that decide the error code), and the message says so, as a run's does.
 
 A snapshot writes nothing to the account, so it takes no lock. A snapshot without a command is one
 the core takes with the demo's client, which sends nothing and answers the `rank_get` with an
@@ -251,7 +251,7 @@ class SnapshotExecution:
             # Every manifest lists the configuration, so without it there's none to write.
             or self._configuration is None
         ):
-            return error
+            return self._without_manifest(error)
         record = result.record
         if not isinstance(record, AttemptRecordV1_2):  # a snapshot's attempt writes 1.2.0
             raise TypeError("a snapshot's attempt record is version 1.2.0")
@@ -274,6 +274,19 @@ class SnapshotExecution:
         didn't record itself: whether the `rank_get` was sent and may have been charged, as the
         attempt's records read, and whether the snapshot has its manifest."""
         return f"{self._request_detail()} {self._manifest.detail}"
+
+    def _without_manifest(self, error: TrialFolioError | None) -> TrialFolioError | None:
+        """The error of a snapshot whose attempt ended without the snapshot writing its manifest,
+        with what the records say of the manifest, as a screen run's says it (`Execution`): the
+        attempt's own error already says what happened to its `rank_get`, its attempt record
+        written or not, and a snapshot is never resumed, so nothing reads a start record left
+        running."""
+        if error is None:
+            return None
+        detail = self._manifest.detail
+        if error.message.endswith(detail):
+            return error
+        return error.with_detail(detail)
 
     def _check_configuration(self, configuration: bytes) -> None:
         """Checks that the configuration's bytes give the plan, with the plan's versions."""

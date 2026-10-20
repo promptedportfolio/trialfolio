@@ -78,7 +78,7 @@ The first two don't bear on steps 1 to 8: every call in them succeeded, so neith
 
 - **The route works.** `rank_update` writes the definition into `ApiRankingSystem`, and a backtest ranked by that name uses it at once. No `rank_touch` was needed between them, within about a minute (step 5).
 - **The name is `ApiRankingSystem`,** the Rank API documentation's spelling. The first `rank_update` creates it: it wasn't in the account before step 2, and was after.
-- **`rank_get` returns the XML `rank_update` sent, byte for byte,** so a case can record the definition it sent, and needn't read the XML back.
+- **`rank_get` returns the XML `rank_update` sent, byte for byte,** so a case can record the definition it sent, and needn't read the XML back. R04-T13's live check found on 2026-10-19 that this holds for XML Portfolio123 wrote itself, such as C's: Portfolio123 stores a definition it's sent as equivalent XML, in its own serialization ([its run record](../ranking-live-check/README.md)).
 - **`rank_update` stores the ranking method it's sent.** Step 8 sent method 4 to the existing `ApiRankingSystem`, which held 2, and read back 4. Steps 1 to 7 couldn't show it: step 2 sent method 2, the three saved systems' method, to a system the call created.
 - **`rank_update` accepts `currency`,** but every step sent USD, the saved systems' currency, so whether the call stores another currency isn't shown. That's left to R04-T02.
 - **`rank_update`'s response** holds only `cost` and `quotaRemaining`: no ID, and no echo of the definition.

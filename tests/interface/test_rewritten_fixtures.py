@@ -15,7 +15,14 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.rewritten_fixtures import FIXTURES, RUN, differences, main, write
+from tests.support.rewritten_fixtures import (
+    FIXTURES,
+    RUN,
+    RUN_WITH_DEFINITION,
+    differences,
+    main,
+    write,
+)
 
 _ATTEMPT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 
@@ -48,6 +55,10 @@ def test_the_same_code_writes_the_same_bytes(written: Path, tmp_path: Path) -> N
         ("run", "runs/synthetic-run-1.0.0"),
         ("review", "reviews/synthetic-review-1.0.0"),
         ("experiment", "experiments/synthetic-experiment-1.0.0"),
+        ("run-1.1.0", "runs/synthetic-run-1.1.0"),
+        ("experiment-1.1.0", "experiments/synthetic-experiment-1.1.0"),
+        ("snapshot-1.0.0", "snapshots/synthetic-snapshot-1.0.0"),
+        ("ranking-review", "reviews/synthetic-ranking-review-1.0.0"),
     ],
 )
 def test_each_fixture_is_written_again_with_its_files(
@@ -65,11 +76,27 @@ def test_the_review_reads_a_copy_of_the_committed_run(written: Path, label: str)
         assert (copy / name).read_bytes() == (RUN / name).read_bytes(), name
 
 
-def test_the_committed_run_s_report_is_rendered_again(written: Path) -> None:
-    assert _layout(written / "report") == {"report.html"}
-    (attempt,) = (RUN / "cases").glob("*/attempts/*")
-    in_the_copy = f"../inputs/runs/demo/{attempt.relative_to(RUN).as_posix()}/"
-    assert in_the_copy in (written / "report" / "report.html").read_text(encoding="utf-8")
+@pytest.mark.parametrize(
+    ("name", "run", "copy"),
+    [("report", RUN, "runs/demo"), ("report-1.1.0", RUN_WITH_DEFINITION, "runs/synthetic")],
+)
+def test_the_committed_run_s_report_is_rendered_again(
+    written: Path, name: str, run: Path, copy: str
+) -> None:
+    assert _layout(written / name) == {"report.html"}
+    (attempt,) = (run / "cases").glob("*/attempts/*")
+    in_the_copy = f"../inputs/{copy}/{attempt.relative_to(run).as_posix()}/"
+    assert in_the_copy in (written / name / "report.html").read_text(encoding="utf-8")
+
+
+def test_the_ranking_review_reads_a_copy_of_the_committed_run_with_a_definition(
+    written: Path,
+) -> None:
+    copy = written / "ranking-review" / "inputs" / "synthetic"
+    copied = sorted(path.relative_to(copy) for path in copy.rglob("*") if path.is_file())
+    assert copied
+    for name in copied:
+        assert (copy / name).read_bytes() == (RUN_WITH_DEFINITION / name).read_bytes(), name
 
 
 def test_the_comparison_finds_each_changed_file_but_those_in_logs(

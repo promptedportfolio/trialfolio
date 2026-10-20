@@ -14,12 +14,23 @@ looks for them, and the scans that look.
   attempt record, and never in a log file, which `logged` scans for them too (release 0.3.0,
   test pairing, canaries).
 
+- **A ranking definition's** names, formulas, descriptions, and weights, from
+  `experiment-configs/ranking/canaries.xml`; the weights `experiment-configs/ranking-canaries.yaml`'s
+  variants set, and their paths, which name canary names; a snapshot's system, from
+  `ranking-snapshot-configs/canaries.yaml`, and the values of `responses/rank-get-canaries.json`,
+  the `rank_get` response that answers it; and Portfolio123's message in a `rank_update`'s 400.
+  They belong in some records, such as the plan, `definition.xml`, `snapshot.json`, and the
+  attempt record, and never in a log file, which `logged` scans for them too (release 0.4.0,
+  R04-AC11).
+
 R01-T09 created the credential and token values; R01-T15 added the fixtures' values and the
 scans, R02-T09 the review configuration's, R03-T13 the experiment configuration's, and R03-T11
 the revision's reason and Portfolio123's message. Release 0.4.0's R04-T06 listed
-`experiment-configs/ranking/canaries.xml`'s, which it wrote: R04-T13 adds them to the scans,
-with its other canaries (release 0.4.0, test pairing, canaries). Each value is ASCII without
-characters JSON escapes, so a scan of the bytes finds it however a file encodes it.
+`experiment-configs/ranking/canaries.xml`'s, which it wrote, and R04-T13 added them to the scans,
+with the ranking variants', the snapshot's, and the `rank_update`'s message (release 0.4.0, test
+pairing, canaries). Each value is ASCII without characters JSON escapes, so a scan of the bytes
+finds it however a file encodes it. Each number is long enough, or holds a point, so that no hash
+or ID a log holds contains it by chance.
 """
 
 from collections.abc import Iterable
@@ -134,6 +145,35 @@ definition's order; each `StockFormula`'s formula and `Description`; and each no
 with distinctive digits. A definition is the user's strategy definition, which logs never hold
 (release 0.4.0, R04-AC11)."""
 
+RANKING_VARIANT: Final = (
+    "61.7283",
+    "19.1358",
+    "19.1359",
+    "71.4286",
+    "28.5714",
+    "71.4285",
+    "28.5715",
+)
+"""Every weight `experiment-configs/ranking-canaries.yaml`'s variants set, with distinctive
+digits: the top-level weights, then a composite's two factors', and the second pair a revision of
+it gives. Its variants' paths name `canaries.xml`'s canary names, which `RANKING_DEFINITION`
+lists."""
+
+SNAPSHOT: Final = (
+    "canary-system-4d7a2c19",
+    "86315274",
+    "739152846",
+    "591738264",
+    "642179385",
+)
+"""The system `ranking-snapshot-configs/canaries.yaml` names, which `responses/
+rank-get-canaries.json` returns as its name, and that response's ID, `quotaRemaining`, `groupUid`,
+and `resolveGroupUid`. Its `xml` is `canaries.xml`, whose canaries `RANKING_DEFINITION` lists."""
+
+RANK_UPDATE_MESSAGE: Final = "canary-rank-update-message-2e9b7d41"
+"""Portfolio123's message in the body of a `rank_update`'s 400, which the attempt record's error
+message gives, and a loggable message never does."""
+
 REVISION_REASON: Final = "canary-revision-reason-5f024a69"
 """A revision's reason, given with `--revision-reason`: the user's text, which logs never hold
 (docs/contracts.md, the experiment manifest)."""
@@ -176,8 +216,12 @@ def logged(
         *RESPONSE,
         *REVIEW,
         *EXPERIMENT,
+        *RANKING_DEFINITION,
+        *RANKING_VARIANT,
+        *SNAPSHOT,
         REVISION_REASON,
         PROVIDER_MESSAGE,
+        RANK_UPDATE_MESSAGE,
         *more,
     )
     found = [

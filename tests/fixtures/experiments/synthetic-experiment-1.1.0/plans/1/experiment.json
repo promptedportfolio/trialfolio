@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.1.0",
+  "trialfolio_version": "0.4.0",
+  "created_at": "2026-10-03T14:00:01Z",
+  "experiment_id": "synthetic-value-momentum",
+  "title": "Synthetic experiment: value, momentum, and quality weights",
+  "purpose": "Shows an experiment's files and report offline, with ranking-weight variants, from invented values.",
+  "prior_research": {
+    "status": "complete",
+    "description": "None. This experiment is invented for Trial Folio's tests, and no earlier work informed it."
+  },
+  "planned_cases": [
+    {
+      "case_key": "baseline",
+      "case_id": "case-6f5dfa46755878ed",
+      "description": null,
+      "variant": null
+    },
+    {
+      "case_key": "value-heavy",
+      "case_id": "case-873d31a126f33347",
+      "description": "More weight on value, taken equally from momentum and quality.",
+      "variant": {
+        "setting": "ranking",
+        "value": null,
+        "add": null,
+        "replace": null,
+        "with": null,
+        "set": [
+          {
+            "node": "Value",
+            "weight": "60"
+          },
+          {
+            "node": "Momentum",
+            "weight": "20"
+          },
+          {
+            "node": "Quality",
+            "weight": "20"
+          }
+        ],
+        "remove": null,
+        "default": false
+      }
+    }
+  ],
+  "retired_cases": [],
+  "plans": [
+    {
+      "plan": 1,
+      "plan_hash": "sha256:72a09ae1d63ba33c6d4a6c90efbd51b84cd261fc4184a0a450b220dcfbbbc7da",
+      "revises": null,
+      "plan_artifact_id": "sha256:854c888f150c17e80692a78cde836e3e4edb5bd84f472327436659caaeb24e9d",
+      "configuration_artifact_id": "sha256:1d901bf5ac7e90a0b3336eb9a2c5556c87bed932f95f839acd569f5c1a5497b4",
+      "approval": "not_required",
+      "reason": null,
+      "changes": null
+    }
+  ]
+}

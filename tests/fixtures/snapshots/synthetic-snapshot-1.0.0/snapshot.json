@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "trialfolio_version": "0.4.0",
+  "requested": "Value and momentum",
+  "system": {
+    "name": "Value and momentum",
+    "id": 104729,
+    "ranking_method": 2,
+    "currency": "USD",
+    "type": "Stock"
+  },
+  "taken_at": "2026-10-03T14:00:02Z",
+  "attempt_id": "d7830ff4-6253-40b0-95af-6c909275c0a1",
+  "plan_hash": "sha256:b161526e724f173f277a4edd2da017af5806f9acd9da6333b3d61b7ba57a6fbe",
+  "definition": "sha256:6bc59b992f83d5e4c245f37f187651ed18de6b9cb5949ac9f29b743273b26895",
+  "response": "sha256:329114ea692c40ea32e0cac32ee9cace7b695b9f503cc26aade94f9f4d07eaa2"
+}

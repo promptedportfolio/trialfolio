@@ -1,0 +1,196 @@
+{
+  "schema_version": "1.1.0",
+  "artifact_type": "run",
+  "trialfolio_version": "0.4.0",
+  "created_at": "2026-10-03T14:00:03Z",
+  "command": null,
+  "synthetic": true,
+  "plan_hash": "sha256:b4851401303b60bcd69015c118485ff63c8c55b2ad50eb6331922dd3a54de0f1",
+  "approval": "not_required",
+  "outcome": "completed",
+  "error": null,
+  "artifacts": [
+    {
+      "path": "plan.json",
+      "artifact_id": "sha256:12da1177460aa4bf1969cc0dddade6a094b0cb85d86bd5d9780375224d8e9dbf",
+      "size": 16632,
+      "role": "plan",
+      "schema_version": "1.2.0",
+      "source": null
+    },
+    {
+      "path": "configuration.yaml",
+      "artifact_id": "sha256:340e16096812faff7c695b93555e474b4c885f434ac998f735ed116cbb4c17c3",
+      "size": 559,
+      "role": "configuration",
+      "schema_version": "1.1.0",
+      "source": {
+        "acquired_at": "2026-10-03T14:00:00Z",
+        "format": "screen-configuration",
+        "format_version": "1.1.0",
+        "parser_version": null,
+        "provenance": "user_supplied",
+        "operation": null
+      }
+    },
+    {
+      "path": "definition.xml",
+      "artifact_id": "sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc",
+      "size": 1231,
+      "role": "ranking_definition",
+      "schema_version": null,
+      "source": {
+        "acquired_at": "2026-10-03T14:00:00Z",
+        "format": "ranking-definition",
+        "format_version": "1",
+        "parser_version": null,
+        "provenance": "user_supplied",
+        "operation": null
+      }
+    },
+    {
+      "path": "cases/case-6f5dfa46755878ed/attempts/64eea22e-0c41-4c0f-b6fc-8302a29d4b28/rank-update-request.json",
+      "artifact_id": "sha256:d3d7d142bc572ad7644a2fc119cfcc259a78ce1675047b0eea0e5ffee3eb52ef",
+      "size": 1465,
+      "role": "rank_update_request",
+      "schema_version": null,
+      "source": {
+        "acquired_at": "2026-10-03T14:00:01Z",
+        "format": "p123api-rank-update-request",
+        "format_version": "1",
+        "parser_version": null,
+        "provenance": "verified",
+        "operation": "rank_update"
+      }
+    },
+    {
+      "path": "cases/case-6f5dfa46755878ed/attempts/64eea22e-0c41-4c0f-b6fc-8302a29d4b28/updating.json",
+      "artifact_id": "sha256:371a2cff9c3c516e9a8ce29b7cfc9dc6be84dc7624fd523979dce48572461392",
+      "size": 575,
+      "role": "update_record",
+      "schema_version": "1.2.0",
+      "source": null
+    },
+    {
+      "path": "cases/case-6f5dfa46755878ed/attempts/64eea22e-0c41-4c0f-b6fc-8302a29d4b28/rank-update-response.json",
+      "artifact_id": "sha256:ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+      "size": 3,
+      "role": "rank_update_response",
+      "schema_version": null,
+      "source": {
+        "acquired_at": "2026-10-03T14:00:02Z",
+        "format": "p123api-rank-update",
+        "format_version": "1",
+        "parser_version": null,
+        "provenance": "verified",
+        "operation": "rank_update"
+      }
+    },
+    {
+      "path": "cases/case-6f5dfa46755878ed/attempts/64eea22e-0c41-4c0f-b6fc-8302a29d4b28/request.json",
+      "artifact_id": "sha256:695b52f8e007c853aa31373faac051ac4c3a580ba38d90ea23b1b1b113135d67",
+      "size": 450,
+      "role": "provider_request",
+      "schema_version": null,
+      "source": {
+        "acquired_at": "2026-10-03T14:00:01Z",
+        "format": "p123api-screen-backtest-request",
+        "format_version": "1",
+        "parser_version": null,
+        "provenance": "verified",
+        "operation": "screen_backtest"
+      }
+    },
+    {
+      "path": "cases/case-6f5dfa46755878ed/attempts/64eea22e-0c41-4c0f-b6fc-8302a29d4b28/started.json",
+      "artifact_id": "sha256:6578fc193908306a7172191c208b86e6b90b6a9d15a56055a0f259ee6c82133a",
+      "size": 691,
+      "role": "start_record",
+      "schema_version": "1.2.0",
+      "source": null
+    },
+    {
+      "path": "cases/case-6f5dfa46755878ed/attempts/64eea22e-0c41-4c0f-b6fc-8302a29d4b28/response.json",
+      "artifact_id": "sha256:ee269d536bf73c7c1846bd24240f4b1d460e7867a7c935c486c656228077f4b8",
+      "size": 1931,
+      "role": "provider_response",
+      "schema_version": null,
+      "source": {
+        "acquired_at": "2026-10-03T14:00:02Z",
+        "format": "p123api-screen-backtest",
+        "format_version": "1",
+        "parser_version": 1,
+        "provenance": "verified",
+        "operation": "screen_backtest"
+      }
+    },
+    {
+      "path": "cases/case-6f5dfa46755878ed/attempts/64eea22e-0c41-4c0f-b6fc-8302a29d4b28/attempt.json",
+      "artifact_id": "sha256:b74d354e8a80ffeee6794bebe1166e9aa00c79b19b030c8e46c3dc35e64b8408",
+      "size": 2061,
+      "role": "attempt_record",
+      "schema_version": "1.2.0",
+      "source": null
+    },
+    {
+      "path": "normalized/metrics.csv",
+      "artifact_id": "sha256:07ccc9841d22135bbf48741253a41e12ada74f176f524b761e9bddebd10c246b",
+      "size": 4469,
+      "role": "metrics",
+      "schema_version": "1.0.0",
+      "source": null
+    },
+    {
+      "path": "normalized/settings.csv",
+      "artifact_id": "sha256:966ddb8601969c5fdb9b56c52662198a67ab47dcaf7577210119ee163d3f52db",
+      "size": 6451,
+      "role": "settings",
+      "schema_version": "1.1.0",
+      "source": null
+    },
+    {
+      "path": "report.html",
+      "artifact_id": "sha256:21e2820b2d131711a130b690b5e8a46e02f29b2681380901f7982a48d9c90206",
+      "size": 37054,
+      "role": "report",
+      "schema_version": null,
+      "source": null
+    }
+  ],
+  "parsers": [
+    {
+      "layout": "p123api-screen-backtest",
+      "layout_version": 1,
+      "parser_version": 1
+    }
+  ],
+  "license_id": "LicenseRef-NSPRL-1.1",
+  "notice_version": "1.0",
+  "capabilities": {
+    "return_series": "source_only",
+    "statistical_validation": "not_assessed",
+    "trading_readiness": "not_assessed"
+  },
+  "reproducibility": {
+    "status": "incomplete",
+    "external_references": [
+      {
+        "setting": "universe",
+        "snapshotted": false
+      }
+    ]
+  },
+  "counts": {
+    "results": 1,
+    "cases": 1,
+    "attempts": {
+      "succeeded": 1,
+      "failed": 0,
+      "unknown": 0,
+      "running": 0
+    },
+    "provider_requests": 2,
+    "retries": 0,
+    "cost": null
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.3.0",
+  "trialfolio_version": "0.4.0",
+  "attempt_id": "e9939942-3be4-41bd-8c0b-92d4b63ebdab",
+  "case_id": "case-6f5dfa46755878ed",
+  "plan_hash": "sha256:72a09ae1d63ba33c6d4a6c90efbd51b84cd261fc4184a0a450b220dcfbbbc7da",
+  "session": 1,
+  "sequence": 1,
+  "operation": "screen_backtest",
+  "authenticated_by": "e9939942-3be4-41bd-8c0b-92d4b63ebdab",
+  "repeat_of": null,
+  "started_at": "2026-10-03T14:00:02Z",
+  "provider_wrapper": {
+    "p123api": "3.1.0"
+  },
+  "transport": {
+    "requests": "2.34.2",
+    "urllib3": "2.8.0"
+  },
+  "ended_at": "2026-10-03T14:00:03Z",
+  "outcome": "succeeded",
+  "error": null,
+  "exchanges": [
+    {
+      "request": "POST /auth",
+      "result": "response",
+      "status": 200,
+      "note": null
+    },
+    {
+      "request": "POST /rank",
+      "result": "response",
+      "status": 200,
+      "note": null
+    },
+    {
+      "request": "POST /screen/backtest",
+      "result": "response",
+      "status": 200,
+      "note": null
+    }
+  ],
+  "possibly_charged": true,
+  "ranking_update": {
+    "request": {
+      "path": "cases/case-6f5dfa46755878ed/attempts/e9939942-3be4-41bd-8c0b-92d4b63ebdab/rank-update-request.json",
+      "artifact_id": "sha256:d3d7d142bc572ad7644a2fc119cfcc259a78ce1675047b0eea0e5ffee3eb52ef"
+    },
+    "response": {
+      "path": "cases/case-6f5dfa46755878ed/attempts/e9939942-3be4-41bd-8c0b-92d4b63ebdab/rank-update-response.json",
+      "artifact_id": "sha256:ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+      "form": "decoded"
+    },
+    "provider_metadata": {
+      "cost": null,
+      "quota_remaining": null
+    }
+  },
+  "request": {
+    "path": "cases/case-6f5dfa46755878ed/attempts/e9939942-3be4-41bd-8c0b-92d4b63ebdab/request.json",
+    "artifact_id": "sha256:695b52f8e007c853aa31373faac051ac4c3a580ba38d90ea23b1b1b113135d67"
+  },
+  "response": {
+    "path": "cases/case-6f5dfa46755878ed/attempts/e9939942-3be4-41bd-8c0b-92d4b63ebdab/response.json",
+    "artifact_id": "sha256:ee269d536bf73c7c1846bd24240f4b1d460e7867a7c935c486c656228077f4b8",
+    "form": "decoded"
+  },
+  "provider_metadata": {
+    "cost": null,
+    "quota_remaining": null
+  }
+}

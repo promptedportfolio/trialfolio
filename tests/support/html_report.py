@@ -1,6 +1,10 @@
 """A report parsed with the standard library's `html.parser` into a tree of elements, so a test can
 check what each element holds and where it sits (release 0.1.0, test pairing: R01-AC13 parses
 each report with `html.parser`). It isn't a double: it replaces nothing.
+
+From release 0.4.0's R04-T13, it also parses the parts of a report of a ranking definition: its
+weights, its definition's source, and each attempt's exchanges, its `POST /rank` among them, with
+its cost (release 0.4.0, test pairing: the report parser).
 """
 
 from collections.abc import Iterator
@@ -29,6 +33,23 @@ class Element:
         """All the text inside, with each run of whitespace made one space, and a `<br>` read as
         one."""
         return " ".join(self._raw().split())
+
+    @property
+    def lines(self) -> list[str]:
+        """The text inside, split at each `<br>`, each line as `text` gives it."""
+        lines: list[list[str]] = [[]]
+
+        def walk(element: Element) -> None:
+            for child in element.children:
+                if isinstance(child, str):
+                    lines[-1].append(child)
+                elif child.tag == "br":
+                    lines.append([])
+                else:
+                    walk(child)
+
+        walk(self)
+        return [" ".join("".join(parts).split()) for parts in lines]
 
     def _raw(self) -> str:
         if self.tag == "br":
@@ -92,6 +113,115 @@ class Document:
             [cell for cell in row.children if isinstance(cell, Element)]
             for row in table.find_all("tr")
         ]
+
+    def texts(self, table: Element) -> list[list[str]]:
+        """The text of each cell of each row of `table`, its header row first."""
+        return [[cell.text for cell in row] for row in self.rows(table)]
+
+    def heading(self, text: str) -> Element:
+        """The one `<h3>` whose text is exactly `text`."""
+        (found,) = (h for h in self.root.find_all("h3") if h.text == text)
+        return found
+
+    def has_heading(self, text: str) -> bool:
+        """Whether an `<h3>` has exactly the text `text`."""
+        return any(h.text == text for h in self.root.find_all("h3"))
+
+    def under(self, heading: str) -> list[Element]:
+        """The elements that follow the `<h3>` whose text is exactly `heading`, beside it in its
+        section, up to the next heading."""
+        h3 = self.heading(heading)
+        assert h3.parent is not None
+        siblings = [child for child in h3.parent.children if isinstance(child, Element)]
+        after = siblings[siblings.index(h3) + 1 :]
+        end = next((i for i, e in enumerate(after) if e.tag in ("h2", "h3")), len(after))
+        return after[:end]
+
+    def items_under(self, heading: str) -> list[str]:
+        """The text of each item of the lists under the `<h3>` `heading`, such as
+        "Limitations"."""
+        return [li.text for e in self.under(heading) for li in e.find_all("li")]
+
+    # A ranking definition's parts (release 0.4.0)
+
+    def ranking_weights(self) -> list[list[str]]:
+        """The weights a report of a ranking definition shows, header row first: a run's table of
+        each node's weight, under "The ranking definition", or an experiment session's of each
+        case's, under "The ranking's weights"."""
+        for heading in ("The ranking definition", "The ranking's weights"):
+            if self.has_heading(heading):
+                (table,) = (t for e in self.under(heading) for t in e.find_all("table"))
+                return self.texts(table)
+        raise AssertionError("the report shows no ranking weights")
+
+    def ranking_sources(self) -> list[tuple[str | None, str]]:
+        """The ranking definition's source, under "The ranking definition's source", as
+        `(plan, source)` pairs: a run's, its paragraph, with no plan, or an experiment session's,
+        each plan's row of its table, oldest first."""
+        under = self.under("The ranking definition's source")
+        tables = [t for e in under for t in e.find_all("table")]
+        if not tables:
+            (paragraph, *_) = (p for e in under for p in e.find_all("p"))
+            return [(None, paragraph.text)]
+        (table,) = tables
+        header, *rows = self.texts(table)
+        assert header == ["Plan", "Source"], header
+        return [(plan, source) for plan, source in rows]
+
+    def attempts_shown(self) -> list["AttemptShown"]:
+        """Each attempt a report shows, in its order: a run's, each `Attempt <id>` with its
+        exchanges' table and its cost; or an experiment session's, each row of its cases' tables
+        of attempts, whose caption names the case."""
+        shown: list[AttemptShown] = []
+        for h3 in self.root.find_all("h3"):
+            if not h3.text.startswith("Attempt "):
+                continue
+            under = self.under(h3.text)
+            (cost,) = (
+                dd.text
+                for e in under
+                for dt, dd in pairwise(c for c in e.children if isinstance(c, Element))
+                if dt.tag == "dt" and dd.tag == "dd" and dt.text == "Cost"
+            )
+            (table,) = (t for e in under for t in e.find_all("table"))
+            exchanges = tuple(
+                f"{request}: {result} {status}".rstrip()
+                for _, request, result, status, _ in self.texts(table)[1:]
+            )
+            shown.append(AttemptShown(None, h3.text.removeprefix("Attempt "), exchanges, cost))
+        for table in self.root.find_all("table"):
+            rows = self.rows(table)
+            if not rows or [cell.text for cell in rows[0]][:1] != ["Attempt"]:
+                continue
+            names = [cell.text for cell in rows[0]]
+            (caption,) = table.find_all("caption")
+            for row in rows[1:]:
+                cells = dict(zip(names, row, strict=True))
+                cost = cells["Cost"].text if "Cost" in cells else ""
+                shown.append(
+                    AttemptShown(
+                        caption.text,
+                        cells["Attempt"].text,
+                        tuple(cells["Exchanges"].lines),
+                        cost,
+                    )
+                )
+        return shown
+
+
+@dataclass(frozen=True)
+class AttemptShown:
+    """An attempt as a report shows it."""
+
+    case: str | None
+    """An experiment's case, as its table's caption names it, `<case-key>, <case_id>`; None in a
+    run's report, which has one case."""
+    attempt_id: str
+    exchanges: tuple[str, ...]
+    """Each exchange, in order, as `<request>: <result> <status>`, such as
+    `POST /rank: Response 200`."""
+    cost: str
+    """Its cost, as the report gives it; empty in a table of attempts without a `Cost` column."""
 
 
 class _Parser(HTMLParser):

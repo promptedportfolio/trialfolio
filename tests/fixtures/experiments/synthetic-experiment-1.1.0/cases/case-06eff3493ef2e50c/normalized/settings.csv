@@ -1,0 +1,35 @@
+label,setting,category,critical,value,unit,interpretation,provenance,inference_rule,original_key,original_value,source_artifact,flags,node
+case-06eff3493ef2e50c,universe,universe,true,SP500,,interpreted,verified,,baseline.universe,'SP500',sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,not_snapshotted,
+case-06eff3493ef2e50c,screen_type,universe,true,stock,,interpreted,verified,,,,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,rules,strategy,true,"[""AvgDailyTot(30) > 1000000""]",,interpreted,verified,,baseline.rules,- 'AvgDailyTot(30) > 1000000',sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,ranking,strategy,true,"{""definition"": ""sha256:fd7e3e6174d954efc310cff229feadcca3df56dc3b89bab41b0840d9ff9076e4"", ""ranking_method"": ""percentile_nas_negative""}",,interpreted,verified,,variants.ranking[1],"key: no-sales-yield
+      description: Value without its sales-yield factor.
+      remove: 'Value/Sales Yield'
+      set: {'Value/Earnings Yield': 100}",sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,ranking_weight,strategy,true,40,,interpreted,verified,,baseline.ranking.definition,40,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Value
+case-06eff3493ef2e50c,ranking_weight,strategy,true,100,,interpreted,verified,,variants.ranking[1].set[0],100,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,Value/Earnings Yield
+case-06eff3493ef2e50c,ranking_weight,strategy,true,30,,interpreted,verified,,baseline.ranking.definition,30,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Momentum
+case-06eff3493ef2e50c,ranking_weight,strategy,true,50,,interpreted,verified,,baseline.ranking.definition,50,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Momentum/Six-Month Return
+case-06eff3493ef2e50c,ranking_weight,strategy,true,50,,interpreted,verified,,baseline.ranking.definition,50,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Momentum/Year Return
+case-06eff3493ef2e50c,ranking_weight,strategy,true,30,,interpreted,verified,,baseline.ranking.definition,30,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Quality
+case-06eff3493ef2e50c,ranking_weight,strategy,true,50,,interpreted,verified,,baseline.ranking.definition,50,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Quality/Return on Equity
+case-06eff3493ef2e50c,ranking_weight,strategy,true,50,,interpreted,verified,,baseline.ranking.definition,50,sha256:84e3dbd0e229275986404fbdf5826e9fe18b29f6aa0d3ad1829e99372ac662cc,,Quality/Gross Margin
+case-06eff3493ef2e50c,max_holdings,strategy,true,25,count,interpreted,verified,,baseline.max_holdings,25,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,position_method,strategy,true,long,,interpreted,verified,,,,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,benchmark,benchmark,true,SPY,,interpreted,verified,,baseline.benchmark,'SPY',sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,currency,currency,true,USD,,interpreted,verified,,,,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,start_date,dates,true,2016-01-01,,interpreted,verified,,baseline.start_date,2016-01-01,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,end_date,dates,true,2025-12-31,,interpreted,verified,,baseline.end_date,2025-12-31,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,rebalance_weeks,execution,true,4,weeks,interpreted,verified,,baseline.rebalance_weeks,4,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,transaction_price,execution,true,open,,interpreted,verified,,baseline.transaction_price,open,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,slippage_percent,costs,true,0.25,percent,interpreted,verified,,baseline.slippage_percent,0.25,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,commission,costs,true,not_modeled,,interpreted,inferred,"Portfolio123's API: Screen page documents no commission parameter, and slippage is its only trading-cost input (checked 2026-10-01).",,,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,pit_method,data_source,true,complete,,interpreted,verified,,baseline.pit_method,complete,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,data_vendor,data_source,true,FactSet,,interpreted,inferred,"D-16: FactSet is the only supported data vendor. The endpoint documents no vendor parameter, so none is sent, and the response doesn't report the vendor.",,,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,inferred_default,
+case-06eff3493ef2e50c,precision,other,false,4,,interpreted,verified,,baseline.precision,4,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,risk_stats_period,other,false,monthly,,interpreted,inferred,"Portfolio123's documented default: the API: Screen page lists riskStatsPeriod's values as ['Monthly'] | 'Weekly' | 'Daily' (checked 2026-10-01), and the wrapper's documentation says an optional parameter defaults to the first value.",,,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,inferred_default,
+case-06eff3493ef2e50c,max_pos_pct,strategy,true,not_sent,,not_interpreted,unknown,,,,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,rank_tolerance,strategy,true,not_sent,,not_interpreted,unknown,,,,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,carry_cost,costs,true,not_sent,,not_interpreted,unknown,,,,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,long_weight,strategy,true,not_sent,,not_interpreted,unknown,,,,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,
+case-06eff3493ef2e50c,short_weight,strategy,true,not_sent,,not_interpreted,unknown,,,,sha256:87f8cd8a1b7d12a0ede927f697be13a797ec60b3e79b095587b7d352945531da,,

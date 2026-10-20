@@ -12,7 +12,17 @@ the two.
 - `report/`, the committed run's report, rendered again from its records by `trialfolio report`,
   from that copy;
 - `experiment/`, as the synthetic experiment's writer, `tests/support/synthetic_experiment.py`,
-  wrote `experiments/synthetic-experiment-1.0.0/`, with both sessions' reports.
+  wrote `experiments/synthetic-experiment-1.0.0/`, with both sessions' reports;
+- from release 0.4.0's R04-T13, the fixtures with a ranking definition, as that writer wrote them:
+  `run-1.1.0/`, `runs/synthetic-run-1.1.0/`; `experiment-1.1.0/`,
+  `experiments/synthetic-experiment-1.1.0/`; `snapshot-1.0.0/`,
+  `snapshots/synthetic-snapshot-1.0.0/`; and `ranking-review/`,
+  `reviews/synthetic-ranking-review-1.0.0/`, by `trialfolio review` of
+  `review-configs/synthetic-ranking.yaml`, over a copy of the committed run with a definition at
+  the `run` path it gives, `runs/synthetic`, and the synthetic run of `synthetic-heavy.yaml`,
+  which the writer writes at `runs/synthetic-heavy`, all in `inputs/`;
+- `report-1.1.0/`, the committed run with a definition's report, rendered again from its records
+  by `trialfolio report`, from that copy.
 
 The commands run through the CLI's entry function, in this process, with the license acknowledged
 by `TRIALFOLIO_ACCEPT_LICENSE`, and in an environment without the other variables Trial Folio
@@ -54,10 +64,23 @@ from unittest import mock
 FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
 RUN: Final = FIXTURES / "runs" / "synthetic-run-1.0.0"
 """The committed run, which `trialfolio demo` wrote, and which the review and the report read."""
+RUN_WITH_DEFINITION: Final = FIXTURES / "runs" / "synthetic-run-1.1.0"
+"""The committed run with a ranking definition, which the synthetic writer wrote, and which the
+ranking review and the second report read."""
 REVIEW_CONFIGURATION: Final = FIXTURES / "review-configs" / "synthetic-only.yaml"
 """The configuration of the committed review, which names the run at `runs/demo`."""
 
-WRITTEN: Final = ("run", "review", "report", "experiment")
+WRITTEN: Final = (
+    "run",
+    "review",
+    "report",
+    "experiment",
+    "run-1.1.0",
+    "experiment-1.1.0",
+    "snapshot-1.0.0",
+    "ranking-review",
+    "report-1.1.0",
+)
 """The directories `write` writes, apart from `inputs/`, in the order it writes them."""
 
 LOGS: Final = "logs"
@@ -118,7 +141,13 @@ def _command(*argv: str | Path) -> None:
 
 def write(out: Path) -> None:
     """Writes the fixtures again into `out`, a new or empty directory, as the module says."""
-    from tests.support.synthetic_experiment import write_synthetic_experiment
+    from tests.support.synthetic_experiment import (
+        write_synthetic_experiment,
+        write_synthetic_ranking_experiment,
+        write_synthetic_ranking_review,
+        write_synthetic_run,
+        write_synthetic_snapshot,
+    )
 
     if out.exists() and any(out.iterdir()):
         raise ValueError(f"{out} isn't empty")
@@ -133,6 +162,15 @@ def write(out: Path) -> None:
         _command("report", run, "--out", out / "report")
         with fixed_ids():
             write_synthetic_experiment(out / "experiment")
+        with fixed_ids():
+            write_synthetic_run(out / "run-1.1.0")
+        with fixed_ids():
+            write_synthetic_ranking_experiment(out / "experiment-1.1.0")
+        with fixed_ids():
+            write_synthetic_snapshot(out / "snapshot-1.0.0")
+        with fixed_ids():
+            write_synthetic_ranking_review(out / "ranking-review", inputs, RUN_WITH_DEFINITION)
+        _command("report", inputs / "runs" / "synthetic", "--out", out / "report-1.1.0")
 
 
 def _raise(error: OSError) -> NoReturn:

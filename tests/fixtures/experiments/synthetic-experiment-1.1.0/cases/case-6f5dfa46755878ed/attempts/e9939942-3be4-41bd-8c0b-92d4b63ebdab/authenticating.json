@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0.0",
+  "trialfolio_version": "0.4.0",
+  "attempt_id": "e9939942-3be4-41bd-8c0b-92d4b63ebdab",
+  "case_id": "case-6f5dfa46755878ed",
+  "plan_hash": "sha256:72a09ae1d63ba33c6d4a6c90efbd51b84cd261fc4184a0a450b220dcfbbbc7da",
+  "session": 1,
+  "sequence": 1,
+  "repeat_of": null,
+  "started_at": "2026-10-03T14:00:02Z"
+}

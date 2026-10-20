@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.2.0",
+  "trialfolio_version": "0.4.0",
+  "attempt_id": "d7830ff4-6253-40b0-95af-6c909275c0a1",
+  "case_id": null,
+  "plan_hash": "sha256:b161526e724f173f277a4edd2da017af5806f9acd9da6333b3d61b7ba57a6fbe",
+  "operation": "rank_get",
+  "started_at": "2026-10-03T14:00:01Z",
+  "provider_wrapper": {
+    "p123api": "3.1.0"
+  },
+  "transport": {
+    "requests": "2.34.2",
+    "urllib3": "2.8.0"
+  },
+  "exchanges": [
+    {
+      "request": "POST /auth",
+      "result": "response",
+      "status": 200,
+      "note": null
+    }
+  ]
+}
