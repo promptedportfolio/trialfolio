@@ -9,17 +9,25 @@ the same command resumes the experiment, after a fault in one of its attempts, a
 record; and fails with `output.not_empty`, exit 4, after a fault in a screen run's files or a
 snapshot's, since `run` resumes neither, or in a new experiment's plan, which wasn't recorded.
 
+A snapshot's message says it has no manifest after a fault at its `configuration.yaml` or its
+attempt's files too, as a run's does. And a storage failure at the attempt record, which leaves
+the start record running, ends a run's message, or a snapshot's, with what the attempt's own
+error says of its requests, then what the start record says of them, and that the output has no
+manifest: for a run without a definition too, since the rule is 0.1.0's.
+
 Traces to R04-AC13, as release 0.4.0's test pairing gives it for
 `tests/interface/test_ranking_storage.py`, and to docs/contracts.md, sending a definition (the
 attempt's files, and the backtest only after the write), ranking snapshot output, running an
 experiment (an ending without a manifest), endings that decide the error code, and CLI behavior
-(which directories `run` resumes). Through the CLI's entry function in the test process, over the
-fake server, with storage faults wrapping the real store: at a whole path, such as
-`/definition.xml`, or at a file of a case, in its attempt. A screen run is of
-`screen-configs/definition.yaml`, an experiment of `ranking-example.yaml`, whose first case,
-`baseline`, authenticates, and a snapshot of `ranking-snapshot-configs/example.yaml`; a plan's
-`snapshot.json` is that of a configuration that names a snapshot the snapshot builder took,
-beside it. The ranking lock is in the test's own directory.
+(which directories `run` resumes, and what a run writes after its attempt), and to the corrected
+defects the review of R04-T13's pull request found. Through the CLI's entry function in the test
+process, over the fake server, with storage faults wrapping the real store: at a whole path, such
+as `/definition.xml`, or at a file of a case, in its attempt. A screen run is of
+`screen-configs/definition.yaml`, or `formula.yaml` without a definition, an experiment of
+`ranking-example.yaml`, whose first case, `baseline`, authenticates, and a snapshot of
+`ranking-snapshot-configs/example.yaml`; a plan's `snapshot.json` is that of a configuration that
+names a snapshot the snapshot builder took, beside it. The ranking lock is in the test's own
+directory.
 """
 
 import json
@@ -155,16 +163,23 @@ def run_screen(cli: Cli, path: Path, faults: FaultyStores) -> tuple[list[str | P
     return argv, cli(*argv, store_factory=faults)
 
 
+NEITHER_SENT: Final = "Neither the rank_update request nor the screen backtest request was sent."
+UPDATE_ONLY: Final = (
+    "The rank_update request, which writes the case's ranking definition into ApiRankingSystem,"
+    " reached Portfolio123, and may have been charged. The screen backtest request wasn't sent."
+)
+
 SCREEN_FAULTS: Final = {
-    "definition.xml": ("/definition.xml", []),
-    "rank-update-request.json": ("rank-update-request.json", [AUTH]),
-    "updating.json": ("updating.json", [AUTH]),
-    "rank-update-response.json": ("rank-update-response.json", [AUTH, RANK]),
+    "definition.xml": ("/definition.xml", [], NEITHER_SENT),
+    "rank-update-request.json": ("rank-update-request.json", [AUTH], NEITHER_SENT),
+    "updating.json": ("updating.json", [AUTH], NEITHER_SENT),
+    "rank-update-response.json": ("rank-update-response.json", [AUTH, RANK], UPDATE_ONLY),
 }
-"""Where each fault strikes a screen run, and the requests sent before it, as written by hand:
-nothing before the plan's copy of the definition, which comes before the attempt; the
-authentication, which a screen run's attempt makes first, before its `rank-update-request.json`
-and its update record; and the `rank_update` too, before its response is saved."""
+"""Where each fault strikes a screen run, the requests sent before it, and what the message says
+of the two requests, as written by hand: nothing before the plan's copy of the definition, which
+comes before the attempt; the authentication, which a screen run's attempt makes first, before
+its `rank-update-request.json` and its update record; and the `rank_update` too, before its
+response is saved."""
 
 
 @pytest.mark.parametrize("kind", FAULTS)
@@ -172,13 +187,13 @@ and its update record; and the `rank_update` too, before its response is saved."
 def test_a_fault_at_a_screen_runs_file_leaves_no_manifest_and_the_run_isnt_resumed(
     cli: Cli, faults: FaultyStores, at: str, kind: str
 ) -> None:
-    name, before = SCREEN_FAULTS[at]
+    name, before, said = SCREEN_FAULTS[at]
     arm(faults, kind, name)
 
     argv, outcome = run_screen(cli, DEFINITION, faults)
 
     message = failed(outcome, kind)
-    assert RUN_INCOMPLETE in message
+    assert message.endswith(f"{said} {RUN_INCOMPLETE}")
     out = cli.tmp / "run"
     assert not (out / "manifest.json").exists()
     assert sent(cli) == before
@@ -426,3 +441,125 @@ def test_a_fault_at_a_snapshots_file_leaves_no_manifest_and_it_isnt_resumed(
     record = json.loads(next((out / "attempts").glob("*/attempt.json")).read_bytes())
     assert (record["outcome"], record["operation"]) == ("succeeded", "rank_get")
     refused_again(cli, argv, out)
+
+
+SNAPSHOT_ATTEMPT_FAULTS: Final = {
+    "configuration.yaml": ("/configuration.yaml", [], "The rank_get request wasn't sent."),
+    "request.json": ("request.json", [AUTH], "The rank_get request wasn't sent."),
+    "started.json": ("started.json", [AUTH], "The rank_get request wasn't sent."),
+    "response.json": (
+        "response.json",
+        [AUTH, RANK_GET],
+        (
+            "The rank_get request may have been charged, and its outcome is unknown: no response"
+            " was saved. Trial Folio never retries it automatically: check the account's API"
+            " credits on Portfolio123's website before running the command again."
+        ),
+    ),
+}
+"""Where each fault strikes a snapshot before its attempt record, the requests sent before it, and
+what the message says of the `rank_get`, as written by hand: `configuration.yaml` before the
+attempt; the attempt's `request.json` and start record after its authentication; and its response
+after the `rank_get`. The attempt record's own fault is below."""
+
+
+@pytest.mark.parametrize("kind", FAULTS)
+@pytest.mark.parametrize("at", SNAPSHOT_ATTEMPT_FAULTS)
+def test_a_fault_before_a_snapshots_attempt_record_says_it_has_no_manifest(
+    cli: Cli, faults: FaultyStores, at: str, kind: str
+) -> None:
+    name, before, said = SNAPSHOT_ATTEMPT_FAULTS[at]
+    cli.ready()
+    cli.server.reply("/auth", AUTHENTICATED)
+    cli.server.reply("/rank", rank_get(), method="GET")
+    out = cli.tmp / "snapshot"
+    argv: list[str | Path] = [
+        "run",
+        SNAPSHOT,
+        "--out",
+        out,
+        "--approve",
+        snapshot_plan_hash(),
+        "--json",
+    ]
+    arm(faults, kind, name)
+
+    outcome = cli(*argv, store_factory=faults)
+
+    message = failed(outcome, kind)
+    assert message.endswith(f"{said} {SNAPSHOT_INCOMPLETE}")
+    assert not (out / "manifest.json").exists()
+    assert sent(cli) == before
+    written_once(faults)
+    refused_again(cli, argv, out)
+
+
+# An attempt record that can't be written
+
+
+RUNNING: Final = (
+    "may have been sent, and may have been charged: the attempt's start record reads as running."
+)
+
+UNRECORDED_ATTEMPTS: Final = {
+    "screen run": (
+        config("formula.yaml"),
+        [AUTH, BACKTEST],
+        "The screen backtest request succeeded, and its response was saved.",
+        f"The screen backtest request {RUNNING} Trial Folio never retries it automatically.",
+        RUN_INCOMPLETE,
+    ),
+    "screen run with a definition": (
+        DEFINITION,
+        [AUTH, RANK, BACKTEST],
+        (
+            "The rank_update request, which writes the case's ranking definition into"
+            " ApiRankingSystem, and the screen backtest request succeeded, and their responses"
+            " were saved."
+        ),
+        (
+            "The rank_update request, which writes the case's ranking definition into"
+            " ApiRankingSystem, reached Portfolio123, and may have been charged. Its screen"
+            f" backtest request {RUNNING} Trial Folio never retries either automatically."
+        ),
+        RUN_INCOMPLETE,
+    ),
+    "snapshot": (
+        SNAPSHOT,
+        [AUTH, RANK_GET],
+        "The rank_get request succeeded, and its response was saved.",
+        f"The rank_get request {RUNNING} Trial Folio never retries it automatically.",
+        SNAPSHOT_INCOMPLETE,
+    ),
+}
+"""For a run without a definition, one with a definition, and a snapshot, each as written by
+hand: the requests it sends, each answered with a 200; what the attempt's own error says of them;
+what its records say, without the attempt record, by its start record; and that the output has no
+manifest."""
+
+
+@pytest.mark.parametrize("what", UNRECORDED_ATTEMPTS)
+def test_a_storage_failure_at_the_attempt_record_says_what_the_attempt_and_its_records_say(
+    cli: Cli, faults: FaultyStores, what: str
+) -> None:
+    configuration, requests, attempt_said, records_say, incomplete = UNRECORDED_ATTEMPTS[what]
+    faults.fail_os("attempt.json")
+    cli.ready()
+    cli.server.reply("/auth", AUTHENTICATED)
+    cli.server.reply("/rank", response("rank-update.json"), method="POST")
+    cli.server.reply("/rank", rank_get(), method="GET")
+    cli.server.reply("/screen/backtest", response("complete.json"))
+    out = cli.tmp / "out"
+    approve = snapshot_plan_hash() if configuration == SNAPSHOT else plan_hash_for(configuration)
+
+    outcome = cli(
+        "run", configuration, "--out", out, "--approve", approve, "--json", store_factory=faults
+    )
+
+    message = failed(outcome, "storage")
+    assert message.endswith(f"{attempt_said} {records_say} {incomplete}")
+    assert sent(cli) == requests
+    (attempt,) = out.glob("**/attempts/*")
+    assert (attempt / "started.json").is_file()
+    assert not (attempt / "attempt.json").exists()
+    assert not (out / "manifest.json").exists()
