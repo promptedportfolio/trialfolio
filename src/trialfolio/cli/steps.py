@@ -1,10 +1,13 @@
 """The steps the commands share (docs/contracts.md, CLI behavior and credentials).
 
 `run`, `demo`, and `review` open the same way: the license acknowledgment, then the time the
-command started, `opened`; and each command that writes an output directory checks it's absent or
-empty first, `empty_store`. The commands that send read the credentials, make Portfolio123's
-client, and give the core the ranking lock's file and a definition's bytes; `run` first removes
-`SSLKEYLOGFILE` from its environment. `run` and `demo` log each plan they build and approve here.
+command started, `opened`. The screen's run, the snapshot's, `demo`, `review`, and `init` check
+that their output directory is absent or empty before they write to it, `empty_store`; an
+experiment's run opens its directory itself, since it may resume the experiment the directory
+holds, and `report`'s core checks its own. The commands that send read the credentials, make
+Portfolio123's client, and give the core the ranking lock's file and a definition's bytes; `run`
+first removes `SSLKEYLOGFILE` from its environment. `run` and `demo` log each plan they build and
+approve here.
 
 The modules that import `p123api`, `requests`, or `urllib3` are imported only within the steps
 that need them, which run once `installed_versions` has checked them.
