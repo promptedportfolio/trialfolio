@@ -30,12 +30,13 @@ Ranking by the system's name, `ranking: {name: ...}`, ranks by whatever the syst
 
     In a terminal, the plan shows the system's name, that the run reads it with one `rank_get` and writes nothing to the account, the request exactly as it will be sent, and the budget: 1 provider request, 1 credit. Type `approve`, or give the plan's hash with `--approve sha256:<the plan hash>`.
 
-3. Read stdout. It names the system read, and says whether its definition, ranking method, currency, and type can be a ranking. For the invented system of this page's example, read from Trial Folio's test server, it reads:
+3. Read stdout. It names the system read, says whether its definition, ranking method, currency, and type can be a ranking, and ends with the plan hash. For the invented system of this page's example, read from Trial Folio's test server, it reads, with the plan's hash in place of `<the plan hash>`:
 
     ```text
     Ranking snapshot taken: runs/snapshots/value-momentum/
     Ranking system read: Value and momentum
     Its definition, ranking method, currency, and type can be a ranking: name the snapshot's directory as ranking.snapshot in a screen's or an experiment's configuration, schema version 1.1.0.
+    Plan hash: sha256:<the plan hash>
     ```
 
     When it can't, stdout says so, with a line for each rule it breaks, such as a currency other than USD, or a node of a kind Trial Folio doesn't send. The snapshot is still kept, as a record of what the system held.
