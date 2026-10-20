@@ -68,7 +68,7 @@ A snapshot is never resumed or added to. To read the system again, such as after
 
 ## The same definition, the same case
 
-A case is identified by its definition's bytes, not by where they came from. So a snapshot and a file that hold the same definition, byte for byte, give the same case, with the same `case_id`, and a review compares their runs as the same ranking. The plans differ only in the definition's source, which the plan hash covers.
+A case is identified by its settings, among them its definition's bytes and its ranking method, not by where the definition came from. So a snapshot and a file that hold the same definition, byte for byte, give the same case, with the same `case_id`, when the file's configuration gives the `ranking_method` the snapshot's system has, and the other settings are the same. A review then compares their runs as the same ranking, and the plans differ only in the definition's source, which the plan hash covers. With another ranking method, the same bytes give another case: in an experiment, the snapshot in the file's place is then a changed ranking method, which changes every case ([revise an experiment](revise-an-experiment.md#what-a-revision-keeps)).
 
 Portfolio123 stores a definition as equivalent XML, in its own serialization, so a snapshot of a system that Trial Folio or another program wrote through the API, such as `ApiRankingSystem`, may hold the definition in other bytes than were sent, and give another case ([what Portfolio123 stores](../explanation/apirankingsystem-and-the-ranking-lock.md#what-portfolio123-stores)).
 

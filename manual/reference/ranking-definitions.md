@@ -76,7 +76,7 @@ A ranking variant names a node by its path: the nodes from the top level down to
 
 ## A case's identity
 
-A case's `ranking` setting holds its definition's hash, `sha256:` and 64 hex digits, and its ranking method, and a weight row for each node follows it. So the `case_id` covers the definition, byte for byte, and its weights. Where it came from doesn't count: the same definition, given in a file or read by a snapshot, gives the same case. The plan records the source, so the plan hash covers it ([plans with a ranking definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#plans-with-a-ranking-definition)).
+A case's `ranking` setting holds its definition's hash, `sha256:` and 64 hex digits, and its ranking method, and a weight row for each node follows it. So the `case_id` covers the definition, byte for byte, its ranking method, and its weights. Where it came from doesn't count: the same definition, given in a file or read by a snapshot, with the same ranking method and the other settings the same, gives the same case. The plan records the source, so the plan hash covers it. A snapshot's ranking method is its system's, so a snapshot of the same bytes, whose system has another ranking method than the file's configuration gives, is another case ([plans with a ranking definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#plans-with-a-ranking-definition)).
 
 ## What's rejected
 
