@@ -22,7 +22,8 @@ Its steps are the live check's, in [release 0.4.0](docs/releases/0.4.0-ranking-w
    and one variant, `earnings-heavy`, which sets them to 80 and 20. Two cases, 4 provider
    requests, 12 credits at the documented costs. One `POST /auth` serves both cases, and each
    sends `POST /rank` and then `POST /screen/backtest`, each a 200; at least one of
-   `earnings-heavy`'s metrics differs from the baseline's (D-20).
+   `earnings-heavy`'s metrics differs from the baseline's (D-20): one available in both cases,
+   whose values differ as numbers. A metric unavailable in either case shows no changed value.
 2. **The restore,** `screen-configs/ranking-live.yaml`: the baseline's case as a screen run, 2
    requests and 6 credits, after `ApiRankingSystem` held `earnings-heavy`'s definition. Its
    `case_id` is the baseline's, and every value of its `metrics.csv` equals the baseline case's.
@@ -56,6 +57,7 @@ import json
 import os
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import pytest
@@ -111,6 +113,27 @@ def metric_values(path: Path) -> dict[tuple[str, str], tuple[str | None, str]]:
     available. Read as plain values, never shown."""
     rows = read_metrics_csv(path.read_bytes(), path.name)
     return {(row.subject, row.metric_id): (row.value, row.availability) for row in rows}
+
+
+def _as_number(value: str) -> Decimal | str:
+    """A metric's value as a number, so that values that differ only in their digits after the
+    point, such as `9.6` and `9.60`, are the same; a date as its text."""
+    try:
+        return Decimal(value)
+    except InvalidOperation:
+        return value
+
+
+def changed_value(before: tuple[str | None, str], after: tuple[str | None, str] | None) -> bool:
+    """Whether a metric of `metric_values` changed between two cases: it's available in both,
+    and its two values differ, as numbers. A metric that's unavailable in either case shows no
+    value that changed, so it isn't evidence that a variant changes a metric (D-20)."""
+    if after is None:
+        return False
+    (first, available), (second, still) = before, after
+    if first is None or second is None or "unavailable" in (available, still):
+        return False
+    return _as_number(first) != _as_number(second)
 
 
 def canonical(content: bytes) -> str:
@@ -215,7 +238,7 @@ def test_a_live_weight_variant_changes_a_metric_and_the_baselines_definition_res
     attempts = [(attempt.case_id, attempt.outcome) for attempt in saved.attempts]
     first = metric_values(out / "cases" / baseline.case_id / "normalized" / "metrics.csv")
     second = metric_values(out / "cases" / heavy.case_id / "normalized" / "metrics.csv")
-    changed = sum(first[key] != second.get(key) for key in first)
+    changed = sum(changed_value(first[key], second.get(key)) for key in first)
     assert attempts == [(baseline.case_id, "succeeded"), (heavy.case_id, "succeeded")]
     answered = ("response", 200)
     assert exchanges == [
@@ -279,16 +302,23 @@ def test_a_live_weight_variant_changes_a_metric_and_the_baselines_definition_res
     named_plan = build_plan_v1_1(
         read_screen_configuration_v1_1(named.read_bytes(), str(named), named), versions
     )
-    assert isinstance(named_plan, PlanV1_2)
+    # The plan holds the snapshot's definition, so what it says is read out as plain values
+    # before it's checked, as the docstring says: a failing assertion shows its operands.
+    by_definition = isinstance(named_plan, PlanV1_2)
+    named_case = named_plan.cases[0].case_id
+    same_weights = isinstance(named_plan, PlanV1_2) and weights(named_plan) == weights(restore_plan)
+    as_restore = named_case == baseline.case_id
     exit_code, summary = trialfolio(
         "run", named, "--out", PAYLOADS / f"unsent-{stamp}", env=offline
     )
 
+    shown = summary["ids"]["case_id"] == named_case
+    assert by_definition, "the configuration naming the snapshot doesn't plan with a definition"
     assert exit_code == 2
     assert error_code(summary) == "plan.approval_required"
-    assert summary["ids"]["case_id"] == named_plan.cases[0].case_id
-    assert weights(named_plan) == weights(restore_plan)
-    assert (named_plan.cases[0].case_id == baseline.case_id) == same_bytes
+    assert shown, "the command's case_id isn't that of the plan the snapshot gives"
+    assert same_weights, "the plan the snapshot gives doesn't have the restore's weights"
+    assert as_restore == same_bytes, "the case isn't the restore's exactly when the bytes are"
     assert not (PAYLOADS / f"unsent-{stamp}").exists()
     print(f"The snapshot held the definition's bytes: {'yes' if same_bytes else 'no'}.")
 
