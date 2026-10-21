@@ -31,6 +31,10 @@ a resume, the most the requests counted so far can have cost apart from the most
 ones can cost. Each case's attempt sends two requests, so the budget the display and the repeat's
 prompt count covers half as many cases (R04-T12).
 
+A case whose succeeded attempt's response failed validation awaits a repeat, which names that
+attempt, and the display and the repeat's prompt say that its response failed validation, rather
+than that its request may have been charged without succeeding (D-45).
+
 It imports the modules that read an experiment's records, which import `p123api`, so the CLI
 imports it only once `installed_versions` has checked them.
 """
@@ -56,7 +60,13 @@ from trialfolio.approval import (
     shown,
     write_shown,
 )
-from trialfolio.case_state import case_outcome, confirmation_used, described, repeatable
+from trialfolio.case_state import (
+    case_outcome,
+    confirmation_used,
+    described,
+    invalid_success,
+    repeatable,
+)
 from trialfolio.contracts.experiment_plan import (
     ExperimentPlanCase,
     ExperimentPlanCaseV1_3,
@@ -263,14 +273,28 @@ def _so_far(saved: AnySavedCase) -> str:
         )
     attempt = saved.latest_charged
     assert attempt is not None  # a case awaiting a repeat has one
-    requests = (
-        "Its rank_update, or its backtest, may have reached Portfolio123, and may have been"
-        " charged, so it's sent again only by a repeat, which sends both again, and may be"
-        " charged again"
-        if isinstance(saved, SavedRankingCase)
-        else "Its request may have reached Portfolio123, and may have been charged, so it's sent"
-        " again only by a repeat, which may be charged again"
-    )
+    ranked = isinstance(saved, SavedRankingCase)
+    if invalid_success(saved.attempts, valid=saved.valid):
+        again = (
+            "a repeat, which sends its rank_update and its backtest again"
+            if ranked
+            else "a repeat, which sends its request again"
+        )
+        requests = (
+            "Its attempt succeeded, but its saved response failed validation, so it wasn't"
+            f" normalized, and it's sent again only by {again}, and may be charged again"
+        )
+    elif ranked:
+        requests = (
+            "Its rank_update, or its backtest, may have reached Portfolio123, and may have been"
+            " charged, so it's sent again only by a repeat, which sends both again, and may be"
+            " charged again"
+        )
+    else:
+        requests = (
+            "Its request may have reached Portfolio123, and may have been charged, so it's sent"
+            " again only by a repeat, which may be charged again"
+        )
     return f"{outcome}, after {tried}. {requests}: {_option(saved, attempt)}"
 
 
@@ -682,11 +706,12 @@ def _check_repeats(run: ExperimentRun, *, asks: bool) -> _CheckedRepeats:  # noq
             to_ask.append((saved, latest))
             continue
         named = [a for a in saved.attempts if a.attempt_id == option.attempt_id]
-        if not named or not repeatable(named[0]):
+        if not named or not repeatable(named[0], valid=saved.valid):
             problem = (
                 "The repeat of case {} names attempt {}, which isn't an attempt of the case whose"
-                " request may have been charged and that didn't succeed. A repeat names the"
-                " case's latest attempt whose request may have been charged."
+                " request may have been charged and that didn't succeed, or succeeded with a"
+                " response that failed validation. A repeat names the case's latest attempt whose"
+                " request may have been charged."
             )
             raise _not_repeated(
                 run,
@@ -748,10 +773,16 @@ def _ask_repeats(
     costs, and asks the user to type `repeat`. Returns the repeats of the attempts it showed."""
     lines = ["", "Repeat these cases? Each one's request may already have been charged:"]
     for saved, attempt in cases:
-        code = "" if attempt.error_code is None else f" ({attempt.error_code})"
+        if attempt.outcome == "succeeded":  # its response failed validation (D-45)
+            state = (
+                "succeeded, but its saved response failed validation (provider.response_invalid)"
+            )
+        else:
+            code = "" if attempt.error_code is None else f" ({attempt.error_code})"
+            state = f"is {attempt.outcome}{code}"
         lines.append(
             f"  {saved.case.case_key} ({saved.case.case_id}): its attempt {attempt.attempt_id}"
-            f" is {attempt.outcome}{code}, and its request may already have been charged."
+            f" {state}, and its request may already have been charged."
         )
     budget = run.plan.budget
     remaining = max(0, budget.provider_requests - run.provider_requests)

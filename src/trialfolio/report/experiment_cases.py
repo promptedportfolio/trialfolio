@@ -148,8 +148,16 @@ def _outcome(experiment: ExperimentContext, view: CaseView) -> str:
     if outcome == "succeeded":
         response = "invented response" if experiment.synthetic else "response"
         meaning = f"its {response} was saved and normalized."
-    elif view.invalid is not None:
-        meaning = "its response was saved, but couldn't be normalized."
+    elif view.invalid_success:
+        failed = (
+            "repeats the response of the case before it in its session, which was ranked by a"
+            " different definition"
+            if view.identical_to is not None
+            else "failed validation"
+        )
+        meaning = (
+            f"its response was saved, but {failed}, so it wasn't normalized. Awaiting a repeat."
+        )
     elif view.repeat_attempt is not None:
         if outcome == "unknown":
             meaning = "its request may have been charged, and no response was saved."
@@ -167,14 +175,15 @@ def _outcome(experiment: ExperimentContext, view: CaseView) -> str:
 
 
 def _outcome_code(view: CaseView) -> str | None:
-    """The error code that gives a case's outcome: its response's `provider.response_invalid`,
-    or the error of its latest possibly charged attempt, or else of its latest attempt."""
-    if view.invalid is not None:
-        return view.invalid.code
+    """The error code that gives a case's outcome: the error of its latest possibly charged
+    attempt, or else of its latest attempt, or, when that succeeded, its response's
+    `provider.response_invalid`."""
     if view.outcome in ("succeeded", "not_yet_run"):
         return None
     charged = [attempt for attempt in view.attempts if attempt.possibly_charged]
     latest = (charged or list(view.attempts))[-1]
+    if latest.outcome == "succeeded" and view.invalid is not None:
+        return view.invalid.code
     return None if latest.error is None else latest.error.code
 
 
@@ -215,11 +224,11 @@ def _awaiting(experiment: ExperimentContext) -> list[str]:
         *parts,
         (
             "<p>A case awaiting a repeat has an attempt whose request may have reached"
-            " Portfolio123, and so may have been charged, and no attempt that succeeded. A"
-            " resume never sends its request again on its own. A repeat sends it again, as a"
-            " new attempt of the same case, which may be charged again, and counts against"
-            " the budget. Each case is listed with its latest attempt whose request may have"
-            f" been charged.{how}</p>"
+            " Portfolio123, and so may have been charged, and no attempt that succeeded with a"
+            " response that passed validation. A resume never sends its request again on its"
+            " own. A repeat sends it again, as a new attempt of the same case, which may be"
+            " charged again, and counts against the budget. Each case is listed with its latest"
+            f" attempt whose request may have been charged.{how}</p>"
         ),
         "<ul>",
         *items,
@@ -233,6 +242,8 @@ def _awaiting_item(
     """A case awaiting a repeat, with its latest possibly charged attempt, and, unless the
     experiment is synthetic, the option that repeats it."""
     error = "" if attempt.error is None else f" ({code(attempt.error.code)})"
+    if attempt.outcome == "succeeded" and view.invalid is not None:
+        error = f", its response failed validation ({code(view.invalid.code)})"
     lead = (
         f"{code(view.case.case_key)}, {code(view.case.case_id)}: attempt"
         f" {code(str(attempt.attempt_id))}, {code(attempt.outcome)}{error}."

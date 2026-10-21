@@ -10,6 +10,14 @@ reads as the resume's step 8 will record it, or, for one of the executor's sessi
 which a case's outcome counts as `unknown`. An attempt whose outcome is None is one of the
 executor's session that left no record: it counts only for the budget.
 
+`valid` says whether the case's latest succeeded attempt's response passed validation, or will
+once a resume writes its tables, and is true for a case without one. A case whose succeeded
+attempt's response failed validation, saved undecoded, without the layout's required structure,
+or flagged as a stale backtest, awaits a repeat, as a case whose request may have been charged
+without succeeding does, and its succeeded attempt is the one a repeat names (D-45). So a case
+has at most one succeeded attempt whose response passed validation, and it's the case's last
+attempt: every earlier succeeded attempt's response failed validation.
+
 Nothing here writes, sends, or logs.
 """
 
@@ -70,12 +78,18 @@ class _CountedAttempt(_CaseAttempt, Protocol):
 # A case's state and outcome
 
 
-def case_state(attempts: Sequence[_CaseAttempt]) -> CaseState:
-    """`complete` when one of the case's attempts succeeded; `awaiting_repeat` when one is
-    possibly charged and none succeeded, so only a confirmed repeat sends it; and `due`
-    otherwise, so a resume sends it. One whose response failed validation succeeded, so it's
-    complete."""
-    if any(attempt.outcome == "succeeded" for attempt in attempts):
+def complete(attempts: Sequence[_CaseAttempt], *, valid: bool) -> bool:
+    """Whether one of the case's attempts succeeded, and its response passed validation, as
+    `valid` gives, so the case is never sent again."""
+    return valid and any(attempt.outcome == "succeeded" for attempt in attempts)
+
+
+def case_state(attempts: Sequence[_CaseAttempt], *, valid: bool) -> CaseState:
+    """`complete` when one of the case's attempts succeeded and its response passed validation,
+    as `valid` gives; `awaiting_repeat` when one is possibly charged, and none is such a success,
+    so only a confirmed repeat sends it, as for a case whose succeeded attempt's response failed
+    validation (D-45); and `due` otherwise, so a resume sends it."""
+    if complete(attempts, valid=valid):
         return "complete"
     if any(attempt.possibly_charged for attempt in attempts):
         return "awaiting_repeat"
@@ -84,16 +98,16 @@ def case_state(attempts: Sequence[_CaseAttempt]) -> CaseState:
 
 def case_outcome(attempts: Sequence[_CaseAttempt], *, valid: bool) -> CaseOutcome:
     """The case's outcome, as the manifest counts it: `succeeded` when one of its attempts
-    succeeded, and `failed` when its response failed validation, as `valid` gives; otherwise the
-    outcome of its latest possibly charged attempt, with a `running` one counted as `unknown`;
-    `failed` when it has attempts and none is possibly charged; and `not_yet_run` when it has
-    none."""
+    succeeded and its response passed validation, as `valid` gives; otherwise the outcome of its
+    latest possibly charged attempt, with a `running` one counted as `unknown`, and a succeeded
+    one, whose response failed validation, as `failed`; `failed` when it has attempts and none
+    is possibly charged; and `not_yet_run` when it has none."""
     made = [attempt for attempt in attempts if attempt.outcome is not None]
-    if any(attempt.outcome == "succeeded" for attempt in made):
-        return "succeeded" if valid else "failed"
+    if complete(made, valid=valid):
+        return "succeeded"
     latest = latest_charged(made)
     if latest is not None:
-        return "failed" if latest.outcome == "failed" else "unknown"
+        return "unknown" if latest.outcome in ("unknown", "running") else "failed"
     return "failed" if made else "not_yet_run"
 
 
@@ -114,13 +128,25 @@ def described_by[A: _CaseAttempt](attempts: Sequence[A]) -> A | None:
 
 
 def outcome_code(attempts: Sequence[_CaseAttempt], *, valid: bool) -> str | None:
-    """The error code that gives the case's outcome: `provider.response_invalid` when its
-    response failed validation, as `valid` gives, or else the error code of the attempt that
-    describes it."""
-    if not valid:
-        return _INVALID_RESPONSE
+    """The error code that gives the case's outcome: None for a complete case; otherwise the
+    error code of the attempt that describes it, or `provider.response_invalid` when that's a
+    succeeded attempt, whose response failed validation, as `valid` gives."""
+    if complete(attempts, valid=valid):
+        return None
     attempt = described_by(attempts)
-    return None if attempt is None else attempt.error_code
+    if attempt is None:
+        return None
+    return _INVALID_RESPONSE if attempt.outcome == "succeeded" else attempt.error_code
+
+
+def invalid_success(attempts: Sequence[_CaseAttempt], *, valid: bool) -> bool:
+    """Whether the case awaits a repeat because its latest possibly charged attempt succeeded,
+    and its response failed validation, as `valid` gives (D-45): what describes the case is that
+    response, not a request that may have been charged without succeeding."""
+    if complete(attempts, valid=valid):
+        return False
+    latest = latest_charged([attempt for attempt in attempts if attempt.outcome is not None])
+    return latest is not None and latest.outcome == "succeeded"
 
 
 def described(attempts: Sequence[_CaseAttempt], *, valid: bool) -> str:
@@ -135,10 +161,11 @@ def described(attempts: Sequence[_CaseAttempt], *, valid: bool) -> str:
 # Repeats
 
 
-def repeatable(attempt: _CaseAttempt) -> bool:
-    """Whether a repeat may name the attempt: its request may have been charged, and it didn't
-    succeed (repeating a case)."""
-    return attempt.possibly_charged and attempt.outcome != "succeeded"
+def repeatable(attempt: _CaseAttempt, *, valid: bool) -> bool:
+    """Whether a repeat may name the attempt, one of a case whose latest succeeded attempt's
+    response passed validation as `valid` gives: its request may have been charged, and it didn't
+    succeed, or it did, and its case's response failed validation (repeating a case, D-45)."""
+    return attempt.possibly_charged and (attempt.outcome != "succeeded" or not valid)
 
 
 def confirmation_used(attempts: Sequence[_CaseAttempt], attempt_id: uuid.UUID | None) -> bool:
