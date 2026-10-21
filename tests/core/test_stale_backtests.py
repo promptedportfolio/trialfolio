@@ -223,7 +223,8 @@ def test_the_previous_cases_results_after_another_definition_are_flagged(
     error = ran.error
     assert error is not None and error.code == "execution.partial"
     # The message names the cases by their keys, and says why, that identical results can be
-    # genuine, that the response is saved, and how to repeat it.
+    # genuine, that the response is saved, and that it awaits a repeat. It gives no option: the
+    # CLI ends execution.partial's message with each case's, as for any case awaiting a repeat.
     assert "`value-heavy`, failed (provider.response_invalid)" in error.message
     assert (
         "The backtest of case `value-heavy` returned the same response, apart from cost and"
@@ -232,13 +233,20 @@ def test_the_previous_cases_results_after_another_definition_are_flagged(
         " `baseline`'s definition, although its rank_update succeeded. Identical results can"
         " sometimes be genuine, as when a changed weight doesn't change which stocks the screen"
         " selects. The response is saved, but the case isn't normalized, and it awaits a repeat,"
-        " which sends its rank_update and its backtest again, and may be charged again:"
-        f" --repeat value-heavy:{attempt}."
+        " which sends its rank_update and its backtest again, and may be charged again. A case"
+        " whose request may have reached Portfolio123"
     ) in error.message
-    # The loggable message names them by their case_ids, and holds no key.
+    assert "--repeat" not in error.message
+    assert attempt not in error.message
+    # The loggable message names them by their case_ids, and holds no key; it names the attempt
+    # by its ID.
     assert f"The backtest of case {VALUE_HEAVY} returned the same response" in error.log_message
     assert f"as that of case {BASELINE}, the case before it" in error.log_message
-    assert f"a confirmed repeat of its attempt {attempt} sends it." in error.log_message
+    assert (
+        f" The response of attempt {attempt} is saved, but the case isn't normalized, and it"
+        " awaits a repeat, which sends its rank_update and its backtest again, and may be charged"
+        " again. A case whose request may have reached Portfolio123"
+    ) in error.log_message
     for case in EXAMPLE.cases:
         assert case.case_key not in error.log_message
     (invalid,) = [r for r in caplog.records if getattr(r, "event", "") == "experiment.case.invalid"]

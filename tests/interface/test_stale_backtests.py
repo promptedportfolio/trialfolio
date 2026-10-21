@@ -1,15 +1,16 @@
 """A stale backtest, and the repeat of a case whose response failed validation, through
 `trialfolio run` (D-45): a flagged case fails with `provider.response_invalid`, and
-`execution.partial`'s message says why, by its key, with the option that repeats it, while the
-log names it only by its `case_id`; the JSON summary gives its `repeat_attempt_id`; a resume's
-plan display, and the prompt that confirms a repeat, say that its response failed validation; its
-repeat completes it, as a repeat completes a 0.3.0 case whose response lacked the layout's
-structure.
+`execution.partial`'s message says why, by its key, and gives the option that repeats it once,
+where the CLI ends that message, as for any case awaiting a repeat, while the log names it only
+by its `case_id`; the JSON summary gives its `repeat_attempt_id`; a resume's plan display, and
+the prompt that confirms a repeat, say that its response failed validation; its repeat completes
+it, as a repeat completes a 0.3.0 case whose response lacked the layout's structure.
 
 Traces to docs/contracts.md, running an experiment (a stale backtest, a response that fails
-validation, the command's plan display and repeats), repeating a case, the JSON summary
-(`cases`), and logging and local diagnostics; and to D-45. The CLI's entry function runs in the test process, with the fake server
-below `urllib3`, the fixed clock, the fake pause, and an in-process pseudo-terminal.
+validation, the command's plan display and repeats, and `execution.partial`'s message), repeating
+a case, the JSON summary (`cases`), and logging and local diagnostics; and to D-45. The CLI's
+entry function runs in the test process, with the fake server below `urllib3`, the fixed clock,
+the fake pause, and an in-process pseudo-terminal.
 """
 
 import json
@@ -72,7 +73,7 @@ def stale_value_heavy(experiments: ExperimentBuilder[Outcome], out: Path) -> tup
     return outcome, attempt
 
 
-def test_a_stale_backtest_fails_its_case_and_its_message_gives_the_option_that_repeats_it(
+def test_a_stale_backtest_fails_its_case_and_the_runs_message_gives_its_repeat_option_once(
     cli: Cli, experiments: ExperimentBuilder[Outcome]
 ) -> None:
     cli.ready()
@@ -100,17 +101,40 @@ def test_a_stale_backtest_fails_its_case_and_its_message_gives_the_option_that_r
         " quotaRemaining, as that of case `baseline`, the case before it in session 1"
     ) in message
     assert "Identical results can sometimes be genuine" in message
+    # The option comes once, where the CLI ends execution.partial's message, as for any case
+    # awaiting a repeat, and only the report's location follows it; the case's own sentence ends
+    # without it.
+    assert f"Error (execution.partial): {message}\n" in outcome.stderr
+    option = f"--repeat value-heavy:{attempt}"
+    assert outcome.stderr.count("--repeat") == message.count("--repeat") == 1
+    said, after = message.split(option)
+    assert said.endswith(
+        " To repeat the case awaiting a repeat, which may be charged again, run the same command"
+        " with its option: "
+    )
+    assert after.startswith(". Session 1's report gives each case's attempts: ")
+    assert after.endswith("report.html.")
     assert (
-        "To repeat the case awaiting a repeat, which may be charged again, run the same command"
-        f" with its option: --repeat value-heavy:{attempt}."
-    ) in message
-    # The log names the cases by their case_ids, never by their keys.
+        " The response is saved, but the case isn't normalized, and it awaits a repeat, which"
+        " sends its rank_update and its backtest again, and may be charged again. A case whose"
+        " request may have reached Portfolio123"
+    ) in said
+    # The log names the cases by their case_ids, never by their keys, and the attempt by its ID,
+    # once, with no option.
     log = (out / "logs" / "trialfolio.log").read_text(encoding="utf-8")
     events = [json.loads(line) for line in log.splitlines()]
     (invalid,) = [event for event in events if event["event"] == "experiment.case.invalid"]
     assert invalid["case_id"] == cases["value-heavy"]["case_id"]
     (ended,) = [event for event in events if event["event"] == "cli.command.completed"]
-    assert f"The backtest of case {cases['value-heavy']['case_id']}" in str(ended["message"])
+    logged = str(ended["message"])
+    assert f"The backtest of case {cases['value-heavy']['case_id']}" in logged
+    assert (
+        f" The response of attempt {attempt} is saved, but the case isn't normalized, and it"
+        " awaits a repeat, which sends its rank_update and its backtest again, and may be charged"
+        " again."
+    ) in logged
+    assert logged.count(attempt) == 1
+    assert "--repeat" not in log
     for key in cases:
         assert key not in log
 

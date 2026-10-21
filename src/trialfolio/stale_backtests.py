@@ -93,27 +93,25 @@ def stale_error(
 ) -> TrialFolioError:
     """`provider.response_invalid` for a stale backtest, whose case's key is `key`, and whose
     previous case's is `previous_key`. The message names the cases by their keys, and the
-    loggable message by their `case_id`s, since a key is the user's text."""
+    loggable message by their `case_id`s, since a key is the user's text, and the attempt by its
+    `attempt_id`. Neither gives the option that repeats the case: the CLI ends
+    `execution.partial`'s message with it, as for any case awaiting a repeat, so a terminal
+    shows it once."""
 
-    def said(case: str, before: str, repeat: str) -> str:
+    def said(case: str, before: str, response: str) -> str:
         return (
             f"The backtest of case {case} returned the same response, apart from cost and"
             f" quotaRemaining, as that of case {before}, the case before it in session"
             f" {backtest.session}, which was ranked by a different ranking definition. So"
             f" Portfolio123 may have ranked it by {before}'s definition, although its rank_update"
             " succeeded. Identical results can sometimes be genuine, as when a changed weight"
-            " doesn't change which stocks the screen selects. The response is saved, but the"
-            " case isn't normalized, and it awaits a repeat, which sends its rank_update and its"
-            f" backtest again, and may be charged again: {repeat}"
+            f" doesn't change which stocks the screen selects. {response} is saved, but the case"
+            " isn't normalized, and it awaits a repeat, which sends its rank_update and its"
+            " backtest again, and may be charged again."
         )
 
-    attempt = backtest.attempt_id
     return TrialFolioError(
         "provider.response_invalid",
-        said(f"`{key}`", f"`{previous_key}`", f"--repeat {key}:{attempt}."),
-        said(
-            backtest.case_id,
-            previous.case_id,
-            f"a confirmed repeat of its attempt {attempt} sends it.",
-        ),
+        said(f"`{key}`", f"`{previous_key}`", "The response"),
+        said(backtest.case_id, previous.case_id, f"The response of attempt {backtest.attempt_id}"),
     )
