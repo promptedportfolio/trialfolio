@@ -54,11 +54,11 @@ import pytest
 from tests.interface.conftest import AUTHENTICATED, Cli, Outcome, plan_hash_for, response
 from tests.support.experiment_builder import (
     RANK_UPDATED,
+    RESPONSES,
     ExperimentBuilder,
     experiment_config,
-    returns,
 )
-from tests.support.fake_portfolio123 import FakePortfolio123
+from tests.support.fake_portfolio123 import FakePortfolio123, distinct
 from tests.support.html_report import AttemptShown, Document, Element, parse
 from tests.support.snapshot_builder import SnapshotBuilder, naming
 from tests.support.synthetic_experiment import (
@@ -239,9 +239,15 @@ def _experiment(config: Path, changed: str | None = None, *, snapshot: bool = Fa
             config_ = naming(config, _snapshot(directory), directory / "experiment-configs")
         cases = 4 if config == EXAMPLE else 3
         keys = CASES if config == EXAMPLE else ("baseline", "positions-heavy", "no-first-yield")
-        sends = [
-            returns("changed-metrics.json" if key == changed else "complete.json") for key in keys
-        ]
+        # Each case's response its own, so none is a stale backtest (D-45).
+        sends = distinct(
+            *(
+                (
+                    RESPONSES / ("changed-metrics.json" if key == changed else "complete.json")
+                ).read_bytes()
+                for key in keys
+            )
+        )
         out = directory / "experiment"
         builder: ExperimentBuilder[Outcome] = ExperimentBuilder(cli.server, cli)
         outcome = builder.run(config_, out, ranks=[RANK_UPDATED] * cases, sends=sends)

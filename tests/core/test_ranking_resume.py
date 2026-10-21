@@ -38,7 +38,7 @@ import pytest
 
 from tests.support import canaries
 from tests.support.clock import FixedClock, no_wait
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.fake_portfolio123 import FakePortfolio123, Reply, each_its_own
 from tests.support.storage_faults import StorageFaults
 from trialfolio.canonical import sha256_hex
 from trialfolio.configuration import (
@@ -289,9 +289,11 @@ def script(
     ranks: Sequence[Reply] = (),
     backtests: Sequence[Reply] = (),
 ) -> None:
+    """Scripts the server's replies. Each backtest's 200 gets a response of its own, so no case is
+    a stale backtest of the one before it (D-45), unless a test scripts the server itself."""
     server.reply("/auth", *(authenticated() for _ in range(auths)))
     server.reply("/rank", *ranks, method="POST")
-    server.reply("/screen/backtest", *backtests)
+    server.reply("/screen/backtest", *each_its_own(backtests))
 
 
 def refused(ran: Ran, code: str) -> TrialFolioError:

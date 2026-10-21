@@ -53,7 +53,7 @@ from tests.support.experiment_builder import (
     ExperimentBuilder,
     experiment_config,
     plan_hash,
-    returns,
+    returns_each,
 )
 from tests.support.fake_portfolio123 import Reply
 from tests.support.synthetic_experiment import (
@@ -174,7 +174,7 @@ def test_an_attempt_sent_with_a_token_a_401_or_403_to_a_rank_update_dropped_fail
         EXAMPLE,
         out,
         ranks=[RANK_UPDATED, Reply(status), RANK_UPDATED, RANK_UPDATED],
-        sends=[returns()] * 3,
+        sends=returns_each(3),
         authenticates=[AUTHENTICATED, AUTHENTICATED],
     )
     assert built.exit_code == 6, built.stderr

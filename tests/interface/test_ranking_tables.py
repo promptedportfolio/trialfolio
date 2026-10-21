@@ -41,7 +41,7 @@ from tests.support.experiment_builder import (
     RANK_UPDATED,
     ExperimentBuilder,
     experiment_config,
-    returns,
+    returns_each,
 )
 from trialfolio.contracts.experiment_manifest import ExperimentManifest, ExperimentManifestV1_1
 from trialfolio.contracts.manifest import RunManifest, RunManifestV1_1
@@ -124,7 +124,7 @@ def written(cli: Cli, experiments: Builder, config: Path = EXAMPLE) -> Path:
     to its `POST /rank` and `complete.json`'s to its backtest, and returns its directory."""
     cli.ready()
     out = cli.tmp / "experiment"
-    outcome = experiments.run(config, out, ranks=[RANK_UPDATED] * 4, sends=[returns()] * 4)
+    outcome = experiments.run(config, out, ranks=[RANK_UPDATED] * 4, sends=returns_each(4))
     assert outcome.exit_code == 0, outcome.stderr
     return out
 
@@ -307,7 +307,7 @@ def test_a_case_without_a_definition_writes_settings_csv_1_0_0(
 ) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
-    outcome = experiments.run(experiment_config("example.yaml"), out, sends=[returns()] * 5)
+    outcome = experiments.run(experiment_config("example.yaml"), out, sends=returns_each(5))
     assert outcome.exit_code == 0, outcome.stderr
     manifest = ExperimentManifest.model_validate_json(
         (out / "sessions/1/manifest.json").read_bytes()

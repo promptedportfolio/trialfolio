@@ -36,6 +36,7 @@ from tests.support.experiment_builder import (
     ExperimentBuilder,
     experiment_config,
     returns,
+    returns_each,
 )
 from tests.support.fake_portfolio123 import Received, Reply
 from tests.support.snapshot_builder import SnapshotBuilder, naming
@@ -123,7 +124,7 @@ def test_an_experiment_sends_only_its_authentication_and_each_cases_two_requests
     cli.ready()
 
     outcome = experiments.run(
-        EXAMPLE, cli.tmp / "experiment", ranks=four(RANK_UPDATED), sends=four(returns())
+        EXAMPLE, cli.tmp / "experiment", ranks=four(RANK_UPDATED), sends=returns_each(4)
     )
 
     assert outcome.exit_code == 0, outcome.stderr
@@ -146,7 +147,7 @@ def test_a_resume_sends_only_its_authentication_and_each_due_cases_two_requests(
     assert cli.server.requests() == [AUTH]
     before = len(cli.server.received)
 
-    resumed = experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=four(returns()))
+    resumed = experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=returns_each(4))
 
     assert resumed.exit_code == 0, resumed.stderr
     assert cast("dict[str, object]", resumed.summary["ids"])["session"] == 2
@@ -163,7 +164,7 @@ def test_a_repeat_sends_only_its_authentication_and_the_cases_two_requests(
     cli.ready()
     out = cli.tmp / "experiment"
     first = experiments.run(
-        BUDGET_RAISED, out, ranks=four(RANK_UPDATED), sends=(UNAVAILABLE, *(returns(),) * 3)
+        BUDGET_RAISED, out, ranks=four(RANK_UPDATED), sends=(UNAVAILABLE, *returns_each(3))
     )
     assert first.exit_code == 6, first.stderr
     (baseline,) = [case for case in summary_cases(first) if case["case_key"] == "baseline"]
@@ -192,7 +193,7 @@ def test_a_revision_sends_only_its_authentication_and_each_new_cases_two_request
     cases, each of which writes its own definition."""
     cli.ready()
     out = cli.tmp / "experiment"
-    first = experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=four(returns()))
+    first = experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=returns_each(4))
     assert first.exit_code == 0, first.stderr
     before = len(cli.server.received)
 
@@ -202,7 +203,7 @@ def test_a_revision_sends_only_its_authentication_and_each_new_cases_two_request
         "--revision-reason",
         "The Value factors weigh 60 and 40.",
         ranks=(RANK_UPDATED, RANK_UPDATED),
-        sends=(returns(), returns()),
+        sends=returns_each(2),
     )
 
     assert revised.exit_code == 0, revised.stderr

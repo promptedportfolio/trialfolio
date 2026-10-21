@@ -27,7 +27,7 @@ import pytest
 
 from tests.support import canaries
 from tests.support.clock import FixedClock, no_wait
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.fake_portfolio123 import FakePortfolio123, Reply, distinct
 from tests.support.storage_faults import StorageFaults
 from trialfolio.configuration import (
     read_experiment_configuration,
@@ -698,9 +698,11 @@ def test_a_screen_run_without_a_definition_is_refused_one(tmp_path: Path) -> Non
 
 
 def script_experiment(server: FakePortfolio123, cases: int) -> None:
+    """Each case's `rank_update` gets a 200, and its backtest a response of its own, so none is a
+    stale backtest (D-45)."""
     server.reply("/auth", authenticated())
     server.reply("/rank", *(updated() for _ in range(cases)), method="POST")
-    server.reply("/screen/backtest", *(complete() for _ in range(cases)))
+    server.reply("/screen/backtest", *distinct(*(complete().body for _ in range(cases))))
 
 
 def test_each_case_of_an_experiment_writes_its_definition_then_backtests(
@@ -903,7 +905,7 @@ def test_after_a_401_to_a_rank_update_the_next_case_authenticates_again(
 ) -> None:
     server.reply("/auth", authenticated(), authenticated())
     server.reply("/rank", Reply(401, b""), *(updated() for _ in range(3)), method="POST")
-    server.reply("/screen/backtest", *(complete() for _ in range(3)))
+    server.reply("/screen/backtest", *distinct(*(complete().body for _ in range(3))))
 
     ran = run_experiment(tmp_path, server)
 

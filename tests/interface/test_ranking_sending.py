@@ -40,7 +40,12 @@ from typing import cast
 import pytest
 
 from tests.interface.conftest import AUTHENTICATED, Cli, FaultyStores, Outcome, plan_hash_for
-from tests.support.experiment_builder import ExperimentBuilder, experiment_config, returns
+from tests.support.experiment_builder import (
+    ExperimentBuilder,
+    experiment_config,
+    returns,
+    returns_each,
+)
 from tests.support.fake_portfolio123 import Received, Reply
 from trialfolio.contracts.attempt import (
     AttemptRecordV1_2,
@@ -294,7 +299,7 @@ def test_each_case_sends_its_rank_update_then_its_backtest_after_one_authenticat
     cli.ready()
     out = cli.tmp / "experiment"
 
-    outcome = experiments.run(config, out, ranks=four(RANK_UPDATED), sends=four(returns()))
+    outcome = experiments.run(config, out, ranks=four(RANK_UPDATED), sends=returns_each(4))
 
     assert outcome.exit_code == 0, outcome.stderr
     assert cli.server.requests() == [
@@ -325,7 +330,7 @@ def test_every_case_but_a_ranking_variant_sends_the_baselines_definition(
     cli.ready()
     out = cli.tmp / "experiment"
 
-    outcome = experiments.run(MIXED, out, ranks=four(RANK_UPDATED), sends=four(returns()))
+    outcome = experiments.run(MIXED, out, ranks=four(RANK_UPDATED), sends=returns_each(4))
 
     assert outcome.exit_code == 0, outcome.stderr
     plan = read_plan(out)
@@ -350,7 +355,7 @@ def test_each_attempt_of_an_experiment_writes_its_files_in_order(
     out = cli.tmp / "experiment"
 
     outcome = experiments.run(
-        EXAMPLE, out, ranks=four(RANK_UPDATED), sends=four(returns()), store_factory=faults
+        EXAMPLE, out, ranks=four(RANK_UPDATED), sends=returns_each(4), store_factory=faults
     )
 
     assert outcome.exit_code == 0, outcome.stderr
@@ -369,7 +374,7 @@ def test_an_experiments_records_are_1_3_0_and_name_each_rank_update(
     cli.ready()
     out = cli.tmp / "experiment"
 
-    outcome = experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=four(returns()))
+    outcome = experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=returns_each(4))
 
     assert outcome.exit_code == 0, outcome.stderr
     for place, case in enumerate(read_plan(out).cases):
@@ -414,7 +419,7 @@ def test_after_a_failing_reply_to_a_cases_rank_update_the_next_case_is_sent(
     cli.ready()
     out = cli.tmp / "experiment"
 
-    ran = experiments.run(EXAMPLE, out, ranks=(reply, *(RANK_UPDATED,) * 3), sends=(returns(),) * 3)
+    ran = experiments.run(EXAMPLE, out, ranks=(reply, *(RANK_UPDATED,) * 3), sends=returns_each(3))
 
     assert ran.exit_code == 6, ran.stderr
     assert error_code(ran) == "execution.partial"
@@ -460,7 +465,7 @@ def test_after_a_401_or_a_403_to_a_rank_update_the_next_case_authenticates_again
         EXAMPLE,
         out,
         ranks=(Reply(status, b""), *(RANK_UPDATED,) * 3),
-        sends=(returns(),) * 3,
+        sends=returns_each(3),
         authenticates=(AUTHENTICATED, AUTHENTICATED),
     )
 

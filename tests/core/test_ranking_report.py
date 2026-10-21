@@ -24,7 +24,7 @@ import pytest
 
 from tests.support import canaries
 from tests.support.clock import FixedClock, no_wait
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.fake_portfolio123 import FakePortfolio123, Reply, each_its_own
 from tests.support.html_report import Document, Element, parse
 from tests.support.snapshot_builder import SnapshotBuilder, naming
 from trialfolio.configuration import (
@@ -226,7 +226,8 @@ def write_experiment(
     cases = len(plan.cases)
     server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
     server.reply("/rank", *(reply("rank-update.json"),) * cases, method="POST")
-    server.reply("/screen/backtest", *(backtests or (reply("complete.json"),) * cases))
+    # Each case's response its own, so none is a stale backtest (D-45).
+    server.reply("/screen/backtest", *each_its_own(backtests or (reply("complete.json"),) * cases))
     out = tmp_path / "experiment"
     credentials = Credentials(canaries.API_ID, canaries.API_KEY)
     with (

@@ -43,6 +43,7 @@ from tests.support.experiment_builder import (
     experiment_config,
     held,
     returns,
+    returns_each,
 )
 from tests.support.fake_portfolio123 import FakePortfolio123
 from tests.support.terminal import PseudoTerminal
@@ -172,7 +173,7 @@ def test_a_rank_update_killed_mid_flight_is_recorded_unknown_and_awaits_a_repeat
     value_heavy = CASE_IDS["value-heavy"]
     cli.server.reply("/auth", AUTHENTICATED)
     cli.server.reply("/rank", RANK_UPDATED, RANK_UPDATED, method="POST")
-    cli.server.reply("/screen/backtest", returns(), returns())
+    cli.server.reply("/screen/backtest", *returns_each(2))
     received = len(cli.server.received)
 
     with PseudoTerminal() as terminal:
@@ -267,7 +268,7 @@ def test_an_interrupt_at_the_backtests_request_leaves_the_attempt_failed_and_uns
     assert exchanges(record) == [(AUTH, "response", 200, None), (RANK, "response", 200, None)]
     received = len(cli.server.received)
 
-    resumed = experiments.run(EXAMPLE, out, ranks=[RANK_UPDATED] * 3, sends=[returns()] * 3)
+    resumed = experiments.run(EXAMPLE, out, ranks=[RANK_UPDATED] * 3, sends=returns_each(3))
 
     # Without --repeat, it isn't sent again: only the three cases that are due are.
     assert resumed.exit_code == 6, resumed.stderr
@@ -306,7 +307,7 @@ def test_an_attempt_record_unwritten_after_the_rank_updates_response_is_recorded
     }
     received = len(cli.server.received)
 
-    resumed = experiments.run(EXAMPLE, out, ranks=[RANK_UPDATED] * 3, sends=[returns()] * 3)
+    resumed = experiments.run(EXAMPLE, out, ranks=[RANK_UPDATED] * 3, sends=returns_each(3))
 
     assert resumed.exit_code == 6, resumed.stderr
     assert cli.server.requests()[received:] == [AUTH, *(RANK, BACKTEST) * 3]
@@ -346,14 +347,14 @@ def test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once(
     out = cli.tmp / "experiment"
     if stopped == "killed":
         key, attempt = "value-heavy", str(killed_value_heavy(cli, experiments, out).attempt_id)
-        sends = [returns()] * 2
+        sends = returns_each(2)
     else:
         key = "baseline"
         faults.fail_before(f"{CASE_IDS[key]}/request.json", KeyboardInterrupt())
         interrupted_baseline(experiments, faults, out)
         (record,) = attempts_of(out, CASE_IDS[key])
         attempt = str(record.attempt_id)
-        sends = [returns()] * 3
+        sends = returns_each(3)
     resumed = experiments.run(EXAMPLE, out, ranks=[RANK_UPDATED] * len(sends), sends=sends)
     assert resumed.exit_code == 6, resumed.stderr
     # Seven of the budget's 8 requests are counted, so the repeat's two need the raised budget.

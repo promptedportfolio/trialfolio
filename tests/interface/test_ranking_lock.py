@@ -40,6 +40,7 @@ from tests.support.experiment_builder import (
     held,
     plan_hash,
     returns,
+    returns_each,
 )
 from tests.support.fake_portfolio123 import Reply
 from trialfolio.configuration import read_experiment_configuration_v1_1
@@ -117,7 +118,7 @@ def test_runs_that_find_the_lock_held_send_and_write_nothing_until_it_ends(
         *(RANK_UPDATED,) * 3,
         method="POST",
     )
-    cli.server.reply("/screen/backtest", *(returns(),) * 4)
+    cli.server.reply("/screen/backtest", *returns_each(4))
     first = cli.tmp / "first"
     argv = ["run", EXAMPLE, "--out", first, "--approve", plan_hash(EXAMPLE, first)]
     stderr_path = cli.tmp / "first-stderr.txt"
@@ -200,7 +201,7 @@ def test_a_resume_meets_the_lock_before_its_session_record(
     assert cli.server.requests() == received
     assert sorted(path.name for path in (out / "sessions").iterdir()) == ["1"]
 
-    resumed = experiments.run(EXAMPLE, out, ranks=(RANK_UPDATED,) * 3, sends=(returns(),) * 3)
+    resumed = experiments.run(EXAMPLE, out, ranks=(RANK_UPDATED,) * 3, sends=returns_each(3))
 
     assert resumed.exit_code == 0, resumed.stderr
     sent = cli.server.requests()[len(received) :]
@@ -236,7 +237,7 @@ def test_a_formula_ranked_run_and_a_resume_that_sends_nothing_run_beside_a_held_
     take it)."""
     cli.ready()
     out = cli.tmp / "experiment"
-    complete = experiments.run(EXAMPLE, out, ranks=(RANK_UPDATED,) * 4, sends=(returns(),) * 4)
+    complete = experiments.run(EXAMPLE, out, ranks=(RANK_UPDATED,) * 4, sends=returns_each(4))
     assert complete.exit_code == 0, complete.stderr
     cli.server.reply("/auth", AUTHENTICATED)
     cli.server.reply("/screen/backtest", response("complete.json"))

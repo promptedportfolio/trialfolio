@@ -37,6 +37,7 @@ from tests.support.experiment_builder import (
     experiment_config,
     plan_hash,
     returns,
+    returns_each,
 )
 from tests.support.fake_portfolio123 import Reply
 from tests.support.snapshot_builder import SnapshotBuilder, naming
@@ -109,7 +110,7 @@ def test_under_a_terminal_the_plan_shows_each_cases_definition_and_nothing_is_se
     cli.ready()
     cli.server.reply("/auth", AUTHENTICATED)
     cli.server.reply("/rank", *four(RANK_UPDATED), method="POST")
-    cli.server.reply("/screen/backtest", *four(returns()))
+    cli.server.reply("/screen/backtest", *returns_each(4))
     out = cli.tmp / "experiment"
     expected_hash = plan_hash(EXAMPLE, out)
 
@@ -219,7 +220,7 @@ def test_an_approved_experiment_sends_each_cases_rank_update_then_its_backtest(
     cli.ready()
     out = cli.tmp / "experiment"
 
-    outcome = experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=four(returns()))
+    outcome = experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=returns_each(4))
 
     assert outcome.exit_code == 0, outcome.stderr
     requests = cli.server.requests()
@@ -250,7 +251,7 @@ def test_a_complete_experiment_resumes_without_credentials_and_sends_nothing(
     cli.ready()
     out = cli.tmp / "experiment"
     assert (
-        experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=four(returns())).exit_code
+        experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=returns_each(4)).exit_code
         == 0
     )
     received = cli.server.requests()
@@ -273,7 +274,7 @@ def test_a_revised_definition_sends_only_the_cases_it_adds(
     cli.ready()
     out = cli.tmp / "experiment"
     assert (
-        experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=four(returns())).exit_code
+        experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=returns_each(4)).exit_code
         == 0
     )
     before = len(cli.server.requests())
@@ -284,7 +285,7 @@ def test_a_revised_definition_sends_only_the_cases_it_adds(
         "--revision-reason",
         "The Value factors weigh 60 and 40.",
         ranks=(RANK_UPDATED, RANK_UPDATED),
-        sends=(returns(), returns()),
+        sends=returns_each(2),
     )
 
     assert revised.exit_code == 0, revised.stderr
@@ -318,7 +319,7 @@ def awaiting_baseline(cli: Cli, experiments: ExperimentBuilder[Outcome], out: Pa
     backtest gets a 503, so it awaits a repeat with 8 requests counted, and returns its attempt's
     ID, which confirms the repeat."""
     outcome = experiments.run(
-        BUDGET_RAISED, out, ranks=four(RANK_UPDATED), sends=(UNAVAILABLE, *(returns(),) * 3)
+        BUDGET_RAISED, out, ranks=four(RANK_UPDATED), sends=(UNAVAILABLE, *returns_each(3))
     )
     assert outcome.exit_code == 6, outcome.stderr
     (baseline,) = [case for case in summary_cases(outcome) if case["case_key"] == "baseline"]
@@ -381,7 +382,7 @@ def refused_baseline(cli: Cli, experiments: ExperimentBuilder[Outcome], out: Pat
         EXAMPLE,
         out,
         ranks=(Reply(400, b"Unsupported value"), *(RANK_UPDATED,) * 3),
-        sends=(returns(),) * 3,
+        sends=returns_each(3),
     )
     assert first.exit_code == 6, first.stderr
     assert counts(first)["provider_requests"] == 7
@@ -547,7 +548,7 @@ def test_an_experiment_1_1_0_ranked_by_a_formula_runs_and_resumes_as_a_plan_1_1_
     assert plan.schema_version == "1.1.0"
     assert b"schema_version: 1.1.0" in (out / "plans" / "1" / "configuration.yaml").read_bytes()
 
-    resumed = experiments.run(config, out, sends=(returns(),) * 4)
+    resumed = experiments.run(config, out, sends=returns_each(4))
 
     assert resumed.exit_code == 0, resumed.stderr
     assert (out / "cases" / str(baseline) / "normalized" / "settings.csv").is_file()
