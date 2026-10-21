@@ -403,7 +403,9 @@ def test_a_remaining_budget_of_one_request_covers_no_case(
 ) -> None:
     """A case's attempt starts only when both its requests fit, so a confirmed repeat with one
     request left isn't started: the run needs no credentials, sends nothing, and the display names
-    the case the remaining budget can't cover (the budget across runs)."""
+    the case the remaining budget can't cover (the budget across runs). So it says the run sends
+    no case, in place of the line that it overwrites `ApiRankingSystem`, although it confirms a
+    repeat (D-45)."""
     cli.ready()
     out = cli.tmp / "experiment"
     attempt = refused_baseline(cli, experiments, out)
@@ -417,6 +419,8 @@ def test_a_remaining_budget_of_one_request_covers_no_case(
     assert error_code(outcome) == "execution.partial"
     assert cli.server.requests() == received
     assert counts(outcome)["provider_requests"] == 7
+    assert SENDS_NO_CASE in outcome.stderr.splitlines()
+    assert OVERWRITES not in outcome.stderr
 
 
 @posix_only
@@ -452,9 +456,9 @@ def test_without_a_terminal_a_resumes_line_on_api_ranking_system_follows_its_bud
     """Without a terminal, a resume gives the plan hash, the plan it resumes, and the budget, with
     what's counted so far across every run; then the line on `ApiRankingSystem`, after the whole
     budget, and then how to see the full plan (plans with a ranking definition, the display's
-    wording). This resume confirms no repeat, and its remaining budget, 1 request, covers no
-    case, so it sends none, and the line says so, rather than that it overwrites the system
-    (D-45). Before, it said the run overwrites it."""
+    wording). This resume confirms no repeat, and no case is due, so it sends none, and the line
+    says so, rather than that it overwrites the system (D-45). Before, it said the run overwrites
+    it."""
     cli.ready()
     out = cli.tmp / "experiment"
     refused_baseline(cli, experiments, out)

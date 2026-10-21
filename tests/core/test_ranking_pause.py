@@ -230,6 +230,26 @@ def test_the_wait_is_measured_from_the_rank_updates_200(
     assert pause.slept == [Slept(UPDATE_PAUSE_SECONDS - 4, (AUTH, RANK))]
 
 
+def test_nothing_is_logged_or_waited_once_10_seconds_have_passed(
+    tmp_path: Path, server: FakePortfolio123, faults: Faults, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Saving the rank_update's response takes 10 seconds, so no time is left to wait: the
+    # attempt sends its backtest without sleeping, or logging that it waits.
+    caplog.set_level(logging.INFO, logger="trialfolio")
+    server.reply("/auth", authenticated())
+    server.reply("/rank", updated(), method="POST")
+    server.reply("/screen/backtest", Reply(200, complete()))
+    pause = FakePause(server)
+    faults.on_write("rank-update-response.json", once(lambda: pause.advance(UPDATE_PAUSE_SECONDS)))
+
+    error = run_screen(tmp_path, server, pause)
+
+    assert error is None
+    assert server.requests() == [AUTH, RANK, BACKTEST]
+    assert pause.slept == []
+    assert WAITING not in {getattr(record, "event", None) for record in caplog.records}
+
+
 def test_a_sleep_that_ends_early_is_followed_by_another_until_10_seconds_have_passed(
     tmp_path: Path, server: FakePortfolio123
 ) -> None:
