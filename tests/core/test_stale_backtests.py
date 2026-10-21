@@ -184,6 +184,29 @@ def ok(body: bytes) -> Reply:
     return Reply(200, body)
 
 
+BETWEEN = [
+    pytest.param(
+        None, Reply(400, b"Invalid ranking system"), True, id="a rank_update that got a 400"
+    ),
+    pytest.param(Reply(200, b"<html>not JSON</html>"), None, True, id="a backtest saved undecoded"),
+    pytest.param(Reply(503, b""), None, True, id="a backtest without a response"),
+    pytest.param(ok(INVALID), None, False, id="a decoded backtest without the required structure"),
+]
+"""What `value-heavy` gets between the baseline and `tilt-earnings-yield`, which gets the
+baseline's results: its backtest's reply, or None when its `rank_update` gets the reply after it,
+so no backtest is sent; and whether `tilt-earnings-yield` is then flagged, against the baseline,
+as it is unless `value-heavy` saved a decoded response."""
+
+
+def script_between(lab: Lab, between: Reply | None, ranks: Reply | None) -> None:
+    """The baseline gets `complete.json`, `value-heavy` `between` or, for its `rank_update`,
+    `ranks`, `tilt-earnings-yield` the baseline's results, and `no-sales-yield` others."""
+    updated = Reply(200, (RESPONSES / "rank-update.json").read_bytes())
+    backtests = [ok(COMPLETE), *([] if between is None else [between]), ok(SAME_RESULTS)]
+    rank_replies = [updated, updated if ranks is None else ranks, updated]
+    lab.script(*backtests, ok(CHANGED), ranks=[*rank_replies, updated])
+
+
 def outcomes(ran: Ran) -> list[str]:
     return [outcome for _, outcome in ran.execution.outcomes]
 
@@ -272,31 +295,14 @@ def test_a_backtest_of_another_request_is_never_flagged(lab: Lab) -> None:
     assert outcomes(ran) == ["succeeded", "failed", *["succeeded"] * (len(keys) - 2)]
 
 
-@pytest.mark.parametrize(
-    ("between", "ranks", "flags"),
-    [
-        (None, Reply(400, b"Invalid ranking system"), True),
-        (Reply(200, b"<html>not JSON</html>"), None, True),
-        (Reply(503, b""), None, True),
-        (ok(INVALID), None, False),
-    ],
-    ids=[
-        "a rank_update that got a 400",
-        "a backtest saved undecoded",
-        "a backtest without a response",
-        "a decoded backtest without the required structure",
-    ],
-)
+@pytest.mark.parametrize(("between", "ranks", "flags"), BETWEEN)
 def test_the_previous_backtest_is_the_sessions_latest_with_a_decoded_response(
     lab: Lab, between: Reply | None, ranks: Reply | None, flags: bool
 ) -> None:
     # `value-heavy` gets no decoded response, or one without the required structure, between
     # the baseline and `tilt-earnings-yield`, which gets the baseline's results: it's compared
     # with the baseline unless `value-heavy` saved a decoded response.
-    updated = Reply(200, (RESPONSES / "rank-update.json").read_bytes())
-    backtests = [ok(COMPLETE), *([] if between is None else [between]), ok(SAME_RESULTS)]
-    rank_replies = [updated, updated if ranks is None else ranks, updated]
-    lab.script(*backtests, ok(CHANGED), ranks=[*rank_replies, updated])
+    script_between(lab, between, ranks)
 
     ran = lab.run()
 
@@ -352,22 +358,33 @@ def test_a_resume_reads_a_stale_backtest_as_the_session_flagged_it(
     assert "`value-heavy` returned the same response" in resumed.error.message
 
 
+@pytest.mark.parametrize(("between", "ranks", "flags"), BETWEEN)
 def test_a_resume_compares_with_the_sessions_latest_attempt_that_saved_a_decoded_response(
-    lab: Lab,
+    lab: Lab, between: Reply | None, ranks: Reply | None, flags: bool
 ) -> None:
-    # `value-heavy`'s backtest gets a 503, so it saved no response, and `tilt-earnings-yield`
-    # gets the baseline's results. The session stops before `no-sales-yield`: the records check
-    # compares `tilt-earnings-yield` with the baseline, the session's latest attempt before it
-    # that saved a decoded response, as the session did.
-    lab.script(ok(COMPLETE), Reply(503, b""), ok(SAME_RESULTS))
-    first = lab.run(faults={f"{NO_SALES}/rank-update-request.json": KeyboardInterrupt()})
+    # The session stops before `tilt-earnings-yield`'s tables, or, when it flagged the case,
+    # before `no-sales-yield`. The records check compares `tilt-earnings-yield`, which has no
+    # tables, with the session's latest attempt before it that saved a decoded response, as the
+    # session did: the baseline, unless `value-heavy` saved one, whatever its structure.
+    script_between(lab, between, ranks)
+    first = lab.run(
+        faults={
+            f"{TILT}/metrics.csv": KeyboardInterrupt(),
+            f"{NO_SALES}/rank-update-request.json": KeyboardInterrupt(),
+        }
+    )
     assert first.execution.manifest is None
+    assert outcomes(first)[2] == ("failed" if flags else "succeeded")
+    assert not (lab.tables(TILT) / "metrics.csv").exists()
 
     saved = lab.records()
 
     missing = saved.missing[TILT]
-    assert missing.invalid is not None and missing.invalid.code == "provider.response_invalid"
-    assert missing.identical_to == BASELINE
+    if flags:
+        assert missing.invalid is not None and missing.invalid.code == "provider.response_invalid"
+        assert missing.identical_to == BASELINE
+    else:
+        assert (missing.invalid, missing.identical_to) == (None, None)
 
 
 def test_a_resume_names_a_flagged_case_by_the_key_the_plan_it_approves_gives_it(
@@ -593,6 +610,32 @@ def test_the_same_repeat_after_it_completed_its_case_repeats_nothing_and_resumes
     assert outcomes(again) == ["succeeded"] * 4
 
 
+def test_a_stale_backtests_repeat_without_the_required_structure_isnt_called_stale(
+    lab: Lab,
+) -> None:
+    # The repeat of the flagged `value-heavy` gets a response without the layout's required
+    # structure: the case awaits a repeat again, which names the repeat, and the session's
+    # message and report give that response's failure, not the stale backtest's.
+    lab.script(ok(COMPLETE), ok(SAME_RESULTS), ok(CHANGED), ok(COMPLETE))
+    attempt = flagged(lab, lab.run())
+    lab.script(ok(INVALID))
+
+    repeated = lab.run(
+        "revisions/ranking-budget-raised.yaml",
+        reason=RAISED,
+        repeats=[Repeat(VALUE_HEAVY, uuid.UUID(attempt))],
+    )
+
+    assert repeated.error is not None and repeated.error.code == "execution.partial"
+    assert "returned the same response" not in repeated.error.message
+    _, repeat = lab.attempts(VALUE_HEAVY)
+    assert repeat.outcome == "succeeded"
+    assert repeated.execution.repeat_attempts == {VALUE_HEAVY: repeat.attempt_id}
+    report = (lab.out / "sessions/2/report.html").read_text(encoding="utf-8")
+    assert "repeats the response of the case before it" not in report
+    assert "required structure, so it wasn" in report
+
+
 def test_a_repeat_of_a_case_whose_response_had_no_required_structure_completes_it(
     lab: Lab,
 ) -> None:
@@ -647,6 +690,8 @@ def test_tables_drawn_from_a_succeeded_attempt_that_another_follows_are_refused(
         repeats=[Repeat(VALUE_HEAVY, uuid.UUID(attempt))],
     )
     assert rejected.error is not None
+    # The repeat's 400 describes the case now, not the stale backtest before it.
+    assert "returned the same response" not in rejected.error.message
     assert lab.records().cases(EXAMPLE)[1].state == "awaiting_repeat"
     stale = lab.attempts(VALUE_HEAVY)[0]
     assert stale.response is not None
