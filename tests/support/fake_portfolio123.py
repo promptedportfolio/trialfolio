@@ -28,8 +28,8 @@ import socket
 import struct
 import threading
 from collections import deque
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import MappingProxyType
 from typing import Final, Literal, override
@@ -57,6 +57,31 @@ class Reply:
     release: threading.Event | None = None
     """An event to wait for, after any delay, before doing anything else: the test sets it to let
     the reply go."""
+
+
+def distinct(*bodies: bytes) -> tuple[Reply, ...]:
+    """A 200 for each of `bodies`, backtest responses that are JSON objects, each with a member of
+    its own first, `fixtureReply`, its number from 1, which no layout reads, so no two have the
+    same results, as backtests of cases ranked by different definitions wouldn't. A case whose
+    response is the previous case's, apart from `cost` and `quotaRemaining`, after the same
+    backtest request and a different definition, is flagged as a stale backtest (D-45)."""
+    if not all(body.lstrip().startswith(b"{") for body in bodies):
+        raise ValueError("each body is a JSON object")
+    return each_its_own([Reply(200, body) for body in bodies])
+
+
+def each_its_own(replies: Sequence[Reply]) -> tuple[Reply, ...]:
+    """`replies`, with each 200 whose body is a JSON object given a member of its own, as
+    `distinct` gives it, numbered from 1 among them, and each other reply as it is."""
+    numbered: list[Reply] = []
+    number = 0
+    for reply in replies:
+        if reply.status == 200 and reply.body.lstrip().startswith(b"{"):
+            number += 1
+            body = reply.body.replace(b"{", b'{"fixtureReply": %d, ' % number, 1)
+            reply = replace(reply, body=body)
+        numbered.append(reply)
+    return tuple(numbered)
 
 
 @dataclass(frozen=True)

@@ -35,11 +35,12 @@ definition): `RankingAttempt`, a screen run's, with start and attempt records 1.
 `RankingExperimentAttempt`, an experiment's, with records 1.3.0. After authenticating, each writes
 the `rank_update`'s request, `rank-update-request.json`, and its start record, the update record
 `updating.json`, sends the `rank_update`, and saves its response, `rank-update-response.json`, or
-`.raw` for a 200 the wrapper couldn't decode. Only after a 200 the wrapper decoded, and saved, does
-it write the backtest's `request.json` and `started.json`, and send the backtest, as 0.3.0's
-attempts do. Any other ending of the `rank_update` ends the attempt there, so no backtest ranks by
-whatever `ApiRankingSystem` held before. The backtest's exchange gives the outcome; without one,
-the `rank_update`'s does, and the attempt is possibly charged when either may have reached
+`.raw` for a 200 the wrapper couldn't decode. Only after a 200 the wrapper decoded, and saved, and
+once at least 10 seconds have passed since that 200 arrived (D-45), does it write the backtest's
+`request.json` and `started.json`, and send the backtest, as 0.3.0's attempts do. Any other
+ending of the `rank_update` ends the attempt there, so no backtest ranks by whatever
+`ApiRankingSystem` held before. The backtest's exchange gives the outcome; without one, the
+`rank_update`'s does, and the attempt is possibly charged when either may have reached
 Portfolio123.
 
 A `SnapshotAttempt` is a ranking snapshot's one attempt (ranking snapshot output), in

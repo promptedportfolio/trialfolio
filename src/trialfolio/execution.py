@@ -36,8 +36,8 @@ differences (sending a definition, a run with a ranking definition):
   ranking named by a snapshot, it's the snapshot's `definition.xml`, and `snapshot.json`, the
   snapshot's record, follows it, each from the bytes read and checked when the configuration was
   validated (reading a snapshot).
-- Step 3's attempt (`RankingAttempt`) sends the case's `rank_update`, then its backtest, with
-  start and attempt records 1.2.0.
+- Step 3's attempt (`RankingAttempt`) sends the case's `rank_update`, then, once at least 10
+  seconds have passed since its 200 (D-45), its backtest, with start and attempt records 1.2.0.
 - Step 4 writes `settings.csv` 1.1.0, with a weight row for each node, and step 6 run manifest
   1.1.0, with the roles and source records of the files a definition adds. A run the core writes
   with the demo's client, which no command writes, is synthetic, with no command, and needs no
@@ -121,6 +121,7 @@ from trialfolio.manifests import (
 )
 from trialfolio.normalization import NormalizedTables, RankingOriginals, holds_series, write_tables
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
+from trialfolio.pause import REAL_PAUSE, Pause
 from trialfolio.planning import check_approval, ranking_source
 from trialfolio.provider import DecodedResponse, ScreenBacktestClient
 from trialfolio.ranking_lock import RankingLock
@@ -222,6 +223,7 @@ class Execution:
         *,
         clock: Clock = utc_now,
         ranking_lock: str | os.PathLike[str] | None = None,
+        pause: Pause = REAL_PAUSE,
     ) -> None:
         """Writes nothing.
 
@@ -230,7 +232,8 @@ class Execution:
         `demo`, or one with a ranking definition that the core writes with the demo's client,
         whose `command` is None, since no command writes it. `ranking_lock` is the ranking lock's
         file, which an execution of a plan 1.2.0, whose ranking is a definition, takes, and no
-        other does.
+        other does. `pause` is the wait between the `rank_update`'s 200 and the backtest of such
+        a plan's attempt (D-45), which tests inject, as they do the clock.
 
         Raises `TrialFolioError` with `plan.approval_required` unless `approved_hash` is the
         plan's hash, recomputed from its contents (approval), and `ValueError` if `approval` and
@@ -255,6 +258,7 @@ class Execution:
         self._store = store
         self._command = command
         self._clock = clock
+        self._pause = pause
         self._lock = None if ranking_lock is None else RankingLock(ranking_lock)
         self._claimed = False
         self._attempt: Attempt | RankingAttempt | None = None
@@ -467,6 +471,7 @@ class Execution:
                 self._store,
                 clock=self._clock,
                 synthetic=self._synthetic,
+                pause=self._pause,
             )
         return Attempt(
             self._plan,

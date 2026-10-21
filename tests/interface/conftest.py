@@ -3,6 +3,8 @@ release allows (AGENTS.md, verification expectations; release 0.1.0, test pairin
 
 - the fake Portfolio123 server, below `urllib3`, through the entry function's `endpoint`;
 - a fixed clock, through `clock`;
+- a fake pause, through `pause`, so no command waits 10 seconds before a backtest (D-45): `Cli`'s
+  own, for the test, which records each wait with what the server had received then;
 - storage faults, through `store_factory`.
 
 `on_terminal` runs the command in a new process instead, under a real pseudo-terminal, through
@@ -31,7 +33,7 @@ from typing import TextIO
 import pytest
 
 from tests.support import canaries, launcher
-from tests.support.clock import FixedClock
+from tests.support.clock import FakePause, FixedClock
 from tests.support.environment import VARIABLES
 from tests.support.experiment_builder import ExperimentBuilder
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
@@ -137,6 +139,8 @@ class Cli:
         self.locks = tmp_path.with_name(f"{tmp_path.name}-locks")
         self.locks.mkdir(exist_ok=True)
         monkeypatch.setenv(LOCK_DIRECTORY_VARIABLE, str(self.locks))
+        self.pause = FakePause(server)
+        """The pause every command of the test takes, which records each wait (D-45)."""
 
     def accept_license(self) -> None:
         """Acknowledges the license for the test, as CI would, without a record."""
@@ -176,6 +180,7 @@ class Cli:
                 timeout=timeout,
                 clock=FixedClock() if clock is None else clock,
                 store_factory=store_factory,
+                pause=self.pause.pause,
             )
         return Outcome(code, out.getvalue(), captured.getvalue() if stderr is None else "")
 

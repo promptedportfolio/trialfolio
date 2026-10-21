@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from tests.support import canaries
-from tests.support.clock import FixedClock
+from tests.support.clock import FixedClock, no_wait
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.html_report import Document, Element, parse
 from tests.support.snapshot_builder import SnapshotBuilder, naming
@@ -189,6 +189,7 @@ def write_run(
             None if synthetic else COMMAND,
             clock=FixedClock(),
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         )
         error = execution.run(
             content,
@@ -241,6 +242,7 @@ def write_experiment(
             command=None,
             clock=FixedClock(),
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         ).run(content, **given)  # pyright: ignore[reportArgumentType]
     return out
 
@@ -277,6 +279,7 @@ def write_synthetic_sessions(
                 experiment=saved,
                 reason=None if saved is None else f"Revised into {name}.",
                 ranking_lock=tmp_path / LOCK_FILE if ranked else None,
+                pause=no_wait(),
             ).run(
                 content,
                 definition=read.definition.content if ranked and read.definition else None,

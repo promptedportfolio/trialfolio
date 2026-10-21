@@ -32,7 +32,7 @@ from typing import Final
 import pytest
 
 from tests.support import canaries
-from tests.support.clock import FixedClock
+from tests.support.clock import FixedClock, no_wait
 from tests.support.environment import VARIABLES
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
@@ -199,6 +199,7 @@ class RunBuilder:
                     ["run", str(path), "--out", str(out), "--approve", plan_hash],
                     endpoint=server.endpoint,
                     clock=FixedClock(),
+                    pause=no_wait(),
                 )
         finally:
             server.close()

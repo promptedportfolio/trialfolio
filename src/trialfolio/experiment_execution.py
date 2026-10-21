@@ -60,9 +60,9 @@ steps, with these differences (sending a definition, running an experiment):
   baseline named by a snapshot, it's the snapshot's `definition.xml`, and the snapshot's
   record, `snapshot.json`, follows it, each from the bytes read and checked when the
   configuration was validated (reading a snapshot).
-- Step 4's attempts (`RankingExperimentAttempt`) each send the case's `rank_update`, then its
-  backtest, with start and attempt records 1.3.0. An attempt starts only when the budget covers
-  both its requests.
+- Step 4's attempts (`RankingExperimentAttempt`) each send the case's `rank_update`, then, once
+  at least 10 seconds have passed since its 200, its backtest, with start and attempt records
+  1.3.0 (D-45). An attempt starts only when the budget covers both its requests.
 - Step 5 writes `settings.csv` 1.1.0, with a weight row for each node, and step 6 experiment
   manifest 1.1.0, with the roles and source records of the files a definition adds.
 
@@ -225,6 +225,7 @@ from trialfolio.normalization import (
     write_case_tables,
 )
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
+from trialfolio.pause import REAL_PAUSE, Pause
 from trialfolio.planning import (
     PlanRevision,
     PlanRevisionV1_1,
@@ -598,6 +599,7 @@ class ExperimentExecution:
         reason: str | None = None,
         repeats: Sequence[Repeat] = (),
         ranking_lock: str | os.PathLike[str] | None = None,
+        pause: Pause = REAL_PAUSE,
     ) -> None:
         """Writes nothing.
 
@@ -613,7 +615,9 @@ class ExperimentExecution:
         or `plan_revision_v1_1` for an experiment with a ranking definition, built, with its
         `reason`. `repeats` are the confirmed repeats, each checked as repeating a case says.
         `ranking_lock` is the ranking lock's file, given exactly for a plan 1.3.0: a new
-        experiment takes it, and a resumed one when its session sends.
+        experiment takes it, and a resumed one when its session sends. `pause` is the wait between
+        each `rank_update`'s 200 and its backtest, under a plan 1.3.0 (D-45), which tests inject,
+        as they do the clock.
 
         Raises `TrialFolioError`:
 
@@ -672,6 +676,7 @@ class ExperimentExecution:
         """The configuration, as 0.4.0's reader read it, for a plan with a ranking definition."""
         self._command = command
         self._clock = clock
+        self._pause = pause
         self._progress = progress
         self._cancellation = cancellation
         self._synthetic = synthetic
@@ -1337,6 +1342,7 @@ class ExperimentExecution:
                 repeat_of=repeat_of,
                 clock=self._clock,
                 synthetic=self._synthetic,
+                pause=self._pause,
             )
         if isinstance(plan, PlanV1_1) and isinstance(case, ExperimentPlanCase):
             return ExperimentAttempt(

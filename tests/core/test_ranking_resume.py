@@ -37,7 +37,7 @@ from typing import Any
 import pytest
 
 from tests.support import canaries
-from tests.support.clock import FixedClock
+from tests.support.clock import FixedClock, no_wait
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.storage_faults import StorageFaults
 from trialfolio.canonical import sha256_hex
@@ -185,6 +185,7 @@ class Lab:
                 progress=progress,
                 cancellation=cancellation,
                 ranking_lock=self.lock if isinstance(plan, PlanV1_3) else None,
+                pause=no_wait(),
             ), isinstance(plan, PlanV1_3)
 
         return self._run(content, read, build, arm=arm)
@@ -215,6 +216,7 @@ class Lab:
                 reason=reason,
                 repeats=repeats,
                 ranking_lock=self.lock if isinstance(plan, PlanV1_3) else None,
+                pause=no_wait(),
             ), isinstance(plan, PlanV1_3)
 
         return self._run(content, read, build, arm=arm)
@@ -1457,7 +1459,13 @@ def write_screen(tmp: Path, server: FakePortfolio123, definition: bytes | None =
     credentials = Credentials(canaries.API_ID, canaries.API_KEY)
     with LocalArtifactStore(out) as store:
         error = Execution(
-            plan, plan.plan_hash, "option", store, COMMAND, ranking_lock=tmp / LOCK_FILE
+            plan,
+            plan.plan_hash,
+            "option",
+            store,
+            COMMAND,
+            ranking_lock=tmp / LOCK_FILE,
+            pause=no_wait(),
         ).run(
             content,
             lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint),

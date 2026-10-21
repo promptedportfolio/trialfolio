@@ -188,6 +188,7 @@ def _run_screen(
         ),
         clock=context.clock,
         ranking_lock=ranking_lock(context, plan),
+        pause=context.pause,
     )
     invocation.outcome = ScreenOutcome(execution)
     definition, files = definition_bytes(configuration)

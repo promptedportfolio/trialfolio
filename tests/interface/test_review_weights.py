@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 
 from tests.interface.conftest import Cli, Outcome
-from tests.support.clock import FixedClock
+from tests.support.clock import FixedClock, no_wait
 from tests.support.html_report import parse
 from tests.support.run_builder import SYNTHETIC_RUN
 from trialfolio.configuration import read_screen_configuration_v1_1
@@ -180,6 +180,7 @@ def synthetic_run(tmp_path: Path, out: Path) -> Path:
             None,
             clock=FixedClock(),
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         ).run(
             content,
             lambda: SyntheticScreenBacktestClient(response_bytes()),

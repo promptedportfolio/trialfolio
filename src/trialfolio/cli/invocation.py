@@ -36,6 +36,7 @@ from trialfolio.contracts.summary import JsonSummaryV1_2, NoCounts, SummaryCase,
 from trialfolio.display import visible
 from trialfolio.errors import EXIT_CODES, TrialFolioError, interrupted
 from trialfolio.logs import LOGS_DIRECTORY, CommandLogs
+from trialfolio.pause import Pause
 from trialfolio.storage import ArtifactStore
 
 _logger = logging.getLogger("trialfolio.cli")
@@ -68,6 +69,8 @@ class Context:
     timeout: int | None
     clock: Clock
     store_factory: StoreFactory
+    pause: Pause
+    """The wait between a `rank_update`'s 200 and its backtest (D-45)."""
 
 
 class _Outcome(Protocol):

@@ -11,8 +11,9 @@ Text from the configuration is shown with its control and formatting characters 
 title or formula can't move the cursor, clear the terminal, or reorder what's shown.
 
 From release 0.4.0, a plan 1.2.0, whose ranking is a definition, shows more (plans with a ranking
-definition, the display): that the run overwrites `ApiRankingSystem` in the account, what the
-ranking lock does and doesn't exclude, the definition's source, each node's weight, the case's
+definition, the display): that the run overwrites `ApiRankingSystem` in the account, that each
+case's backtest is sent 10 seconds after its `rank_update` (D-45), what the ranking lock does and
+doesn't exclude, the definition's source, each node's weight, the case's
 `rank_update` with its whole definition as text, line by line, keeping its tabs, and its hash,
 and the budget with each operation's documented cost. Without a terminal, and with a matching
 `--approve`, it adds only the line that the run overwrites `ApiRankingSystem`, which holds nothing
@@ -50,6 +51,7 @@ from trialfolio.contracts.ranking_snapshot import (
 )
 from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError
+from trialfolio.pause import UPDATE_PAUSE_SECONDS
 from trialfolio.planning import check_approval, plan_hash
 
 APPROVE_ANSWER: Final = "approve"
@@ -267,9 +269,10 @@ def definition_lines(text: str, indent: str) -> list[str]:
 
 def ranking_lines(source: RankingSource, snapshot: RankingSnapshotRecord | None) -> list[str]:
     """What the full display of a plan with a ranking definition says first: that the run
-    overwrites `ApiRankingSystem`, what the ranking lock does and doesn't exclude, and where
-    the definition came from: a file, by the definition's hash, or a snapshot, by its system's
-    name, and when it was read, as its record gives it."""
+    overwrites `ApiRankingSystem`; that each case's backtest is sent 10 seconds after its
+    `rank_update` (D-45); what the ranking lock does and doesn't exclude; and where the
+    definition came from: a file, by the definition's hash, or a snapshot, by its system's name,
+    and when it was read, as its record gives it."""
     if source.form == "definition" or snapshot is None:
         where = f"a file, by the definition's hash, {source.definition}."
     else:
@@ -281,8 +284,10 @@ def ranking_lines(source: RankingSource, snapshot: RankingSnapshotRecord | None)
     return [
         OVERWRITES,
         (
-            "  Each case writes its definition there with its rank_update, just before its"
-            " backtest, which ranks by that system's name."
+            "  Each case writes its definition there with its rank_update, and its backtest,"
+            f" which ranks by that system's name, is sent {UPDATE_PAUSE_SECONDS} seconds after"
+            " the rank_update's response, so that Portfolio123 ranks it by the definition just"
+            " written."
         ),
         (
             "  The ranking lock keeps other Trial Folio processes on this machine from writing"
