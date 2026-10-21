@@ -105,7 +105,15 @@ OVERWRITES: Final = (
     " each case's ranking definition."
 )
 """The line every display of a plan with a ranking definition gives, a terminal's or not, which
-holds nothing from the configuration."""
+holds nothing from the configuration, unless the run sends no case."""
+
+SENDS_NO_CASE: Final = (
+    "This run sends no case, so it doesn't write ApiRankingSystem, a ranking system in your"
+    " Portfolio123 account."
+)
+"""The line in `OVERWRITES`' place, in the display of a resumed experiment with a ranking
+definition whose run sends no case: no case is due, and no repeat is to be made, or the remaining
+budget covers none of them (D-45)."""
 
 
 def _cost(cost: OperationCost) -> str:
@@ -267,12 +275,15 @@ def definition_lines(text: str, indent: str) -> list[str]:
     return [f"{indent}{visible(line, keep=chr(9))}" for line in lines]
 
 
-def ranking_lines(source: RankingSource, snapshot: RankingSnapshotRecord | None) -> list[str]:
+def ranking_lines(
+    source: RankingSource, snapshot: RankingSnapshotRecord | None, *, sends: bool = True
+) -> list[str]:
     """What the full display of a plan with a ranking definition says first: that the run
-    overwrites `ApiRankingSystem`; that each case's backtest is sent 10 seconds after its
-    `rank_update` (D-45); what the ranking lock does and doesn't exclude; and where the
-    definition came from: a file, by the definition's hash, or a snapshot, by its system's name,
-    and when it was read, as its record gives it."""
+    overwrites `ApiRankingSystem`, or, without `sends`, for a resume that sends no case, that it
+    doesn't write it; that each case's backtest is sent 10 seconds after its `rank_update`
+    (D-45); what the ranking lock does and doesn't exclude; and where the definition came from: a
+    file, by the definition's hash, or a snapshot, by its system's name, and when it was read, as
+    its record gives it."""
     if source.form == "definition" or snapshot is None:
         where = f"a file, by the definition's hash, {source.definition}."
     else:
@@ -282,7 +293,7 @@ def ranking_lines(source: RankingSource, snapshot: RankingSnapshotRecord | None)
             f" by the definition's hash, {source.definition}."
         )
     return [
-        OVERWRITES,
+        OVERWRITES if sends else SENDS_NO_CASE,
         (
             "  Each case writes its definition there with its rank_update, and its backtest,"
             f" which ranks by that system's name, is sent {UPDATE_PAUSE_SECONDS} seconds after"

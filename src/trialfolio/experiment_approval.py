@@ -29,7 +29,8 @@ settings, each ranking variant's change, each case's `rank_update` with its whol
 text, and the budget with each operation's documented cost, what a case's attempt costs, and, in
 a resume, the most the requests counted so far can have cost apart from the most the remaining
 ones can cost. Each case's attempt sends two requests, so the budget the display and the repeat's
-prompt count covers half as many cases (R04-T12).
+prompt count covers half as many cases (R04-T12). A resume that sends no case says so in place of
+the line that the run overwrites `ApiRankingSystem`, on a terminal or not (D-45).
 
 A case whose succeeded attempt's response failed validation awaits a repeat, which names that
 attempt, and the display and the repeat's prompt say that its response failed validation, rather
@@ -47,6 +48,7 @@ from typing import Final, TextIO
 from trialfolio.approval import (
     APPROVE_ANSWER,
     OVERWRITES,
+    SENDS_NO_CASE,
     Approval,
     budget_lines,
     counted,
@@ -196,6 +198,12 @@ class ExperimentRun:
             return sends
         remaining = max(0, budget.provider_requests - self.provider_requests)
         return sends[remaining // self.requests_per_case :]
+
+    def sends_a_case(self) -> bool:
+        """Whether this run would send a case: one is due, or to be repeated, and the remaining
+        budget covers the first of them. A run that sends none doesn't write `ApiRankingSystem`,
+        and needs no credentials."""
+        return len(self.sends()) > len(self.uncovered())
 
     def counted_credits(self) -> int | None:
         """For a plan with a ranking definition, the most the requests counted so far can have
@@ -400,7 +408,8 @@ def format_experiment_plan(run: ExperimentRun) -> str:
             ),
         ]
     if isinstance(plan, PlanV1_3):
-        lines += ["", *ranking_lines(plan.ranking_source, run.snapshot)]
+        sends = experiment is None or run.sends_a_case()
+        lines += ["", *ranking_lines(plan.ranking_source, run.snapshot, sends=sends)]
     baseline = plan.cases[0]
     lines += ["", "The baseline's settings, with the provenance each value will have once sent:"]
     for row in baseline.settings:
@@ -477,7 +486,8 @@ def format_experiment_summary(run: ExperimentRun, *, full_plan_hint: bool) -> st
         )
     # After the whole budget, what's counted so far included, so it doesn't split the budget.
     if isinstance(plan, PlanV1_3):
-        lines.append(OVERWRITES)
+        sends = run.experiment is None or run.sends_a_case()
+        lines.append(OVERWRITES if sends else SENDS_NO_CASE)
     if full_plan_hint:
         lines.append("Run the command in a terminal to see the full plan.")
     return "\n".join(lines) + "\n"
@@ -545,7 +555,7 @@ def approve_experiment(
     due = any(saved.state == "due" for saved in run.cases)
     # A run whose remaining budget covers none of its sends starts none, so it needs no
     # credentials (the 0.3.0 walk-through).
-    covered = len(run.sends()) > len(run.uncovered())
+    covered = run.sends_a_case()
     return ExperimentApproval(
         approval, (*checked.confirmed, *asked), (due or bool(asked) or checked.made) and covered
     )
