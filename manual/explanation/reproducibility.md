@@ -78,7 +78,7 @@ A case's `case_id` is the identity of its resolved settings: `case-` followed by
 
 That's what a revision relies on ([what a revision keeps](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#experiment-plans-and-revisions)):
 
-- **A case whose settings didn't change** keeps its `case_id`, and so its attempts, whatever its key now. A case that succeeded isn't sent again, even after a change of versions, because its request is what its settings send.
+- **A case whose settings didn't change** keeps its `case_id`, and so its attempts, whatever its key now. A case that succeeded, with a response that passed validation, isn't sent again, even after a change of versions, because its request is what its settings send.
 - **A case whose settings changed** is a new case, with a new `case_id`, even under the same key. The old case is retired: it and its attempts stay in the record, the plan display and the report list it, and the budget still counts its attempts.
 - **A variant you remove** retires its case the same way. A later plan that includes the same settings again, under any key, includes that same case again, with its attempts.
 - **With a ranking definition,** a case's settings hold its definition's hash, its ranking method, and each node's weight, so a changed definition is a new case, and a ranking variant whose definition stays the same, byte for byte, keeps its case. Where the definition came from isn't a setting: the same definition, from a file or a snapshot, with the same ranking method and the other settings the same, gives the same case ([plans with a ranking definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#plans-with-a-ranking-definition)).

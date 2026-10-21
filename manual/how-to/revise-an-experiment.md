@@ -36,7 +36,7 @@ Use this page when you've changed an experiment's configuration after it ran, su
 
 ## What a revision keeps
 
-- **A case whose settings didn't change** keeps its `case_id` and its attempts, whatever its key, so a case that succeeded isn't sent again.
+- **A case whose settings didn't change** keeps its `case_id` and its attempts, whatever its key, so a case that succeeded, with a response that passed validation, isn't sent again.
 - **A case whose settings changed** is a new case, with a new `case_id`, even under the same key. The old case is retired: it and its attempts stay in the record, the report lists it, and the budget still counts its attempts.
 - **With a ranking definition,** a changed definition changes every case whose definition changes with it: the baseline, each variant of another setting, and each ranking variant whose definition is then different. A ranking variant whose definition stays the same, byte for byte, keeps its case. A changed ranking method changes every case. A snapshot of the same definition, byte for byte, in a file's place, whose system has the ranking method the configuration gave, changes no case, and the revision records the new source; one whose system has another ranking method changes every case, as any changed ranking method does ([plans with a ranking definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#plans-with-a-ranking-definition)).
 - **A ranking given another way,** such as a definition in a formula's place, is a changed setting of the baseline: the revision needs `schema_version: 1.1.0`, and its budget at least two requests a case.

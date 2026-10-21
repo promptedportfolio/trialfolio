@@ -1,6 +1,8 @@
 # Repeat a case
 
-Use this page to send an experiment's case again, on purpose, when it's awaiting a repeat. Its request may have reached Portfolio123, and may have been charged, but none of its attempts succeeded: it's `unknown`, as after a timeout or an interrupt while waiting for Portfolio123, or `failed`, as after Portfolio123 rejected it. A resume never sends such a case on its own.
+Use this page to send an experiment's case again, on purpose, when it's awaiting a repeat. Its request may have reached Portfolio123, and may have been charged, but none of its attempts succeeded with a response that passed validation: it's `unknown`, as after a timeout or an interrupt while waiting for Portfolio123; `failed`, as after Portfolio123 rejected it; or `failed` with `provider.response_invalid`, when its attempt succeeded, but its response failed validation. A resume never sends such a case on its own.
+
+From release 0.4.0, a case whose response failed validation can be repeated, where it had counted as complete: its response couldn't be read, lacked the layout's structure, or, in an experiment with a ranking definition, repeated the results of the case before it in the same run, which Portfolio123 may have ranked by that case's definition ([why it waits 10 seconds](../explanation/apirankingsystem-and-the-ranking-lock.md#why-it-waits-10-seconds)). The plan display, and the prompt that confirms a repeat, say that its attempt succeeded, but its response failed validation. Its option names that attempt. A repeat whose response passes validation completes the case, and its tables are written from that response.
 
 A case awaiting a repeat is sent again only when `--repeat` names it and you confirm that its request may be charged again.
 
@@ -53,6 +55,6 @@ One confirmation, one repeat. Once the repeat may have reached Portfolio123, run
 
 ## Check
 
-- An `unknown` or rejected case isn't sent again without `--repeat`, and the plan display gives its option, `--repeat <case-key>:<attempt-id>`.
+- An `unknown` or rejected case, or one whose response failed validation, isn't sent again without `--repeat`, and the plan display gives its option, `--repeat <case-key>:<attempt-id>`.
 - `--repeat <case-key>` alone, with `--approve` or from a script, fails with `plan.approval_required`, exit code 2, and the message gives the option with the attempt ID. Nothing was sent.
 - After a repeat confirmed by its attempt ID may have reached Portfolio123, the same command again says the case isn't repeated, because its confirmation was used, and sends nothing for it. A repeat that sent nothing, such as one whose authentication failed, leaves its confirmation unused, and the same command tries it again.

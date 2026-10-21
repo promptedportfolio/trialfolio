@@ -1,12 +1,12 @@
 # `ApiRankingSystem` and the ranking lock
 
-From release 0.4.0, a screen or an experiment whose ranking is a ranking system's definition, given in a file or by a ranking snapshot, writes each case's definition into a ranking system in your Portfolio123 account, `ApiRankingSystem`, just before the case's backtest. This page explains why, what that changes in your account, and what the lock that guards it can and can't exclude.
+From release 0.4.0, a screen or an experiment whose ranking is a ranking system's definition, given in a file or by a ranking snapshot, writes each case's definition into a ranking system in your Portfolio123 account, `ApiRankingSystem`, 10 seconds before the case's backtest. This page explains why, what that changes in your account, why it waits, and what the lock that guards it can and can't exclude.
 
 ## Why Trial Folio writes a ranking system
 
 A screen backtest through the API ranks by a formula, or by a ranking system saved in the account, by its name or its ID. Its request has no place for a ranking system's definition. So to rank a case by a definition, Trial Folio first writes the definition into a ranking system of the account, with Portfolio123's `rank_update`, then sends the backtest, ranked by that system's name.
 
-Live calls verified that route before it was built: a backtest ranked by the system right after its `rank_update` used the definition just written, a changed weight changed the backtest's metrics, and writing the first definition again gave the first metrics back, so ranks aren't cached ([what R04-T01 verified](https://github.com/promptedportfolio/trialfolio/blob/main/docs/releases/0.4.0-ranking-weights.md#what-r04-t01-verified)).
+Live calls verified that route before it was built: a changed weight changed the backtest's metrics, and writing the first definition again gave the first metrics back ([what R04-T01 verified](https://github.com/promptedportfolio/trialfolio/blob/main/docs/releases/0.4.0-ranking-weights.md#what-r04-t01-verified)). Those calls found that a backtest sent right after its `rank_update` used the definition just written. A later walk-through of release 0.4.0 found that this doesn't always hold, so Trial Folio now waits between the two ([why it waits](#why-it-waits-10-seconds)).
 
 ## Why `ApiRankingSystem`, and only it
 
@@ -23,9 +23,23 @@ So the ranking systems you keep are never changed by Trial Folio, and `ApiRankin
 Each attempt of a case with a ranking definition sends two requests, in this order ([sending a definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#sending-a-definition)):
 
 1. **`rank_update`,** with the case's whole definition, its ranking method, and the fixed currency, USD, and type, stock;
-2. **the backtest,** ranked by `ApiRankingSystem`, sent only after the `rank_update` got a response Trial Folio could read, so it never ranks by whatever the system held before.
+2. **the backtest,** ranked by `ApiRankingSystem`, sent only after the `rank_update` got a response Trial Folio could read, and 10 seconds after that response arrived.
 
 Nothing is sent between them. A resume and a repeat send both again, never a backtest alone: once a run ends, another process may have written the system since.
+
+## Why it waits 10 seconds
+
+Portfolio123 sometimes ranks a backtest sent right after a `rank_update` by the definition `ApiRankingSystem` held before, although the `rank_update` succeeded, and the system already holds the new definition. The backtest's results are then exactly the previous definition's. Release 0.4.0's walk-through found it, and a diagnostic with live calls measured it: with Portfolio123's `rank_touch`, which it documents as flushing cached ranks, sent between the two, some backtests still ranked by the earlier definition, and with a pause of 10 seconds, none did ([D-45](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#decisions)).
+
+So each attempt waits until 10 seconds have passed since its `rank_update`'s response arrived, and only then sends the backtest. It sends no `rank_touch`. The terminal says so while it waits:
+
+```text
+Waiting 10 seconds after the rank_update before sending the backtest, so Portfolio123 ranks by the definition just written.
+```
+
+The plan says so too, before you approve. The pause adds 10 seconds to each case, and costs nothing: a run that sends nothing doesn't wait, and neither does a snapshot, which only reads. If you interrupt a run during the pause, the backtest isn't sent, and the case waits for a [repeat](../how-to/repeat-a-case.md), since its `rank_update` reached Portfolio123.
+
+A pause can't prove that a backtest ranked by its own definition. So, in an experiment, a case's backtest whose results are the same as those of the case before it in the same run, apart from the cost and the remaining quota, after the same backtest request ranked by a different definition, is flagged. The case is `failed`, with `provider.response_invalid`: its response is kept as evidence, it has no normalized tables, and it waits for a repeat. Identical results can be genuine, as when a changed weight doesn't change which stocks the screen selects, so the message says so, and gives the option that repeats the case, which sends its `rank_update` and its backtest again, in a later run. A synthetic experiment, whose results are invented, is never flagged.
 
 The two requests cost 6 credits at Portfolio123's documented costs: 1 for a `rank_update` and 5 for a backtest. The budget counts each as one provider request, so an experiment's budget is at least two requests a case. A case whose `rank_update` may have reached Portfolio123 is possibly charged, even when its backtest wasn't sent, so it waits for a [repeat](../how-to/repeat-a-case.md) rather than being sent again on its own ([credits and uncertain charges](credits-and-uncertain-charges.md)).
 
@@ -63,7 +77,9 @@ If one of those wrote the system between a case's `rank_update` and its backtest
 
 ## Where it's specified
 
-- [Sending a definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#sending-a-definition) and [the ranking lock](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#the-ranking-lock), in contracts.md: the two requests, their records, and the lock.
+- [Sending a definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#sending-a-definition) and [the ranking lock](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#the-ranking-lock), in contracts.md: the two requests, the pause between them, their records, and the lock.
+- [Running an experiment](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#running-an-experiment), in contracts.md: a stale backtest, and how an experiment flags it.
+- [D-45](https://github.com/promptedportfolio/trialfolio/blob/main/docs/spec.md#decisions), in spec.md: why each backtest waits 10 seconds, and why a stale backtest is flagged.
 - [Plans with a ranking definition](https://github.com/promptedportfolio/trialfolio/blob/main/docs/contracts.md#plans-with-a-ranking-definition), in contracts.md: what the plan shows.
 - [Release 0.4.0](https://github.com/promptedportfolio/trialfolio/blob/main/docs/releases/0.4.0-ranking-weights.md): its scope, its exclusions, and what its live calls verified.
 - [ADR 0001](https://github.com/promptedportfolio/trialfolio/blob/main/docs/adrs/0001-python-and-portfolio123-integration.md), decision 5: why runs that share an object in the account are serialized.

@@ -2,7 +2,7 @@
 
 Use this page to test how a screen's results depend on its ranking system: run an experiment whose variants change the weights of the system's nodes, at the top level or within a composite, or remove one factor. Each case's whole ranking definition is in the plan you approve, and in its records. It's new in release 0.4.0.
 
-Each case writes its definition into `ApiRankingSystem`, a ranking system in your Portfolio123 account, then backtests ranked by it. [`ApiRankingSystem` and the ranking lock](../explanation/apirankingsystem-and-the-ranking-lock.md) explains why, and what that changes in your account.
+Each case writes its definition into `ApiRankingSystem`, a ranking system in your Portfolio123 account, then, 10 seconds later, backtests ranked by it. [`ApiRankingSystem` and the ranking lock](../explanation/apirankingsystem-and-the-ranking-lock.md) explains why, and what that changes in your account.
 
 !!! warning "It overwrites `ApiRankingSystem`"
     Every run with a ranking definition overwrites `ApiRankingSystem` in your account. Keep nothing of your own in it, and don't edit it in Portfolio123's website while a run runs.
@@ -85,7 +85,7 @@ Every other key is an experiment configuration's, as [your first experiment](../
 
     Trial Folio reads the definition's file, checks the variants against it, and shows the whole plan. Besides what any experiment's plan shows ([your first experiment](../tutorials/first-experiment.md#step-2-review-the-plan)), it shows:
 
-    - that the run overwrites `ApiRankingSystem` in your account, with each case's definition, just before the case's backtest, and what the [ranking lock](../explanation/apirankingsystem-and-the-ranking-lock.md#the-ranking-lock) can't exclude;
+    - that the run overwrites `ApiRankingSystem` in your account, with each case's definition, before the case's backtest, which is sent 10 seconds after its `rank_update`, and what the [ranking lock](../explanation/apirankingsystem-and-the-ranking-lock.md#the-ranking-lock) can't exclude;
     - the definition's source: a file, by the definition's hash;
     - each node's weight, among the baseline's settings, as `ranking_weight` and the node's path, such as `ranking_weight Value/Earnings Yield: 50`;
     - each case's change, as in this excerpt of the example's plan. Its values are the example's, which are invented:
@@ -108,9 +108,11 @@ A path that names no node, or more than one, weights whose sum differs from the 
 
 1. Run the same command in a terminal, and type `approve`. Or give the plan's hash with `--approve sha256:<the plan hash>`.
 
-2. Wait. Trial Folio takes the ranking lock, then runs the cases one at a time. For each case, the terminal shows its `rank_update`, `POST /rank`, then its backtest, `POST /screen/backtest`, and how the attempt ended. A case's backtest is sent only after its `rank_update` succeeded.
+2. Wait. Trial Folio takes the ranking lock, then runs the cases one at a time. For each case, the terminal shows its `rank_update`, `POST /rank`, then that it waits 10 seconds, then its backtest, `POST /screen/backtest`, and how the attempt ended. A case's backtest is sent only after its `rank_update` succeeded, and 10 seconds after its response, so that Portfolio123 ranks it by the definition just written ([why it waits](../explanation/apirankingsystem-and-the-ranking-lock.md#why-it-waits-10-seconds)). So each case takes at least 10 seconds.
 
     When every case succeeds, it exits 0, and stdout says "Experiment completed", as for any experiment.
+
+A case whose backtest returned the same results as the case before it in the run, apart from the cost and the remaining quota, though it was ranked by another definition, is `failed`, with `provider.response_invalid`: Portfolio123 may have ranked it by the earlier case's definition. Its response is kept, it has no tables, and the run ends with `execution.partial`, exit code 6, whose message says why, and gives the option that repeats it. Identical results can be genuine, as when a changed weight doesn't change which stocks the screen selects. [Repeat the case](repeat-a-case.md) to send it again.
 
 Another Trial Folio process on your machine that's writing `ApiRankingSystem` makes the run fail with `experiment.locked`, exit code 4, before anything is sent: wait for it to end, and run the command again.
 
@@ -148,7 +150,7 @@ ranking:
   ranking_method: percentile_nas_negative
 ```
 
-Its run sends a `rank_update`, then its backtest: 2 provider requests, 6 credits. The run keeps `definition.xml` beside `configuration.yaml`, and its `settings.csv` has a weight row for each node. A screen run of the baseline's definition, with the baseline's settings, is the same case as the experiment's baseline, with the same `case_id`.
+Its run sends a `rank_update`, then, 10 seconds after its response, its backtest: 2 provider requests, 6 credits. The run keeps `definition.xml` beside `configuration.yaml`, and its `settings.csv` has a weight row for each node. A screen run of the baseline's definition, with the baseline's settings, is the same case as the experiment's baseline, with the same `case_id`.
 
 ## Compare runs' weights
 
@@ -165,12 +167,13 @@ Each weight that differs is then `intended_change`, with that reason. Without th
 ## Resume, repeat, or revise it
 
 - **Resume** with the same command, as for any experiment ([recover from an interrupt](recover-from-an-interrupt.md)). A resume that sends a case sends its `rank_update` and its backtest again, and takes the ranking lock first.
-- **A case whose `rank_update` may have reached Portfolio123** is possibly charged, even when its backtest wasn't sent, so it waits for a [repeat](repeat-a-case.md). A repeat sends both requests again, two requests from the budget.
+- **A case whose `rank_update` may have reached Portfolio123** is possibly charged, even when its backtest wasn't sent, so it waits for a [repeat](repeat-a-case.md). So does a case whose backtest returned the previous case's results, or whose response failed validation. A repeat sends both requests again, two requests from the budget.
+- **A resume that sends no case,** because none is due and you name no repeat, says that it doesn't write `ApiRankingSystem`, rather than that it overwrites it.
 - **Changing the definition's file, or the variants,** changes the plan, which you [revise](revise-an-experiment.md) with `--revision-reason`. A case whose definition changes is a new case, and the old one is retired. A ranking variant whose definition stays the same, byte for byte, keeps its results.
 
 ## Check
 
-- The plan shows that the run overwrites `ApiRankingSystem`, and each case's whole definition, before you approve it.
+- The plan shows that the run overwrites `ApiRankingSystem`, that each backtest is sent 10 seconds after its `rank_update`, and each case's whole definition, before you approve it.
 - It exits 0, and each case that succeeded has a `ranking_weight` row for each node of its definition in its `settings.csv`.
 - `plans/1/definition.xml` is your definition file, byte for byte.
 - The report shows each case's weights side by side, and ranks no case.
