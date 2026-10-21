@@ -7,7 +7,8 @@ once after its `rank_update` got a 200, returned exactly the response of the def
 `ApiRankingSystem` in turn, B first, each followed at once by the same backtest, as an
 experiment's attempts are, and labels each backtest by the definition whose response it returns.
 With `--touch`, it sends `rank_touch` for `ApiRankingSystem` between the two, which Portfolio123's
-Rank API page says "Forces a flush of all cached ranks".
+Rank API page says "Forces a flush of all cached ranks". With `--pause`, it waits that many seconds
+after the `rank_update`'s 200, or the touch's, before the backtest.
 
 The calls go through Trial Folio's own provider client, configured as for a run (ADR 0006): one
 authentication for the command, then each write's calls, each allowed one HTTP exchange, with no
@@ -36,7 +37,7 @@ it prints only Trial Folio's error code. Every response, the exchanges, and a su
 labels and timings are saved in the payloads folder given, which must be git-ignored.
 
     diagnose.py writes PAYLOADS LABEL A.xml B.xml BACKTEST.json --writes N --budget C
-                [--touch] [--references A.json B.json]       6 credits a write, 7 with --touch
+                [--touch] [--pause S] [--references A.json B.json]    6 credits a write, 7 with --touch
     diagnose.py id PAYLOADS [--compare A.xml B.xml] --budget C       1 credit
 """
 
@@ -96,6 +97,7 @@ def main() -> None:
     w.add_argument("--writes", type=int, required=True)
     w.add_argument("--budget", type=int, required=True)
     w.add_argument("--touch", action="store_true")
+    w.add_argument("--pause", type=float, default=0.0)
     w.add_argument("--references", type=Path, nargs=2)
     i = commands.add_parser("id")
     i.add_argument("payloads", type=Path)
@@ -127,7 +129,8 @@ def writes(args: argparse.Namespace) -> None:
     backtest = json.loads(args.backtest.read_bytes())
     system_id = saved_id(args.payloads) if args.touch else None
     print(
-        f"{args.writes} writes, alternating B and A, B first{', with rank_touch' if args.touch else ''}: "
+        f"{args.writes} writes, alternating B and A, B first{', with rank_touch' if args.touch else ''}"
+        f"{f', with a pause of {args.pause:g} s' if args.pause else ''}: "
         f"at most {planned} credits at the documented costs."
     )
     done: list[Write] = []
@@ -140,7 +143,7 @@ def writes(args: argparse.Namespace) -> None:
             write = Write(number, name)
             done.append(write)
             sent = send_write(
-                provider, write, definitions[name], backtest, system_id, folder, quota
+                provider, write, definitions[name], backtest, (system_id, args.pause), folder, quota
             )
             report(write)
             save_summary(folder, done, args)
@@ -164,12 +167,14 @@ def send_write(
     write: Write,
     definition: str,
     backtest: dict[str, object],
-    system_id: int | None,
+    between: tuple[int | None, float],
     folder: Path,
     quota: list[tuple[int, int]],
 ) -> bool:
-    """Sends one write's calls, as an attempt sends them, and records what the summary may hold.
-    Returns whether every call succeeded."""
+    """Sends one write's calls, as an attempt sends them, and records what the summary may hold:
+    between the `rank_update` and the backtest, the `rank_touch` of the system ID, when given,
+    then the pause, in seconds. Returns whether every call succeeded."""
+    system_id, pause = between
     stem = folder / f"write-{write.number:02d}"
     params = {
         "type": "stock",
@@ -197,6 +202,8 @@ def send_write(
             write.exchanges = exchanges(provider, before)
             print(f"  Write {write.number}: rank_touch failed: {touch.code}.")
             return False
+    if pause:
+        time.sleep(pause)
     started = time.monotonic()
     tested = call(
         provider,
@@ -286,6 +293,7 @@ def report(write: Write) -> None:
 def save_summary(folder: Path, done: list[Write], args: argparse.Namespace) -> None:
     summary = {
         "touch": args.touch,
+        "pause_seconds": args.pause,
         "writes": [asdict(w) for w in done],
     }
     (folder / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
