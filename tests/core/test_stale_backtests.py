@@ -370,6 +370,51 @@ def test_a_resume_compares_with_the_sessions_latest_attempt_that_saved_a_decoded
     assert missing.identical_to == BASELINE
 
 
+def test_a_resume_names_a_flagged_case_by_the_key_the_plan_it_approves_gives_it(
+    lab: Lab,
+) -> None:
+    # A revision renames `value-heavy` `heavy-value`, and keeps its case_id and its attempts.
+    # The resume, which finds the flag again in the records, names the case by its new key, as
+    # execution.partial's message lists it, never by the key it ran under.
+    lab.script(ok(COMPLETE), ok(SAME_RESULTS), ok(CHANGED), ok(COMPLETE))
+    flagged(lab, lab.run())
+
+    resumed = lab.run("revisions/ranking-key-renamed.yaml", reason="Renamed a case.")
+
+    error = resumed.error
+    assert error is not None and error.code == "execution.partial"
+    assert "`heavy-value`, failed (provider.response_invalid)" in error.message
+    assert (
+        "The backtest of case `heavy-value` returned the same response, apart from cost and"
+        " quotaRemaining, as that of case `baseline`, the case before it in session 1"
+    ) in error.message
+    assert "value-heavy" not in error.message
+    manifest = resumed.execution.manifest
+    assert manifest is not None and manifest.error is not None
+    assert manifest.error.message == error.message
+
+
+def test_a_resume_names_a_retired_previous_case_by_the_key_it_ran_under(lab: Lab) -> None:
+    # `tilt-earnings-yield` gets `value-heavy`'s results, so it's flagged against it. Then a
+    # revision changes the baseline's definition, which retires `value-heavy`, adds a case with
+    # its key again, and keeps `tilt-earnings-yield`: the resume, which sends the two new cases,
+    # names the retired case by its key in the plan it ran under.
+    stale_results = CHANGED.replace(b'"cost": 5,', b'"cost": 7,', 1)
+    lab.script(ok(COMPLETE), ok(CHANGED), ok(stale_results), ok(SAME_RESULTS))
+    first = lab.run()
+    assert outcomes(first) == ["succeeded", "succeeded", "failed", "succeeded"]
+    lab.script(ok(COMPLETE), ok(CHANGED))
+
+    resumed = lab.run("revisions/ranking-definition-changed.yaml", reason="A revised definition.")
+
+    error = resumed.error
+    assert error is not None and error.code == "execution.partial"
+    assert (
+        "The backtest of case `tilt-earnings-yield` returned the same response, apart from cost"
+        " and quotaRemaining, as that of case `value-heavy`, the case before it in session 1"
+    ) in error.message
+
+
 @pytest.mark.parametrize(
     "table", ["metrics.csv", "settings.csv"], ids=["before its tables", "between them"]
 )

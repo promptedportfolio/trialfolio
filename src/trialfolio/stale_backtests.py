@@ -28,7 +28,7 @@ sends, or logs.
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Final, cast
+from typing import Final, Protocol, cast
 
 from trialfolio.errors import TrialFolioError
 
@@ -51,6 +51,18 @@ class SentBacktest:
     """The `artifact_id` of its backtest's `request.json`."""
     response: bytes
     """Its saved `response.json`'s bytes."""
+
+
+class FlaggedAttempt(Protocol):
+    """The attempt whose backtest is stale, as its error names it: a `SentBacktest`, or the
+    attempt as an experiment's records read it."""
+
+    @property
+    def case_id(self) -> str: ...
+    @property
+    def attempt_id(self) -> uuid.UUID: ...
+    @property
+    def session(self) -> int: ...
 
 
 def same_results(first: bytes, second: bytes) -> bool:
@@ -89,14 +101,15 @@ def stale(backtest: SentBacktest, previous: SentBacktest | None) -> bool:
 
 
 def stale_error(
-    backtest: SentBacktest, previous: SentBacktest, *, key: str, previous_key: str
+    backtest: FlaggedAttempt, previous: str, *, key: str, previous_key: str
 ) -> TrialFolioError:
     """`provider.response_invalid` for a stale backtest, whose case's key is `key`, and whose
-    previous case's is `previous_key`. The message names the cases by their keys, and the
-    loggable message by their `case_id`s, since a key is the user's text, and the attempt by its
-    `attempt_id`. Neither gives the option that repeats the case: the CLI ends
-    `execution.partial`'s message with it, as for any case awaiting a repeat, so a terminal
-    shows it once."""
+    previous attempt's case is `previous`, by its `case_id`, keyed `previous_key`. The keys are
+    those of the plan the session that reports it runs, since a revision can rename a case's key
+    and keep its attempts. The message names the cases by their keys, and the loggable message
+    by their `case_id`s, since a key is the user's text, and the attempt by its `attempt_id`.
+    Neither gives the option that repeats the case: the CLI ends `execution.partial`'s message
+    with it, as for any case awaiting a repeat, so a terminal shows it once."""
 
     def said(case: str, before: str, response: str) -> str:
         return (
@@ -113,5 +126,5 @@ def stale_error(
     return TrialFolioError(
         "provider.response_invalid",
         said(f"`{key}`", f"`{previous_key}`", "The response"),
-        said(backtest.case_id, previous.case_id, f"The response of attempt {backtest.attempt_id}"),
+        said(backtest.case_id, previous, f"The response of attempt {backtest.attempt_id}"),
     )

@@ -721,7 +721,7 @@ class ExperimentExecution:
             {}
             if experiment is None
             else {
-                case_id: missing.invalid
+                case_id: _keyed(missing.invalid, missing, plan, experiment)
                 for case_id, missing in experiment.missing.items()
                 if missing.invalid is not None
             }
@@ -1213,7 +1213,8 @@ class ExperimentExecution:
         self, case_id: str, missing: MissingTables, experiment: SavedExperiment
     ) -> None:
         if missing.invalid is not None:
-            self._case_invalid(case_id, missing.invalid, identical_to=missing.identical_to)
+            failure = _keyed(missing.invalid, missing, self._plan, experiment)
+            self._case_invalid(case_id, failure, identical_to=missing.identical_to)
             return
         if missing.metrics_rows is not None:
             try:
@@ -1498,7 +1499,9 @@ class ExperimentExecution:
         if sent is None or self._synthetic or previous is None or not stale(sent, previous):
             return None
         before = next(c for c in self._plan.cases if c.case_id == previous.case_id)
-        failure = stale_error(sent, previous, key=case.case_key, previous_key=before.case_key)
+        failure = stale_error(
+            sent, previous.case_id, key=case.case_key, previous_key=before.case_key
+        )
         return failure, previous.case_id
 
     def _keep_published_metrics(self, case_id: str) -> None:
@@ -2084,6 +2087,30 @@ def _recorded_plan(saved: SavedPlan) -> _RecordedPlan:
         saved.read,
         _ranking_source(saved.plan),
     )
+
+
+def _keyed(
+    failure: TrialFolioError,
+    missing: MissingTables,
+    plan: PlanV1_1 | PlanV1_3,
+    experiment: SavedExperiment,
+) -> TrialFolioError:
+    """`failure`, the `provider.response_invalid` the records check found for a case's response,
+    as the session running `plan` reports it: a stale backtest's message is made again with the
+    keys `plan` gives the case and the one before it, since a revision can rename a case's key
+    and keep its attempts. A case that `plan` retired keeps its key in the plan the attempt ran
+    under, which the attempt before it in its session ran under too (D-45)."""
+    previous = missing.identical_to
+    if previous is None:
+        return failure
+    keys = {case.case_id: case.case_key for case in plan.cases}
+    ran_under = experiment.saved_plan(missing.attempt.plan)
+
+    def key(case_id: str) -> str:
+        return keys[case_id] if case_id in keys else ran_under.case(case_id).case_key
+
+    attempt = missing.attempt
+    return stale_error(attempt, previous, key=key(attempt.case_id), previous_key=key(previous))
 
 
 def _ranking_source(plan: PlanV1_1 | PlanV1_3) -> RankingSource | None:

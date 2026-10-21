@@ -2064,12 +2064,7 @@ class _Verdicts:
         if previous is None or not stale(sent, _sent(previous)):
             return _Verdict(rows, None)
         before = self._plans[previous.plan].case(previous.case_id)
-        error = stale_error(
-            sent,
-            cast("SentBacktest", _sent(previous)),
-            key=case.case_key,
-            previous_key=before.case_key,
-        )
+        error = stale_error(sent, previous.case_id, key=case.case_key, previous_key=before.case_key)
         return _Verdict(None, error, previous.case_id)
 
     def _previous(self, attempt: SavedExperimentAttempt) -> SavedExperimentAttempt | None:
