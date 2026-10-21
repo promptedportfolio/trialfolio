@@ -1409,7 +1409,9 @@ class ExperimentExecution:
         """Writes the case's tables from its saved response, right after its attempt record. A
         response that fails validation leaves the case `failed`, awaiting a repeat: one the
         installed parser can't read, as the layout's required structure needs, and a stale
-        backtest (D-45). A response that passes it makes a case awaiting a repeat complete."""
+        backtest (D-45). A response that passes it makes a case awaiting a repeat complete, from
+        then, as the records read it: a failure that keeps its tables from being written leaves
+        them to a resume (an experiment's normalized tables)."""
         response = result.record.response
         if not result.recorded or response is None:
             return
@@ -1429,38 +1431,35 @@ class ExperimentExecution:
             )
             if plan.read.definition is not None:
                 ranking = RankingOriginals(weights, files["ranking_definition"])
+        content = self._store.read(response.path)
         try:
-            content = self._store.read(response.path)
-            stale_after = self._stale(case, result, response, content)
-            tables = (
-                None
-                if stale_after is not None
-                else write_case_tables(
-                    self._store,
-                    case,
-                    originals,
-                    configuration=configuration_file,
-                    response=response,
-                    content=content,
-                    ranking=ranking,
-                )
-            )
+            stale_after = self._validated(case, result, response, content)
         except TrialFolioError as failure:
             if failure.code != "provider.response_invalid":
-                self._keep_published_metrics(case.case_id)
                 raise
             self._case_invalid(case.case_id, failure)
             return
+        if stale_after is not None:
+            failure, previous = stale_after
+            self._case_invalid(case.case_id, failure, identical_to=previous)
+            return
+        # The response passed validation, so the case's outcome and state are the records' before
+        # its tables are written, and stay so if a failure stops their writes.
+        self._invalid.pop(case.case_id, None)
+        self._identical.pop(case.case_id, None)
+        try:
+            tables = write_case_tables(
+                self._store,
+                case,
+                originals,
+                configuration=configuration_file,
+                response=response,
+                content=content,
+                ranking=ranking,
+            )
         except BaseException:
             self._keep_published_metrics(case.case_id)
             raise
-        if tables is None:
-            if stale_after is not None:
-                failure, previous = stale_after
-                self._case_invalid(case.case_id, failure, identical_to=previous)
-            return
-        self._invalid.pop(case.case_id, None)
-        self._identical.pop(case.case_id, None)
         self._tables[case.case_id] = _Tables(
             tables.metrics,
             tables.settings,
@@ -1469,33 +1468,34 @@ class ExperimentExecution:
             tables.settings_rows,
         )
 
-    def _stale(
+    def _validated(
         self,
         case: ExperimentPlanCase | ExperimentPlanCaseV1_3,
         result: ExperimentAttemptResult,
         response: SavedResponse,
         content: bytes,
     ) -> tuple[TrialFolioError, str] | None:
-        """For a case's attempt that sent a definition and saved its backtest's decoded response,
-        becomes the session's latest such attempt, and, unless the experiment is synthetic, gives
-        the stale backtest's `provider.response_invalid`, and the case whose response it repeats,
-        when it's one against the one before it (`stale_backtests.py`, D-45). Raises the
-        `provider.response_invalid` of a response the installed parser can't read, which is
-        checked first, as the rule needs the layout's required structure."""
-        if not isinstance(case, ExperimentPlanCaseV1_3) or response.form != "decoded":
-            return None
-        files = {file.role: file.file for file in result.files}
-        sent = SentBacktest(
-            case_id=case.case_id,
-            attempt_id=result.record.attempt_id,
-            session=self._session,
-            update_request=files["rank_update_request"].artifact_id,
-            request=files["provider_request"].artifact_id,
-            response=content,
-        )
-        previous, self._previous = self._previous, sent
+        """Checks the case's saved response, whose bytes are `content`, and raises its
+        `provider.response_invalid` when the installed parser can't read it, as the layout's
+        required structure needs. An attempt that sent a definition and saved its backtest's
+        decoded response first becomes the session's latest such attempt, whatever its structure;
+        for one with the structure, unless the experiment is synthetic, gives the stale backtest's
+        `provider.response_invalid`, and the case whose response it repeats, when it's one
+        against the one before it (`stale_backtests.py`, D-45)."""
+        previous, sent = self._previous, None
+        if isinstance(case, ExperimentPlanCaseV1_3) and response.form == "decoded":
+            files = {file.role: file.file for file in result.files}
+            sent = SentBacktest(
+                case_id=case.case_id,
+                attempt_id=result.record.attempt_id,
+                session=self._session,
+                update_request=files["rank_update_request"].artifact_id,
+                request=files["provider_request"].artifact_id,
+                response=content,
+            )
+            self._previous = sent
         case_metrics_rows(content, case, response)
-        if self._synthetic or previous is None or not stale(sent, previous):
+        if sent is None or self._synthetic or previous is None or not stale(sent, previous):
             return None
         before = next(c for c in self._plan.cases if c.case_id == previous.case_id)
         failure = stale_error(sent, previous, key=case.case_key, previous_key=before.case_key)

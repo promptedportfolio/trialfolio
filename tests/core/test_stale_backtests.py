@@ -370,12 +370,17 @@ def test_a_resume_compares_with_the_sessions_latest_attempt_that_saved_a_decoded
     assert missing.identical_to == BASELINE
 
 
+@pytest.mark.parametrize(
+    "table", ["metrics.csv", "settings.csv"], ids=["before its tables", "between them"]
+)
 def test_a_repeats_tables_a_stopped_session_didnt_write_come_from_the_repeat(
-    lab: Lab,
+    lab: Lab, table: str
 ) -> None:
     # The session that repeats the flagged `value-heavy` stops after its repeat's attempt
-    # record, before its tables. The next resume writes them from the repeat's response, the
-    # case's latest succeeded attempt's, which passed validation.
+    # record, before its tables, or between them. The repeat's response passed validation, so
+    # the case is complete from then, as the records read it, and the stopped session's
+    # outcomes, counts, and cases awaiting a repeat agree with them. The next resume writes the
+    # tables from the repeat's response, the case's latest succeeded attempt's.
     lab.script(ok(COMPLETE), ok(SAME_RESULTS), ok(CHANGED), ok(COMPLETE))
     attempt = flagged(lab, lab.run())
     lab.script(ok(CHANGED))
@@ -383,13 +388,21 @@ def test_a_repeats_tables_a_stopped_session_didnt_write_come_from_the_repeat(
         "revisions/ranking-budget-raised.yaml",
         reason=RAISED,
         repeats=[Repeat(VALUE_HEAVY, uuid.UUID(attempt))],
-        faults={f"{VALUE_HEAVY}/metrics.csv": KeyboardInterrupt()},
+        faults={f"{VALUE_HEAVY}/{table}": KeyboardInterrupt()},
     )
     assert stopped.execution.manifest is None
+    assert stopped.error is not None and stopped.error.code == "command.interrupted"
     stale, repeat = lab.attempts(VALUE_HEAVY)
     assert repeat.response is not None
+    saved = lab.records()
+    current = saved.current.plan
+    assert isinstance(current, PlanV1_3)
+    assert saved.cases(current)[1].state == "complete"
+    assert outcomes(stopped) == ["succeeded"] * 4
+    assert stopped.execution.repeat_attempts == {}
+    assert stopped.execution.counts == saved.counts(current)
 
-    missing = lab.records().missing[VALUE_HEAVY]
+    missing = saved.missing[VALUE_HEAVY]
     assert (missing.attempt.attempt_id, missing.invalid) == (repeat.attempt_id, None)
 
     resumed = lab.run("revisions/ranking-budget-raised.yaml", reason=RAISED)
