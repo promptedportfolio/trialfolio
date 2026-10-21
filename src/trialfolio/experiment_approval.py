@@ -715,8 +715,7 @@ def _check_repeats(run: ExperimentRun, *, asks: bool) -> _CheckedRepeats:  # noq
                 raise _not_repeated(run, problem.format(key), problem.format(case_id))
             to_ask.append((saved, latest))
             continue
-        named = [a for a in saved.attempts if a.attempt_id == option.attempt_id]
-        if not named or not repeatable(named[0], valid=saved.valid):
+        if not repeatable(saved.attempts, option.attempt_id, valid=saved.valid):
             problem = (
                 "The repeat of case {} names attempt {}, which isn't an attempt of the case whose"
                 " request may have been charged and that didn't succeed, or succeeded with a"

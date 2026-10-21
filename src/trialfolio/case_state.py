@@ -161,11 +161,19 @@ def described(attempts: Sequence[_CaseAttempt], *, valid: bool) -> str:
 # Repeats
 
 
-def repeatable(attempt: _CaseAttempt, *, valid: bool) -> bool:
-    """Whether a repeat may name the attempt, one of a case whose latest succeeded attempt's
-    response passed validation as `valid` gives: its request may have been charged, and it didn't
-    succeed, or it did, and its case's response failed validation (repeating a case, D-45)."""
-    return attempt.possibly_charged and (attempt.outcome != "succeeded" or not valid)
+def repeatable(attempts: Sequence[_CaseAttempt], attempt_id: uuid.UUID, *, valid: bool) -> bool:
+    """Whether a repeat may name the case's attempt `attempt_id`: its request may have been
+    charged, and it didn't succeed, or it did, and its own response failed validation (repeating
+    a case, D-45). `valid` gives that for the case's latest succeeded attempt; an earlier one's
+    response failed validation, since an attempt follows it. So the attempt a used confirmation
+    names stays one a repeat may name after its repeat completes the case."""
+    named = [attempt for attempt in attempts if attempt.attempt_id == attempt_id]
+    if not named or not named[0].possibly_charged:
+        return False
+    if named[0].outcome != "succeeded":
+        return True
+    succeeded = [attempt for attempt in attempts if attempt.outcome == "succeeded"]
+    return not valid or succeeded[-1] is not named[0]
 
 
 def confirmation_used(attempts: Sequence[_CaseAttempt], attempt_id: uuid.UUID | None) -> bool:

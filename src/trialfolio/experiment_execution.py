@@ -2117,8 +2117,7 @@ def _confirmed(
                 " Portfolio123, so running the experiment sends it without one."
             )
             raise _not_repeated(message.format(key), message.format(saved.case.case_id))
-        named = [a for a in saved.attempts if a.attempt_id == repeat.attempt_id]
-        if not named or not repeatable(named[0], valid=saved.valid):
+        if not repeatable(saved.attempts, repeat.attempt_id, valid=saved.valid):
             message = (
                 f"A repeat of case {{}} names attempt {repeat.attempt_id}, which isn't an attempt"
                 " of the case whose request may have been charged and that didn't succeed, or"

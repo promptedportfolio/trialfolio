@@ -512,6 +512,29 @@ def test_a_repeat_of_a_stale_backtest_completes_its_case_with_its_tables_written
     assert lab.server.requests()[-1] == BACKTEST
 
 
+def test_the_same_repeat_after_it_completed_its_case_repeats_nothing_and_resumes(
+    lab: Lab,
+) -> None:
+    # One confirmation, one repeat: the repeat of the flagged `value-heavy` completed it, so the
+    # same repeat, given again, as when the command is run again after an interruption, is one
+    # whose confirmation is used. It isn't refused: the attempt it names succeeded, but its own
+    # response failed validation, whatever its repeat's did.
+    lab.script(ok(COMPLETE), ok(SAME_RESULTS), ok(CHANGED), ok(COMPLETE))
+    repeat = Repeat(VALUE_HEAVY, uuid.UUID(flagged(lab, lab.run())))
+    lab.script(ok(CHANGED))
+    repeated = lab.run("revisions/ranking-budget-raised.yaml", reason=RAISED, repeats=[repeat])
+    assert repeated.error is None
+    sent = lab.server.requests()
+
+    again = lab.run("revisions/ranking-budget-raised.yaml", reason=RAISED, repeats=[repeat])
+
+    assert again.error is None
+    assert again.execution.repeats_used == (repeat,)
+    assert lab.server.requests() == sent
+    assert len(lab.attempts(VALUE_HEAVY)) == 2
+    assert outcomes(again) == ["succeeded"] * 4
+
+
 def test_a_repeat_of_a_case_whose_response_had_no_required_structure_completes_it(
     lab: Lab,
 ) -> None:

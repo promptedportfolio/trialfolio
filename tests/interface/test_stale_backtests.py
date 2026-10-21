@@ -186,6 +186,33 @@ def test_a_resumes_display_and_its_repeats_prompt_say_the_response_failed_valida
     assert {case["repeat_attempt_id"] for case in cases.values()} == {None}
 
 
+def test_the_same_command_after_its_repeat_completed_the_case_repeats_nothing_and_resumes(
+    cli: Cli, experiments: ExperimentBuilder[Outcome]
+) -> None:
+    # One confirmation, one repeat: the repeat of the flagged case completed it, so the same
+    # command again repeats nothing, says so, and resumes the rest. The attempt the option names
+    # succeeded, but its own response failed validation, whatever its repeat's did.
+    cli.ready()
+    out = cli.tmp / "experiment"
+    _, attempt = stale_value_heavy(experiments, out)
+    options = ("--revision-reason", RAISED, "--repeat", f"value-heavy:{attempt}")
+    repeated = experiments.run(
+        BUDGET_RAISED, out, *options, ranks=(RANK_UPDATED,), sends=returns_each(1)
+    )
+    assert repeated.exit_code == 0, repeated.stderr
+    received = cli.server.requests()
+
+    again = experiments.run(BUDGET_RAISED, out, *options)
+
+    assert again.exit_code == 0, again.stderr
+    assert cli.server.requests() == received
+    assert (
+        f"Case value-heavy isn't repeated: the repeat confirmed for its attempt {attempt} was made"
+        " already, and may have reached Portfolio123. The run resumes the rest of the experiment."
+    ) in again.stderr
+    assert {case["outcome"] for case in summary_cases(again).values()} == {"succeeded"}
+
+
 def test_a_case_whose_response_had_no_required_structure_awaits_a_repeat_that_completes_it(
     cli: Cli, experiments: ExperimentBuilder[Outcome]
 ) -> None:
