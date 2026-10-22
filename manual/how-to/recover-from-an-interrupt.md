@@ -45,9 +45,9 @@ A resume treats each case by its state:
 
 | State | What a resume does with it |
 |---|---|
-| **Complete:** one of its attempts succeeded, so its response was saved, even one that then failed validation | Skips it. It's never sent again. |
+| **Complete:** one of its attempts succeeded, so its response was saved, and that response passed validation | Skips it. It's never sent again. |
 | **Due:** it has no attempt, or each failed before its request could reach Portfolio123, as after a failed authentication | Sends it |
-| **Awaiting a repeat:** its request may have reached Portfolio123, and may have been charged, but none of its attempts succeeded. It's `unknown`, as after a timeout or an interrupt while waiting for Portfolio123, or `failed`, as after Portfolio123 rejected it. | Never sends it on its own. Only a [repeat](repeat-a-case.md) sends it again. |
+| **Awaiting a repeat:** its request may have reached Portfolio123, and may have been charged, but none of its attempts succeeded with a response that passed validation. It's `unknown`, as after a timeout or an interrupt while waiting for Portfolio123; `failed`, as after Portfolio123 rejected it; or `failed` with `provider.response_invalid`, after its response was saved but failed validation. | Never sends it on its own. Only a [repeat](repeat-a-case.md) sends it again. |
 
 ### After an interrupt
 

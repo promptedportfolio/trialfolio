@@ -242,8 +242,11 @@ class CaseView:
     settings: tuple[SettingsRow, ...] | tuple[SettingsRowV1_1, ...] | None
     """Its `settings.csv`'s rows, with `metrics`."""
     invalid: ErrorDetail | None
-    """The `provider.response_invalid` its succeeded attempt's response got, which left it
-    `failed` without tables."""
+    """The `provider.response_invalid` its latest succeeded attempt's response got, which left
+    it without tables, awaiting a repeat."""
+    identical_to: str | None = None
+    """With `invalid`, for a stale backtest, the `case_id` of the case before it in its session,
+    whose response it repeats (D-45)."""
 
     def __post_init__(self) -> None:
         if (self.metrics is None) != (self.settings is None):
@@ -258,11 +261,20 @@ class CaseView:
     @property
     def repeat_attempt(self) -> AttemptRecordV1_1 | AttemptRecordV1_3 | None:
         """When the case awaits a repeat, its latest possibly charged attempt, whose
-        `attempt_id` confirms the repeat; otherwise None (repeating a case)."""
-        if any(attempt.outcome == "succeeded" for attempt in self.attempts):
+        `attempt_id` confirms the repeat; otherwise None (repeating a case). A case whose
+        succeeded attempt's response failed validation awaits one, and its succeeded attempt
+        can be that attempt (D-45)."""
+        if self.invalid is None and any(a.outcome == "succeeded" for a in self.attempts):
             return None
         charged = [attempt for attempt in self.attempts if attempt.possibly_charged]
         return charged[-1] if charged else None
+
+    @property
+    def invalid_success(self) -> bool:
+        """Whether the case awaits a repeat because its latest possibly charged attempt
+        succeeded, and its response failed validation, which `invalid` gives (D-45)."""
+        attempt = self.repeat_attempt
+        return attempt is not None and attempt.outcome == "succeeded"
 
 
 @dataclass(frozen=True)

@@ -28,7 +28,7 @@ from typing import cast
 import pytest
 
 from tests.support import canaries
-from tests.support.clock import FixedClock
+from tests.support.clock import FixedClock, no_wait
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from tests.support.snapshot_builder import naming
 from tests.support.storage_faults import StorageFaults
@@ -812,6 +812,7 @@ def test_a_run_copies_the_snapshots_two_files_beside_its_configuration(
             RUN_COMMAND,
             clock=FixedClock(),
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         ).run(
             content,
             lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint),
@@ -867,6 +868,7 @@ def test_a_run_is_given_its_snapshots_files_as_its_plan_has_them(
                 store,
                 RUN_COMMAND,
                 ranking_lock=tmp_path / LOCK_FILE,
+                pause=no_wait(),
             )
             with pytest.raises(ValueError):
                 execution.run(
@@ -952,6 +954,7 @@ def test_an_experiment_copies_the_snapshot_into_its_plan_and_resumes_with_it(
             command=None,
             clock=FixedClock(),
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         ).run(content, snapshot=files)
 
     assert error is None
@@ -999,6 +1002,7 @@ def test_an_experiment_copies_the_snapshot_into_its_plan_and_resumes_with_it(
             clock=FixedClock(),
             experiment=saved,
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         )
         assert resumed.run(content, snapshot=files) is None
     assert (out / "sessions" / "2" / "manifest.json").is_file()
@@ -1023,6 +1027,7 @@ def test_an_experiments_plan_whose_snapshot_record_is_missing_is_refused(
             command=None,
             clock=FixedClock(),
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         ).run(content, snapshot=read.snapshot.files)
     # An incomplete copy: the plan's snapshot.json, and every manifest, which would catch it first.
     (out / "plans" / "1" / "snapshot.json").unlink()
@@ -1150,6 +1155,7 @@ def new_experiment(tmp_path: Path, path: Path) -> Path:
             command=None,
             clock=FixedClock(),
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         ).run(content, **given)  # pyright: ignore[reportArgumentType]
     assert error is None
     shutil.rmtree(out / "sessions" / "1")

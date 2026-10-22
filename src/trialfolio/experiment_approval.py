@@ -29,7 +29,12 @@ settings, each ranking variant's change, each case's `rank_update` with its whol
 text, and the budget with each operation's documented cost, what a case's attempt costs, and, in
 a resume, the most the requests counted so far can have cost apart from the most the remaining
 ones can cost. Each case's attempt sends two requests, so the budget the display and the repeat's
-prompt count covers half as many cases (R04-T12).
+prompt count covers half as many cases (R04-T12). A resume that sends no case says so in place of
+the line that the run overwrites `ApiRankingSystem`, on a terminal or not (D-45).
+
+A case whose succeeded attempt's response failed validation awaits a repeat, which names that
+attempt, and the display and the repeat's prompt say that its response failed validation, rather
+than that its request may have been charged without succeeding (D-45).
 
 It imports the modules that read an experiment's records, which import `p123api`, so the CLI
 imports it only once `installed_versions` has checked them.
@@ -43,6 +48,7 @@ from typing import Final, TextIO
 from trialfolio.approval import (
     APPROVE_ANSWER,
     OVERWRITES,
+    SENDS_NO_CASE,
     Approval,
     budget_lines,
     counted,
@@ -56,7 +62,13 @@ from trialfolio.approval import (
     shown,
     write_shown,
 )
-from trialfolio.case_state import case_outcome, confirmation_used, described, repeatable
+from trialfolio.case_state import (
+    case_outcome,
+    confirmation_used,
+    described,
+    invalid_success,
+    repeatable,
+)
 from trialfolio.contracts.experiment_plan import (
     ExperimentPlanCase,
     ExperimentPlanCaseV1_3,
@@ -187,6 +199,12 @@ class ExperimentRun:
         remaining = max(0, budget.provider_requests - self.provider_requests)
         return sends[remaining // self.requests_per_case :]
 
+    def sends_a_case(self) -> bool:
+        """Whether this run would send a case: one is due, or to be repeated, and the remaining
+        budget covers the first of them. A run that sends none doesn't write `ApiRankingSystem`,
+        and needs no credentials."""
+        return len(self.sends()) > len(self.uncovered())
+
     def counted_credits(self) -> int | None:
         """For a plan with a ranking definition, the most the requests counted so far can have
         cost, each at its operation's documented cost in the plan: an attempt that sends a
@@ -263,14 +281,28 @@ def _so_far(saved: AnySavedCase) -> str:
         )
     attempt = saved.latest_charged
     assert attempt is not None  # a case awaiting a repeat has one
-    requests = (
-        "Its rank_update, or its backtest, may have reached Portfolio123, and may have been"
-        " charged, so it's sent again only by a repeat, which sends both again, and may be"
-        " charged again"
-        if isinstance(saved, SavedRankingCase)
-        else "Its request may have reached Portfolio123, and may have been charged, so it's sent"
-        " again only by a repeat, which may be charged again"
-    )
+    ranked = isinstance(saved, SavedRankingCase)
+    if invalid_success(saved.attempts, valid=saved.valid):
+        again = (
+            "a repeat, which sends its rank_update and its backtest again"
+            if ranked
+            else "a repeat, which sends its request again"
+        )
+        requests = (
+            "Its attempt succeeded, but its saved response failed validation, so it wasn't"
+            f" normalized, and it's sent again only by {again}, and may be charged again"
+        )
+    elif ranked:
+        requests = (
+            "Its rank_update, or its backtest, may have reached Portfolio123, and may have been"
+            " charged, so it's sent again only by a repeat, which sends both again, and may be"
+            " charged again"
+        )
+    else:
+        requests = (
+            "Its request may have reached Portfolio123, and may have been charged, so it's sent"
+            " again only by a repeat, which may be charged again"
+        )
     return f"{outcome}, after {tried}. {requests}: {_option(saved, attempt)}"
 
 
@@ -376,7 +408,8 @@ def format_experiment_plan(run: ExperimentRun) -> str:
             ),
         ]
     if isinstance(plan, PlanV1_3):
-        lines += ["", *ranking_lines(plan.ranking_source, run.snapshot)]
+        sends = experiment is None or run.sends_a_case()
+        lines += ["", *ranking_lines(plan.ranking_source, run.snapshot, sends=sends)]
     baseline = plan.cases[0]
     lines += ["", "The baseline's settings, with the provenance each value will have once sent:"]
     for row in baseline.settings:
@@ -453,7 +486,8 @@ def format_experiment_summary(run: ExperimentRun, *, full_plan_hint: bool) -> st
         )
     # After the whole budget, what's counted so far included, so it doesn't split the budget.
     if isinstance(plan, PlanV1_3):
-        lines.append(OVERWRITES)
+        sends = run.experiment is None or run.sends_a_case()
+        lines.append(OVERWRITES if sends else SENDS_NO_CASE)
     if full_plan_hint:
         lines.append("Run the command in a terminal to see the full plan.")
     return "\n".join(lines) + "\n"
@@ -521,7 +555,7 @@ def approve_experiment(
     due = any(saved.state == "due" for saved in run.cases)
     # A run whose remaining budget covers none of its sends starts none, so it needs no
     # credentials (the 0.3.0 walk-through).
-    covered = len(run.sends()) > len(run.uncovered())
+    covered = run.sends_a_case()
     return ExperimentApproval(
         approval, (*checked.confirmed, *asked), (due or bool(asked) or checked.made) and covered
     )
@@ -681,12 +715,12 @@ def _check_repeats(run: ExperimentRun, *, asks: bool) -> _CheckedRepeats:  # noq
                 raise _not_repeated(run, problem.format(key), problem.format(case_id))
             to_ask.append((saved, latest))
             continue
-        named = [a for a in saved.attempts if a.attempt_id == option.attempt_id]
-        if not named or not repeatable(named[0]):
+        if not repeatable(saved.attempts, option.attempt_id, valid=saved.valid):
             problem = (
                 "The repeat of case {} names attempt {}, which isn't an attempt of the case whose"
-                " request may have been charged and that didn't succeed. A repeat names the"
-                " case's latest attempt whose request may have been charged."
+                " request may have been charged and that didn't succeed, or succeeded with a"
+                " response that failed validation. A repeat names the case's latest attempt whose"
+                " request may have been charged."
             )
             raise _not_repeated(
                 run,
@@ -748,10 +782,16 @@ def _ask_repeats(
     costs, and asks the user to type `repeat`. Returns the repeats of the attempts it showed."""
     lines = ["", "Repeat these cases? Each one's request may already have been charged:"]
     for saved, attempt in cases:
-        code = "" if attempt.error_code is None else f" ({attempt.error_code})"
+        if attempt.outcome == "succeeded":  # its response failed validation (D-45)
+            state = (
+                "succeeded, but its saved response failed validation (provider.response_invalid)"
+            )
+        else:
+            code = "" if attempt.error_code is None else f" ({attempt.error_code})"
+            state = f"is {attempt.outcome}{code}"
         lines.append(
             f"  {saved.case.case_key} ({saved.case.case_id}): its attempt {attempt.attempt_id}"
-            f" is {attempt.outcome}{code}, and its request may already have been charged."
+            f" {state}, and its request may already have been charged."
         )
     budget = run.plan.budget
     remaining = max(0, budget.provider_requests - run.provider_requests)

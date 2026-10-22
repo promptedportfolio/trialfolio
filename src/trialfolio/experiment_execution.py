@@ -22,7 +22,7 @@ empty:
    every later case would end the same way (D-32), and after a cancellation.
 5. It writes each succeeded case's tables, `cases/<case_id>/normalized/metrics.csv` and
    `settings.csv`, right after its attempt record. A response that fails validation leaves the
-   case `failed`, with `provider.response_invalid`, and the session goes on.
+   case `failed`, with `provider.response_invalid`, awaiting a repeat, and the session goes on.
 6. It writes the session's report, `sessions/1/report.html`, and then its manifest,
    `sessions/1/manifest.json`, last.
 
@@ -60,9 +60,14 @@ steps, with these differences (sending a definition, running an experiment):
   baseline named by a snapshot, it's the snapshot's `definition.xml`, and the snapshot's
   record, `snapshot.json`, follows it, each from the bytes read and checked when the
   configuration was validated (reading a snapshot).
-- Step 4's attempts (`RankingExperimentAttempt`) each send the case's `rank_update`, then its
-  backtest, with start and attempt records 1.3.0. An attempt starts only when the budget covers
-  both its requests.
+- Step 4's attempts (`RankingExperimentAttempt`) each send the case's `rank_update`, then, once
+  at least 10 seconds have passed since its 200, its backtest, with start and attempt records
+  1.3.0 (D-45). An attempt starts only when the budget covers both its requests.
+- Step 5 flags a stale backtest: a case's response equal, apart from `cost` and `quotaRemaining`,
+  to the session's previous backtest of the same request after a different definition, as
+  `stale_backtests.py` gives the rule, unless the experiment is synthetic. Its response fails
+  validation, so the case is `failed`, with `provider.response_invalid`, without tables, and
+  awaits a repeat (D-45).
 - Step 5 writes `settings.csv` 1.1.0, with a weight row for each node, and step 6 experiment
   manifest 1.1.0, with the roles and source records of the files a definition adds.
 
@@ -128,6 +133,7 @@ from trialfolio.case_state import (
     described,
     described_by,
     experiment_counts,
+    invalid_success,
     latest_charged,
     outcome_code,
     repeatable,
@@ -139,7 +145,7 @@ from trialfolio.configuration import (
     experiment_original_values_v1_1,
     read_experiment_configuration_v1_1,
 )
-from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3
+from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3, SavedResponse
 from trialfolio.contracts.common import (
     AUTHENTICATION_REQUEST,
     Approval,
@@ -219,12 +225,14 @@ from trialfolio.normalization import (
     PARSER_VERSION,
     AnySettingsRows,
     RankingOriginals,
+    case_metrics_rows,
     case_tables_path,
     holds_series,
     write_case_settings,
     write_case_tables,
 )
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
+from trialfolio.pause import REAL_PAUSE, Pause
 from trialfolio.planning import (
     PlanRevision,
     PlanRevisionV1_1,
@@ -251,6 +259,7 @@ from trialfolio.report import (
     write_experiment_report,
 )
 from trialfolio.snapshots import SnapshotFiles
+from trialfolio.stale_backtests import SentBacktest, stale, stale_error
 from trialfolio.storage import LOCK_LINE, LOCK_PATH, ArtifactStore, StoredFile, published
 from trialfolio.tables import read_metrics_csv
 
@@ -598,6 +607,7 @@ class ExperimentExecution:
         reason: str | None = None,
         repeats: Sequence[Repeat] = (),
         ranking_lock: str | os.PathLike[str] | None = None,
+        pause: Pause = REAL_PAUSE,
     ) -> None:
         """Writes nothing.
 
@@ -613,7 +623,9 @@ class ExperimentExecution:
         or `plan_revision_v1_1` for an experiment with a ranking definition, built, with its
         `reason`. `repeats` are the confirmed repeats, each checked as repeating a case says.
         `ranking_lock` is the ranking lock's file, given exactly for a plan 1.3.0: a new
-        experiment takes it, and a resumed one when its session sends.
+        experiment takes it, and a resumed one when its session sends. `pause` is the wait between
+        each `rank_update`'s 200 and its backtest, under a plan 1.3.0 (D-45), which tests inject,
+        as they do the clock.
 
         Raises `TrialFolioError`:
 
@@ -621,10 +633,10 @@ class ExperimentExecution:
           synthetic, or another client for one that is;
         - with `plan.approval_required` when a repeat names no case of the plan, a case that
           isn't awaiting a repeat, or an attempt of it that isn't possibly charged, or that
-          succeeded; when a new experiment is given a reason or a repeat; when a resume of the
-          current plan is given a reason, unless it's the one the current plan recorded, which
-          resumes it; and unless `approved_hash` is the plan's hash, recomputed from its
-          contents (approval);
+          succeeded with a response that passed validation; when a new experiment is given a
+          reason or a repeat; when a resume of the current plan is given a reason, unless it's the
+          one the current plan recorded, which resumes it; and unless `approved_hash` is the
+          plan's hash, recomputed from its contents (approval);
         - with `plan.changed` when a revision isn't approved by its hash, with a reason.
 
         Raises `ValueError` when `plan` revises another without the experiment's records, or
@@ -672,6 +684,7 @@ class ExperimentExecution:
         """The configuration, as 0.4.0's reader read it, for a plan with a ranking definition."""
         self._command = command
         self._clock = clock
+        self._pause = pause
         self._progress = progress
         self._cancellation = cancellation
         self._synthetic = synthetic
@@ -708,14 +721,29 @@ class ExperimentExecution:
             {}
             if experiment is None
             else {
-                case_id: missing.invalid
+                case_id: _keyed(missing.invalid, missing, plan, experiment)
                 for case_id, missing in experiment.missing.items()
                 if missing.invalid is not None
             }
         )
-        """The `provider.response_invalid` each case's saved response got, by `case_id`: in a
-        resume, from the start, those the records check found, so the outcomes are the records'
-        before step 8 logs them, and after a failure that ends the session before it does."""
+        """The `provider.response_invalid` each case's latest succeeded attempt's saved response
+        got, by `case_id`: in a resume, from the start, those the records check found, so the
+        outcomes are the records' before step 8 logs them, and after a failure that ends the
+        session before it does. A repeat whose response passes validation removes its case."""
+        self._identical: dict[str, str] = (
+            {}
+            if experiment is None
+            else {
+                case_id: missing.identical_to
+                for case_id, missing in experiment.missing.items()
+                if missing.identical_to is not None
+            }
+        )
+        """For each case whose latest succeeded attempt is a stale backtest, the `case_id` of the
+        case whose response it repeats (D-45)."""
+        self._previous: SentBacktest | None = None
+        """The session's latest attempt that sent a definition and saved its backtest's decoded
+        response, against which the next one's is compared (D-45)."""
         self._results: list[ExperimentAttemptResult] = []
         self._current: ExperimentAttempt | RankingExperimentAttempt | None = None
         self._stopped: tuple[StopReason, TrialFolioError | None] | None = None
@@ -817,7 +845,7 @@ class ExperimentExecution:
         for case in self._plan.cases:
             attempts = self._of(case.case_id)
             latest = latest_charged(attempts)
-            if case_state(attempts) == "awaiting_repeat" and latest is not None:
+            if self._state(case.case_id) == "awaiting_repeat" and latest is not None:
                 repeats[case.case_id] = latest.attempt_id
         return repeats
 
@@ -1185,7 +1213,8 @@ class ExperimentExecution:
         self, case_id: str, missing: MissingTables, experiment: SavedExperiment
     ) -> None:
         if missing.invalid is not None:
-            self._case_invalid(case_id, missing.invalid)
+            failure = _keyed(missing.invalid, missing, self._plan, experiment)
+            self._case_invalid(case_id, failure, identical_to=missing.identical_to)
             return
         if missing.metrics_rows is not None:
             try:
@@ -1337,6 +1366,7 @@ class ExperimentExecution:
                 repeat_of=repeat_of,
                 clock=self._clock,
                 synthetic=self._synthetic,
+                pause=self._pause,
             )
         if isinstance(plan, PlanV1_1) and isinstance(case, ExperimentPlanCase):
             return ExperimentAttempt(
@@ -1378,7 +1408,11 @@ class ExperimentExecution:
         self, case: ExperimentPlanCase | ExperimentPlanCaseV1_3, result: ExperimentAttemptResult
     ) -> None:
         """Writes the case's tables from its saved response, right after its attempt record. A
-        response that fails validation leaves the case `failed`."""
+        response that fails validation leaves the case `failed`, awaiting a repeat: one the
+        installed parser can't read, as the layout's required structure needs, and a stale
+        backtest (D-45). A response that passes it makes a case awaiting a repeat complete, from
+        then, as the records read it: a failure that keeps its tables from being written leaves
+        them to a resume (an experiment's normalized tables)."""
         response = result.record.response
         if not result.recorded or response is None:
             return
@@ -1398,6 +1432,22 @@ class ExperimentExecution:
             )
             if plan.read.definition is not None:
                 ranking = RankingOriginals(weights, files["ranking_definition"])
+        content = self._store.read(response.path)
+        try:
+            stale_after = self._validated(case, result, response, content)
+        except TrialFolioError as failure:
+            if failure.code != "provider.response_invalid":
+                raise
+            self._case_invalid(case.case_id, failure)
+            return
+        if stale_after is not None:
+            failure, previous = stale_after
+            self._case_invalid(case.case_id, failure, identical_to=previous)
+            return
+        # The response passed validation, so the case's outcome and state are the records' before
+        # its tables are written, and stay so if a failure stops their writes.
+        self._invalid.pop(case.case_id, None)
+        self._identical.pop(case.case_id, None)
         try:
             tables = write_case_tables(
                 self._store,
@@ -1405,14 +1455,9 @@ class ExperimentExecution:
                 originals,
                 configuration=configuration_file,
                 response=response,
+                content=content,
                 ranking=ranking,
             )
-        except TrialFolioError as failure:
-            if failure.code != "provider.response_invalid":
-                self._keep_published_metrics(case.case_id)
-                raise
-            self._case_invalid(case.case_id, failure)
-            return
         except BaseException:
             self._keep_published_metrics(case.case_id)
             raise
@@ -1423,6 +1468,41 @@ class ExperimentExecution:
             tables.metrics_rows,
             tables.settings_rows,
         )
+
+    def _validated(
+        self,
+        case: ExperimentPlanCase | ExperimentPlanCaseV1_3,
+        result: ExperimentAttemptResult,
+        response: SavedResponse,
+        content: bytes,
+    ) -> tuple[TrialFolioError, str] | None:
+        """Checks the case's saved response, whose bytes are `content`, and raises its
+        `provider.response_invalid` when the installed parser can't read it, as the layout's
+        required structure needs. An attempt that sent a definition and saved its backtest's
+        decoded response first becomes the session's latest such attempt, whatever its structure;
+        for one with the structure, unless the experiment is synthetic, gives the stale backtest's
+        `provider.response_invalid`, and the case whose response it repeats, when it's one
+        against the one before it (`stale_backtests.py`, D-45)."""
+        previous, sent = self._previous, None
+        if isinstance(case, ExperimentPlanCaseV1_3) and response.form == "decoded":
+            files = {file.role: file.file for file in result.files}
+            sent = SentBacktest(
+                case_id=case.case_id,
+                attempt_id=result.record.attempt_id,
+                session=self._session,
+                update_request=files["rank_update_request"].artifact_id,
+                request=files["provider_request"].artifact_id,
+                response=content,
+            )
+            self._previous = sent
+        case_metrics_rows(content, case, response)
+        if sent is None or self._synthetic or previous is None or not stale(sent, previous):
+            return None
+        before = next(c for c in self._plan.cases if c.case_id == previous.case_id)
+        failure = stale_error(
+            sent, previous.case_id, key=case.case_key, previous_key=before.case_key
+        )
+        return failure, previous.case_id
 
     def _keep_published_metrics(self, case_id: str) -> None:
         """After a failed write of the case's tables, keeps the rows of its `metrics.csv` if the
@@ -1436,8 +1516,16 @@ class ExperimentExecution:
         except (OSError, TrialFolioError):
             return  # Never published, or not readable: a resume's records check reads it.
 
-    def _case_invalid(self, case_id: str, failure: TrialFolioError) -> None:
+    def _case_invalid(
+        self, case_id: str, failure: TrialFolioError, *, identical_to: str | None = None
+    ) -> None:
+        """Records that the case's latest succeeded attempt's response failed validation, and
+        logs it. `identical_to` is, for a stale backtest, the case whose response it repeats."""
         self._invalid[case_id] = failure
+        if identical_to is None:
+            self._identical.pop(case_id, None)
+        else:
+            self._identical[case_id] = identical_to
         _logger.error(
             "The case's response failed validation: %s.",
             failure.code,
@@ -1453,9 +1541,24 @@ class ExperimentExecution:
     def _outcome(self, case_id: str) -> CaseOutcome:
         return case_outcome(self._of(case_id), valid=case_id not in self._invalid)
 
+    def _state(self, case_id: str) -> Literal["complete", "due", "awaiting_repeat"]:
+        """The case's state, as the records now give it: one whose latest succeeded attempt's
+        response failed validation awaits a repeat (D-45)."""
+        return case_state(self._of(case_id), valid=case_id not in self._invalid)
+
     def _described(self, case_id: str) -> str:
         """The case's outcome, with the error code that gives it."""
         return described(self._of(case_id), valid=case_id not in self._invalid)
+
+    def _flagged(self, case_id: str) -> TrialFolioError | None:
+        """The stale backtest's `provider.response_invalid`, when it gives the case's outcome:
+        its latest possibly charged attempt is the succeeded one that's stale (D-45)."""
+        if case_id not in self._identical:
+            return None
+        valid = case_id not in self._invalid
+        if not invalid_success(self._of(case_id), valid=valid):
+            return None
+        return self._invalid.get(case_id)
 
     def _provider_said(self, case_id: str) -> str | None:
         """Portfolio123's own message in the error a case that didn't succeed is described by,
@@ -1526,6 +1629,7 @@ class ExperimentExecution:
             invalid=(
                 None if invalid is None else ErrorDetail(code=invalid.code, message=invalid.message)
             ),
+            identical_to=self._identical.get(case.case_id) if invalid is not None else None,
         )
 
     def _records_of(self, case_id: str) -> tuple[AttemptRecordV1_1 | AttemptRecordV1_3, ...]:
@@ -1562,9 +1666,14 @@ class ExperimentExecution:
         charged = (
             " A case whose request may have reached Portfolio123 is never sent again"
             " automatically: a confirmed repeat sends it."
-            if any(case_state(self._of(case.case_id)) == "awaiting_repeat" for case in missed)
+            if any(self._state(case.case_id) == "awaiting_repeat" for case in missed)
             else ""
         )
+        # A stale backtest's message says why its response failed validation, by the case's key,
+        # and its loggable message by its case_id (D-45).
+        flagged = [failure for case in missed if (failure := self._flagged(case.case_id))]
+        stale_said = "".join(f" {failure.message}" for failure in flagged)
+        stale_logged = "".join(f" {failure.log_message}" for failure in flagged)
         # Portfolio123's own text can repeat configuration values, so logs never hold it. The
         # loggable message leaves out the revision's sentence too (D-38).
         said = "".join(
@@ -1586,10 +1695,11 @@ class ExperimentExecution:
             else ""
         )
         tail = " Every planned case is accounted for in the session's manifest."
+        keys = listing(lambda c: f"`{c.case_key}`")
         return TrialFolioError(
             "execution.partial",
-            f"{lead} {listing(lambda c: f'`{c.case_key}`')}.{said}{why}{charged}{revise}{tail}",
-            f"{lead} {listing(lambda c: c.case_id)}.{why}{charged}{tail}",
+            f"{lead} {keys}.{said}{stale_said}{why}{charged}{revise}{tail}",
+            f"{lead} {listing(lambda c: c.case_id)}.{stale_logged}{why}{charged}{tail}",
         )
 
     def _build_manifest(
@@ -1686,8 +1796,8 @@ class ExperimentExecution:
         ]
         for attempt in self._attempts:
             listed.extend(self._attempt_file(file, attempt) for file in attempt.files)
-            tables = self._tables.get(attempt.case_id)
-            if tables is not None and attempt.outcome == "succeeded":
+            tables = self._tables_of(attempt)
+            if tables is not None:
                 metrics, settings = tables.metrics, tables.settings
                 listed.append(self._earlier(metrics.path) or self._listed("metrics", metrics))
                 listed.append(self._earlier(settings.path) or self._listed("settings", settings))
@@ -1716,8 +1826,8 @@ class ExperimentExecution:
         ]
         for attempt in self._attempts:
             listed.extend(self._attempt_file_v1_1(file, attempt) for file in attempt.files)
-            tables = self._tables.get(attempt.case_id)
-            if tables is not None and attempt.outcome == "succeeded":
+            tables = self._tables_of(attempt)
+            if tables is not None:
                 metrics, settings = tables.metrics, tables.settings
                 listed.append(
                     self._earlier_v1_1(metrics.path) or self._listed_v1_1("metrics", metrics)
@@ -1730,10 +1840,19 @@ class ExperimentExecution:
             listed.append(self._listed_v1_1("session_record", self._session_record))
         return tuple(listed)
 
+    def _tables_of(self, attempt: _Attempt) -> _Tables | None:
+        """The tables drawn from `attempt`'s response: its case's, when it's the case's latest
+        succeeded attempt. An earlier one's response failed validation (D-45)."""
+        tables = self._tables.get(attempt.case_id)
+        if tables is None or attempt.outcome != "succeeded":
+            return None
+        succeeded = [a for a in self._of(attempt.case_id) if a.outcome == "succeeded"]
+        return tables if succeeded[-1] is attempt else None
+
     def _attempt_file_v1_1(self, file: AttemptFile, attempt: _Attempt) -> ExperimentArtifactV1_1:
         """The file as experiment manifest 1.1.0 lists it, by `_attempt_file`'s rule."""
         earlier = self._earlier_v1_1(file.file.path)
-        tables = self._tables.get(attempt.case_id)
+        tables = self._tables_of(attempt)
         if earlier is not None and not (
             file.role == "provider_response"
             and tables is not None
@@ -1748,7 +1867,7 @@ class ExperimentExecution:
         parser wrote since, and which its source record then names (which parser wrote them)."""
         role = _ROLES_V1_0[file.role]
         earlier = self._earlier(file.file.path)
-        tables = self._tables.get(attempt.case_id)
+        tables = self._tables_of(attempt)
         if earlier is not None and not (
             role == "provider_response"
             and tables is not None
@@ -1970,6 +2089,30 @@ def _recorded_plan(saved: SavedPlan) -> _RecordedPlan:
     )
 
 
+def _keyed(
+    failure: TrialFolioError,
+    missing: MissingTables,
+    plan: PlanV1_1 | PlanV1_3,
+    experiment: SavedExperiment,
+) -> TrialFolioError:
+    """`failure`, the `provider.response_invalid` the records check found for a case's response,
+    as the session running `plan` reports it: a stale backtest's message is made again with the
+    keys `plan` gives the case and the one before it, since a revision can rename a case's key
+    and keep its attempts. A case that `plan` retired keeps its key in the plan the attempt ran
+    under, which the attempt before it in its session ran under too (D-45)."""
+    previous = missing.identical_to
+    if previous is None:
+        return failure
+    keys = {case.case_id: case.case_key for case in plan.cases}
+    ran_under = experiment.saved_plan(missing.attempt.plan)
+
+    def key(case_id: str) -> str:
+        return keys[case_id] if case_id in keys else ran_under.case(case_id).case_key
+
+    attempt = missing.attempt
+    return stale_error(attempt, previous, key=key(attempt.case_id), previous_key=key(previous))
+
+
 def _ranking_source(plan: PlanV1_1 | PlanV1_3) -> RankingSource | None:
     """A plan's `ranking_source`: where its ranking definition came from, or None for a plan
     without one."""
@@ -2001,12 +2144,12 @@ def _confirmed(
                 " Portfolio123, so running the experiment sends it without one."
             )
             raise _not_repeated(message.format(key), message.format(saved.case.case_id))
-        named = [a for a in saved.attempts if a.attempt_id == repeat.attempt_id]
-        if not named or not repeatable(named[0]):
+        if not repeatable(saved.attempts, repeat.attempt_id, valid=saved.valid):
             message = (
                 f"A repeat of case {{}} names attempt {repeat.attempt_id}, which isn't an attempt"
-                " of the case whose request may have been charged and that didn't succeed. A"
-                " repeat names the case's latest attempt whose request may have been charged."
+                " of the case whose request may have been charged and that didn't succeed, or"
+                " succeeded with a response that failed validation. A repeat names the case's"
+                " latest attempt whose request may have been charged."
             )
             raise _not_repeated(message.format(key), message.format(saved.case.case_id))
         if confirmation_used(saved.attempts, repeat.attempt_id):

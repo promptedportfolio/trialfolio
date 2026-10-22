@@ -24,12 +24,14 @@ each file once, and checks them:
   attempt record references has the `artifact_id` it records; each request was sent with a token
   an attempt of its session obtained, which no 401 or 403 had dropped since; and an attempt that
   follows a possibly charged attempt of its case names the latest one in `repeat_of`, and no
-  other attempt names one.
+  other attempt names one. An attempt follows a succeeded attempt of its case only when that
+  attempt's response failed validation, as below, so the case awaited a repeat (D-45).
 - **The tables,** in `cases/<case_id>/normalized/`: only a case with a succeeded attempt has
-  them, and `settings.csv` never alone; each reads back as a valid table, labeled with the case's
-  `case_id`, and drawn from that attempt's saved response and the configuration of the plan it
-  ran under; and a `metrics.csv` the latest manifest doesn't list is exactly what the installed
-  parser writes from that response.
+  them, and `settings.csv` never alone; they're drawn from its latest succeeded attempt, its last
+  attempt; each reads back as a valid table, labeled with the case's `case_id`, and drawn from
+  that attempt's saved response and the configuration of the plan it ran under; and a
+  `metrics.csv` the latest manifest doesn't list is exactly what the installed parser writes from
+  that response.
 
 An attempt with a start record and no attempt record is `running`, and one whose only record is
 its authentication record stopped before its send. `SavedExperimentAttempt` reads each as the
@@ -38,10 +40,20 @@ one, possibly charged either way, and the second `failed`, not possibly charged,
 `completed_record` gives the attempt record step 8 writes. The case states, and the budget's
 counts, read them the same way, by the rules in `case_state.py`, which the executor shares.
 
-The check also prepares the tables a stopped run didn't write: for each case with a succeeded
-attempt and no `settings.csv`, the rows its `metrics.csv` will hold, from the response's bytes the
-check read, or that the response fails validation, and the original values from its plan's
-configuration. So the resume writes them without reading anything again.
+The check also prepares the tables a stopped run didn't write: for each case whose latest
+succeeded attempt has no `settings.csv`, the rows its `metrics.csv` will hold, from the response's
+bytes the check read, or that the response fails validation, and the original values from its
+plan's configuration. So the resume writes them without reading anything again.
+
+**Whether a response passes validation** is found, for a succeeded attempt whose case has no
+tables drawn from it, as its session found it: the installed parser reads it, as the layout's
+required structure needs; and, in an experiment that isn't synthetic, an attempt that sent a
+definition isn't a stale backtest, by the rule in `stale_backtests.py`, which the executor
+shares, against its session's previous attempt that sent a definition and saved its backtest's
+decoded response, in the session's order. So a resume, and the plan display, read a case flagged
+in a session that stopped before its manifest as that session flagged it, and never write its
+tables. A case whose tables are drawn from its latest succeeded attempt passed validation when
+they were written, and isn't read again.
 
 From 0.4.0, read with `ranking`, it also reads an experiment with a ranking definition (release
 0.4.0's R04-T09): plans 1.3.0, `experiment.json` 1.1.0, experiment manifests 1.1.0, start and
@@ -207,6 +219,7 @@ from trialfolio.record_checks import (
     named,
 )
 from trialfolio.snapshots import SnapshotFiles
+from trialfolio.stale_backtests import SentBacktest, stale, stale_error
 from trialfolio.storage import LOCK_PATH, ArtifactStore, StoredFile
 from trialfolio.tables import (
     metrics_csv,
@@ -801,7 +814,11 @@ class MissingTables:
     """The rows the installed parser writes to `metrics.csv` from the response, when the case
     has none yet; None when it has, or when the response fails validation."""
     invalid: TrialFolioError | None
-    """The `provider.response_invalid` the response gets, when the case has no `metrics.csv`."""
+    """The `provider.response_invalid` the response gets, when the case has no `metrics.csv`:
+    the installed parser can't read it, or it's a stale backtest (D-45)."""
+    identical_to: str | None = None
+    """For a stale backtest, the `case_id` of the case whose response it repeats: the case of its
+    session's previous attempt that sent a definition and saved its backtest's response."""
 
 
 class _CaseRecords:
@@ -813,8 +830,9 @@ class _CaseRecords:
 
     @property
     def state(self) -> CaseState:
-        """`complete`, `due`, or `awaiting_repeat`, by `case_state`."""
-        return case_state(self.attempts)
+        """`complete`, `due`, or `awaiting_repeat`, by `case_state`: a case whose succeeded
+        attempt's response failed validation awaits a repeat (D-45)."""
+        return case_state(self.attempts, valid=self.valid)
 
     @property
     def latest_charged(self) -> SavedExperimentAttempt | None:
@@ -835,8 +853,8 @@ class SavedCase(_CaseRecords):
     attempts: tuple[SavedExperimentAttempt, ...]
     """Every attempt of the case, under any plan, by session and then sequence."""
     valid: bool
-    """Whether its succeeded attempt's response passed validation, or will once a resume writes
-    its tables, when it has one."""
+    """Whether its latest succeeded attempt's response passed validation, or will once a resume
+    writes its tables, when it has one."""
 
 
 @dataclass(frozen=True)
@@ -947,9 +965,10 @@ class SavedExperiment:
         )
 
     def valid(self, case_id: str) -> bool:
-        """Whether the case's succeeded attempt's response passed validation, or will pass it
-        when a resume writes its tables: it has `metrics.csv`, or the installed parser reads its
-        response. True for a case without a succeeded attempt."""
+        """Whether the case's latest succeeded attempt's response passed validation, or will pass
+        it when a resume writes its tables: it has `metrics.csv`, or the installed parser reads
+        its response, and it isn't a stale backtest. True for a case without a succeeded
+        attempt."""
         missing = self.missing.get(case_id)
         return missing is None or missing.invalid is None
 
@@ -1028,7 +1047,8 @@ def read_experiment(store: ArtifactStore, *, ranking: bool = False) -> SavedExpe
         _check_manifest(manifest, plans, synthetic=synthetic)
     attempts = _attempts(reader, plans, {record.session for record in sessions})
     _check_authentication(attempts)
-    _check_repeats(attempts)
+    verdicts = _Verdicts(plans, attempts, synthetic=synthetic)
+    _check_repeats(attempts, verdicts)
     listed: dict[str, AnyArtifact] = (
         {} if manifest is None else {a.path: a for a in manifest.artifacts}
     )
@@ -1039,7 +1059,7 @@ def read_experiment(store: ArtifactStore, *, ranking: bool = False) -> SavedExpe
         if manifest is None or record.session > manifest.session
     )
     tables = _tables(reader, plans, attempts, listed, since)
-    missing = _missing(plans, attempts, tables)
+    missing = _missing(plans, attempts, tables, verdicts)
     return SavedExperiment(
         plans=tuple(plans),
         sessions=tuple(sessions),
@@ -1954,19 +1974,21 @@ def _token_dropped(attempt: SavedExperimentAttempt) -> bool:
     )
 
 
-def _check_repeats(attempts: Sequence[SavedExperimentAttempt]) -> None:
+def _check_repeats(attempts: Sequence[SavedExperimentAttempt], verdicts: "_Verdicts") -> None:
     """An attempt that follows a possibly charged attempt of its case, by session and then
     sequence, names the latest such attempt in `repeat_of`, and no other attempt names one. No
-    attempt follows its case's succeeded attempt: a complete case is never sent again."""
+    attempt follows its case's succeeded attempt whose response passed validation, as `verdicts`
+    finds it: a complete case is never sent again. One whose response failed validation awaits a
+    repeat, so a repeat of it follows it (D-45)."""
     by_case: dict[str, list[SavedExperimentAttempt]] = {}
     for attempt in attempts:
         by_case.setdefault(attempt.case_id, []).append(attempt)
     for group in by_case.values():
         latest: SavedExperimentAttempt | None = None
-        succeeded = False
+        succeeded: SavedExperimentAttempt | None = None
         for attempt in group:
             directory = named(attempt.directory + "/")
-            if succeeded:
+            if succeeded is not None and verdicts.judge(succeeded).error is None:
                 raise _refused(
                     f"{directory} follows its case's succeeded attempt, and a complete case is"
                     " never sent again."
@@ -1984,7 +2006,101 @@ def _check_repeats(attempts: Sequence[SavedExperimentAttempt]) -> None:
                 )
             if attempt.possibly_charged:
                 latest = attempt
-            succeeded = attempt.outcome == "succeeded"
+            succeeded = attempt if attempt.outcome == "succeeded" else None
+
+
+@dataclass(frozen=True)
+class _Verdict:
+    """Whether a succeeded attempt's response passed validation, as its session found it."""
+
+    rows: tuple[MetricsRow, ...] | None
+    """The rows the installed parser writes to `metrics.csv` from it, when it passed."""
+    error: TrialFolioError | None
+    """Its `provider.response_invalid`, when it didn't."""
+    identical_to: str | None = None
+    """For a stale backtest, the `case_id` of the case whose response it repeats."""
+
+
+class _Verdicts:
+    """Whether each succeeded attempt's response passes validation, found as its session found
+    it, once, when a check asks: the installed parser reads it, as the layout's required
+    structure needs, and, in an experiment that isn't synthetic, an attempt that sent a definition
+    isn't a stale backtest against its session's previous attempt that sent one and saved its
+    backtest's decoded response (`stale_backtests.py`, D-45)."""
+
+    def __init__(
+        self,
+        plans: Sequence[SavedPlan],
+        attempts: Sequence[SavedExperimentAttempt],
+        *,
+        synthetic: bool,
+    ) -> None:
+        self._plans = {saved.number: saved for saved in plans}
+        self._attempts = attempts
+        self._synthetic = synthetic
+        self._found: dict[uuid.UUID, _Verdict] = {}
+
+    def judge(self, attempt: SavedExperimentAttempt) -> _Verdict:
+        """The verdict on `attempt`'s saved response: a succeeded attempt's, or a `running` one's
+        that step 8 records as succeeded."""
+        found = self._found.get(attempt.attempt_id)
+        if found is None:
+            found = self._judged(attempt)
+            self._found[attempt.attempt_id] = found
+        return found
+
+    def _judged(self, attempt: SavedExperimentAttempt) -> _Verdict:
+        response, content = cast("tuple[SavedResponse, bytes]", attempt.response)
+        saved = self._plans[attempt.plan]
+        case = saved.case(attempt.case_id)
+        try:
+            rows = case_metrics_rows(content, case, response)
+        except TrialFolioError as error:
+            return _Verdict(None, error)
+        sent = _sent(attempt)
+        if self._synthetic or sent is None:
+            return _Verdict(rows, None)
+        previous = self._previous(attempt)
+        if previous is None or not stale(sent, _sent(previous)):
+            return _Verdict(rows, None)
+        before = self._plans[previous.plan].case(previous.case_id)
+        error = stale_error(sent, previous.case_id, key=case.case_key, previous_key=before.case_key)
+        return _Verdict(None, error, previous.case_id)
+
+    def _previous(self, attempt: SavedExperimentAttempt) -> SavedExperimentAttempt | None:
+        """Its session's previous attempt, in the session's order, that sent a definition and
+        saved its backtest's decoded response."""
+        earlier = [
+            other
+            for other in self._attempts
+            if other.session == attempt.session
+            and other.sequence < attempt.sequence
+            and _sent(other) is not None
+        ]
+        return earlier[-1] if earlier else None
+
+
+def _sent(attempt: SavedExperimentAttempt) -> SentBacktest | None:
+    """The attempt as the rule of a stale backtest reads it, when it sent a definition and saved
+    its backtest's decoded response: the response its attempt record references, or, for a
+    `running` attempt, the one its directory holds."""
+    if attempt.version != "1.3.0" or attempt.response is None:
+        return None
+    response, content = attempt.response
+    if response.form != "decoded":
+        return None
+    files = {file.role: file.file for file in attempt.files}
+    update, request = files.get("rank_update_request"), files.get("provider_request")
+    if update is None or request is None:
+        return None
+    return SentBacktest(
+        case_id=attempt.case_id,
+        attempt_id=attempt.attempt_id,
+        session=attempt.session,
+        update_request=update.artifact_id,
+        request=request.artifact_id,
+        response=content,
+    )
 
 
 def _tables(
@@ -2006,6 +2122,11 @@ def _tables(
             settings_path = case_tables_path(case_id, SETTINGS_PATH)
             raise _refused(f"{named(settings_path)} is there without its metrics.csv.")
         attempt = _succeeded(attempts, case_id)
+        if attempt is not [a for a in attempts if a.case_id == case_id][-1]:
+            raise _refused(
+                f"{named(f'cases/{case_id}/')} has normalized tables, but an attempt follows the"
+                " succeeded attempt they're drawn from, and a complete case is never sent again."
+            )
         saved = numbered[attempt.plan]
         metrics, metrics_rows, parser = _metrics(
             reader, saved.case(case_id), attempt, listed, since
@@ -2024,7 +2145,8 @@ def _tables(
 
 
 def _succeeded(attempts: Sequence[SavedExperimentAttempt], case_id: str) -> SavedExperimentAttempt:
-    """The succeeded attempt of a case that has normalized tables, as only such a case does."""
+    """The latest succeeded attempt of a case that has normalized tables, as only such a case
+    does: the one they're drawn from. Any earlier one's response failed validation (D-45)."""
     succeeded = [
         a
         for a in attempts
@@ -2034,8 +2156,7 @@ def _succeeded(attempts: Sequence[SavedExperimentAttempt], case_id: str) -> Save
         raise _refused(
             f"{named(f'cases/{case_id}/')} has normalized tables, but no succeeded attempt."
         )
-    (attempt,) = succeeded
-    return attempt
+    return succeeded[-1]
 
 
 def _metrics(
@@ -2185,33 +2306,36 @@ def _missing(
     plans: Sequence[SavedPlan],
     attempts: Sequence[SavedExperimentAttempt],
     tables: Mapping[str, SavedTables],
+    verdicts: _Verdicts,
 ) -> dict[str, MissingTables]:
-    """For each case whose succeeded attempt has no `settings.csv`, what a resume writes: the
-    response's rows, read from the bytes the check read, and its plan's original values, and,
-    for a case of a plan 1.3.0, its weight rows' originals."""
+    """For each case whose latest succeeded attempt has no `settings.csv`, what a resume writes:
+    the response's rows, read from the bytes the check read, and its plan's original values, and,
+    for a case of a plan 1.3.0, its weight rows' originals; or, for one without `metrics.csv`
+    either, that its response fails validation, as `verdicts` finds it: a stale backtest's
+    included (D-45)."""
     numbered = {saved.number: saved for saved in plans}
-    missing: dict[str, MissingTables] = {}
+    latest: dict[str, SavedExperimentAttempt] = {}
     for attempt in attempts:
-        saved_tables = tables.get(attempt.case_id)
-        if attempt.outcome != "succeeded" or (
-            saved_tables is not None and saved_tables.settings is not None
-        ):
+        if attempt.outcome == "succeeded":
+            latest[attempt.case_id] = attempt
+    missing: dict[str, MissingTables] = {}
+    for case_id, attempt in latest.items():
+        saved_tables = tables.get(case_id)
+        if saved_tables is not None and saved_tables.settings is not None:
             continue
         response, content = cast("tuple[SavedResponse, bytes]", attempt.response)
         saved = numbered[attempt.plan]
-        case = saved.case(attempt.case_id)
+        case = saved.case(case_id)
         rows: tuple[MetricsRow, ...] | None = None
-        invalid: TrialFolioError | None = None
+        verdict = _Verdict(None, None)
         if saved_tables is None:
-            try:
-                rows = case_metrics_rows(content, case, response)
-            except TrialFolioError as error:
-                invalid = error
+            verdict = verdicts.judge(attempt)
+            rows = verdict.rows
         originals: Mapping[str, tuple[str, str]] = {}
         ranking: RankingOriginals | None = None
-        if invalid is None:
+        if verdict.error is None:
             originals, ranking = _originals(saved, case.case_key)
-        missing[attempt.case_id] = MissingTables(
+        missing[case_id] = MissingTables(
             attempt=attempt,
             case=case,
             configuration=saved.configuration,
@@ -2220,7 +2344,8 @@ def _missing(
             response=response,
             content=content,
             metrics_rows=rows,
-            invalid=invalid,
+            invalid=verdict.error,
+            identical_to=verdict.identical_to,
         )
     return missing
 

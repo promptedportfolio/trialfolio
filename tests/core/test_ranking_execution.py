@@ -26,8 +26,8 @@ from pathlib import Path
 import pytest
 
 from tests.support import canaries
-from tests.support.clock import FixedClock
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.clock import FixedClock, no_wait
+from tests.support.fake_portfolio123 import FakePortfolio123, Reply, distinct
 from tests.support.storage_faults import StorageFaults
 from trialfolio.configuration import (
     read_experiment_configuration,
@@ -172,6 +172,7 @@ def run_screen(
             COMMAND,
             clock=FixedClock(),
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         ).run(
             content,
             lambda: P123ScreenBacktestClient(
@@ -218,6 +219,7 @@ def run_experiment(
             clock=FixedClock(),
             cancellation=cancellation,
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         )
         error = execution.run(content, definition=definition)
     received = tuple(r.request for r in server.received[before:])
@@ -546,7 +548,13 @@ def test_a_second_interrupt_at_the_attempt_record_says_what_each_request_did(
     store.fail_before("attempt.json", KeyboardInterrupt())
     credentials = Credentials(canaries.API_ID, canaries.API_KEY)
     execution = Execution(
-        plan, plan.plan_hash, "option", store, COMMAND, ranking_lock=tmp_path / LOCK_FILE
+        plan,
+        plan.plan_hash,
+        "option",
+        store,
+        COMMAND,
+        ranking_lock=tmp_path / LOCK_FILE,
+        pause=no_wait(),
     )
     try:
         with pytest.raises(KeyboardInterrupt):
@@ -578,6 +586,7 @@ def test_the_core_writes_a_synthetic_run_with_the_demos_client(tmp_path: Path) -
             None,
             clock=FixedClock(),
             ranking_lock=lock,
+            pause=no_wait(),
         ).run(
             content, lambda: SyntheticScreenBacktestClient(response_bytes()), definition=definition
         )
@@ -624,6 +633,7 @@ def test_a_run_without_a_command_sends_nothing_with_a_client_that_isnt_the_demos
             None,
             clock=FixedClock(),
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         )
         with pytest.raises(ValueError, match="demo's"):
             execution.run(
@@ -688,9 +698,11 @@ def test_a_screen_run_without_a_definition_is_refused_one(tmp_path: Path) -> Non
 
 
 def script_experiment(server: FakePortfolio123, cases: int) -> None:
+    """Each case's `rank_update` gets a 200, and its backtest a response of its own, so none is a
+    stale backtest (D-45)."""
     server.reply("/auth", authenticated())
     server.reply("/rank", *(updated() for _ in range(cases)), method="POST")
-    server.reply("/screen/backtest", *(complete() for _ in range(cases)))
+    server.reply("/screen/backtest", *distinct(*(complete().body for _ in range(cases))))
 
 
 def test_each_case_of_an_experiment_writes_its_definition_then_backtests(
@@ -893,7 +905,7 @@ def test_after_a_401_to_a_rank_update_the_next_case_authenticates_again(
 ) -> None:
     server.reply("/auth", authenticated(), authenticated())
     server.reply("/rank", Reply(401, b""), *(updated() for _ in range(3)), method="POST")
-    server.reply("/screen/backtest", *(complete() for _ in range(3)))
+    server.reply("/screen/backtest", *distinct(*(complete().body for _ in range(3))))
 
     ran = run_experiment(tmp_path, server)
 
@@ -1131,6 +1143,7 @@ def test_the_core_writes_a_synthetic_experiment_with_the_demos_client(tmp_path: 
             command=None,
             clock=FixedClock(),
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         ).run(content, definition=definition)
 
     assert error is None
@@ -1205,6 +1218,7 @@ def test_an_experiment_is_given_its_definition_as_the_plan_has_it(tmp_path: Path
             SyntheticScreenBacktestClient(response_bytes()),
             command=None,
             ranking_lock=tmp_path / LOCK_FILE,
+            pause=no_wait(),
         )
 
     # Another formula, so the weights' rules still hold, and only its plan differs.
@@ -1233,6 +1247,7 @@ def test_an_experiment_without_a_definition_is_refused_one_and_the_ranking_lock(
             SyntheticScreenBacktestClient(response_bytes()),
             command=None,
             ranking_lock=lock,
+            pause=no_wait(),
         )
 
     with pytest.raises(ValueError, match="only an experiment with a ranking definition"):

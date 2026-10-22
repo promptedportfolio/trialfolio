@@ -521,6 +521,8 @@ def test_a_failed_authentication_is_counted_and_sends_nothing(experiments: Exper
 def test_a_response_that_fails_validation_leaves_its_case_failed_without_tables(
     experiments: Experiments,
 ) -> None:
+    # From D-45, such a case awaits a repeat, which names its succeeded attempt: 0.3.0 had read
+    # it as complete, so this test said `execution.partial` gave no repeat for it.
     experiments.server.reply("/auth", AUTHENTICATED)
     invalid = Reply(200, (RESPONSES / "invalid-structure.json").read_bytes())
     experiments.server.reply("/screen/backtest", complete(), invalid)
@@ -528,14 +530,16 @@ def test_a_response_that_fails_validation_leaves_its_case_failed_without_tables(
     executed = experiments.run("default-only.yaml")
 
     _, default = executed.plan.cases
-    assert executed.record(default.case_id).outcome == "succeeded"
+    record = executed.record(default.case_id)
+    assert record.outcome == "succeeded"
     assert outcomes(executed) == ["succeeded", "failed"]
     assert not (executed.out / "cases" / default.case_id / "normalized").exists()
     error = executed.error
     assert error is not None
     assert f"`{default.case_key}`, failed (provider.response_invalid)" in error.message
-    assert "a confirmed repeat sends it" not in error.message
+    assert "a confirmed repeat sends it" in error.message
     assert executed.manifest.counts.attempts.succeeded == 2
+    assert executed.execution.repeat_attempts == {default.case_id: record.attempt_id}
 
 
 # Each case's tables

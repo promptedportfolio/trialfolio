@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Final, Protocol
 
 from tests.support import canaries, launcher
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.fake_portfolio123 import FakePortfolio123, Reply, distinct
 from trialfolio.configuration import read_experiment_configuration_v1_1
 from trialfolio.experiment_records import read_experiment
 from trialfolio.planning import build_experiment_plan_v1_1, installed_versions, plan_revision_v1_1
@@ -72,6 +72,13 @@ def experiment_config(name: str) -> Path:
 def returns(name: str = "complete.json") -> Reply:
     """A 200 whose body is the response fixture `name`."""
     return Reply(200, (RESPONSES / name).read_bytes())
+
+
+def returns_each(count: int, name: str = "complete.json") -> tuple[Reply, ...]:
+    """`count` 200s for `count` cases' backtests, each the response fixture `name`, with a member
+    of its own that no layout reads, so none is the previous case's response, which would flag a
+    case of an experiment with a ranking definition as a stale backtest (D-45)."""
+    return distinct(*((RESPONSES / name).read_bytes(),) * count)
 
 
 def plan_hash(config: Path, out: Path) -> str:

@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import canaries
-from tests.support.clock import FixedClock
+from tests.support.clock import FixedClock, no_wait
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from trialfolio.configuration import (
     read_experiment_configuration_v1_1,
@@ -430,6 +430,7 @@ def test_a_new_experiment_holds_the_lock_from_before_its_claim_until_it_ends(
             command=None,
             clock=FixedClock(),
             ranking_lock=lock,
+            pause=no_wait(),
         ).run(content, definition=definition)
 
     assert error is None
@@ -521,4 +522,5 @@ def test_a_run_without_a_definition_takes_no_lock(tmp_path: Path) -> None:
             LocalArtifactStore(tmp_path / "x"),
             COMMAND,
             ranking_lock=lock,
+            pause=no_wait(),
         )

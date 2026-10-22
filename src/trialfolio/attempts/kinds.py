@@ -14,8 +14,11 @@ and its token (`_SessionAttempt`).
 - **`ended_at`** is the clock's time when the attempt ends, or its start time when the clock
   reads earlier, as after the wall clock moved backward during the attempt, so the attempt record
   can still be written.
-- **Logs.** An attempt logs its start, and its `rank_update`'s, as `trialfolio.attempts`, as its
-  ending policy logs its end (docs/refactoring.md, decision 11).
+- **Logs.** An attempt logs its start, its `rank_update`'s, and the pause before its backtest, as
+  `trialfolio.attempts`, as its ending policy logs its end (docs/refactoring.md, decision 11).
+- **The pause (D-45).** An attempt that sends a definition waits, after its `rank_update`'s 200,
+  until at least 10 seconds have passed on a monotonic clock, before it writes its backtest's
+  request and start record, and sends the backtest. The wait is injected, as the clock is.
 """
 
 import logging
@@ -68,6 +71,7 @@ from trialfolio.contracts.plan import Plan, PlanV1_2
 from trialfolio.contracts.ranking_snapshot import RankingSnapshotPlan
 from trialfolio.errors import TrialFolioError
 from trialfolio.manifests import model_json, utc
+from trialfolio.pause import REAL_PAUSE, UPDATE_PAUSE_SECONDS, Pause
 from trialfolio.planning import check_approval
 from trialfolio.provider import (
     ProviderError,
@@ -229,6 +233,7 @@ class _AttemptBase[
             else attempt_directory(case_id, attempt_id)
         )
         self._files = AttemptFiles(store, self._directory)
+        self._synthetic = synthetic
         self._ending = AttemptEnding(
             self._files,
             self._log_fields,
@@ -330,13 +335,15 @@ class _AttemptBase[
         client: ScreenBacktestClient,
         params: tuple[dict[str, object], dict[str, object]],
         write_start: Callable[[RankingOperation], None],
+        pause: Pause,
     ) -> None:
         """An authenticated attempt's sends of a definition (sending a definition): writes the
         `rank_update`'s request and its update record, sends it, and saves its response; then,
-        only after a 200 the wrapper decoded, whose response was saved, writes the backtest's
-        request and start record, sends it, and saves its response. `write_start` writes the start
-        record of the operation it's given, the last write before its send. `params` are the two
-        requests'."""
+        only after a 200 the wrapper decoded, whose response was saved, waits until at least 10
+        seconds have passed since that 200 arrived, on `pause`'s monotonic clock (D-45), writes
+        the backtest's request and start record, sends it, and saves its response. A synthetic
+        attempt, which sends nothing, doesn't wait. `write_start` writes the start record of the
+        operation it's given, the last write before its send. `params` are the two requests'."""
         update, backtest = params
         self._files.write_rank_update_request(update)
         write_start("rank_update")
@@ -345,12 +352,31 @@ class _AttemptBase[
             extra=self._log_fields("attempt.rank_update.started"),
         )
         response = client.rank_update(update)
+        received = pause.monotonic()
         self._files.save_rank_update(response)
         if isinstance(response, UndecodedResponse):
             raise _undecoded_update()
+        if not self._synthetic:
+            self._wait_before_backtest(pause, received)
         self._files.write_request(backtest, list_published=True)
         write_start("screen_backtest")
         self._files.save(client.screen_backtest(backtest), list_published=True)
+
+    def _wait_before_backtest(self, pause: Pause, received: float) -> None:
+        """Waits until at least 10 seconds have passed since the `rank_update`'s 200 arrived, at
+        `received` on `pause`'s monotonic clock, so Portfolio123 ranks the backtest by the
+        definition just written (D-45). It says so first, as progress. Cancellation isn't
+        checked here: an execution checks it only before an attempt, never between its two
+        calls."""
+        if pause.monotonic() - received >= UPDATE_PAUSE_SECONDS:
+            return
+        _logger.info(
+            "Waiting %d seconds after the rank_update before sending the backtest, so"
+            " Portfolio123 ranks by the definition just written.",
+            UPDATE_PAUSE_SECONDS,
+            extra=self._log_fields("attempt.backtest.waiting"),
+        )
+        pause.wait_from(received)
 
     def _end(self, exchanges: tuple[Exchange, ...], ending: BaseException | None) -> T:
         def record(end: Ending, error: TrialFolioError | None) -> R:
@@ -537,11 +563,13 @@ class RankingAttempt(_RunAttempt[str, StartRecordV1_2, AttemptRecordV1_2]):
         *,
         clock: Clock = utc_now,
         synthetic: bool = False,
+        pause: Pause = REAL_PAUSE,
     ) -> None:
         """Starts the attempt: gives it an ID and its start time. Writes nothing.
 
-        `synthetic` is for a run the core writes with the demo's client, which sends nothing.
-        Raises as `Attempt` does.
+        `synthetic` is for a run the core writes with the demo's client, which sends nothing, and
+        doesn't wait. `pause` is the wait between the `rank_update`'s 200 and the backtest, which
+        tests inject, as they do the clock. Raises as `Attempt` does.
         """
         plan_hash = check_approval(plan, approved_hash)
         (case,) = plan.cases
@@ -559,6 +587,7 @@ class RankingAttempt(_RunAttempt[str, StartRecordV1_2, AttemptRecordV1_2]):
             update.params.model_dump(mode="json"),
             backtest.params.model_dump(mode="json"),
         )
+        self._pause = pause
 
     @property
     def update_record(self) -> StartRecordV1_2 | None:
@@ -576,7 +605,7 @@ class RankingAttempt(_RunAttempt[str, StartRecordV1_2, AttemptRecordV1_2]):
             )
             self._write_before(operation, record)
 
-        self._send_definition(client, self._params, write_start)
+        self._send_definition(client, self._params, write_start, self._pause)
 
     def _record(self, fields: EndingFields, exchanges: tuple[Exchange, ...]) -> AttemptRecordV1_2:
         return AttemptRecordV1_2(
@@ -872,9 +901,11 @@ class RankingExperimentAttempt(_SessionAttempt[StartRecordV1_3, AttemptRecordV1_
         repeat_of: uuid.UUID | None = None,
         clock: Clock = utc_now,
         synthetic: bool = False,
+        pause: Pause = REAL_PAUSE,
     ) -> None:
-        """Starts the attempt, as an `ExperimentAttempt` does. Writes nothing. Raises as it
-        does."""
+        """Starts the attempt, as an `ExperimentAttempt` does, with `pause`, the wait between
+        the `rank_update`'s 200 and the backtest, as a `RankingAttempt` takes it. Writes nothing.
+        Raises as an `ExperimentAttempt` does."""
         super().__init__(
             plan,
             case,
@@ -891,6 +922,7 @@ class RankingExperimentAttempt(_SessionAttempt[StartRecordV1_3, AttemptRecordV1_
             update.params.model_dump(mode="json"),
             backtest.params.model_dump(mode="json"),
         )
+        self._pause = pause
 
     @property
     def update_record(self) -> StartRecordV1_3 | None:
@@ -908,7 +940,7 @@ class RankingExperimentAttempt(_SessionAttempt[StartRecordV1_3, AttemptRecordV1_
             )
             self._write_before(operation, record)
 
-        self._send_definition(client, self._params, write_start)
+        self._send_definition(client, self._params, write_start, self._pause)
 
     def _record(self, fields: EndingFields, exchanges: tuple[Exchange, ...]) -> AttemptRecordV1_3:
         return AttemptRecordV1_3(

@@ -52,7 +52,7 @@ from tests.support.experiment_builder import (
     ExperimentBuilder,
     experiment_config,
     plan_hash,
-    returns,
+    returns_each,
 )
 from tests.support.snapshot_builder import (
     SNAPSHOT_CONFIGS,
@@ -299,7 +299,7 @@ def test_a_fault_at_an_experiment_attempts_file_leaves_no_manifest_and_the_comma
     out = cli.tmp / "experiment"
     # The same command, run twice: approved by the new experiment's plan hash.
     approve = ("--approve", plan_hash(EXAMPLE, out))
-    ranks, sends = [RANK_UPDATED] * 4, [returns()] * 4
+    ranks, sends = [RANK_UPDATED] * 4, returns_each(4)
     arm(faults, kind, f"{case_id_of(EXAMPLE, 'baseline')}/{at}")
 
     stopped = experiments.run(
@@ -343,7 +343,7 @@ def test_a_fault_at_an_experiments_rank_update_response_leaves_its_case_awaiting
     arm(faults, kind, f"{baseline}/rank-update-response.json")
 
     stopped = experiments.run(
-        EXAMPLE, out, ranks=[RANK_UPDATED] * 4, sends=[returns()] * 4, store_factory=faults
+        EXAMPLE, out, ranks=[RANK_UPDATED] * 4, sends=returns_each(4), store_factory=faults
     )
 
     failed(stopped, kind)
@@ -361,7 +361,7 @@ def test_a_fault_at_an_experiments_rank_update_response_leaves_its_case_awaiting
     received = len(cli.server.received)
 
     # The resume never sends it again on its own: it awaits a repeat.
-    resumed = experiments.run(EXAMPLE, out, ranks=[RANK_UPDATED] * 3, sends=[returns()] * 3)
+    resumed = experiments.run(EXAMPLE, out, ranks=[RANK_UPDATED] * 3, sends=returns_each(3))
 
     assert resumed.exit_code == 6, resumed.stderr
     assert sent(cli, received) == [AUTH, *[RANK, BACKTEST] * 3]
@@ -394,7 +394,7 @@ def test_a_fault_at_a_new_experiments_plan_files_sends_nothing_and_it_cant_be_re
         out,
         *approve,
         ranks=[RANK_UPDATED] * 4,
-        sends=[returns()] * 4,
+        sends=returns_each(4),
         approve=False,
         store_factory=faults,
     )
@@ -569,7 +569,7 @@ def test_an_experiments_storage_failure_at_the_attempt_record_gives_its_start_re
     faults.fail_os(f"{case_id_of(EXAMPLE, 'baseline')}/attempt.json")
 
     stopped = experiments.run(
-        EXAMPLE, out, ranks=[RANK_UPDATED] * 4, sends=[returns()] * 4, store_factory=faults
+        EXAMPLE, out, ranks=[RANK_UPDATED] * 4, sends=returns_each(4), store_factory=faults
     )
 
     # The resume reads the start record, so the session's message says what it says too.

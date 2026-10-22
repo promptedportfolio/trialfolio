@@ -318,6 +318,7 @@ def _executor(
         reason=args.revision_reason,
         repeats=approved.repeats,
         ranking_lock=ranking_lock(context, plan),
+        pause=context.pause,
     )
     outcome.execution = execution
     return execution

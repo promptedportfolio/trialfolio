@@ -1,6 +1,9 @@
 """The test launcher (release 0.1.0, test pairing): runs the CLI's entry function in a new Python
 process, with the fake server's endpoint and a request timeout. It isn't a double, and installs
-none: the client, the store, and the clock are the real ones.
+only one: the client, the store, and the clock are the real ones, and, from D-45, the pause
+between each `rank_update`'s 200 and its backtest is one that never waits, so a run it starts
+doesn't wait 10 seconds before each backtest (release 0.4.0, test pairing). Its monotonic clock
+moves only when it sleeps.
 
 The timeout is the installed command's 300 seconds, so success-path tests don't depend on how
 fast the machine is, unless the test is about a timeout and sets 1 second, the shortest the
@@ -26,9 +29,18 @@ _ENTRY: Final = """
 import sys
 
 from trialfolio.cli import main
+from trialfolio.pause import Pause
+
+now = [0.0]
+
+
+def sleep(seconds):
+    now[0] += seconds
+
 
 endpoint, timeout, *argv = sys.argv[1:]
-sys.exit(main(argv, endpoint=endpoint, timeout=int(timeout)))
+pause = Pause(monotonic=lambda: now[0], sleep=sleep)
+sys.exit(main(argv, endpoint=endpoint, timeout=int(timeout), pause=pause))
 """
 
 

@@ -45,6 +45,7 @@ from tests.support.experiment_builder import (
     ExperimentBuilder,
     experiment_config,
     returns,
+    returns_each,
 )
 from tests.support.fake_portfolio123 import FakePortfolio123
 from tests.support.terminal import PseudoTerminal
@@ -147,7 +148,7 @@ def each_backtest_follows_its_cases_rank_update(
 def completed(cli: Cli, experiments: Builder, out: Path) -> Outcome:
     """`ranking-example.yaml`'s four cases, each succeeded, with `rank-update.json`, whose `cost`
     is 1, and `complete.json`, whose `cost` is 5."""
-    outcome = experiments.run(EXAMPLE, out, ranks=[RANK_UPDATED] * 4, sends=[returns()] * 4)
+    outcome = experiments.run(EXAMPLE, out, ranks=[RANK_UPDATED] * 4, sends=returns_each(4))
     assert outcome.exit_code == 0, outcome.stderr
     assert cli.server.requests() == [AUTH, *(RANK, BACKTEST) * 4]
     return outcome
@@ -194,7 +195,7 @@ def test_a_repeat_the_counted_requests_leave_no_room_for_waits_for_a_raised_budg
     out = cli.tmp / "experiment"
     # A 503 to the last case's backtest leaves it unknown, with all 8 requests counted.
     first = experiments.run(
-        EXAMPLE, out, ranks=[RANK_UPDATED] * 4, sends=[*(returns(),) * 3, UNAVAILABLE]
+        EXAMPLE, out, ranks=[RANK_UPDATED] * 4, sends=[*returns_each(3), UNAVAILABLE]
     )
     assert first.exit_code == 6, first.stderr
     assert counts(first)["provider_requests"] == 8
@@ -256,7 +257,7 @@ def test_a_changed_definition_keeps_its_unchanged_cases_attempts_and_sends_two_n
         "--revision-reason",
         REASON,
         ranks=[RANK_UPDATED] * 2,
-        sends=[returns()] * 2,
+        sends=returns_each(2),
     )
 
     assert revised.exit_code == 0, revised.stderr
@@ -328,12 +329,12 @@ def test_a_revision_from_a_formula_gives_what_the_counted_backtests_and_the_rest
 ) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
-    first = experiments.run(FORMULA, out, sends=[returns()] * 5)
+    first = experiments.run(FORMULA, out, sends=returns_each(5))
     assert first.exit_code == 0, first.stderr
     since = len(cli.server.received)
     cli.server.reply("/auth", AUTHENTICATED)
     cli.server.reply("/rank", *[RANK_UPDATED] * 5, method="POST")
-    cli.server.reply("/screen/backtest", *[returns()] * 5)
+    cli.server.reply("/screen/backtest", *returns_each(5))
 
     with PseudoTerminal() as terminal:
         terminal.press("approve\n")

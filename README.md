@@ -55,7 +55,7 @@ Release 0.4.0 adds a ranking given as a ranking system's definition: the XML tha
 - the weights of one parent's nodes, the top level or one composite, which keep their sum
 - the removal of one factor, with the weights of the factors left beside it
 
-Each case writes its definition into `ApiRankingSystem`, a ranking system in your account, then backtests ranked by it. Trial Folio writes no other ranking system. [Ranking definitions](docs/contracts.md#ranking-definitions) and [ranking variants](docs/contracts.md#ranking-variants) give the rules, with an example.
+Each case writes its definition into `ApiRankingSystem`, a ranking system in your account, then, 10 seconds later, backtests ranked by it. Trial Folio writes no other ranking system. [Ranking definitions](docs/contracts.md#ranking-definitions) and [ranking variants](docs/contracts.md#ranking-variants) give the rules, with an example.
 
 Statistical validation and trading readiness are **not assessed** by any planned release before the statistical evaluation increment.
 
@@ -100,7 +100,7 @@ From release 0.4.0, `trialfolio run` also reads a ranking system saved in your a
 trialfolio run snapshot.yaml --out runs/snapshots/value-momentum/
 ```
 
-A screen's or an experiment's configuration can then rank by the snapshot, or by a definition in a file, and an experiment's variants can change its weights. The plan shows each case's whole definition, and that the run overwrites `ApiRankingSystem` in your account with it, just before each backtest. A lock keeps two Trial Folio runs on one machine from interleaving their cases. [Vary a ranking system's weights](https://promptedportfolio.github.io/trialfolio/how-to/vary-a-ranking-systems-weights/) gives the steps.
+A screen's or an experiment's configuration can then rank by the snapshot, or by a definition in a file, and an experiment's variants can change its weights. The plan shows each case's whole definition, and that the run overwrites `ApiRankingSystem` in your account with it, 10 seconds before each backtest, so Portfolio123 ranks the backtest by the definition just written. A lock keeps two Trial Folio runs on one machine from interleaving their cases. [Vary a ranking system's weights](https://promptedportfolio.github.io/trialfolio/how-to/vary-a-ranking-systems-weights/) gives the steps.
 
 The other commands:
 

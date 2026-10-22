@@ -37,8 +37,8 @@ from typing import Any
 import pytest
 
 from tests.support import canaries
-from tests.support.clock import FixedClock
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.clock import FixedClock, no_wait
+from tests.support.fake_portfolio123 import FakePortfolio123, Reply, each_its_own
 from tests.support.storage_faults import StorageFaults
 from trialfolio.canonical import sha256_hex
 from trialfolio.configuration import (
@@ -185,6 +185,7 @@ class Lab:
                 progress=progress,
                 cancellation=cancellation,
                 ranking_lock=self.lock if isinstance(plan, PlanV1_3) else None,
+                pause=no_wait(),
             ), isinstance(plan, PlanV1_3)
 
         return self._run(content, read, build, arm=arm)
@@ -215,6 +216,7 @@ class Lab:
                 reason=reason,
                 repeats=repeats,
                 ranking_lock=self.lock if isinstance(plan, PlanV1_3) else None,
+                pause=no_wait(),
             ), isinstance(plan, PlanV1_3)
 
         return self._run(content, read, build, arm=arm)
@@ -287,9 +289,11 @@ def script(
     ranks: Sequence[Reply] = (),
     backtests: Sequence[Reply] = (),
 ) -> None:
+    """Scripts the server's replies. Each backtest's 200 gets a response of its own, so no case is
+    a stale backtest of the one before it (D-45), unless a test scripts the server itself."""
     server.reply("/auth", *(authenticated() for _ in range(auths)))
     server.reply("/rank", *ranks, method="POST")
-    server.reply("/screen/backtest", *backtests)
+    server.reply("/screen/backtest", *each_its_own(backtests))
 
 
 def refused(ran: Ran, code: str) -> TrialFolioError:
@@ -1457,7 +1461,13 @@ def write_screen(tmp: Path, server: FakePortfolio123, definition: bytes | None =
     credentials = Credentials(canaries.API_ID, canaries.API_KEY)
     with LocalArtifactStore(out) as store:
         error = Execution(
-            plan, plan.plan_hash, "option", store, COMMAND, ranking_lock=tmp / LOCK_FILE
+            plan,
+            plan.plan_hash,
+            "option",
+            store,
+            COMMAND,
+            ranking_lock=tmp / LOCK_FILE,
+            pause=no_wait(),
         ).run(
             content,
             lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint),

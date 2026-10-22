@@ -615,7 +615,11 @@ def test_each_outcome_says_what_it_means_and_what_sends_the_case(sessions: Sessi
             "unknown (provider.outcome_unknown): its request may have been charged, and no"
             " response was saved. Awaiting a repeat."
         ),
-        ("failed (provider.response_invalid): its response was saved, but couldn't be normalized."),
+        # From D-45, a case whose response failed validation awaits a repeat.
+        (
+            "failed (provider.response_invalid): its response was saved, but failed validation,"
+            " so it wasn't normalized. Awaiting a repeat."
+        ),
         (
             "failed (provider.unsupported_capability): its request may have reached"
             " Portfolio123, and may have been charged. Awaiting a repeat."
@@ -639,12 +643,19 @@ def test_a_case_awaiting_a_repeat_is_marked_with_the_option_that_repeats_it(
     session = sessions("troubled")[0]
     document = session.document
     (unknown,) = session.attempt_ids(BASELINE)
+    (invalid,) = session.attempt_ids(LIQUIDITY)
     (rejected,) = session.attempt_ids(HOLDINGS_50)
 
+    # From D-45, `liquidity-100m`, whose response failed validation, awaits a repeat too.
     assert items_after(document, "Cases awaiting a repeat") == [
         (
             f"baseline, {BASELINE}: attempt {unknown}, unknown (provider.outcome_unknown). The"
             f" option that repeats it: --repeat baseline:{unknown}"
+        ),
+        (
+            f"liquidity-100m, {LIQUIDITY}: attempt {invalid}, succeeded, its response failed"
+            " validation (provider.response_invalid). The option that repeats it: --repeat"
+            f" liquidity-100m:{invalid}"
         ),
         (
             f"holdings-50, {HOLDINGS_50}: attempt {rejected}, failed"
@@ -654,10 +665,11 @@ def test_a_case_awaiting_a_repeat_is_marked_with_the_option_that_repeats_it(
     ]
     assert (
         "A case awaiting a repeat has an attempt whose request may have reached Portfolio123,"
-        " and so may have been charged, and no attempt that succeeded. A resume never sends its"
-        " request again on its own. A repeat sends it again, as a new attempt of the same case,"
-        " which may be charged again, and counts against the budget. Each case is listed with"
-        " its latest attempt whose request may have been charged. Running the experiment again"
+        " and so may have been charged, and no attempt that succeeded with a response that"
+        " passed validation. A resume never sends its request again on its own. A repeat sends"
+        " it again, as a new attempt of the same case, which may be charged again, and counts"
+        " against the budget. Each case is listed with its latest attempt whose request may have"
+        " been charged. Running the experiment again"
         " with the option given below for a case, and the plan's approval, repeats it: the"
         " option confirms the possible repeat charge, by naming the attempt."
     ) in document.root.by_id("cases").text

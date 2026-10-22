@@ -18,7 +18,10 @@ ranking definition, the display); to R04-AC08's interface checks that R04-T10 le
 `ranking-example.yaml` naming a snapshot, a synthetic one included; and to an experiment
 configuration 1.1.0 ranked by a formula, which gives plan 1.1.0, as 0.4.0's planner gives it,
 and resumes. R04-T12 wrote them. The checks of the budget and the resume that R04-AC10 pairs with
-`test_ranking_budget.py` and `test_ranking_resume.py` are R04-T13's.
+`test_ranking_budget.py` and `test_ranking_resume.py` are R04-T13's. From D-45, a resume that
+sends no case says so, on a terminal or not, in place of the line that the run overwrites
+`ApiRankingSystem`, and one that sends a case still gives that line (plans with a ranking
+definition, the display's wording).
 """
 
 import json
@@ -37,6 +40,7 @@ from tests.support.experiment_builder import (
     experiment_config,
     plan_hash,
     returns,
+    returns_each,
 )
 from tests.support.fake_portfolio123 import Reply
 from tests.support.snapshot_builder import SnapshotBuilder, naming
@@ -56,6 +60,11 @@ OVERWRITES = (
     "This run overwrites ApiRankingSystem, a ranking system in your Portfolio123 account, with"
     " each case's ranking definition."
 )
+SENDS_NO_CASE = (
+    "This run sends no case, so it doesn't write ApiRankingSystem, a ranking system in your"
+    " Portfolio123 account."
+)
+"""In the overwrite line's place, in a resume that sends no case (D-45)."""
 CASES = ("baseline", "value-heavy", "tilt-earnings-yield", "no-sales-yield")
 
 
@@ -109,7 +118,7 @@ def test_under_a_terminal_the_plan_shows_each_cases_definition_and_nothing_is_se
     cli.ready()
     cli.server.reply("/auth", AUTHENTICATED)
     cli.server.reply("/rank", *four(RANK_UPDATED), method="POST")
-    cli.server.reply("/screen/backtest", *four(returns()))
+    cli.server.reply("/screen/backtest", *returns_each(4))
     out = cli.tmp / "experiment"
     expected_hash = plan_hash(EXAMPLE, out)
 
@@ -219,7 +228,7 @@ def test_an_approved_experiment_sends_each_cases_rank_update_then_its_backtest(
     cli.ready()
     out = cli.tmp / "experiment"
 
-    outcome = experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=four(returns()))
+    outcome = experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=returns_each(4))
 
     assert outcome.exit_code == 0, outcome.stderr
     requests = cli.server.requests()
@@ -250,7 +259,7 @@ def test_a_complete_experiment_resumes_without_credentials_and_sends_nothing(
     cli.ready()
     out = cli.tmp / "experiment"
     assert (
-        experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=four(returns())).exit_code
+        experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=returns_each(4)).exit_code
         == 0
     )
     received = cli.server.requests()
@@ -273,7 +282,7 @@ def test_a_revised_definition_sends_only_the_cases_it_adds(
     cli.ready()
     out = cli.tmp / "experiment"
     assert (
-        experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=four(returns())).exit_code
+        experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=returns_each(4)).exit_code
         == 0
     )
     before = len(cli.server.requests())
@@ -284,7 +293,7 @@ def test_a_revised_definition_sends_only_the_cases_it_adds(
         "--revision-reason",
         "The Value factors weigh 60 and 40.",
         ranks=(RANK_UPDATED, RANK_UPDATED),
-        sends=(returns(), returns()),
+        sends=returns_each(2),
     )
 
     assert revised.exit_code == 0, revised.stderr
@@ -318,7 +327,7 @@ def awaiting_baseline(cli: Cli, experiments: ExperimentBuilder[Outcome], out: Pa
     backtest gets a 503, so it awaits a repeat with 8 requests counted, and returns its attempt's
     ID, which confirms the repeat."""
     outcome = experiments.run(
-        BUDGET_RAISED, out, ranks=four(RANK_UPDATED), sends=(UNAVAILABLE, *(returns(),) * 3)
+        BUDGET_RAISED, out, ranks=four(RANK_UPDATED), sends=(UNAVAILABLE, *returns_each(3))
     )
     assert outcome.exit_code == 6, outcome.stderr
     (baseline,) = [case for case in summary_cases(outcome) if case["case_key"] == "baseline"]
@@ -381,7 +390,7 @@ def refused_baseline(cli: Cli, experiments: ExperimentBuilder[Outcome], out: Pat
         EXAMPLE,
         out,
         ranks=(Reply(400, b"Unsupported value"), *(RANK_UPDATED,) * 3),
-        sends=(returns(),) * 3,
+        sends=returns_each(3),
     )
     assert first.exit_code == 6, first.stderr
     assert counts(first)["provider_requests"] == 7
@@ -394,7 +403,9 @@ def test_a_remaining_budget_of_one_request_covers_no_case(
 ) -> None:
     """A case's attempt starts only when both its requests fit, so a confirmed repeat with one
     request left isn't started: the run needs no credentials, sends nothing, and the display names
-    the case the remaining budget can't cover (the budget across runs)."""
+    the case the remaining budget can't cover (the budget across runs). So it says the run sends
+    no case, in place of the line that it overwrites `ApiRankingSystem`, although it confirms a
+    repeat (D-45)."""
     cli.ready()
     out = cli.tmp / "experiment"
     attempt = refused_baseline(cli, experiments, out)
@@ -408,6 +419,8 @@ def test_a_remaining_budget_of_one_request_covers_no_case(
     assert error_code(outcome) == "execution.partial"
     assert cli.server.requests() == received
     assert counts(outcome)["provider_requests"] == 7
+    assert SENDS_NO_CASE in outcome.stderr.splitlines()
+    assert OVERWRITES not in outcome.stderr
 
 
 @posix_only
@@ -437,13 +450,15 @@ def test_a_lone_counted_request_costs_what_a_rank_update_costs(
     assert cli.server.requests() == received
 
 
-def test_without_a_terminal_a_resumes_overwrite_line_follows_its_budget(
+def test_without_a_terminal_a_resumes_line_on_api_ranking_system_follows_its_budget(
     cli: Cli, experiments: ExperimentBuilder[Outcome]
 ) -> None:
     """Without a terminal, a resume gives the plan hash, the plan it resumes, and the budget, with
-    what's counted so far across every run; then the line that the run overwrites
-    `ApiRankingSystem`, after the whole budget, and then how to see the full plan (plans with a
-    ranking definition, the display's wording)."""
+    what's counted so far across every run; then the line on `ApiRankingSystem`, after the whole
+    budget, and then how to see the full plan (plans with a ranking definition, the display's
+    wording). This resume confirms no repeat, and no case is due, so it sends none, and the line
+    says so, rather than that it overwrites the system (D-45). Before, it said the run overwrites
+    it."""
     cli.ready()
     out = cli.tmp / "experiment"
     refused_baseline(cli, experiments, out)
@@ -459,8 +474,53 @@ def test_without_a_terminal_a_resumes_overwrite_line_follows_its_budget(
             "  Counted so far, across every run of the experiment: 7 provider requests and 1"
             " authentication call, which leaves 1 provider request and 7 authentication calls."
         ),
-        OVERWRITES,
+        SENDS_NO_CASE,
     ]
+    assert OVERWRITES not in lines
+
+
+def test_without_a_terminal_a_resumes_line_says_whether_it_sends_a_case(
+    cli: Cli, experiments: ExperimentBuilder[Outcome]
+) -> None:
+    # The baseline's backtest gets a 503, so it awaits a repeat, and no case is due. Without a
+    # confirmed repeat, the run sends no case; with one, which the raised budget covers, it does.
+    cli.ready()
+    out = cli.tmp / "experiment"
+    first = experiments.run(
+        BUDGET_RAISED, out, ranks=(RANK_UPDATED,) * 4, sends=(UNAVAILABLE, *returns_each(3))
+    )
+    (baseline,) = [case for case in summary_cases(first) if case["case_key"] == "baseline"]
+    attempt = baseline["repeat_attempt_id"]
+
+    sends_none = cli("run", BUDGET_RAISED, "--out", out, "--json")
+    sends_one = cli("run", BUDGET_RAISED, "--out", out, "--json", "--repeat", f"baseline:{attempt}")
+
+    for outcome in (sends_none, sends_one):
+        assert outcome.exit_code == 2, outcome.stderr
+    assert SENDS_NO_CASE in sends_none.stderr.splitlines()
+    assert OVERWRITES not in sends_none.stderr
+    assert OVERWRITES in sends_one.stderr.splitlines()
+    assert SENDS_NO_CASE not in sends_one.stderr
+    assert plan_hash(BUDGET_RAISED, out) in sends_none.stderr
+
+
+@posix_only
+def test_on_a_terminal_a_resume_that_sends_no_case_says_so(
+    cli: Cli, experiments: ExperimentBuilder[Outcome]
+) -> None:
+    cli.ready()
+    out = cli.tmp / "experiment"
+    complete = experiments.run(EXAMPLE, out, ranks=(RANK_UPDATED,) * 4, sends=returns_each(4))
+    assert complete.exit_code == 0, complete.stderr
+
+    with PseudoTerminal() as terminal:
+        terminal.press("no\n")
+        outcome = cli("run", EXAMPLE, "--out", out, stdin=terminal.stdin, stderr=terminal.stderr)
+    shown = terminal.shown().replace("\n", " ").replace("  ", " ")
+
+    assert outcome.exit_code == 2, shown
+    assert SENDS_NO_CASE in shown
+    assert OVERWRITES not in shown
 
 
 # A snapshot as the baseline's ranking (R04-AC08)
@@ -547,7 +607,7 @@ def test_an_experiment_1_1_0_ranked_by_a_formula_runs_and_resumes_as_a_plan_1_1_
     assert plan.schema_version == "1.1.0"
     assert b"schema_version: 1.1.0" in (out / "plans" / "1" / "configuration.yaml").read_bytes()
 
-    resumed = experiments.run(config, out, sends=(returns(),) * 4)
+    resumed = experiments.run(config, out, sends=returns_each(4))
 
     assert resumed.exit_code == 0, resumed.stderr
     assert (out / "cases" / str(baseline) / "normalized" / "settings.csv").is_file()

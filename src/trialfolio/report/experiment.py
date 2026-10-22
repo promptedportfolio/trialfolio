@@ -426,6 +426,15 @@ def _exclusions(experiment: ExperimentContext) -> str:
 
 def _no_tables(view: CaseView) -> str:
     """Why a planned case has no normalized tables."""
+    if view.invalid is not None and view.identical_to is not None:
+        return (
+            "its backtest's response is the same, apart from cost and quotaRemaining, as that"
+            f" of the case before it in its session, {code(view.identical_to)}, which was"
+            " ranked by a different definition, so Portfolio123 may have ranked it by that"
+            " definition, although its rank_update succeeded. Identical results can sometimes"
+            " be genuine, as when a changed weight doesn't change which stocks the screen"
+            " selects. The response is saved, and the case awaits a repeat."
+        )
     if view.invalid is not None:
         if any(
             attempt.response is not None and attempt.response.form == "undecoded"

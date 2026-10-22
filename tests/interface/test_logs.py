@@ -73,7 +73,7 @@ from tests.support.experiment_builder import (
     plan_hash,
     returns,
 )
-from tests.support.fake_portfolio123 import Reply
+from tests.support.fake_portfolio123 import Reply, each_its_own
 from tests.support.snapshot_builder import rank_get, snapshot_plan_hash
 from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3
 from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
@@ -683,7 +683,7 @@ def test_an_experiment_with_a_definition_logs_no_canary_of_its_definition_or_mes
         cli,
         experiments,
         ranks=[RANK_UPDATED, RANK_UPDATED, REJECTED_DEFINITION, RANK_UPDATED],
-        sends=[answered(), answered(), answered()],
+        sends=list(each_its_own([answered(), answered(), answered()])),
     )
 
     assert outcome.exit_code == 6, outcome.stderr
@@ -722,7 +722,7 @@ def test_a_resume_with_a_definition_logs_no_canary(
     assert stopped.exit_code == 4, stopped.stderr
 
     resumed = experiments.run(
-        RANKING_EXPERIMENT, out, ranks=[RANK_UPDATED] * 3, sends=[answered()] * 3
+        RANKING_EXPERIMENT, out, ranks=[RANK_UPDATED] * 3, sends=each_its_own([answered()] * 3)
     )
 
     assert resumed.exit_code == 0, resumed.stderr
@@ -752,7 +752,7 @@ def test_a_repeat_with_a_definition_logs_no_canary(cli: Cli, experiments: Builde
         config,
         out,
         ranks=[RANK_UPDATED] * 4,
-        sends=[answered(), answered(), UNAVAILABLE, answered()],
+        sends=each_its_own([answered(), answered(), UNAVAILABLE, answered()]),
     )
     assert first.exit_code == 6, first.stderr
     case = cast("list[dict[str, str]]", first.summary["cases"])[2]
@@ -773,7 +773,9 @@ def test_a_repeat_with_a_definition_logs_no_canary(cli: Cli, experiments: Builde
 def test_a_revision_with_a_definition_logs_no_canary_and_not_its_reason(
     cli: Cli, experiments: Builder
 ) -> None:
-    first = ranked(cli, experiments, ranks=[RANK_UPDATED] * 4, sends=[answered()] * 4)
+    first = ranked(
+        cli, experiments, ranks=[RANK_UPDATED] * 4, sends=list(each_its_own([answered()] * 4))
+    )
     assert first.exit_code == 0, first.stderr
     # The tilt variant's weights changed, which adds a case and retires one, and a budget of 10.
     text = RANKING_EXPERIMENT.read_text(encoding="utf-8")

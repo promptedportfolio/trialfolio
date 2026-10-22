@@ -63,6 +63,7 @@ from trialfolio.cli.invocation import Invocation as _Invocation
 from trialfolio.cli.steps import API_ID_VARIABLE, API_KEY_VARIABLE, KEY_LOG_VARIABLE
 from trialfolio.cli.summary import SUMMARY_SCHEMA_VERSION
 from trialfolio.logs import CommandLogs
+from trialfolio.pause import REAL_PAUSE, Pause
 from trialfolio.storage import LocalArtifactStore
 
 __all__ = [
@@ -95,6 +96,7 @@ def main(
     timeout: int | None = None,
     clock: Clock = utc_now,
     store_factory: StoreFactory = LocalArtifactStore,
+    pause: Pause = REAL_PAUSE,
 ) -> int:
     """Runs one `trialfolio` command, and returns its exit code.
 
@@ -102,7 +104,9 @@ def main(
     parameters are for tests only (docs/contracts.md, credentials), and the installed command
     never passes them: `endpoint`, Portfolio123's API in its place, which the fake server takes;
     `timeout`, the request's timeout in whole seconds, instead of 300; `clock`, for the records'
-    and manifest's times; and `store_factory`, which makes the output directory's store.
+    and manifest's times; `store_factory`, which makes the output directory's store; and
+    `pause`, the wait between each `rank_update`'s 200 and its backtest, so a test needn't wait
+    10 seconds (D-45).
     Standard input, output, and error are `sys.stdin`, `sys.stdout`, and `sys.stderr` as they are
     when it's called.
     """
@@ -125,6 +129,7 @@ def main(
             timeout=timeout,
             clock=clock,
             store_factory=store_factory,
+            pause=pause,
         )
     )
     with CommandLogs(version, os.environ, invocation.context.stderr) as logs:

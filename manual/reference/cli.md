@@ -146,7 +146,7 @@ trialfolio run [-h] --out DIR [--approve PLAN_HASH]
 
 ### `--repeat`
 
-- **For an existing experiment's case awaiting a repeat** only: one whose request may have reached Portfolio123, and none of whose attempts succeeded. With a screen, a ranking snapshot, or a new experiment, it fails with `plan.approval_required`.
+- **For an existing experiment's case awaiting a repeat** only: one whose request may have reached Portfolio123, and none of whose attempts succeeded with a response that passed validation, so a case whose response was saved but failed validation, with `provider.response_invalid`, can be repeated too. With a screen, a ranking snapshot, or a new experiment, it fails with `plan.approval_required`.
 - **With a ranking definition,** a repeat sends the case's `rank_update` and its backtest again, two requests from the budget.
 - **Give it once for each case** you repeat. A case key given twice is a usage error, exit code 2.
 - **With the attempt ID,** `--repeat <case-key>:<attempt-id>`, the option is the confirmation, and Trial Folio doesn't ask. With `--approve`, or from a script, a repeat needs it.

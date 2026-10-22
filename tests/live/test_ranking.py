@@ -21,12 +21,14 @@ Its steps are the live check's, in [release 0.4.0](docs/releases/0.4.0-ranking-w
    ranked by `ranking/live.xml`, two top-level composites at 50 each, each holding one factor,
    and one variant, `earnings-heavy`, which sets them to 80 and 20. Two cases, 4 provider
    requests, 12 credits at the documented costs. One `POST /auth` serves both cases, and each
-   sends `POST /rank` and then `POST /screen/backtest`, each a 200; at least one of
+   sends `POST /rank` and then `POST /screen/backtest`, each a 200, the backtest at least 10
+   seconds after the `rank_update`'s 200, by the log's timestamps (D-45); at least one of
    `earnings-heavy`'s metrics differs from the baseline's (D-20): one available in both cases,
    whose values differ as numbers. A metric unavailable in either case shows no changed value.
 2. **The restore,** `screen-configs/ranking-live.yaml`: the baseline's case as a screen run, 2
-   requests and 6 credits, after `ApiRankingSystem` held `earnings-heavy`'s definition. Its
-   `case_id` is the baseline's, and every value of its `metrics.csv` equals the baseline case's.
+   requests and 6 credits, after `ApiRankingSystem` held `earnings-heavy`'s definition, its
+   backtest sent at least 10 seconds after its `rank_update`'s 200. Its `case_id` is the
+   baseline's, and every value of its `metrics.csv` equals the baseline case's.
 3. **The snapshot,** `ranking-snapshot-configs/api-ranking-system.yaml`: one `rank_get` of
    `ApiRankingSystem`, 1 request and 1 credit. Its `definition.xml` is the restore's definition
    as XML, by its canonical form, and `snapshot.json` gives ranking method 2, `USD`, and `Stock`:
@@ -83,6 +85,7 @@ from trialfolio.contracts.experiment_plan import PlanV1_3
 from trialfolio.contracts.plan import PlanV1_2
 from trialfolio.contracts.ranking_snapshot import RankingSnapshotRecord
 from trialfolio.experiment_records import read_experiment
+from trialfolio.pause import UPDATE_PAUSE_SECONDS
 from trialfolio.planning import (
     build_experiment_plan_v1_1,
     build_plan_v1_1,
@@ -145,6 +148,35 @@ def canonical(content: bytes) -> str:
 def weights(plan: PlanV1_2) -> list[tuple[str | None, object]]:
     """Each weight row of a screen run's plan: its node's canonical path, and its weight."""
     return [(row.node, row.value) for row in plan.cases[0].settings if row.node is not None]
+
+
+def waits(log: Path) -> list[float]:
+    """The seconds between each `rank_update`'s 200 and the send of the backtest after it, by the
+    timestamps of a run's log: its `POST /rank`'s `provider.request.completed` with a 200, and the
+    next `provider.request.started` of `POST /screen/backtest` (D-45). The records hold no
+    exchange's time, so the log, which logs both events, gives them. Plain values: the log holds
+    no value from a response."""
+    found: list[float] = []
+    received: datetime | None = None
+    for line in log.read_text("utf-8").splitlines():
+        entry = json.loads(line)
+        message = str(entry["message"])
+        moment = datetime.fromisoformat(str(entry["timestamp"]))
+        if entry["event"] == "provider.request.completed" and message.startswith(
+            f"{RANK} got HTTP 200 "
+        ):
+            received = moment
+        elif entry["event"] == "provider.request.started" and message == f"Sending {BACKTEST}.":
+            assert received is not None, "a backtest was sent without a rank_update's 200 before it"
+            found.append((moment - received).total_seconds())
+            received = None
+    return found
+
+
+def waited_enough(seconds: list[float], attempts: int) -> bool:
+    """Whether each of `attempts` backtests was sent at least 10 seconds after its rank_update's
+    200 (D-45). Each timestamp is cut to the millisecond, so a gap can read up to 1 ms short."""
+    return len(seconds) == attempts and all(gap >= UPDATE_PAUSE_SECONDS - 0.001 for gap in seconds)
 
 
 def events(log: Path) -> list[str]:
@@ -247,6 +279,10 @@ def test_a_live_weight_variant_changes_a_metric_and_the_baselines_definition_res
     ]
     assert first.keys() == second.keys()
     assert changed >= 1, "no metric of earnings-heavy differs from the baseline's"
+    experiment_waits = waits(out / "logs" / "trialfolio.log")
+    assert waited_enough(experiment_waits, 2), (
+        f"the backtests weren't each sent 10 seconds after their rank_update: {experiment_waits}"
+    )
 
     # 2. The restore, after ApiRankingSystem held earnings-heavy's definition.
     exit_code, summary = trialfolio(
@@ -268,6 +304,10 @@ def test_a_live_weight_variant_changes_a_metric_and_the_baselines_definition_res
     restore = metric_values(restored / "normalized" / "metrics.csv")
     differing = sum(restore.get(key) != value for key, value in first.items())
     assert restore_exchanges == [(AUTH, *answered), (RANK, *answered), (BACKTEST, *answered)]
+    restore_waits = waits(restored / "logs" / "trialfolio.log")
+    assert waited_enough(restore_waits, 1), (
+        f"the backtest wasn't sent 10 seconds after its rank_update: {restore_waits}"
+    )
     assert restore.keys() == first.keys()
     assert differing == 0, f"{differing} of the restore's metrics differ from the baseline case's"
 
