@@ -18,7 +18,7 @@ Portfolio123 does the backtesting. Trial Folio plans each request, records exact
 
 ## Status
 
-**Pre-release. Nothing is installable yet.** Release 0.1.0 is built, has passed its tests, including a live run through the Portfolio123 API, and is in private use. Release 0.2.0, which compares saved runs, is built, has passed its tests, including reviews of real runs, and is in private use too. Release 0.2.1 changes only the license, to version 1.1. Release 0.3.0, which runs experiments, is built, has passed its tests, including a live experiment through the Portfolio123 API, and is in private use too. All four are tagged, with every release requirement met, but none has been released. Release 0.4.0, which varies a ranking system's weights, is built, and has passed its tests, including a live check through the Portfolio123 API, but it isn't in private use or tagged yet.
+**Pre-release. Nothing is installable yet.** Release 0.1.0 is built, has passed its tests, including a live run through the Portfolio123 API, and is in private use. Release 0.2.0, which compares saved runs, is built, has passed its tests, including reviews of real runs, and is in private use too. Release 0.2.1 changes only the license, to version 1.1. Release 0.3.0, which runs experiments, is built, has passed its tests, including a live experiment through the Portfolio123 API, and is in private use too. All four are tagged, with every release requirement met, but none has been released. Release 0.4.0, which varies a ranking system's weights, is built, has passed its tests, including a live check through the Portfolio123 API, and is in private use too, but it isn't tagged yet.
 
 | Capability | Planned release | Status |
 |---|---|---|
@@ -26,7 +26,7 @@ Portfolio123 does the backtesting. Trial Folio plans each request, records exact
 | Compare saved runs, offline, against a baseline | [0.2.0](docs/releases/0.2.0-review.md) | Implemented: built, tested, and used privately; not yet released |
 | Version 1.1 of the license: your own trust, retirement accounts, and single-member LLC count as you | [0.2.1](docs/releases/0.2.1-license.md) | Ready: signed off, tagged, and every release requirement met; not yet released |
 | Run a small, planned experiment of screen variants, with safe resume | [0.3.0](docs/releases/0.3.0-experiments.md) | Implemented: built, tested, used privately, tagged, and every release requirement met; not yet released |
-| Vary a ranking system's weights, at the top level or within a composite, or remove a factor, as an experiment's variants, and record a saved ranking system's definition with a snapshot | [0.4.0](docs/releases/0.4.0-ranking-weights.md) | Built and tested, with a live check; not yet in private use, tagged, or released |
+| Vary a ranking system's weights, at the top level or within a composite, or remove a factor, as an experiment's variants, and record a saved ranking system's definition with a snapshot | [0.4.0](docs/releases/0.4.0-ranking-weights.md) | Implemented: built, tested, and used privately; not yet tagged or released |
 | Descriptive return analytics, statistical evaluation, grid search, robustness diagnostics, forward tracking | [Roadmap](docs/roadmap.md) | Not specified |
 
 **Supported inputs:** release 0.1.0 runs one long-only stock screen backtest through the Portfolio123 API, described in a YAML file. It accepts only the settings and values that live calls have verified:
