@@ -78,7 +78,7 @@ Each step is labeled:
 - **By hand now,** with what you do yourself.
 - **Planned,** with its target in the [roadmap](https://github.com/promptedportfolio/trialfolio/blob/main/docs/roadmap.md#driving-use-case-coverage): a release's version; the Reproduction and sensitivity workflow, which the roadmap proposes after 1.1.0, without a version, or the Results workspace, which it proposes after that, also without a version; or a later increment, labeled "later, without a version", whose order studies decide. The targets are proposed, not commitments ([where Trial Folio is going](where-trial-folio-is-going.md)).
 
-A step can have parts with different labels. Release 0.3.0 added experiments: a copy of Trial Folio at an earlier tag, such as `v0.2.1`, has none. Release 0.4.0 added ranking definitions, their variants, and ranking snapshots. It's built on `main`, which this manual describes, and its status is still Ready: no tag holds it yet, so a copy at `v0.3.0` has none of them.
+A step can have parts with different labels. Release 0.3.0 added experiments: a copy of Trial Folio at an earlier tag, such as `v0.2.1`, has none. Release 0.4.0 added ranking definitions, their variants, and ranking snapshots. It's built on `main`, which this manual describes, and Implemented, but no tag holds it yet, so a copy at `v0.3.0` has none of them.
 
 In the table, a target named without a version is the Reproduction and sensitivity workflow, the Results workspace, or a later increment.
 
