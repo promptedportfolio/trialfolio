@@ -167,7 +167,7 @@ def write_case_settings(
         case,
         _Originals(original_values, original_keys, ranking),
         configuration=configuration,
-        coverage=_coverage_of(metrics),
+        coverage=lambda: _coverage_of(metrics),
     )
     return store.write(path, table), rows
 
@@ -226,11 +226,16 @@ class _Originals:
 
 
 def _settings(
-    case: AnyPlanCase, originals: _Originals, *, configuration: StoredFile, coverage: Coverage
+    case: AnyPlanCase,
+    originals: _Originals,
+    *,
+    configuration: StoredFile,
+    coverage: Callable[[], Coverage],
 ) -> tuple[AnySettingsRows, bytes]:
     """`settings.csv`'s rows for the case, and the table's bytes: 1.1.0's, whose weight rows take
     their originals from `originals.ranking`, for a case whose ranking is a definition, and
-    1.0.0's for any other."""
+    1.0.0's for any other. The coverage is the one `coverage` gives, which is read only once a
+    case ranked by a definition is known to have been given its weights' originals."""
     if isinstance(case, PlanCaseV1_2 | ExperimentPlanCaseV1_3):
         if originals.ranking is None:
             raise ValueError("a case whose ranking is a definition needs its weights' originals")
@@ -240,7 +245,7 @@ def _settings(
             originals.ranking,
             label=case.case_id,
             source_artifact=configuration.artifact_id,
-            coverage=coverage,
+            coverage=coverage(),
             original_keys=originals.keys,
         )
         return ranked, settings_csv_v1_1(ranked)
@@ -249,7 +254,7 @@ def _settings(
         originals.values,
         label=case.case_id,
         source_artifact=configuration.artifact_id,
-        coverage=coverage,
+        coverage=coverage(),
         original_keys=originals.keys,
     )
     return rows, settings_csv(rows)
@@ -270,7 +275,7 @@ def _write(
     result = _result(response, lambda: store.read(response.path) if content is None else content)
     metrics = _metrics(case, response, result)
     settings, table = _settings(
-        case, originals, configuration=configuration, coverage=result.coverage
+        case, originals, configuration=configuration, coverage=lambda: result.coverage
     )
     return NormalizedTables(
         metrics=store.write(path_of(METRICS_PATH), metrics_csv(metrics)),
