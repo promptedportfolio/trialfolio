@@ -2343,7 +2343,7 @@ The core raises typed errors with stable dotted codes and actionable messages. O
 
 ## Protocols
 
-Protocols are introduced only when a release needs them, apart from the narrower protocols `ArtifactStore` combines, which the [readability refactor](refactoring.md) added so that a reader of saved records takes only the store's reads ([its decisions 12 and 13](refactoring.md#the-owners-decisions)). A protocol private to its module, which no other module imports, such as `_Mark` in `trialfolio.strict_yaml`, isn't one this rule covers, and isn't listed. Each protocol's documentation states its preconditions, return type, exceptions, side effects, and capability limits. Data lives in models and behavior in protocols, and dependencies are passed explicitly, never through global clients.
+Protocols are introduced only when a release needs them, apart from the narrower protocols `ArtifactStore` combines, and `LockableReader`, which combines two of them. The [readability refactor](refactoring.md) added them so that a reader of saved records takes only the store's reads, and `open_experiment` only those and the lock ([its decisions 12 and 13](refactoring.md#the-owners-decisions)). A protocol private to its module, which no other module imports, such as `_Mark` in `trialfolio.strict_yaml`, isn't one this rule covers, and isn't listed. Each protocol's documentation states its preconditions, return type, exceptions, side effects, and capability limits. Data lives in models and behavior in protocols, and dependencies are passed explicitly, never through global clients.
 
 | Protocol | Release | Responsibility |
 |---|---|---|
