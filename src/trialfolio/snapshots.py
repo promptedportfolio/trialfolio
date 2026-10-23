@@ -2,8 +2,9 @@
 checked offline, when the configuration is validated, in step 2 (docs/contracts.md, ranking
 snapshot output, reading a snapshot; release 0.4.0's R04-T10).
 
-`read_snapshot` reads only through an `ArtifactStore`, and only the files the snapshot's manifest
-lists, as `trialfolio report` reads a run. A snapshot can be a configuration's ranking when:
+`read_snapshot` reads only through a `StoreReader`, the store's reads, and only the files the
+snapshot's manifest lists, as `trialfolio report` reads a run. A snapshot can be a configuration's
+ranking when:
 
 1. **It's complete.** Its `manifest.json` is a snapshot manifest, valid, with the `outcome`
    `completed`; each file it lists has the size and `artifact_id` it records; it lists
@@ -47,7 +48,7 @@ from trialfolio.contracts.ranking_snapshot import (
 from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError, reason_of
 from trialfolio.ranking_definitions import DefinitionProblem, RankingDefinition, read_definition
-from trialfolio.storage import ArtifactStore
+from trialfolio.storage import StoreReader
 
 MANIFEST: Final = "manifest.json"
 DEFINITION: Final = "definition.xml"
@@ -119,7 +120,7 @@ class NotARanking(Exception):
         self.problems = tuple(problems)
 
 
-def read_snapshot(store: ArtifactStore, name: SnapshotName) -> SnapshotRead:
+def read_snapshot(store: StoreReader, name: SnapshotName) -> SnapshotRead:
     """Reads the snapshot in `store`, rooted at its directory, and checks that it's complete,
     and can be a ranking, as the module says. Its errors name it as `name` says.
 
@@ -200,7 +201,7 @@ def artifact_id(content: bytes) -> str:
     return "sha256:" + sha256_hex(content)
 
 
-def _manifest(store: ArtifactStore, name: SnapshotName) -> RankingSnapshotManifest:
+def _manifest(store: StoreReader, name: SnapshotName) -> RankingSnapshotManifest:
     try:
         content = store.read(MANIFEST)
     except FileNotFoundError:
@@ -229,7 +230,7 @@ def _manifest(store: ArtifactStore, name: SnapshotName) -> RankingSnapshotManife
     return manifest
 
 
-def _listed(store: ArtifactStore, name: SnapshotName, entry: SnapshotArtifact) -> bytes:
+def _listed(store: StoreReader, name: SnapshotName, entry: SnapshotArtifact) -> bytes:
     """The bytes of a file the manifest lists, checked against its size and `artifact_id`."""
     try:
         content = store.read(entry.path)

@@ -34,69 +34,42 @@ A store serves one output directory, its root, and takes paths relative to it.
 - **Listing.** `entries` gives the names in a directory, so a resume finds an experiment's
   records through the store (release 0.3.0, R03-T09).
 
-R01-T08 checked what each platform reports, on macOS 26.6.2 with Python 3.12.13:
+`ArtifactStore` combines four narrower protocols, `StoreReader`, `StoreWriter`, `StoreClaim`,
+and `StoreLock`, so a reader of saved records takes only the store's reads; `LockableReader`
+combines the first and the last, for the reader that takes the experiment lock before it reads
+(docs/contracts.md, protocols).
 
-- `os.link` on exFAT and FAT32 disk images fails with `ENOTSUP`, "Operation not supported".
-- `F_FULLFSYNC` works on APFS, exFAT, and FAT32, for files and directories. devfs reports
-  `ENODEV`, "Operation not supported by device". Go's `os` package falls back to `fsync` on
-  `ENOTSUP`, which it reports SMB mounts give (golang/go#64215). Trial Folio falls back on those
-  two, and treats any other error as a failed write.
-- macOS keeps a file's extended attributes on FAT and exFAT in an AppleDouble file named `._`
-  plus the file's name, created with the file and removed with it.
-- On FAT and exFAT, macOS gives each new, empty file a temporary inode of its own, counted down
-  from 2**64 for each mount, until its first write gives it a lasting one. A write that failed
-  with `ENOSPC`, and wrote nothing, gave the empty file another temporary inode, and so did
-  mounting the volume again. A walk-through of the user guide found on 2026-10-04, on macOS
-  26.6.2, that the claim had read its file's identity before writing it, so every claim there
-  failed with `output.not_empty`. It now reads it once the file is written, or once writing it
-  failed. PR #30's review checked these inodes on disk images the same day.
-- R03-T08 tried the experiment lock on APFS, exFAT, and FAT32 disk images on macOS 26.6.2, with
-  Python 3.14.6, on 2026-10-09. Each took the lock on the new, empty file's descriptor, and
-  refused a second one, from another descriptor of the same process or from another process, with
-  `EAGAIN` ("Resource temporarily unavailable"), which is `EWOULDBLOCK` there. Closing the
-  descriptor released it, and so did killing its process with `SIGKILL`.
-- On Windows, from CPython 3.12.13's source and Microsoft's documentation: `os.open` calls
-  `_wopen`, which fails with `EACCES` for a directory; `os.fsync` calls `_commit`, which takes a
-  file descriptor; and `os.rename` calls `MoveFileExW` with no flags, so it fails if the name
-  exists, and doesn't ask for `MOVEFILE_WRITE_THROUGH`.
+The platform's primitives the local store builds on, publishing, syncing, the lock, and
+deferring SIGINT, are in `trialfolio.filesystem`, with what R01-T08 and R03-T08 found each
+platform reports. They don't log: the store logs a sync that's less durable, under this
+module's name.
 """
 
-import errno
 import hashlib
 import logging
 import os
 import secrets
-import signal
 import sys
-import threading
-from collections.abc import Generator, Iterable
-from contextlib import contextmanager, suppress
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import FrameType, TracebackType
+from types import TracebackType
 from typing import Final, NoReturn, Protocol, Self
 
 from trialfolio.contracts.common import valid_relative_path
 from trialfolio.errors import TrialFolioError, reason_of
-
-if sys.platform == "win32":
-    import msvcrt
-else:
-    import fcntl
+from trialfolio.filesystem import (
+    BINARY,
+    defer_sigint,
+    part_of_claim,
+    publish,
+    release_lock,
+    sync,
+    sync_directories,
+    take_lock,
+)
 
 _logger = logging.getLogger(__name__)
-
-_NO_FULL_SYNC: Final = frozenset({errno.ENOTSUP, errno.ENODEV})
-"""How macOS reports a file system without `F_FULLFSYNC`. Any other error is a failed sync."""
-
-_NO_DIRECTORY_SYNC: Final = frozenset({errno.EBADF, errno.EINVAL})
-"""How a system that can't sync a directory reports it. PostgreSQL's `fsync_fname_ext` ignores the
-same two for a directory."""
-
-_NO_HARD_LINKS: Final = frozenset({errno.ENOTSUP, errno.EPERM, errno.ENOSYS})
-"""How `os.link` reports a file system without hard links: `ENOTSUP` on macOS; `EPERM` on Linux,
-as link(2) documents; and `ENOSYS`, which libfuse returns for a file system without a link
-operation."""
 
 LOCK_PATH: Final = "experiment.lock"
 """The file that claims an experiment's output directory, and on which the lock is taken. It's
@@ -106,35 +79,10 @@ the modules that read the experiment's records (docs/contracts.md, running an ex
 LOCK_LINE: Final = b"Trial Folio experiment lock: it claims this directory for one experiment.\n"
 """The lock file's one fixed line, so the file is never empty (docs/contracts.md, the lock)."""
 
-_LOCK_HELD: Final = (
-    frozenset({errno.EACCES})
-    if sys.platform == "win32"
-    else frozenset({errno.EAGAIN, errno.EWOULDBLOCK})
-)
-"""How taking the experiment lock reports that another process holds it: `EWOULDBLOCK`, which
-is `EAGAIN` on Linux and macOS, from `flock`, and `EACCES` from `msvcrt.locking` on Windows,
-whose C runtime documents it as a locking violation. Any other error refuses the lock, `EACCES`
-from `flock` included."""
-
-_APPLE_DOUBLE: Final = "._"
-"""The prefix of the file that holds another file's extended attributes on macOS, where the file
-system can't."""
-
 _MODE: Final = 0o666
 """The mode new files are created with, before the umask."""
 
-_BINARY: Final[int] = getattr(os, "O_BINARY", 0)
-"""Windows translates line endings without this flag."""
-
-_NO_FULL_SYNC_WARNING: Final = (
-    "The output directory's file system doesn't support a full sync (F_FULLFSYNC), so Trial"
-    " Folio syncs with fsync, which doesn't flush the drive's cache. The files written there are"
-    " less durable after a power loss."
-)
-_NO_DIRECTORY_SYNC_WARNING: Final = (
-    "The output directory's file system can't sync a directory, so the entries of the files"
-    " written there may be lost after a power loss."
-)
+_DISAPPEARED: Final = "The output directory disappeared while Trial Folio claimed it."
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,60 +104,35 @@ class StoredFile:
         )
 
 
-class ArtifactStore(Protocol):
-    """Persists and reads one output directory's artifacts by relative path.
+class StoreReader(Protocol):
+    """Reads one output directory's files by relative path: what a reader of saved records
+    takes.
 
     Paths are relative to the store's root, with `/` separators, as `valid_relative_path`
-    defines them; any other path raises `ValueError`. No file is ever replaced or changed once
-    it's written.
+    defines them; any other path raises `ValueError`.
     """
 
-    def check_empty(self) -> None:
-        """Checks, without creating anything, that the root is absent or an empty directory.
+    def read(self, path: str) -> bytes:
+        """Returns the bytes of a file under the root.
 
-        Raises `TrialFolioError` with `output.not_empty` if it holds anything, hidden files
-        included, or exists and isn't a directory; and with `storage.write_failed` if it can't be
-        created, because a parent isn't a directory or none exists, or can't be read.
+        Raises `FileNotFoundError` if there's none, and `OSError` if it can't be read.
         """
         ...
 
-    def claim(self, path: str, data: bytes, *, lock: bool = False) -> StoredFile:
-        """Claims the root for this store with its first file, and returns it.
+    def entries(self, path: str) -> tuple[str, ...]:
+        """Returns the names of the entries in the directory `path` under the root, sorted,
+        hidden ones included, so a resume can find an experiment's records (R03-T09).
 
-        First checks the root as `check_empty` does, apart from listing it. Then creates the
-        root, and any missing parent directories, one at a time. Then creates the file, which
-        must be directly in the root and not empty, under its final name with an exclusive
-        create, writes and syncs it, and lists the root. On success, the file and the
-        directories' entries are durable, and the store can `write`.
-
-        With `lock`, for an experiment's `experiment.lock`, it takes the experiment lock on the
-        descriptor that created the file, before writing it, and holds it until `close`.
-
-        Raises `TrialFolioError` with `output.not_empty` if the file existed already, the root
-        holds anything else, or the root or a parent disappeared; with `experiment.locked` if
-        another process holds the lock; and with `storage.write_failed` if the root can't be
-        created, a write or sync fails, or the file system refuses the lock. On any failure, an
-        interrupt included, it releases the lock, and removes what it created: its file, then
-        the directories it created, deepest first, each only while it's empty.
+        Raises `FileNotFoundError` if there's no such directory, `NotADirectoryError` if `path`
+        is a file, and `OSError` if it can't be read.
         """
         ...
 
-    def lock(self, path: str) -> None:
-        """Takes the experiment lock on `path`, the existing file directly in the root that
-        claimed it for an experiment, and holds it until `close`, so a resumed experiment owns
-        its directory: the store can `write` once it holds it, without claiming the root.
 
-        Raises `FileNotFoundError` if there's no such file, as when the root isn't a directory;
-        `TrialFolioError` with
-        `experiment.locked` if another process holds the lock, and with `storage.write_failed`
-        if the file can't be opened or the file system refuses the lock. It writes nothing.
-        """
-        ...
-
-    def close(self) -> None:
-        """Releases the experiment lock, if the store holds it. The operating system also
-        releases it when the process ends, however it ends."""
-        ...
+class StoreWriter(Protocol):
+    """Writes new files into an output directory the store owns, by relative path, as
+    `StoreReader` takes them, and undoes a failed write. No file is ever replaced or changed once
+    it's written."""
 
     def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
         """Writes a new file atomically and durably, and returns it.
@@ -246,24 +169,78 @@ class ArtifactStore(Protocol):
         """
         ...
 
-    def read(self, path: str) -> bytes:
-        """Returns the bytes of a file under the root.
 
-        Raises `FileNotFoundError` if there's none, and `OSError` if it can't be read.
+class StoreClaim(Protocol):
+    """Claims a new output directory for the store, with its first file, so the store owns it."""
+
+    def check_empty(self) -> None:
+        """Checks, without creating anything, that the root is absent or an empty directory.
+
+        Raises `TrialFolioError` with `output.not_empty` if it holds anything, hidden files
+        included, or exists and isn't a directory; and with `storage.write_failed` if it can't be
+        created, because a parent isn't a directory or none exists, or can't be read.
         """
         ...
 
-    def entries(self, path: str) -> tuple[str, ...]:
-        """Returns the names of the entries in the directory `path` under the root, sorted,
-        hidden ones included, so a resume can find an experiment's records (R03-T09).
+    def claim(self, path: str, data: bytes, *, lock: bool = False) -> StoredFile:
+        """Claims the root for this store with its first file, and returns it.
 
-        Raises `FileNotFoundError` if there's no such directory, `NotADirectoryError` if `path`
-        is a file, and `OSError` if it can't be read.
+        First checks the root as `check_empty` does, apart from listing it. Then creates the
+        root, and any missing parent directories, one at a time. Then creates the file, which
+        must be directly in the root and not empty, under its final name with an exclusive
+        create, writes and syncs it, and lists the root. On success, the file and the
+        directories' entries are durable, and the store can `write`.
+
+        With `lock`, for an experiment's `experiment.lock`, it takes the experiment lock on the
+        descriptor that created the file, before writing it, and holds it until `close`.
+
+        Raises `TrialFolioError` with `output.not_empty` if the file existed already, the root
+        holds anything else, or the root or a parent disappeared; with `experiment.locked` if
+        another process holds the lock; and with `storage.write_failed` if the root can't be
+        created, a write or sync fails, or the file system refuses the lock. On any failure, an
+        interrupt included, it releases the lock, and removes what it created: its file, then
+        the directories it created, deepest first, each only while it's empty.
         """
         ...
 
 
-def published(store: ArtifactStore, path: str, data: bytes) -> StoredFile | None:
+class StoreLock(Protocol):
+    """Holds the experiment lock on the output directory, so one process at a time runs an
+    experiment there (docs/contracts.md, the lock)."""
+
+    def lock(self, path: str) -> None:
+        """Takes the experiment lock on `path`, the existing file directly in the root that
+        claimed it for an experiment, and holds it until `close`, so a resumed experiment owns
+        its directory: the store can `write` once it holds it, without claiming the root.
+
+        Raises `FileNotFoundError` if there's no such file, as when the root isn't a directory;
+        `TrialFolioError` with
+        `experiment.locked` if another process holds the lock, and with `storage.write_failed`
+        if the file can't be opened or the file system refuses the lock. It writes nothing.
+        """
+        ...
+
+    def close(self) -> None:
+        """Releases the experiment lock, if the store holds it. The operating system also
+        releases it when the process ends, however it ends."""
+        ...
+
+
+class ArtifactStore(StoreReader, StoreWriter, StoreClaim, StoreLock, Protocol):
+    """Persists and reads one output directory's artifacts by relative path.
+
+    Paths are relative to the store's root, with `/` separators, as `valid_relative_path`
+    defines them; any other path raises `ValueError`. No file is ever replaced or changed once
+    it's written.
+    """
+
+
+class LockableReader(StoreReader, StoreLock, Protocol):
+    """A store that's read once its experiment lock is taken, so the records can't change while
+    they're read: what a resumed experiment's reader takes (`open_experiment`)."""
+
+
+def published(store: StoreReader, path: str, data: bytes) -> StoredFile | None:
     """The file `path`, if a write of `data` that failed published it whole, as the store can
     before a later step fails or an interrupt stops it; None if it holds other bytes, or can't be
     read, as when it was never published."""
@@ -358,7 +335,7 @@ class LocalArtifactStore:
         if self._claimed:
             raise RuntimeError("this store already owns its directory")
         try:
-            descriptor = os.open(self._root / path, os.O_WRONLY | _BINARY)
+            descriptor = os.open(self._root / path, os.O_WRONLY | BINARY)
         except FileNotFoundError:
             raise
         except NotADirectoryError as error:  # The root, or a parent of it, is a file.
@@ -371,8 +348,8 @@ class LocalArtifactStore:
             ) from error
         held = False
         try:
-            _take_lock(descriptor, path)
-            with _defer_sigint():
+            take_lock(descriptor, path)
+            with defer_sigint():
                 self._lock = descriptor
                 held = True
         finally:
@@ -381,10 +358,10 @@ class LocalArtifactStore:
         self._claimed = True
 
     def close(self) -> None:
-        with _defer_sigint():
+        with defer_sigint():
             descriptor, self._lock = self._lock, None
             if descriptor is not None:
-                _release_lock(descriptor)
+                release_lock(descriptor)
 
     def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
         parts = valid_relative_path(path).split("/")
@@ -399,7 +376,7 @@ class LocalArtifactStore:
         try:
             _make_directories(directory, self._unsynced, stop=self._root)
             self._write_new(temporary, data)
-            _publish(temporary, final, path, logged)
+            publish(temporary, final, path, logged)
             if sys.platform != "win32":
                 os.unlink(temporary)
             temporary = None
@@ -432,7 +409,7 @@ class LocalArtifactStore:
             raise RuntimeError("claim the output directory before writing to it")
         final = self._root.joinpath(*parts)
         try:
-            with _defer_sigint():
+            with defer_sigint():
                 try:
                     if final.read_bytes() != data:
                         return  # Another file: not this write's to remove.
@@ -445,7 +422,7 @@ class LocalArtifactStore:
                 f"Couldn't remove {path}, which a failed write may have left: {reason_of(error)}.",
             ) from error
         try:
-            self._sync_directories([final.parent])
+            sync_directories([final.parent], self._warn)
         except OSError:
             pass  # The file is gone either way, and the failure being reported matters more.
 
@@ -482,68 +459,65 @@ class LocalArtifactStore:
             " Check the drive or share it's on.",
         )
 
-    def _claim(self, claim: "_Claim", data: bytes, *, lock: bool) -> None:  # noqa: C901 - RF-T09 shortens it.
+    def _claim(self, claim: "_Claim", data: bytes, *, lock: bool) -> None:
+        """The claim's steps: the directories, the file, which it writes and, with `lock`, locks,
+        and the check that the root holds only that file, then the syncs of the directories."""
         try:
             new = _make_directories(self._root, claim.directories)
         except FileNotFoundError:
             # _check_root found a parent, so it disappeared, because a competing claim that
             # created it failed and removed it.
-            _not_empty("The output directory disappeared while Trial Folio claimed it.")
-        descriptor: int | None = None
+            _not_empty(_DISAPPEARED)
         try:
-            try:
-                with _defer_sigint():
-                    descriptor = os.open(
-                        claim.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, _MODE
-                    )
-                    claim.file = os.fstat(descriptor)
-            except FileExistsError:
-                _not_empty("The output directory isn't empty.")
-            except FileNotFoundError:
-                _not_empty("The output directory disappeared while Trial Folio claimed it.")
-            try:
-                if lock:
-                    # Before the file has its line, so no other process can take the lock on
-                    # the file this claim created.
-                    _take_lock(descriptor, claim.path.name)
-                self._write_all(descriptor, data)
-                # Read again once written: on FAT and exFAT, macOS gives a new, empty file a
-                # temporary inode, which its first write replaces.
-                with _defer_sigint():
-                    claim.file = os.fstat(descriptor)
-                    if lock:
-                        # The descriptor now holds the lock: the store keeps it open.
-                        claim.lock, descriptor = descriptor, None
-            except BaseException:
-                # So may a write that failed or was interrupted, even one that wrote nothing, and
-                # cleanup checks this identity. If reading it fails too, the first failure is the
-                # one to report.
-                held = descriptor if descriptor is not None else claim.lock
-                if held is not None:
-                    with _defer_sigint(), suppress(OSError):
-                        claim.file = os.fstat(held)
-                raise
+            self._fill(claim, claim.create(), data, lock=lock)
         finally:
-            if descriptor is not None:
-                os.close(descriptor)
+            claim.close()
+        self._check_claimed(claim)
+        # The root's parent too: a competing claim may have created the root, and failed before
+        # syncing it.
+        sync_directories(
+            [self._root, self._root.parent, *(directory.parent for directory in new)], self._warn
+        )
+
+    def _fill(self, claim: "_Claim", descriptor: int, data: bytes, *, lock: bool) -> None:
+        """Writes the claim's file through `descriptor`, which created it, with `lock` taking the
+        experiment lock on it first, and reads its identity again once it's written."""
+        try:
+            if lock:
+                # Before the file has its line, so no other process can take the lock on the
+                # file this claim created.
+                take_lock(descriptor, claim.path.name)
+            self._write_all(descriptor, data)
+            # Read again once written: on FAT and exFAT, macOS gives a new, empty file a
+            # temporary inode, which its first write replaces.
+            with defer_sigint():
+                claim.file = os.fstat(descriptor)
+                if lock:
+                    # The descriptor now holds the lock: the store keeps it open.
+                    claim.lock, claim.descriptor = descriptor, None
+        except BaseException:
+            # So may a write that failed or was interrupted, even one that wrote nothing, and
+            # cleanup checks this identity. If reading it fails too, the first failure is the
+            # one to report.
+            claim.identify()
+            raise
+
+    def _check_claimed(self, claim: "_Claim") -> None:
+        """Raises `output.not_empty` unless the root holds the claim's file, and nothing else, as
+        it was when the claim created it."""
         try:
             names = os.listdir(self._root)
         except FileNotFoundError:
-            _not_empty("The output directory disappeared while Trial Folio claimed it.")
+            _not_empty(_DISAPPEARED)
         if claim.path.name not in names or not claim.owns_file():
             _not_empty("The output directory changed while Trial Folio claimed it.")
-        if any(not _part_of(name, claim.path.name) for name in names):
+        if any(not part_of_claim(name, claim.path.name) for name in names):
             _not_empty(
                 "Another process wrote to the output directory while Trial Folio claimed it."
             )
-        # The root's parent too: a competing claim may have created the root, and failed before
-        # syncing it.
-        self._sync_directories(
-            [self._root, self._root.parent, *(directory.parent for directory in new)]
-        )
 
     def _write_new(self, path: Path, data: bytes) -> None:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, _MODE)
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | BINARY, _MODE)
         try:
             self._write_all(descriptor, data)
         finally:
@@ -553,7 +527,7 @@ class LocalArtifactStore:
         view = memoryview(data)
         while view:
             view = view[os.write(descriptor, view) :]
-        self._sync(descriptor)
+        sync(descriptor, self._warn)
 
     def _sync_new_entries(self, file: Path) -> None:
         """Syncs the directory holding `file`, and the parent of each directory on the way to it
@@ -564,36 +538,9 @@ class LocalArtifactStore:
                 directories.append(directory.parent)
             if directory == self._root:
                 break
-        self._sync_directories(directories)
+        sync_directories(directories, self._warn)
         synced = set(file.parents)
         self._unsynced = [directory for directory in self._unsynced if directory not in synced]
-
-    def _sync_directories(self, directories: Iterable[Path]) -> None:
-        if sys.platform == "win32":
-            return  # Python can't open a directory on Windows.
-        # Deepest first, each once.
-        for directory in sorted(set(directories), key=lambda path: len(path.parts), reverse=True):
-            descriptor = os.open(directory, os.O_RDONLY)
-            try:
-                self._sync(descriptor)
-            except OSError as error:
-                if error.errno not in _NO_DIRECTORY_SYNC:
-                    raise
-                self._warn(_NO_DIRECTORY_SYNC_WARNING)
-            finally:
-                os.close(descriptor)
-
-    def _sync(self, descriptor: int) -> None:
-        if sys.platform == "darwin":
-            try:
-                fcntl.fcntl(descriptor, fcntl.F_FULLFSYNC)
-            except OSError as error:
-                if error.errno not in _NO_FULL_SYNC:
-                    raise
-                self._warn(_NO_FULL_SYNC_WARNING)
-            else:
-                return
-        os.fsync(descriptor)
 
     def _warn(self, message: str) -> None:
         """Logs that the store's writes are less durable, once for each reason."""
@@ -611,15 +558,48 @@ class _Claim:
     """The identity read from the descriptor returned by a successful exclusive create."""
     directories: list[Path] = field(default_factory=list[Path])
     """Outermost first."""
+    descriptor: int | None = None
+    """The descriptor that created the file, while the claim holds it open, and before it holds
+    the experiment lock."""
     lock: int | None = None
     """The descriptor that holds the experiment lock, once the claim has taken it."""
 
+    def create(self) -> int:
+        """Creates the file, with an exclusive create, records its identity, and returns the
+        descriptor that created it, which the claim holds open until `close`."""
+        try:
+            with defer_sigint():
+                descriptor = os.open(
+                    self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | BINARY, _MODE
+                )
+                self.descriptor = descriptor
+                self.file = os.fstat(descriptor)
+        except FileExistsError:
+            _not_empty("The output directory isn't empty.")
+        except FileNotFoundError:
+            _not_empty(_DISAPPEARED)
+        return descriptor
+
+    def identify(self) -> None:
+        """Reads the file's identity again from the descriptor that holds it open, if one does.
+        A failure leaves the identity as it was."""
+        held = self.descriptor if self.descriptor is not None else self.lock
+        if held is not None:
+            with defer_sigint(), suppress(OSError):
+                self.file = os.fstat(held)
+
+    def close(self) -> None:
+        """Closes the descriptor that created the file, unless it now holds the lock."""
+        if self.descriptor is not None:
+            descriptor, self.descriptor = self.descriptor, None
+            os.close(descriptor)
+
     def release(self) -> None:
         """Releases the experiment lock, if the claim took it."""
-        with _defer_sigint():
+        with defer_sigint():
             descriptor, self.lock = self.lock, None
             if descriptor is not None:
-                _release_lock(descriptor)
+                release_lock(descriptor)
 
     def undo(self) -> None:
         if self.owns_file():
@@ -655,7 +635,7 @@ def _make_directories(directory: Path, made: list[Path], stop: Path | None = Non
         missing.append(candidate)
     missing.reverse()
     for candidate in missing:
-        with _defer_sigint():
+        with defer_sigint():
             try:
                 os.mkdir(candidate)
             except FileExistsError:
@@ -663,122 +643,6 @@ def _make_directories(directory: Path, made: list[Path], stop: Path | None = Non
             else:
                 made.append(candidate)
     return missing
-
-
-def _publish(temporary: Path, final: Path, path: str, logged: str) -> None:
-    """Gives the temporary file its final name, never replacing a file. An error's message names
-    the file by `path`, and its logged message by `logged`."""
-    try:
-        if sys.platform == "win32":
-            os.rename(temporary, final)
-        else:
-            os.link(temporary, final)
-    except FileExistsError as error:
-
-        def exists(name: str) -> str:
-            return (
-                f"Couldn't write {name}: a file with that name already exists in the output"
-                " directory, and Trial Folio never replaces a file."
-            )
-
-        raise TrialFolioError("storage.write_failed", exists(path), exists(logged)) from error
-    except OSError as error:
-        if sys.platform == "win32" or error.errno not in _NO_HARD_LINKS:
-            raise
-        reason = reason_of(error)
-
-        def no_links(name: str) -> str:
-            return (
-                f"Couldn't write {name}: the output directory's file system doesn't support hard"
-                f" links ({reason}). FAT and exFAT don't. Trial Folio publishes each file"
-                " with a hard link, so that it never replaces one. Choose an output directory on"
-                " another file system."
-            )
-
-        raise TrialFolioError("storage.write_failed", no_links(path), no_links(logged)) from error
-
-
-def _take_lock(descriptor: int, name: str) -> None:
-    """Takes the experiment lock on `descriptor`, without waiting: an exclusive `flock` on Linux
-    and macOS, which a process loses only when every descriptor of its open file is closed, and
-    `msvcrt.locking` on the file's first byte on Windows (docs/contracts.md, the lock).
-
-    Raises `TrialFolioError` with `experiment.locked` if another process holds it, and with
-    `storage.write_failed` if the file system refuses it for any other reason.
-    """
-    try:
-        if sys.platform == "win32":
-            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
-        else:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError as error:
-        if error.errno in _LOCK_HELD:
-            raise TrialFolioError(
-                "experiment.locked",
-                f"Another process is running this experiment: it holds the experiment lock,"
-                f" {name}, in the output directory. Nothing was sent, and nothing was written."
-                " Wait for it to end, then run the command again.",
-            ) from error
-        raise TrialFolioError(
-            "storage.write_failed",
-            f"Couldn't take the experiment lock, {name}: the output directory's file system"
-            f" refused it ({reason_of(error)}). Trial Folio locks an experiment's directory so"
-            " that only one process runs it at a time. Choose an output directory on another"
-            " file system. Nothing was sent.",
-        ) from error
-
-
-def _release_lock(descriptor: int) -> None:
-    """Releases the experiment lock that `descriptor` holds, and closes it. On Windows, it first
-    unlocks the file's first byte, as Microsoft's `_locking` documentation asks before a file is
-    closed: the system releases a lock left at close only when its resources allow, so the
-    store's owner could find it still held. `msvcrt.locking` unlocks from the file's position,
-    which writing the claim's line moved. Closing releases `flock`'s lock on Linux and macOS.
-    Errors are ignored, since closing the descriptor releases the lock either way."""
-    if sys.platform == "win32":
-        with suppress(OSError):
-            os.lseek(descriptor, 0, os.SEEK_SET)
-            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
-    with suppress(OSError):
-        os.close(descriptor)
-
-
-def _part_of(name: str, claimed: str) -> bool:
-    """Whether a name in a directory being claimed is the claim's own file. On macOS, that
-    includes the AppleDouble file it gets on FAT or exFAT."""
-    if sys.platform == "darwin" and name == _APPLE_DOUBLE + claimed:
-        return True
-    return name == claimed
-
-
-@contextmanager
-def _defer_sigint() -> Generator[None, None, None]:
-    """Delays a callable SIGINT handler until a creation's ownership has been recorded.
-
-    Python delivers signal handlers only in the main thread. Workers therefore need no handler
-    changes; ignored or default OS dispositions are left alone too. Restore the caller's handler
-    before delivering a pending interrupt, including when the protected operation failed.
-    """
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-    previous = signal.getsignal(signal.SIGINT)
-    if not callable(previous):
-        yield
-        return
-    pending: tuple[int, FrameType | None] | None = None
-
-    def defer(signum: int, frame: FrameType | None) -> None:
-        nonlocal pending
-        pending = (signum, frame)
-
-    try:
-        signal.signal(signal.SIGINT, defer)
-        yield
-    finally:
-        signal.signal(signal.SIGINT, previous)
-        if pending is not None:
-            previous(*pending)
 
 
 def _remove(path: Path) -> None:

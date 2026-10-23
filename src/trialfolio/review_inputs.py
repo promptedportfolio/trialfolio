@@ -6,9 +6,9 @@ directory unless it's absolute, as every configuration's file paths are. The che
 
 - refuses a path where nothing exists with `input.not_found`, as `trialfolio report` does. The
   file system resolves the path, so a `..` after a symbolic link leads where opening it would.
-- reads each run once, through an `ArtifactStore`, and checks it's a complete run, as
-  `trialfolio report` does (`check_run`): `input.not_a_run`, or `artifact.unknown_schema_version`
-  for a schema version with no reader.
+- reads each run once, through a `StoreReader`, the store's reads, and checks it's a complete
+  run, as `trialfolio report` does (`check_run`): `input.not_a_run`, or
+  `artifact.unknown_schema_version` for a schema version with no reader.
 - keeps the bytes it checked of the files a review copies: the run's manifest, its plan, and its
   normalized tables, when it has them. The review writes its copies from those bytes, never by
   reading the run again, so a file changed after the check can't be copied.
@@ -34,7 +34,7 @@ from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError
 from trialfolio.paths import existing_path
 from trialfolio.runs import MANIFEST_PATH, CheckedRun, RunName, SavedRun, check_run, not_a_run
-from trialfolio.storage import ArtifactStore, LocalArtifactStore
+from trialfolio.storage import LocalArtifactStore, StoreReader
 
 _logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ _COPIED_ROLES: Final[tuple[ReviewArtifactRole, ...]] = ("plan", "metrics", "sett
 """The roles of the files listed in a run's manifest that a review copies, in the order it
 copies them, after the manifest itself."""
 
-type RunStores = Callable[[str], ArtifactStore | None]
+type RunStores = Callable[[str], StoreReader | None]
 """The store of the run directory a result's `run` path names, or None when nothing exists
 there."""
 
@@ -89,7 +89,7 @@ def local_run_stores(configuration_path: str | os.PathLike[str]) -> RunStores:
     each `run` path is read from the configuration's directory, unless it's absolute."""
     directory = Path(configuration_path).parent
 
-    def store(run: str) -> ArtifactStore | None:
+    def store(run: str) -> StoreReader | None:
         # The path the file system resolves, which then reads the run.
         resolved = existing_path(directory / run)
         return None if resolved is None else LocalArtifactStore(resolved)

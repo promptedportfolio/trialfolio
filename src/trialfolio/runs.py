@@ -2,8 +2,8 @@
 `trialfolio report` reads it (release 0.1.0; docs/contracts.md, artifact storage, plan hashing,
 and artifact compatibility).
 
-`read_run` reads only through an `ArtifactStore`, and only the files the manifest lists, so a run
-reads the same way wherever it's stored. A directory is a complete run when:
+`read_run` reads only through a `StoreReader`, the store's reads, and only the files the manifest
+lists, so a run reads the same way wherever it's stored. A directory is a complete run when:
 
 - its `manifest.json` is a run manifest whose schema version has a reader. The manifest is written
   last, so a run without one is incomplete.
@@ -101,7 +101,7 @@ from trialfolio.record_checks import (
     matches,
     named,
 )
-from trialfolio.storage import ArtifactStore
+from trialfolio.storage import StoreReader
 from trialfolio.tables import read_metrics_csv, read_settings_csv, read_settings_csv_v1_1
 
 MANIFEST_PATH: Final = "manifest.json"
@@ -223,7 +223,7 @@ class CheckedRun:
     """By path in the run: `manifest.json`'s bytes, and each listed file's."""
 
 
-def read_run(store: ArtifactStore) -> SavedRun:
+def read_run(store: StoreReader) -> SavedRun:
     """Reads a saved run from `store`, rooted at its output directory, and checks it's complete,
     a run whose ranking is a definition included, as `trialfolio report` reads it.
 
@@ -234,7 +234,7 @@ def read_run(store: ArtifactStore) -> SavedRun:
     return check_run(store).saved
 
 
-def check_run(store: ArtifactStore, name: RunName = THE_RUN_DIRECTORY) -> CheckedRun:
+def check_run(store: StoreReader, name: RunName = THE_RUN_DIRECTORY) -> CheckedRun:
     """Reads and checks a saved run as `read_run` does, reading each file once, and returns it
     with the bytes it checked. Its errors name the run as `name` says."""
     checks = _CHECKS
@@ -258,7 +258,7 @@ def not_a_run(name: RunName, problem: str) -> TrialFolioError:
     return _not_a_run(problem).error(name)
 
 
-def _read_manifest(store: ArtifactStore) -> bytes:
+def _read_manifest(store: StoreReader) -> bytes:
     try:
         return store.read(MANIFEST_PATH)
     except FileNotFoundError:
@@ -283,7 +283,7 @@ def _manifest(content: bytes, checks: RecordChecks) -> AnyManifest:
     return checks.validated(RunManifest, content, MANIFEST_PATH, "run manifest")
 
 
-def _listed(store: ArtifactStore, artifact: AnyArtifact) -> bytes:
+def _listed(store: StoreReader, artifact: AnyArtifact) -> bytes:
     """The bytes of a file the manifest lists, checked against its size and `artifact_id`."""
     try:
         content = store.read(artifact.path)
