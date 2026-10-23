@@ -65,6 +65,10 @@ Error messages name the offending key and never include its value, so they're sa
 key's control and formatting characters and lone surrogates are written as escapes.
 `trialfolio.configuration_messages` gives the messages of a model's errors, and of text written
 without quotes.
+
+`__all__` lists the public names this module had before `trialfolio.strict_yaml` was split out of
+it, so each still imports from here: among them `KeyPath` and the YAML reader's limits,
+`CREDENTIAL_WORDS`, `MAX_DIGITS`, and `MAX_DEPTH`, which `strict_yaml` now defines.
 """
 
 import os
@@ -132,7 +136,38 @@ from trialfolio.snapshots import (
     snapshot_from,
 )
 from trialfolio.storage import LocalArtifactStore
-from trialfolio.strict_yaml import KeyPath, ReadYaml, YamlRefused, format_path, read_yaml
+from trialfolio.strict_yaml import (
+    CREDENTIAL_WORDS,
+    MAX_DEPTH,
+    MAX_DIGITS,
+    KeyPath,
+    ReadYaml,
+    YamlRefused,
+    format_path,
+    read_yaml,
+)
+
+__all__ = [
+    "CREDENTIAL_WORDS",
+    "MAX_DEPTH",
+    "MAX_DIGITS",
+    "ExperimentConfigurationRead",
+    "KeyPath",
+    "ScreenConfigurationRead",
+    "WeightOriginal",
+    "experiment_original_values",
+    "experiment_original_values_v1_1",
+    "experiment_schema_version",
+    "original_values",
+    "read_experiment_configuration",
+    "read_experiment_configuration_v1_1",
+    "read_ranking_snapshot_configuration",
+    "read_review_configuration",
+    "read_run_configuration",
+    "read_screen_configuration",
+    "read_screen_configuration_v1_1",
+    "screen_original_values_v1_1",
+]
 
 
 def read_screen_configuration(content: bytes, source_name: str) -> ScreenConfiguration:
