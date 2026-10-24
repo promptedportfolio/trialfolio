@@ -3,7 +3,7 @@ of the files in a plan's directory, `plans/<n>/`, and in a session's, `sessions/
 attempt's request and saved response, with the paths of a plan's and a session's files.
 
 The names of an attempt's records, and its directory, are `trialfolio.attempts`', and the paths
-of a case's normalized tables `normalization.py`'s, beside the code that writes them.
+of a case's normalized tables `trialfolio.normalization`'s, beside the code that writes them.
 """
 
 from typing import Final

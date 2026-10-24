@@ -23,7 +23,7 @@ from trialfolio.contracts.attempt import (
     StartRecordV1_2,
 )
 from trialfolio.contracts.common import AUTHENTICATION_REQUEST, SCREEN_BACKTEST_REQUEST
-from trialfolio.storage import ArtifactStore
+from trialfolio.storage import StoreReader
 
 type AnyAttemptRecord = AttemptRecord | AttemptRecordV1_1 | AttemptRecordV1_2 | AttemptRecordV1_3
 """An attempt record of any version: a screen run's, 1.0.0, or 1.2.0 with a definition, and an
@@ -85,7 +85,7 @@ def reported_cost(record: AnyAttemptRecord) -> int | None:
     return sum(reported) if reported else None
 
 
-def read_attempt(store: ArtifactStore, case_id: str, attempt_id: uuid.UUID) -> AttemptStatus | None:
+def read_attempt(store: StoreReader, case_id: str, attempt_id: uuid.UUID) -> AttemptStatus | None:
     """Reads how a saved attempt reads: from its attempt record, or, without one, from its start
     record, as `running`, possibly charged, with one provider request. Returns None when it has
     neither, as after a process killed before it wrote the start record.
@@ -153,7 +153,7 @@ def attempt_status(
     return None
 
 
-def _read[M: BaseModel](store: ArtifactStore, path: str, model: type[M]) -> M | None:
+def _read[M: BaseModel](store: StoreReader, path: str, model: type[M]) -> M | None:
     try:
         content = store.read(path)
     except FileNotFoundError:

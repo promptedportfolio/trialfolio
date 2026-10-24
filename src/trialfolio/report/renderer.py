@@ -33,7 +33,7 @@ from trialfolio.report.experiment import render_experiment
 from trialfolio.report.review import render_review
 from trialfolio.report.run import render_run
 from trialfolio.runs import SavedRun, read_run
-from trialfolio.storage import ArtifactStore, StoredFile
+from trialfolio.storage import ArtifactStore, StoredFile, StoreReader
 
 _logger = logging.getLogger("trialfolio.report")
 
@@ -83,7 +83,7 @@ def write_report(store: ArtifactStore, run: SavedRun, renderer: ReportRenderer) 
 
 
 def rerender_report(
-    run_store: ArtifactStore,
+    run_store: StoreReader,
     out_store: ArtifactStore,
     renderer: ReportRenderer,
     *,

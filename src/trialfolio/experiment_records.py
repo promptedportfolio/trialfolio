@@ -220,7 +220,7 @@ from trialfolio.record_checks import (
 )
 from trialfolio.snapshots import SnapshotFiles
 from trialfolio.stale_backtests import SentBacktest, stale, stale_error
-from trialfolio.storage import LOCK_PATH, ArtifactStore, StoredFile
+from trialfolio.storage import LOCK_PATH, LockableReader, StoredFile, StoreReader
 from trialfolio.tables import (
     metrics_csv,
     read_metrics_csv,
@@ -1000,7 +1000,7 @@ class SavedExperiment:
         return None
 
 
-def open_experiment(store: ArtifactStore, *, ranking: bool = False) -> SavedExperiment:
+def open_experiment(store: LockableReader, *, ranking: bool = False) -> SavedExperiment:
     """Takes the experiment lock on the output directory of `store`, and reads and checks its
     records, as `read_experiment` does (docs/contracts.md, a resumed experiment, steps 3 and 4),
     an experiment with a ranking definition's too with `ranking`.
@@ -1025,7 +1025,7 @@ def open_experiment(store: ArtifactStore, *, ranking: bool = False) -> SavedExpe
     return read_experiment(store, ranking=ranking)
 
 
-def read_experiment(store: ArtifactStore, *, ranking: bool = False) -> SavedExperiment:
+def read_experiment(store: StoreReader, *, ranking: bool = False) -> SavedExperiment:
     """Reads the records of the experiment in the output directory of `store`, each file once,
     and checks them, as the module says. Writes nothing. With `ranking`, it reads an experiment
     with a ranking definition too; without it, 0.3.0's versions only.
@@ -1080,7 +1080,7 @@ class _Reader:
     versions it reads: 0.3.0's, or, with `ranking`, an experiment with a ranking definition's
     too."""
 
-    def __init__(self, store: ArtifactStore, *, ranking: bool) -> None:
+    def __init__(self, store: StoreReader, *, ranking: bool) -> None:
         self._store = store
         self._contents: dict[str, bytes | None] = {}
         self.ranking = ranking
