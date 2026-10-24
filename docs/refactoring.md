@@ -239,7 +239,7 @@ Highest payoff first.
 | `experiment_records.py` | The paths, the case state, and the checks, which `runs.py` shares. `SavedExperimentAttempt.completed_record` is writer logic in the reader, so it moves to the resume's code. | RF-T04, RF-T05, and RF-T11 |
 | `attempts.py` | Reading attempts, which `runs.py` uses; the ending policy, which `execution.py` uses; and the two attempt classes | RF-T06 |
 | `experiment_approval.py` | The display, the approval, and the confirmation of a repeat | RF-T10 |
-| `planning.py` | The version checks, the screen plans, the experiment plan's compiler, and the revisions. `_versions_of`, and the `Versions(...)` that `ExperimentExecution._check_configuration` builds, become one `Versions.of(plan)`. | RF-T10 |
+| `planning.py` | The version checks, the screen plans, the experiment plan's compiler, and the revisions. `_versions_of`, and the `Versions(...)` that `ExperimentExecution._check_configuration` builds, and, since 0.4.0, the one that `SnapshotExecution._check_configuration` builds ([found after 0.4.0](#repeated-logic-found-after-040)), become one `Versions.of(plan)`. | RF-T10 |
 | `provider.py` | A `provider/` package: `credentials`, `failures`, `adapter`, and `client`. Its users import only public names. | RF-T07 |
 | `configuration.py` | `strict_yaml.py`, the YAML reader that refuses ambiguous forms, and the error messages, split out. The readers stay. | RF-T09 |
 | `normalization.py` | The response layout's adapter, the row builders, and the writing of the tables | RF-T09 |
