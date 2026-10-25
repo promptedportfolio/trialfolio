@@ -29,20 +29,21 @@ from typing import Final, Literal, TextIO
 from trialfolio.canonical import sha256_hex
 from trialfolio.contracts.experiment_plan import PlanBudgetV1_1, PlanBudgetV1_3
 from trialfolio.contracts.plan import (
+    Plan,
+    PlanBudgetV1_2,
+    PlanV1_2,
+)
+from trialfolio.contracts.plan_parts import (
     Budget,
     DataSent,
     DataSentV1_2,
     OperationCost,
-    Plan,
-    PlanBudgetV1_2,
-    PlanRequest,
     PlanSetting,
     PlanSettingV1_2,
-    PlanV1_2,
     RankingSource,
-    RankUpdateRequest,
     RetryPolicy,
 )
+from trialfolio.contracts.plan_requests import PlanRequest, RankUpdateRequest
 from trialfolio.contracts.ranking_snapshot import (
     RankGetRequest,
     RankingSnapshotPlan,
@@ -56,6 +57,27 @@ from trialfolio.planning import check_approval, plan_hash
 
 APPROVE_ANSWER: Final = "approve"
 """What the user types to approve the plan shown. Any other answer is a refusal."""
+
+NOTHING_CREATED: Final = "Nothing was sent, and no output was created."
+"""What a plan that isn't approved leaves, unless it's a resumed experiment's."""
+
+WRONG_HASH: Final = (
+    "The hash given with --approve isn't this plan's hash. Approval takes the full hash, exactly"
+    " as shown."
+)
+"""Why a plan isn't approved by an `--approve` that isn't its hash."""
+
+NOT_ASKED: Final = (
+    "Running a plan needs its approval. Without --approve, Trial Folio asks for it only when stdin"
+    " and stderr are both terminals."
+)
+"""Why a plan isn't approved without `--approve`, when Trial Folio doesn't ask."""
+
+NOT_TYPED: Final = f"The plan wasn't approved: the answer wasn't {APPROVE_ANSWER}."
+"""Why a plan isn't approved by an answer that isn't `APPROVE_ANSWER`."""
+
+FULL_PLAN_HINT: Final = "Run the command in a terminal to see the full plan."
+"""The last line of a plan's summary, when it's shown because the plan isn't approved."""
 
 ApprovalMethod = Literal["interactive", "option"]
 """How a plan was approved, as the manifest records it."""
@@ -365,14 +387,7 @@ def format_plan(plan: Plan | PlanV1_2, snapshot: RankingSnapshotRecord | None = 
     lines += data_sent_lines(
         plan.data_sent, "the title, the purpose, data_vendor, the configuration file, file paths"
     )
-    lines += [
-        "",
-        f"Plan hash: {shown_hash}",
-        (
-            f"Approve it by typing {APPROVE_ANSWER} when asked in a terminal, or with --approve "
-            f"{shown_hash}"
-        ),
-    ]
+    lines += ["", f"Plan hash: {shown_hash}", how_to_approve(shown_hash)]
     return "\n".join(lines) + "\n"
 
 
@@ -402,12 +417,22 @@ def format_snapshot_plan(plan: RankingSnapshotPlan) -> str:
         *data_sent_lines(plan.data_sent, "the configuration file, file paths"),
         "",
         f"Plan hash: {shown_hash}",
-        (
-            f"Approve it by typing {APPROVE_ANSWER} when asked in a terminal, or with --approve "
-            f"{shown_hash}"
-        ),
+        how_to_approve(shown_hash),
     ]
     return "\n".join(lines) + "\n"
+
+
+def how_to_approve(shown_hash: str) -> str:
+    """The line each full display of a plan ends with but a revision's: how to approve it."""
+    return (
+        f"Approve it by typing {APPROVE_ANSWER} when asked in a terminal, or with --approve"
+        f" {shown_hash}"
+    )
+
+
+def approval_prompt(what: str = "this plan") -> str:
+    """What asks the user to approve `what`, after its full display."""
+    return f"\nType {APPROVE_ANSWER} to run {what}, or anything else to stop: "
 
 
 def _full_plan(
@@ -429,7 +454,7 @@ def format_plan_summary(
     if isinstance(plan, PlanV1_2):
         lines.append(OVERWRITES)
     if full_plan_hint:
-        lines.append("Run the command in a terminal to see the full plan.")
+        lines.append(FULL_PLAN_HINT)
     return "\n".join(lines) + "\n"
 
 
@@ -439,12 +464,13 @@ def write_shown(stderr: TextIO, text: str) -> None:
     stderr.flush()
 
 
-def _not_approved(shown_hash: str, reason: str) -> TrialFolioError:
+def not_approved(shown_hash: str, reason: str, nothing: str = NOTHING_CREATED) -> TrialFolioError:
+    """`plan.approval_required`, for `reason`, with what was left undone, `nothing`, and the
+    options that approve the plan whose hash is `shown_hash`."""
     return TrialFolioError(
         "plan.approval_required",
-        f"{reason} Nothing was sent, and no output was created. To approve this plan, run the "
-        f"command again with --approve {shown_hash}, or run it without --approve in a terminal "
-        f"and type {APPROVE_ANSWER}.",
+        f"{reason} {nothing} To approve this plan, run the command again with --approve"
+        f" {shown_hash}, or run it without --approve in a terminal and type {APPROVE_ANSWER}.",
     )
 
 
@@ -478,46 +504,37 @@ def obtain_approval(
     shown_hash = plan_hash(plan)
     on_terminal = stderr.isatty()
     if refused is not None:
-        write_shown(
-            stderr,
-            _full_plan(plan, snapshot)
-            if on_terminal
-            else format_plan_summary(plan, full_plan_hint=True),
-        )
-        raise _not_approved(shown_hash, refused)
+        raise _refused(plan, snapshot, stderr, refused, on_terminal=on_terminal)
     if approve is not None:
         try:
             approved = check_approval(plan, approve)
         except TrialFolioError:
-            text = (
-                _full_plan(plan, snapshot)
-                if on_terminal
-                else format_plan_summary(plan, full_plan_hint=True)
-            )
-            write_shown(stderr, text)
-            raise _not_approved(
-                shown_hash,
-                "The hash given with --approve isn't this plan's hash. Approval takes the full "
-                "hash, exactly as shown.",
-            ) from None
+            raise _refused(plan, snapshot, stderr, WRONG_HASH, on_terminal=on_terminal) from None
         write_shown(stderr, format_plan_summary(plan, full_plan_hint=False))
         return Approval(approved, "option")
     if on_terminal and stdin.isatty():
         write_shown(stderr, _full_plan(plan, snapshot))
-        write_shown(stderr, f"\nType {APPROVE_ANSWER} to run this plan, or anything else to stop: ")
+        write_shown(stderr, approval_prompt())
         if read_answer(stdin) != APPROVE_ANSWER:
-            raise _not_approved(
-                shown_hash, f"The plan wasn't approved: the answer wasn't {APPROVE_ANSWER}."
-            )
+            raise not_approved(shown_hash, NOT_TYPED)
         return Approval(check_approval(plan, shown_hash), "interactive")
+    raise _refused(plan, snapshot, stderr, NOT_ASKED, on_terminal=on_terminal)
+
+
+def _refused(
+    plan: Plan | PlanV1_2 | RankingSnapshotPlan,
+    snapshot: RankingSnapshotRecord | None,
+    stderr: TextIO,
+    reason: str,
+    *,
+    on_terminal: bool,
+) -> TrialFolioError:
+    """Shows the plan on `stderr`, in full when it's a terminal, and otherwise its summary, and
+    gives the error that it isn't approved, for `reason`."""
     write_shown(
         stderr,
         _full_plan(plan, snapshot)
         if on_terminal
         else format_plan_summary(plan, full_plan_hint=True),
     )
-    raise _not_approved(
-        shown_hash,
-        "Running a plan needs its approval. Without --approve, Trial Folio asks for it only "
-        "when stdin and stderr are both terminals.",
-    )
+    return not_approved(plan_hash(plan), reason)

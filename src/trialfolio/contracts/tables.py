@@ -17,8 +17,8 @@ from typing import Annotated, Final, Literal, Self
 from pydantic import Field, StringConstraints, model_validator
 
 from trialfolio.contracts.common import (
-    CRITICAL_CATEGORIES,
     INTEGER_PATTERN,
+    METRIC_UNIT_PATTERN,
     ContractModel,
     FlagCode,
     Interpretation,
@@ -44,9 +44,11 @@ from trialfolio.contracts.screen_settings import (
     SETTINGS_WITH_WEIGHTS_BY_NAME,
     RankingValues,
     ScreenSetting,
+    check_critical,
     check_flags,
     check_row,
     check_value_text,
+    documented_setting,
     read_ranking_setting,
 )
 
@@ -63,7 +65,7 @@ for a run ranked by a formula, which has no nodes (differences between screen ru
 
 _DECIMAL = re.compile(r"-?(0|[1-9][0-9]*)(\.(?P<fraction>[0-9]+))?")
 _COUNT = re.compile(INTEGER_PATTERN)
-_METRIC_UNIT = re.compile(r"percent|ratio|count|days|date|currency:[A-Z]{3}")
+_METRIC_UNIT = re.compile(METRIC_UNIT_PATTERN)
 
 
 class MetricsRow(ContractModel):
@@ -276,16 +278,11 @@ def _check_differences_row(row: "DifferencesRow | DifferencesRowV1_1") -> None:
         )
 
 
-def _check_setting(row: "DifferencesRow | DifferencesRowV1_1") -> None:  # noqa: C901 - RF-T10 shortens it.
+def _check_setting(row: "DifferencesRow | DifferencesRowV1_1") -> None:
     weights = isinstance(row, DifferencesRowV1_1)
     settings = SETTINGS_WITH_WEIGHTS_BY_NAME if weights else SCREEN_SETTINGS_BY_NAME
-    setting = settings.get(row.name)
-    if setting is None:
-        raise ValueError(f"{row.name} isn't one of the screen settings")
-    if (row.category, row.unit) != (setting.category, setting.unit):
-        raise ValueError(f"{row.name} must have its documented category and unit")
-    if row.critical != (setting.category in CRITICAL_CATEGORIES):
-        raise ValueError("critical must be true exactly for the critical categories")
+    setting = documented_setting(row.name, row.category, row.unit, settings)
+    check_critical(setting, row.critical)
     if row.subject is not None or row.reason is not None:
         raise ValueError("subject and reason are given only for metrics")
     if (row.difference, row.difference_unit, row.difference_decimals) != (None,) * 3:
@@ -297,6 +294,18 @@ def _check_setting(row: "DifferencesRow | DifferencesRowV1_1") -> None:  # noqa:
         raise ValueError("a weight row's node is a node of one run's definition, at least")
     rankings: RankingValues = "any" if weights else "forms"
     read = [_read_compared(setting, text, rankings) for text in values]
+    _check_compared(row, values, read)
+    _check_declared(row, setting)
+    _check_setting_flags(row, setting, read, rankings)
+
+
+def _check_compared(
+    row: "DifferencesRow | DifferencesRowV1_1",
+    values: tuple[str | None, str | None],
+    read: list[object],
+) -> None:
+    """Raises `ValueError` unless a setting row's classification follows its two values: unknown
+    exactly when one is missing, and otherwise same exactly when they're the same."""
     # A value that can't be interpreted can't be written, so an unknown one is missing.
     if (None in values) != (row.classification == "unknown"):
         raise ValueError("a setting is unknown exactly when one of its values is missing")
@@ -304,8 +313,6 @@ def _check_setting(row: "DifferencesRow | DifferencesRowV1_1") -> None:  # noqa:
         same = read[0] == read[1]
         if same != (row.classification == "same"):
             raise ValueError("a setting is same exactly when its two values are the same")
-    _check_declared(row, setting)
-    _check_setting_flags(row, setting, read, rankings)
 
 
 def _read_compared(setting: ScreenSetting, text: str | None, rankings: RankingValues) -> object:
@@ -368,7 +375,7 @@ def _check_setting_flags(
         raise ValueError(f"{row.name}'s flags must be those its runs' rows carry")
 
 
-def _check_metric(row: "DifferencesRow | DifferencesRowV1_1") -> None:  # noqa: C901 - RF-T10 shortens it.
+def _check_metric(row: "DifferencesRow | DifferencesRowV1_1") -> None:
     if row.subject is None:
         raise ValueError("a metric row gives its subject")
     if (row.category, row.critical, row.declared_reason) != (None,) * 3:
@@ -384,6 +391,13 @@ def _check_metric(row: "DifferencesRow | DifferencesRowV1_1") -> None:  # noqa: 
     given = (row.difference, row.difference_unit, row.difference_decimals)
     if row.classification != "differenced" and given != (None,) * 3:
         raise ValueError("only a differenced row has a difference, its unit, and its decimals")
+    _check_metric_classification(row, unit)
+
+
+def _check_metric_classification(row: "DifferencesRow | DifferencesRowV1_1", unit: str) -> None:
+    """Raises `ValueError` unless a metric row's classification follows its values: a difference
+    for a differenced row, both values and why for one that isn't comparable, and a missing value
+    for an unavailable one."""
     match row.classification:
         case "differenced":
             _check_difference(row, unit)

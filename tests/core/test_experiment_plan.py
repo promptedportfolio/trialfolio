@@ -29,7 +29,7 @@ from trialfolio.contracts.common import TransportVersions, WrapperVersions
 from trialfolio.contracts.experiment_configuration import ExperimentConfiguration
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
 from trialfolio.contracts.experiment_record import CaseChange, ExperimentRecord
-from trialfolio.contracts.plan import CREDITS_PER_REQUEST_SOURCE, PlanSetting
+from trialfolio.contracts.plan_parts import CREDITS_PER_REQUEST_SOURCE, PlanSetting
 from trialfolio.errors import TrialFolioError
 from trialfolio.planning import (
     VERIFIED_VERSIONS,

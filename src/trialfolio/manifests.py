@@ -34,7 +34,7 @@ from typing import Final, Literal, Self
 from pydantic import BaseModel
 
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase, ExperimentPlanCaseV1_3
-from trialfolio.contracts.manifest import (
+from trialfolio.contracts.manifest_parts import (
     Capabilities,
     ExternalReference,
     ParserVersion,

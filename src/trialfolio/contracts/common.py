@@ -318,9 +318,10 @@ UnavailableReason = Literal[
     "input_unavailable",
 ]
 
-MetricUnit = Annotated[
-    str, StringConstraints(pattern=r"^(percent|ratio|count|days|date|currency:[A-Z]{3})$")
-]
+METRIC_UNIT_PATTERN: Final = r"percent|ratio|count|days|date|currency:[A-Z]{3}"
+"""A metric's unit, the whole text matched (metrics and missing values)."""
+
+MetricUnit = Annotated[str, StringConstraints(pattern=rf"^({METRIC_UNIT_PATTERN})$")]
 """A metric's unit (metrics and missing values)."""
 
 SettingUnit = Literal["count", "weeks", "percent"]
@@ -394,6 +395,12 @@ def require_unique[T](values: tuple[T, ...], what: str) -> None:
     """Raises `ValueError` when `values` repeats an element."""
     if len(set(values)) != len(values):
         raise ValueError(f"{what} must not repeat")
+
+
+def check_repeat_count(repeats: int, attempts: int) -> None:
+    """Raises `ValueError` when more attempts repeat a case than there are attempts."""
+    if repeats > attempts:
+        raise ValueError("repeats counts attempts, so it's at most their number")
 
 
 class ErrorDetail(ContractModel):

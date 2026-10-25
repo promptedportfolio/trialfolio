@@ -24,15 +24,17 @@ from trialfolio.contracts.attempt import SavedResponse
 from trialfolio.contracts.common import ErrorDetail
 from trialfolio.contracts.manifest import (
     ArtifactRole,
-    AttemptCounts,
-    Capabilities,
     CommandRecord,
-    ExternalReference,
     ManifestArtifact,
     ManifestCounts,
+    RunManifest,
+)
+from trialfolio.contracts.manifest_parts import (
+    AttemptCounts,
+    Capabilities,
+    ExternalReference,
     ParserVersion,
     Reproducibility,
-    RunManifest,
     SourceRecord,
 )
 from trialfolio.contracts.plan import Plan

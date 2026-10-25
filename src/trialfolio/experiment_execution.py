@@ -175,14 +175,14 @@ from trialfolio.contracts.experiment_record import (
     ExperimentRecordV1_1,
     SessionRecord,
 )
-from trialfolio.contracts.manifest import (
+from trialfolio.contracts.manifest_parts import (
     Capabilities,
     ParserVersion,
     Reproducibility,
     SourceRecord,
     SourceRecordV1_1,
 )
-from trialfolio.contracts.plan import RankingSource
+from trialfolio.contracts.plan_parts import RankingSource
 from trialfolio.contracts.tables import (
     TABLES_SCHEMA_VERSION,
     TABLES_SCHEMA_VERSION_V1_1,
@@ -995,12 +995,7 @@ class ExperimentExecution:
         definition's bytes it's given, or the snapshot's files', which `plans/<n>/definition.xml`
         and `snapshot.json` then hold."""
         plan = self._plan
-        versions = Versions(
-            trialfolio=plan.trialfolio_version,
-            p123api=plan.provider_wrapper.p123api,
-            requests=plan.transport.requests,
-            urllib3=plan.transport.urllib3,
-        )
+        versions = Versions.of(plan)
         number = self._plan_number if self._revision is None else self._next_plan()
         source_name = plan_path(number, "configuration.yaml")
         if isinstance(plan, PlanV1_3):

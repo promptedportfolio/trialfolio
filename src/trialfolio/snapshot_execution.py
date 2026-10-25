@@ -51,7 +51,7 @@ from trialfolio.attempts import (
 from trialfolio.configuration import read_ranking_snapshot_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_2
 from trialfolio.contracts.common import ErrorDetail
-from trialfolio.contracts.manifest import AttemptCounts, ParserVersion, SourceRecordV1_1
+from trialfolio.contracts.manifest_parts import AttemptCounts, ParserVersion, SourceRecordV1_1
 from trialfolio.contracts.ranking_snapshot import (
     RankingSnapshotManifest,
     RankingSnapshotPlan,
@@ -293,12 +293,7 @@ class SnapshotExecution:
         # Validated already, when the plan was built from it.
         read = read_ranking_snapshot_configuration(configuration, CONFIGURATION_PATH)
         plan = self._plan
-        versions = Versions(
-            trialfolio=plan.trialfolio_version,
-            p123api=plan.provider_wrapper.p123api,
-            requests=plan.transport.requests,
-            urllib3=plan.transport.urllib3,
-        )
+        versions = Versions.of(plan)
         if build_snapshot_plan(read, versions).plan_hash != plan.plan_hash:
             raise ValueError("the configuration doesn't give the plan")
 

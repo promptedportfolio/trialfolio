@@ -42,13 +42,13 @@ from trialfolio.contracts.common import (
     check_outcome,
     require_unique,
 )
-from trialfolio.contracts.manifest import (
+from trialfolio.contracts.manifest_parts import (
     AttemptCounts,
     ParserVersion,
     SourceRecordV1_1,
     check_ranking_artifact,
 )
-from trialfolio.contracts.plan import Budget, DataCategory, DocumentedSource, RetryPolicy
+from trialfolio.contracts.plan_parts import Budget, DataCategory, DocumentedSource, RetryPolicy
 from trialfolio.contracts.ranking_snapshot_configuration import RANKING_SNAPSHOT_SCHEMA_VERSIONS
 
 RANK_GET_COST_SOURCE: Final = DocumentedSource(

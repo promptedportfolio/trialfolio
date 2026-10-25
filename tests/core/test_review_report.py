@@ -37,7 +37,7 @@ from tests.support.fake_portfolio123 import Reply
 from tests.support.html_report import Document, Element, parse
 from tests.support.run_builder import Run, RunBuilder
 from trialfolio.configuration import read_review_configuration
-from trialfolio.contracts.manifest import SourceRecord
+from trialfolio.contracts.manifest_parts import SourceRecord
 from trialfolio.contracts.review_configuration import ReviewConfiguration
 from trialfolio.contracts.review_manifest import (
     REVIEW_CONFIGURATION_FORMAT,

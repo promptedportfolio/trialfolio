@@ -33,7 +33,7 @@ from datetime import datetime
 from typing import Final
 
 from trialfolio.attempts import Clock, utc_now
-from trialfolio.contracts.manifest import SourceRecord
+from trialfolio.contracts.manifest_parts import SourceRecord
 from trialfolio.contracts.review_configuration import ReviewConfiguration
 from trialfolio.contracts.review_manifest import (
     REVIEW_CONFIGURATION_FORMAT,

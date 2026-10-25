@@ -29,6 +29,8 @@ from trialfolio.contracts.experiment_plan import ExperimentPlanCase, ExperimentP
 from trialfolio.contracts.plan import (
     PlanCase,
     PlanCaseV1_2,
+)
+from trialfolio.contracts.plan_parts import (
     PlanSetting,
     PlanSettingV1_2,
     SettingValue,

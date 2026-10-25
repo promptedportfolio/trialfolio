@@ -81,16 +81,18 @@ from trialfolio.contracts.common import ErrorDetail
 from trialfolio.contracts.manifest import (
     ArtifactRole,
     ArtifactRoleV1_1,
-    AttemptCounts,
-    Capabilities,
     CommandRecord,
     ManifestArtifact,
     ManifestArtifactV1_1,
     ManifestCounts,
-    ParserVersion,
-    Reproducibility,
     RunManifest,
     RunManifestV1_1,
+)
+from trialfolio.contracts.manifest_parts import (
+    AttemptCounts,
+    Capabilities,
+    ParserVersion,
+    Reproducibility,
     SourceRecord,
     SourceRecordV1_1,
 )
