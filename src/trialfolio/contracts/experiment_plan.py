@@ -20,7 +20,7 @@ and nothing else. The budget is at least two requests a case.
 import json
 from collections.abc import Sequence
 from decimal import Decimal
-from typing import Annotated, Literal, Self
+from typing import Annotated, Final, Literal, Self
 
 from pydantic import AfterValidator, ConfigDict, Field, StringConstraints, model_validator
 
@@ -47,35 +47,44 @@ from trialfolio.contracts.common import (
 from trialfolio.contracts.experiment_configuration import (
     VARIANT_SETTINGS,
     VARIANT_SETTINGS_V1_1,
+    ChangeRefusals,
     RankingVariant,
     VariantSetting,
     VariantSettingV1_1,
+    added_rules,
+    changed_value,
     default_variant_key,
+    replaced_rules,
 )
-from trialfolio.contracts.plan import (
+from trialfolio.contracts.plan_parts import (
     DataSent,
     DataSentV1_2,
     DocumentedSource,
     OperationCost,
-    PlanRequest,
     PlanSetting,
     PlanSettingV1_2,
     RankingSource,
-    RankUpdateRequest,
     RetryPolicy,
     check_case,
     check_costs,
+    check_credits,
     check_ranking_case,
     check_ranking_source,
     read_nodes,
 )
+from trialfolio.contracts.plan_requests import PlanRequest, RankUpdateRequest
 from trialfolio.contracts.screen_settings import (
     RANKING_WEIGHT,
     SCREEN_SETTINGS_BY_NAME,
     DefinitionRankingSetting,
     check_value,
 )
-from trialfolio.ranking_definitions import RankingDefinition, VariantProblem, apply_ranking_variant
+from trialfolio.ranking_definitions import (
+    RankingCase,
+    RankingDefinition,
+    VariantProblem,
+    apply_ranking_variant,
+)
 
 
 class DeclaredPriorResearch(ContractModel):
@@ -153,11 +162,25 @@ class ExperimentPlanCase(ContractModel):
     @model_validator(mode="after")
     def _screen_settings(self) -> Self:
         check_case(self.requests, self.settings)
-        if (self.case_key == BASELINE_CASE_KEY) != (self.variant is None):
-            raise ValueError("the baseline, and only the baseline, has no variant")
-        if self.variant is None and self.description is not None:
-            raise ValueError("the baseline has no description")
+        check_baseline(self.case_key, self.variant, self.description)
         return self
+
+
+def check_baseline(
+    case_key: str, variant: "PlanVariant | PlanVariantV1_3 | None", description: str | None
+) -> None:
+    """Raises `ValueError` unless a case has no variant exactly when it's the baseline, and the
+    baseline has no description, as a plan and `experiment.json` hold it."""
+    if (case_key == BASELINE_CASE_KEY) != (variant is None):
+        raise ValueError("the baseline, and only the baseline, has no variant")
+    if variant is None and description is not None:
+        raise ValueError("the baseline has no description")
+
+
+def check_revises(revises: str | None, plan_hash: str) -> None:
+    """Raises `ValueError` when a plan revises itself, as a plan and `experiment.json` hold it."""
+    if revises == plan_hash:
+        raise ValueError("a plan doesn't revise itself")
 
 
 class PlanBudgetV1_1(ContractModel):
@@ -175,11 +198,25 @@ class PlanBudgetV1_1(ContractModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        if self.credits != self.provider_requests * self.credits_per_request:
-            raise ValueError("credits must equal provider_requests times credits_per_request")
-        if self.authentication_calls != self.provider_requests:
-            raise ValueError("authentication_calls must equal provider_requests")
+        check_credits(self.credits, self.provider_requests, self.credits_per_request)
+        _check_authentication_calls(self)
         return self
+
+
+def _check_authentication_calls(budget: "PlanBudgetV1_1 | PlanBudgetV1_3") -> None:
+    """Raises `ValueError` unless a budget across runs allows an authentication call for each
+    provider request."""
+    if budget.authentication_calls != budget.provider_requests:
+        raise ValueError("authentication_calls must equal provider_requests")
+
+
+_REFUSALS: Final = ChangeRefusals(
+    same_value="a variant's value differs from the baseline's",
+    rule_present="a variant adds a rule the baseline doesn't have",
+    replace_not_one="a variant replaces exactly one of the baseline's rules",
+    with_present="a variant replaces a rule with a formula the baseline doesn't have",
+)
+"""How a plan words a variant's change that changes nothing, or isn't one."""
 
 
 def _changed_value(
@@ -189,21 +226,16 @@ def _changed_value(
     when the change changes nothing, or a `replace` isn't exactly one of the baseline's
     rules."""
     if variant.value is not None:
-        if variant.value == baseline.value:
-            raise ValueError("a variant's value differs from the baseline's")
-        return variant.value
+        return changed_value(baseline.value, variant.value, _REFUSALS)
     rules = baseline.value
     if not isinstance(rules, tuple):  # the baseline's rules are valid, so a list of text
         raise ValueError("the baseline's rules must be a list")
     if variant.add is not None:
-        if variant.add in rules:
-            raise ValueError("a variant adds a rule the baseline doesn't have")
-        return (*rules, variant.add)
-    if rules.count(variant.replace) != 1:
-        raise ValueError("a variant replaces exactly one of the baseline's rules")
-    if variant.with_ in rules:
-        raise ValueError("a variant replaces a rule with a formula the baseline doesn't have")
-    return tuple(variant.with_ if rule == variant.replace else rule for rule in rules)
+        return added_rules(rules, variant.add, _REFUSALS)
+    # A variant of rules gives with exactly when it gives replace, which its own check requires.
+    if variant.replace is None or variant.with_ is None:
+        raise ValueError(_REFUSALS.replace_not_one)
+    return replaced_rules(rules, variant.replace, variant.with_, _REFUSALS)
 
 
 def _check_variant(
@@ -264,24 +296,39 @@ class PlanV1_1(ContractModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        require_unique(tuple(entry.category for entry in self.data_sent), "data_sent categories")
-        if self.revises == self.plan_hash:
-            raise ValueError("a plan doesn't revise itself")
+        _check_plan(self)
         baseline, *variants = self.cases
-        if baseline.variant is not None:
-            raise ValueError("the first case is the baseline")
-        require_unique(tuple(case.case_key for case in self.cases), "case keys")
-        require_unique(tuple(case.case_id for case in self.cases), "case IDs")
         changes = [_check_variant(baseline, case) for case in variants]
         settings = [case.variant.setting for case in variants if case.variant is not None]
         require_unique(tuple(zip(settings, changes, strict=True)), "the cases' settings")
-        order = [VARIANT_SETTINGS.index(setting) for setting in settings]
-        if order != sorted(order):
-            raise ValueError("the variants come in the order of their settings")
-        _check_default(variants, settings)
+        _check_order(variants, settings, VARIANT_SETTINGS)
         if self.budget.provider_requests < len(self.cases):
             raise ValueError("the budget's provider_requests is at least the number of cases")
         return self
+
+
+def _check_plan(plan: "PlanV1_1 | PlanV1_3") -> None:
+    """Raises `ValueError` unless a plan 1.1.0 or 1.3.0 gives each category of data sent once,
+    doesn't revise itself, and gives the baseline first, and each case's key and ID once."""
+    require_unique(tuple(entry.category for entry in plan.data_sent), "data_sent categories")
+    check_revises(plan.revises, plan.plan_hash)
+    if plan.cases[0].variant is not None:
+        raise ValueError("the first case is the baseline")
+    require_unique(tuple(case.case_key for case in plan.cases), "case keys")
+    require_unique(tuple(case.case_id for case in plan.cases), "case IDs")
+
+
+def _check_order(
+    variants: "Sequence[ExperimentPlanCase | ExperimentPlanCaseV1_3]",
+    settings: Sequence[str],
+    documented: Sequence[str],
+) -> None:
+    """Raises `ValueError` unless the variants come in the `documented` order of the settings
+    they change, and the default variant, when there's one, is as Trial Folio adds it."""
+    order = [documented.index(setting) for setting in settings]
+    if order != sorted(order):
+        raise ValueError("the variants come in the order of their settings")
+    _check_default(variants, settings)
 
 
 # Version 1.3.0: an experiment whose ranking is a definition.
@@ -365,10 +412,7 @@ class ExperimentPlanCaseV1_3(ContractModel):
     @model_validator(mode="after")
     def _screen_settings(self) -> Self:
         check_ranking_case(self.requests, self.settings)
-        if (self.case_key == BASELINE_CASE_KEY) != (self.variant is None):
-            raise ValueError("the baseline, and only the baseline, has no variant")
-        if self.variant is None and self.description is not None:
-            raise ValueError("the baseline has no description")
+        check_baseline(self.case_key, self.variant, self.description)
         return self
 
 
@@ -387,8 +431,7 @@ class PlanBudgetV1_3(ContractModel):
     @model_validator(mode="after")
     def _consistent(self) -> Self:
         check_costs(self.costs, self.provider_requests, self.credits)
-        if self.authentication_calls != self.provider_requests:
-            raise ValueError("authentication_calls must equal provider_requests")
+        _check_authentication_calls(self)
         return self
 
 
@@ -423,14 +466,8 @@ class PlanV1_3(ContractModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        require_unique(tuple(entry.category for entry in self.data_sent), "data_sent categories")
-        if self.revises == self.plan_hash:
-            raise ValueError("a plan doesn't revise itself")
+        _check_plan(self)
         baseline, *variants = self.cases
-        if baseline.variant is not None:
-            raise ValueError("the first case is the baseline")
-        require_unique(tuple(case.case_key for case in self.cases), "case keys")
-        require_unique(tuple(case.case_id for case in self.cases), "case IDs")
         check_ranking_source(self.ranking_source, baseline.settings)
         definition = read_nodes(baseline.requests[0].params.nodes)
         # A ranking variant's case is its definition, which its change of the baseline's gives.
@@ -446,10 +483,7 @@ class PlanV1_3(ContractModel):
         ]
         require_unique(tuple(changes), "the cases' settings")
         settings = [case.variant.setting for case in variants if case.variant is not None]
-        order = [VARIANT_SETTINGS_V1_1.index(setting) for setting in settings]
-        if order != sorted(order):
-            raise ValueError("the variants come in the order of their settings")
-        _check_default(variants, settings)
+        _check_order(variants, settings, VARIANT_SETTINGS_V1_1)
         if self.budget.provider_requests < 2 * len(self.cases):
             raise ValueError(
                 "the budget's provider_requests is at least twice the number of cases: each "
@@ -458,7 +492,7 @@ class PlanV1_3(ContractModel):
         return self
 
 
-def _check_ranking_variant(  # noqa: C901 - RF-T10 shortens it.
+def _check_ranking_variant(
     definition: RankingDefinition,
     baseline: ExperimentPlanCaseV1_3,
     case: ExperimentPlanCaseV1_3,
@@ -473,29 +507,8 @@ def _check_ranking_variant(  # noqa: C901 - RF-T10 shortens it.
     variant = case.variant
     if variant is None or variant.set is None:  # a ranking variant's own rules require set
         raise ValueError("a ranking variant gives set: the weights it gives its nodes")
-    own_rows = [row for row in case.settings if row.setting != RANKING_WEIGHT.name]
-    base_rows = [row for row in baseline.settings if row.setting != RANKING_WEIGHT.name]
-    # Each case's rows are the screen settings, in order, with weight rows after `ranking`.
-    for own, base in zip(own_rows, base_rows, strict=True):
-        if own.setting == "ranking":
-            if _method(own) != _method(base):
-                raise ValueError("a ranking variant keeps the baseline's ranking method")
-        elif own != base:
-            raise ValueError(f"a ranking variant keeps the baseline's {own.setting}")
-    given: dict[str, object] = {
-        "key": case.case_key,
-        "set": {entry.node: Decimal(entry.weight) for entry in variant.set},
-    }
-    if variant.remove is not None:
-        given["remove"] = variant.remove
-    place = f"cases[{number}].variant"
-    try:
-        applied = apply_ranking_variant(definition, RankingVariant.model_validate(given), place)
-    except VariantProblem as problem:
-        raise ValueError(
-            f"a ranking variant's change follows the rules of ranking variants, and "
-            f"`{problem.where}` {problem.problem}"
-        ) from None
+    _check_kept_settings(baseline, case)
+    applied = _applied(definition, case.case_key, variant.set, variant.remove, number)
     written = [(entry.node, entry.weight) for entry in variant.set]
     if written != [(entry.node.path, format(entry.weight, "f")) for entry in applied.set]:
         raise ValueError(
@@ -510,6 +523,46 @@ def _check_ranking_variant(  # noqa: C901 - RF-T10 shortens it.
     if case.requests[0].params.nodes != applied.definition.text:
         raise ValueError("a ranking variant's definition is the baseline's with exactly its change")
     return applied.definition.hash
+
+
+def _check_kept_settings(baseline: ExperimentPlanCaseV1_3, case: ExperimentPlanCaseV1_3) -> None:
+    """Raises `ValueError` unless a ranking variant's case keeps each of the baseline's settings
+    but its definition and the weight rows, the ranking method included."""
+    own_rows = [row for row in case.settings if row.setting != RANKING_WEIGHT.name]
+    base_rows = [row for row in baseline.settings if row.setting != RANKING_WEIGHT.name]
+    # Each case's rows are the screen settings, in order, with weight rows after `ranking`.
+    for own, base in zip(own_rows, base_rows, strict=True):
+        if own.setting == "ranking":
+            if _method(own) != _method(base):
+                raise ValueError("a ranking variant keeps the baseline's ranking method")
+        elif own != base:
+            raise ValueError(f"a ranking variant keeps the baseline's {own.setting}")
+
+
+def _applied(
+    definition: RankingDefinition,
+    key: str,
+    weights: tuple[WeightChange, ...],
+    remove: str | None,
+    number: int,
+) -> RankingCase:
+    """The case a ranking variant, the plan's case `number`, counted from 0, gives from the
+    baseline's `definition`, by the rules of ranking variants: its `set`, `weights`, and its
+    `remove`. Raises `ValueError` when the change breaks them."""
+    given: dict[str, object] = {
+        "key": key,
+        "set": {entry.node: Decimal(entry.weight) for entry in weights},
+    }
+    if remove is not None:
+        given["remove"] = remove
+    place = f"cases[{number}].variant"
+    try:
+        return apply_ranking_variant(definition, RankingVariant.model_validate(given), place)
+    except VariantProblem as problem:
+        raise ValueError(
+            f"a ranking variant's change follows the rules of ranking variants, and "
+            f"`{problem.where}` {problem.problem}"
+        ) from None
 
 
 def _method(row: PlanSettingV1_2) -> object:

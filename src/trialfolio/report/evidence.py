@@ -37,8 +37,9 @@ from trialfolio.contracts.experiment_record import (
     RetiredCase,
     RetiredCaseV1_1,
 )
-from trialfolio.contracts.manifest import Capabilities, ParserVersion, Reproducibility
-from trialfolio.contracts.plan import PlanCase, PlanCaseV1_2, RankingSource
+from trialfolio.contracts.manifest_parts import Capabilities, ParserVersion, Reproducibility
+from trialfolio.contracts.plan import PlanCase, PlanCaseV1_2
+from trialfolio.contracts.plan_parts import RankingSource
 from trialfolio.contracts.ranking_snapshot import RankingSnapshotRecord
 from trialfolio.contracts.review_configuration import ReviewConfiguration
 from trialfolio.contracts.review_manifest import ReviewArtifact

@@ -8,7 +8,9 @@ the budget. A message from a rule that spans keys names a variant by its place i
 as `variants.max_holdings[0]`, never by its key, which is the user's text.
 
 `configured_variants` gives an experiment's variants, the default included, in the order of its
-cases, each with its case's settings: the baseline's, with the variant's one change.
+cases, each with its case's settings: the baseline's, with the variant's one change. That change
+follows the rule of a variant's change, `changed_value`, `added_rules`, and `replaced_rules`,
+which a plan's model applies too, each caller with its own sentences, `ChangeRefusals`.
 
 Version 1.1.0, `ExperimentConfigurationV1_1`, adds a baseline ranked by a definition or a
 snapshot, and ranking variants, which change its definition's weights or remove a factor
@@ -38,7 +40,7 @@ from trialfolio.contracts.common import (
     ShortText,
     Title,
 )
-from trialfolio.contracts.plan import CREDITS_PER_REQUEST
+from trialfolio.contracts.plan_parts import CREDITS_PER_REQUEST
 from trialfolio.contracts.screen_configuration import (
     ConfigDecimal,
     ConfigWeight,
@@ -352,43 +354,84 @@ def _changed[S: (ScreenFields, ScreenFieldsV1_1)](baseline: S, setting: str, val
     return baseline.model_copy(update={setting: value})
 
 
-def _rules_of(
-    baseline: ScreenFields | ScreenFieldsV1_1, place: str, variant: RuleVariant
+@dataclass(frozen=True)
+class ChangeRefusals:
+    """How a caller words each way a variant's change of the baseline's setting changes nothing,
+    or isn't one: the configuration names the variant's place, and a plan names none."""
+
+    same_value: str
+    """The value is the baseline's."""
+    rule_present: str
+    """The rule `add` gives is one of the baseline's rules already."""
+    replace_not_one: str
+    """`replace` isn't exactly one of the baseline's rules."""
+    with_present: str
+    """The formula `with` gives is one of the baseline's rules."""
+
+
+def changed_value(baseline: object, value: object, refusals: ChangeRefusals) -> object:
+    """The value a variant of a value gives its setting, `value`, which differs from the
+    baseline's. Raises `ValueError`, worded as `refusals` words it, when it doesn't."""
+    # Decimals are normalized, so 0.250 equals the baseline's 0.25.
+    if value == baseline:
+        raise ValueError(refusals.same_value)
+    return value
+
+
+def added_rules(rules: Sequence[str], add: str, refusals: ChangeRefusals) -> tuple[str, ...]:
+    """The rules a variant that adds `add` gives its case: the baseline's `rules`, then `add`,
+    which isn't one of them. Raises `ValueError`, worded as `refusals` words it, when it is."""
+    if add in rules:
+        raise ValueError(refusals.rule_present)
+    return (*rules, add)
+
+
+def replaced_rules(
+    rules: Sequence[str], replace: str, with_: str, refusals: ChangeRefusals
 ) -> tuple[str, ...]:
-    rules = baseline.rules
-    if variant.add is not None:
-        if variant.add in rules:
-            raise ValueError(
-                f"`{place}.add` is one of the baseline's rules already. A variant adds a rule the "
-                "baseline doesn't have"
-            )
-        return (*rules, variant.add)
-    replace, with_ = variant.replace, variant.with_
-    if replace is None or with_ is None:  # the variant's own validator requires both
-        raise ValueError(f"`{place}` needs `add`, or `replace` and `with`")
+    """The rules a variant that replaces `replace` with `with_` gives its case: the baseline's
+    `rules`, in their order, with `with_` in place of `replace`, which is exactly one of them.
+    Raises `ValueError`, worded as `refusals` words it, when it isn't, or when `with_` is one of
+    them already."""
     if rules.count(replace) != 1:
-        raise ValueError(
-            f"`{place}.replace` isn't one of the baseline's rules. It must be the same text as "
-            "exactly one of them, character for character"
-        )
+        raise ValueError(refusals.replace_not_one)
     if with_ in rules:
-        raise ValueError(
-            f"`{place}.with` is one of the baseline's rules. A variant changes one rule to "
-            "a formula the baseline doesn't have"
-        )
+        raise ValueError(refusals.with_present)
     return tuple(with_ if rule == replace else rule for rule in rules)
 
 
-def _value_of(
-    baseline: ScreenFields | ScreenFieldsV1_1, place: str, setting: str, value: object
-) -> object:
-    # Decimals are normalized, so 0.250 equals the baseline's 0.25.
-    if value == getattr(baseline, setting):
-        raise ValueError(
+def _refusals(place: str) -> ChangeRefusals:
+    """How a configuration words a variant's change that changes nothing, or isn't one, by the
+    variant's place, such as `variants.max_holdings[0]`."""
+    return ChangeRefusals(
+        same_value=(
             f"`{place}.value` is the baseline's value, so the variant changes nothing. A "
             "variant's value differs from the baseline's"
-        )
-    return value
+        ),
+        rule_present=(
+            f"`{place}.add` is one of the baseline's rules already. A variant adds a rule the "
+            "baseline doesn't have"
+        ),
+        replace_not_one=(
+            f"`{place}.replace` isn't one of the baseline's rules. It must be the same text as "
+            "exactly one of them, character for character"
+        ),
+        with_present=(
+            f"`{place}.with` is one of the baseline's rules. A variant changes one rule to "
+            "a formula the baseline doesn't have"
+        ),
+    )
+
+
+def _rules_of(
+    baseline: ScreenFields | ScreenFieldsV1_1, place: str, variant: RuleVariant
+) -> tuple[str, ...]:
+    if variant.add is not None:
+        return added_rules(baseline.rules, variant.add, _refusals(place))
+    replace, with_ = variant.replace, variant.with_
+    if replace is None or with_ is None:  # the variant's own validator requires both
+        raise ValueError(f"`{place}` needs `add`, or `replace` and `with`")
+    return replaced_rules(baseline.rules, replace, with_, _refusals(place))
 
 
 def configured_variants(configuration: ExperimentConfiguration) -> tuple[ConfiguredVariant, ...]:
@@ -489,7 +532,7 @@ def _listed[T: str](
             elif isinstance(variant, RuleVariant):
                 value = _rules_of(baseline, place, variant)
             else:
-                value = _value_of(baseline, place, setting, variant.value)
+                value = changed_value(getattr(baseline, setting), variant.value, _refusals(place))
             yield place, setting, variant.key, variant.description, variant, value
 
 

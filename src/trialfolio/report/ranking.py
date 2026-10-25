@@ -21,7 +21,7 @@ from trialfolio.contracts.attempt import (
     AttemptRecordV1_3,
 )
 from trialfolio.contracts.experiment_plan import ExperimentPlanCaseV1_3, PlanVariantV1_3
-from trialfolio.contracts.plan import RankingSource
+from trialfolio.contracts.plan_parts import RankingSource
 from trialfolio.contracts.ranking_snapshot import RankingSnapshotRecord
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS_BY_NAME, DefinitionRankingSetting
 from trialfolio.report.evidence import CaseView

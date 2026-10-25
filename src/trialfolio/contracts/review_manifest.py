@@ -23,7 +23,7 @@ from trialfolio.contracts.common import (
     UtcDatetime,
     require_unique,
 )
-from trialfolio.contracts.manifest import SourceRecord
+from trialfolio.contracts.manifest_parts import SourceRecord
 
 ReviewArtifactRole = Literal[
     "configuration",

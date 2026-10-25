@@ -23,20 +23,16 @@ from urllib.parse import quote
 from trialfolio.contracts.common import UnavailableReason
 from trialfolio.contracts.experiment_plan import PlanBudgetV1_1, PlanBudgetV1_3, PlanV1_1, PlanV1_3
 from trialfolio.contracts.manifest import (
-    AttemptCounts,
-    ParserVersion,
-    Reproducibility,
     RunManifest,
     RunManifestV1_1,
 )
+from trialfolio.contracts.manifest_parts import AttemptCounts, ParserVersion, Reproducibility
 from trialfolio.contracts.plan import (
-    Budget,
     Plan,
     PlanBudgetV1_2,
-    PlanSetting,
-    PlanSettingV1_2,
     PlanV1_2,
 )
+from trialfolio.contracts.plan_parts import Budget, PlanSetting, PlanSettingV1_2
 from trialfolio.contracts.tables import MetricsRow, SettingsRow, SettingsRowV1_1
 from trialfolio.normalization import setting_text
 from trialfolio.report.page import code, facts, moment, table, text

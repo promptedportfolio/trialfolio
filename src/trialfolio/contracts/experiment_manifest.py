@@ -31,9 +31,10 @@ from trialfolio.contracts.common import (
     Sha256Digest,
     UtcDatetime,
     check_outcome,
+    check_repeat_count,
     require_unique,
 )
-from trialfolio.contracts.manifest import (
+from trialfolio.contracts.manifest_parts import (
     AttemptCounts,
     Capabilities,
     ParserVersion,
@@ -199,8 +200,7 @@ class ExperimentAttemptCounts(AttemptCounts):
 
     @model_validator(mode="after")
     def _repeats_are_attempts(self) -> Self:
-        if self.repeats > self.succeeded + self.failed + self.unknown + self.running:
-            raise ValueError("repeats counts attempts, so it's at most their number")
+        check_repeat_count(self.repeats, self.succeeded + self.failed + self.unknown + self.running)
         return self
 
 
@@ -301,9 +301,36 @@ def _check_manifest(
     _check_layout(manifest, role_paths)
 
 
-def _check_layout(  # noqa: C901 - RF-T10 shortens it.
+def _check_layout(
     manifest: "ExperimentManifest | ExperimentManifestV1_1", role_paths: dict[str, re.Pattern[str]]
 ) -> None:
+    """Raises `ValueError` unless the files listed are the layout of the experiment's records:
+    each plan's files, the first and the current one's included, this session's record and
+    report, and each case's two tables."""
+    plans, sessions, tables = _placed(manifest, role_paths)
+    # The first plan is always recorded: a directory without it can't be resumed.
+    numbers = {number for number, _ in plans} | {"1", str(manifest.plan)}
+    if any(plans[(number, role)] != 1 for number in numbers for role in _PLAN_ROLES):
+        raise ValueError(
+            "each plan listed, the first and the current one included, has its "
+            "configuration, plan, and experiment record"
+        )
+    for number in numbers:
+        if plans[(number, "ranking_snapshot_record")] > plans[(number, "ranking_definition")]:
+            raise ValueError("a plan's snapshot record is listed only beside its definition's copy")
+    if sessions != Counter({"session_record": 1, "report": 1}):
+        raise ValueError("the manifest lists its session's record and report")
+    cases = {case for case, _ in tables}
+    if any(tables[(case, role)] != 1 for case in cases for role in ("metrics", "settings")):
+        raise ValueError("a case has both of its normalized tables, or neither")
+
+
+def _placed(
+    manifest: "ExperimentManifest | ExperimentManifestV1_1", role_paths: dict[str, re.Pattern[str]]
+) -> tuple[Counter[tuple[str, str]], Counter[str], Counter[tuple[str, str]]]:
+    """The files listed, counted by where the layout places them: by plan and role, by role in
+    the session, and by case and role. Raises `ValueError` for a file of a plan newer than the
+    current plan, or of another session."""
     plans: Counter[tuple[str, str]] = Counter()
     sessions: Counter[str] = Counter()
     tables: Counter[tuple[str, str]] = Counter()
@@ -321,21 +348,7 @@ def _check_layout(  # noqa: C901 - RF-T10 shortens it.
             sessions[artifact.role] += 1
         elif "case" in groups:
             tables[(groups["case"], artifact.role)] += 1
-    # The first plan is always recorded: a directory without it can't be resumed.
-    numbers = {number for number, _ in plans} | {"1", str(manifest.plan)}
-    if any(plans[(number, role)] != 1 for number in numbers for role in _PLAN_ROLES):
-        raise ValueError(
-            "each plan listed, the first and the current one included, has its "
-            "configuration, plan, and experiment record"
-        )
-    for number in numbers:
-        if plans[(number, "ranking_snapshot_record")] > plans[(number, "ranking_definition")]:
-            raise ValueError("a plan's snapshot record is listed only beside its definition's copy")
-    if sessions != Counter({"session_record": 1, "report": 1}):
-        raise ValueError("the manifest lists its session's record and report")
-    cases = {case for case, _ in tables}
-    if any(tables[(case, role)] != 1 for case in cases for role in ("metrics", "settings")):
-        raise ValueError("a case has both of its normalized tables, or neither")
+    return plans, sessions, tables
 
 
 # Version 1.1.0: an experiment any of whose plans is plan 1.3.0.

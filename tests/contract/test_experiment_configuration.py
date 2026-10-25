@@ -56,7 +56,7 @@ from trialfolio.contracts.experiment_configuration import (
     configured_variants,
     configured_variants_v1_1,
 )
-from trialfolio.contracts.plan import screen_backtest_params
+from trialfolio.contracts.plan_requests import screen_backtest_params
 from trialfolio.contracts.screen_configuration import ScreenFields
 from trialfolio.errors import TrialFolioError
 from trialfolio.planning import case_id, resolve_settings

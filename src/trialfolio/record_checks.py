@@ -34,7 +34,8 @@ from trialfolio.canonical import sha256_hex
 from trialfolio.contracts.experiment_manifest import ExperimentArtifact, ExperimentArtifactV1_1
 from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
 from trialfolio.contracts.manifest import ManifestArtifact, ManifestArtifactV1_1
-from trialfolio.contracts.plan import Plan, PlanSetting, PlanSettingV1_2, PlanV1_2
+from trialfolio.contracts.plan import Plan, PlanV1_2
+from trialfolio.contracts.plan_parts import PlanSetting, PlanSettingV1_2
 from trialfolio.contracts.tables import MetricsRow, SettingsRow, SettingsRowV1_1
 from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError

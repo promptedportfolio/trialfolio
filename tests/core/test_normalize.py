@@ -24,7 +24,8 @@ import pytest
 from tests.core.conftest import CONFIGS, RESPONSES, Execute, execute_run
 from tests.support.deep_json import DEEP, on_a_fixed_stack
 from trialfolio.configuration import original_values
-from trialfolio.contracts.manifest import ExternalReference, RunManifest
+from trialfolio.contracts.manifest import RunManifest
+from trialfolio.contracts.manifest_parts import ExternalReference
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS_BY_NAME
 from trialfolio.contracts.tables import MetricsRow, SettingsRow, SettingsRowV1_1
 from trialfolio.errors import TrialFolioError

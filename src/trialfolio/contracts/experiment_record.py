@@ -41,6 +41,8 @@ from trialfolio.contracts.experiment_plan import (
     DeclaredPriorResearch,
     PlanVariant,
     PlanVariantV1_3,
+    check_baseline,
+    check_revises,
 )
 
 
@@ -67,15 +69,8 @@ class RecordedCase(ContractModel):
 
     @model_validator(mode="after")
     def _baseline(self) -> Self:
-        _check_baseline(self)
+        check_baseline(self.case_key, self.variant, self.description)
         return self
-
-
-def _check_baseline(case: "RecordedCase | RecordedCaseV1_1") -> None:
-    if (case.case_key == BASELINE_CASE_KEY) != (case.variant is None):
-        raise ValueError("the baseline, and only the baseline, has no variant")
-    if case.variant is None and case.description is not None:
-        raise ValueError("the baseline has no description")
 
 
 class RetiredCase(RecordedCase):
@@ -190,8 +185,7 @@ class PlanEntry(ContractModel):
 def _check_entry(entry: "PlanEntry | PlanEntryV1_1") -> None:
     if not (entry.revises is None) == (entry.reason is None) == (entry.changes is None):
         raise ValueError("a revision, and only a revision, has revises, a reason, and changes")
-    if entry.revises == entry.plan_hash:
-        raise ValueError("a plan doesn't revise itself")
+    check_revises(entry.revises, entry.plan_hash)
 
 
 class ExperimentRecord(ContractModel):
@@ -285,7 +279,7 @@ class RecordedCaseV1_1(ContractModel):
 
     @model_validator(mode="after")
     def _baseline(self) -> Self:
-        _check_baseline(self)
+        check_baseline(self.case_key, self.variant, self.description)
         return self
 
 

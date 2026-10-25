@@ -47,7 +47,8 @@ from trialfolio.configuration import (
 )
 from trialfolio.contracts.experiment_plan import ExperimentPlanCaseV1_3, PlanV1_1, PlanV1_3
 from trialfolio.contracts.experiment_record import ExperimentRecord, ExperimentRecordV1_1
-from trialfolio.contracts.plan import PlanSettingV1_2, PlanV1_2
+from trialfolio.contracts.plan import PlanV1_2
+from trialfolio.contracts.plan_parts import PlanSettingV1_2
 from trialfolio.errors import TrialFolioError
 from trialfolio.planning import (
     VERIFIED_VERSIONS,

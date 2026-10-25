@@ -17,7 +17,9 @@ from pydantic import BaseModel, ValidationError
 from trialfolio.contracts.acknowledgment import AcknowledgmentRecord
 from trialfolio.contracts.attempt import AttemptRecord, StartRecord
 from trialfolio.contracts.manifest import RunManifest
-from trialfolio.contracts.plan import DATA_SENT_SETTINGS, Plan, screen_backtest_params
+from trialfolio.contracts.plan import Plan
+from trialfolio.contracts.plan_parts import DATA_SENT_SETTINGS
+from trialfolio.contracts.plan_requests import screen_backtest_params
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS
 from trialfolio.contracts.summary import JsonSummary
 from trialfolio.contracts.tables import (

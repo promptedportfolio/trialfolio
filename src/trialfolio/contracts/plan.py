@@ -12,244 +12,43 @@ its `ranking` setting names by hash, with its ranking method; its weight rows ar
 definition's nodes and weights; its backtest ranks by `ApiRankingSystem`, and is otherwise what
 its settings send; `ranking_source` gives the baseline's definition; and the budget's credits are
 what its costs give. A case's definition is read by the rules of `trialfolio.ranking_definitions`.
+
+The parts a screen's plans share with an experiment's and a ranking snapshot's are in
+`trialfolio.contracts.plan_requests`, the requests, and `trialfolio.contracts.plan_parts`, the
+rest, such as each resolved setting, the budget, and the data sent.
 """
 
-import math
-from collections.abc import Mapping
-from datetime import date
-from typing import TYPE_CHECKING, Annotated, Final, Literal, Self, cast
+from typing import Annotated, Literal, Self
 
-from pydantic import AfterValidator, BeforeValidator, Field, StringConstraints, model_validator
+from pydantic import Field, model_validator
 
 from trialfolio.contracts.common import (
-    API_RANKING_SYSTEM,
-    MAX_SAFE_INTEGER,
-    RANKING_METHOD_NUMBERS,
     CaseId,
     ContractModel,
-    DateText,
     IntegerOnly,
-    Interpretation,
-    NodePathText,
-    NonEmptyText,
-    Provenance,
     Purpose,
     SemanticVersion,
-    SettingCategory,
-    SettingName,
-    SettingUnit,
     Sha256Digest,
     Title,
     TransportVersions,
     WrapperVersions,
     require_unique,
 )
-from trialfolio.contracts.screen_configuration import (
-    FormulaRanking,
-    IdRanking,
-    NameRanking,
-    Ranking,
+from trialfolio.contracts.plan_parts import (
+    Budget,
+    DataSent,
+    DataSentV1_2,
+    OperationCost,
+    PlanSetting,
+    PlanSettingV1_2,
+    RankingSource,
+    RetryPolicy,
+    check_case,
+    check_costs,
+    check_ranking_case,
+    check_ranking_source,
 )
-from trialfolio.contracts.screen_settings import (
-    RANKING_WEIGHT,
-    SCREEN_SETTINGS,
-    SETTINGS_WITH_WEIGHTS_BY_NAME,
-    DefinitionRankingSetting,
-    check_flags,
-    check_row,
-    check_value,
-    read_ranking_setting,
-)
-
-if TYPE_CHECKING:
-    from trialfolio.ranking_definitions import RankingDefinition
-
-# The request's parameters keep Portfolio123's own names, so the model reads like the request.
-
-
-class ScreenRuleParams(ContractModel):
-    """One screening rule, as sent. It has no `type` field: Portfolio123 rejects one."""
-
-    formula: NonEmptyText
-
-
-class FormulaRankingParams(ContractModel):
-    """A single-formula ranking, as sent."""
-
-    formula: NonEmptyText
-    lowerIsBetter: bool
-
-
-class ScreenParams(ContractModel):
-    """The `screen` object of a screen backtest request."""
-
-    type: Literal["stock"]
-    universe: NonEmptyText
-    maxNumHoldings: Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)]
-    method: Literal["long"]
-    currency: Literal["USD"]
-    benchmark: NonEmptyText
-    ranking: FormulaRankingParams | NonEmptyText | Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)]
-    rules: Annotated[tuple[ScreenRuleParams, ...], Field(min_length=1)]
-
-
-def _float_only(value: object) -> object:
-    if not isinstance(value, float):
-        raise ValueError("must be a JSON float, such as 1.0, never an integer")
-    return value
-
-
-def _unsigned(value: float) -> float:
-    if math.copysign(1.0, value) < 0:
-        raise ValueError("must not be negative, not even -0.0")
-    return value
-
-
-class ScreenBacktestParams(ContractModel):
-    """The JSON object passed to p123api's `screen_backtest`, exactly as it will be sent.
-
-    `slippage` is always a JSON float, and every other number an integer (plan contents).
-    """
-
-    screen: ScreenParams
-    startDt: DateText
-    endDt: DateText
-    pitMethod: Literal["Complete"]
-    precision: Annotated[Literal[4], IntegerOnly]
-    transPrice: Annotated[Literal[1], IntegerOnly]
-    slippage: Annotated[
-        float, BeforeValidator(_float_only), Field(allow_inf_nan=False), AfterValidator(_unsigned)
-    ]
-    rebalFreq: Literal["Every Week", "Every 4 Weeks"]
-
-    @model_validator(mode="after")
-    def _end_after_start(self) -> Self:
-        if self.endDt <= self.startDt:
-            raise ValueError("endDt must be later than startDt")
-        return self
-
-
-class PlanRequest(ContractModel):
-    """One provider request a case needs."""
-
-    operation: Literal["screen_backtest"]
-    params: ScreenBacktestParams
-
-
-type SettingValue = (
-    Annotated[int, Field(ge=0, le=MAX_SAFE_INTEGER)]
-    | NonEmptyText
-    | tuple[NonEmptyText, ...]
-    | FormulaRanking
-    | NameRanking
-    | IdRanking
-)
-"""A resolved value, in its JSON type: an integer; text, which holds normalized decimals, dates,
-and tokens too; a list of text; or a ranking mapping (plan contents, settings in the plan)."""
-
-
-PlanFlag = Literal["inferred_default", "not_snapshotted"]
-"""The flags known before execution (plan contents, settings in the plan)."""
-
-
-class PlanSetting(ContractModel):
-    """One resolved setting: a `settings.csv` row without `label`, `original_key`,
-    `original_value`, and `source_artifact`, with `expected_provenance` for `provenance`.
-    """
-
-    setting: SettingName
-    category: SettingCategory
-    critical: bool
-    value: SettingValue
-    unit: SettingUnit | None
-    interpretation: Interpretation
-    expected_provenance: Provenance
-    inference_rule: NonEmptyText | None
-    flags: tuple[PlanFlag, ...]
-
-    @model_validator(mode="after")
-    def _documented(self) -> Self:
-        setting = check_row(
-            self.setting,
-            self.category,
-            self.critical,
-            self.unit,
-            self.interpretation,
-            self.expected_provenance,
-            self.inference_rule,
-        )
-        check_value(setting, self.value)
-        require_unique(self.flags, "flags")
-        check_flags(setting, self.value, self.flags, executed=False)
-        return self
-
-
-TRANSACTION_PRICES: Final = {"open": 1}
-"""`transaction_price` to `transPrice`."""
-
-PIT_METHODS: Final = {"complete": "Complete"}
-"""`pit_method` to `pitMethod`."""
-
-REBALANCE_FREQUENCIES: Final = {1: "Every Week", 4: "Every 4 Weeks"}
-"""`rebalance_weeks` to `rebalFreq`."""
-
-
-def screen_backtest_params(values: Mapping[str, object]) -> ScreenBacktestParams:
-    """Builds the request the resolved settings send, by the screen configuration's "Sent as"
-    mapping (docs/contracts.md). `values` holds each sent setting's value as a plan holds it,
-    by setting name, already valid. A ranking given as a definition is sent as the name
-    `ApiRankingSystem`, which the case's `rank_update` writes it into (sending a definition)."""
-
-    def text(name: str) -> str:
-        return cast("str", values[name])
-
-    def integer(name: str) -> int:
-        return cast("int", values[name])
-
-    ranking: Ranking | DefinitionRankingSetting = read_ranking_setting(values["ranking"], "any")
-    sent: object
-    match ranking:
-        case FormulaRanking():
-            sent = {"formula": ranking.formula, "lowerIsBetter": ranking.lower_is_better}
-        case NameRanking():
-            sent = ranking.name
-        case IdRanking():
-            sent = ranking.id
-        case DefinitionRankingSetting():
-            sent = API_RANKING_SYSTEM
-    rules = cast("tuple[str, ...]", values["rules"])
-    return ScreenBacktestParams.model_validate(
-        {
-            "screen": {
-                "type": text("screen_type"),
-                "universe": text("universe"),
-                "maxNumHoldings": integer("max_holdings"),
-                "method": text("position_method"),
-                "currency": text("currency"),
-                "benchmark": text("benchmark"),
-                "ranking": sent,
-                "rules": tuple({"formula": rule} for rule in rules),
-            },
-            "startDt": text("start_date"),
-            "endDt": text("end_date"),
-            "pitMethod": PIT_METHODS[text("pit_method")],
-            "precision": integer("precision"),
-            "transPrice": TRANSACTION_PRICES[text("transaction_price")],
-            "slippage": float(text("slippage_percent")),
-            "rebalFreq": REBALANCE_FREQUENCIES[integer("rebalance_weeks")],
-        }
-    )
-
-
-def check_case(requests: tuple[PlanRequest], settings: tuple[PlanSetting, ...]) -> None:
-    """Raises `ValueError` unless `settings` are the screen settings, in their documented order,
-    and the request is what they send (plan contents, consistency)."""
-    names = tuple(row.setting for row in settings)
-    if names != tuple(setting.name for setting in SCREEN_SETTINGS):
-        raise ValueError("settings must be the screen settings, in their documented order")
-    values = {row.setting: row.value for row in settings}
-    if requests[0].params != screen_backtest_params(values):
-        raise ValueError("the request's params must be what the settings send")
+from trialfolio.contracts.plan_requests import PlanRequest, RankUpdateRequest
 
 
 class PlanCase(ContractModel):
@@ -262,87 +61,6 @@ class PlanCase(ContractModel):
     @model_validator(mode="after")
     def _screen_settings(self) -> Self:
         check_case(self.requests, self.settings)
-        return self
-
-
-class DocumentedSource(ContractModel):
-    """Where a documented value comes from, and the date the documentation was checked."""
-
-    title: NonEmptyText
-    url: Annotated[str, StringConstraints(pattern=r"^https://[^\s]+$")]
-    checked: date
-
-
-CREDITS_PER_REQUEST: Final = 5
-"""Portfolio123's documented cost of one screen backtest, in credits (budget and retries). The
-planner records it in each plan's budget, and an experiment configuration's budget is bounded by
-it, so that the plan's credits can be hashed."""
-
-CREDITS_PER_REQUEST_SOURCE: Final = DocumentedSource(
-    title="API: Screen",
-    url="https://portfolio123.customerly.help/en/articles/43324-api-screen",
-    checked=date(2026, 10, 1),
-)
-
-
-class Budget(ContractModel):
-    """The request budget (budget and retries)."""
-
-    provider_requests: Annotated[Literal[1], IntegerOnly]
-    """A 1.0.0 plan has one request, sent at most once."""
-    credits_per_request: Annotated[int, Field(ge=0)]
-    """Portfolio123's documented cost of one request when the plan was made. It isn't fixed,
-    because Portfolio123 can change it."""
-    credits_per_request_source: DocumentedSource
-    credits: Annotated[int, Field(ge=0)]
-    authentication_calls: Annotated[Literal[1], IntegerOnly]
-
-    @model_validator(mode="after")
-    def _credits(self) -> Self:
-        if self.credits != self.provider_requests * self.credits_per_request:
-            raise ValueError("credits must equal provider_requests times credits_per_request")
-        return self
-
-
-class RetryPolicy(ContractModel):
-    """The retry policy: no automatic retries, and one exchange per wrapper call."""
-
-    automatic_retries: Annotated[Literal[0], IntegerOnly]
-    wrapper_attempts_per_call: Annotated[Literal[1], IntegerOnly]
-    exchanges_per_call: Annotated[Literal[1], IntegerOnly]
-
-
-DataCategory = Literal["credentials", "strategy_definition", "backtest_settings"]
-
-_SENT: Final = frozenset(
-    setting.name for setting in SCREEN_SETTINGS if setting.provenance == "verified"
-)
-"""The settings the request sends: a value is verified exactly when it's sent (screen settings)."""
-
-_STRATEGY_DEFINITION: Final = frozenset({"universe", "rules", "ranking"})
-
-DATA_SENT_SETTINGS: Final[dict[DataCategory, frozenset[str]]] = {
-    "credentials": frozenset(),
-    "strategy_definition": _STRATEGY_DEFINITION,
-    "backtest_settings": _SENT - _STRATEGY_DEFINITION,
-}
-"""The settings each `data_sent` category carries (data sent). Together, they're every setting
-the request sends, each once."""
-
-
-class DataSent(ContractModel):
-    """A category of data that leaves the machine, its recipient, and the settings it carries."""
-
-    category: DataCategory
-    recipient: Literal["Portfolio123"]
-    via: Literal["p123api"]
-    settings: tuple[SettingName, ...]
-
-    @model_validator(mode="after")
-    def _known_settings(self) -> Self:
-        if frozenset(self.settings) != DATA_SENT_SETTINGS[self.category]:
-            raise ValueError(f"{self.category} must carry exactly its documented settings")
-        require_unique(self.settings, "settings")
         return self
 
 
@@ -373,157 +91,6 @@ class Plan(ContractModel):
 # Version 1.2.0: a screen whose ranking is a definition.
 
 
-class RankUpdateParams(ContractModel):
-    """The params passed to p123api's `rank_update`, exactly as they're sent, in this order: the
-    fixed type, the case's whole definition, its ranking method's number, and the fixed currency.
-    There's no `id`, so the call writes `ApiRankingSystem` (sending a definition)."""
-
-    type: Literal["stock"]
-    nodes: Annotated[str, StringConstraints(min_length=1)]
-    """The case's whole definition, as its file's text reads, each line end a line feed."""
-    rankingMethod: Annotated[Literal[2, 4], IntegerOnly]
-    """2 for `percentile_nas_negative`, and 4 for `percentile_nas_neutral`."""
-    currency: Literal["USD"]
-
-
-class RankUpdateRequest(ContractModel):
-    """A case's first request: the `rank_update` that writes its definition into
-    `ApiRankingSystem`."""
-
-    operation: Literal["rank_update"]
-    params: RankUpdateParams
-
-
-type SettingValueV1_2 = (
-    Annotated[int, Field(ge=0, le=MAX_SAFE_INTEGER)]
-    | NonEmptyText
-    | tuple[NonEmptyText, ...]
-    | DefinitionRankingSetting
-)
-"""A resolved value of a plan with a ranking definition, in its JSON type: 1.0.0's, with the
-`ranking` row's a definition's hash and its ranking method, and a weight as its normalized
-decimal's text."""
-
-
-class PlanSettingV1_2(ContractModel):
-    """One resolved setting of a plan with a ranking definition: 1.0.0's row, with `node` after
-    `setting`: a weight row's canonical path, and null on every other row."""
-
-    setting: SettingName
-    node: NodePathText | None
-    """A weight row's node, by its canonical path; null on every other row."""
-    category: SettingCategory
-    critical: bool
-    value: SettingValueV1_2
-    unit: SettingUnit | None
-    interpretation: Interpretation
-    expected_provenance: Provenance
-    inference_rule: NonEmptyText | None
-    flags: tuple[PlanFlag, ...]
-
-    @model_validator(mode="after")
-    def _documented(self) -> Self:
-        setting = check_row(
-            self.setting,
-            self.category,
-            self.critical,
-            self.unit,
-            self.interpretation,
-            self.expected_provenance,
-            self.inference_rule,
-            settings=SETTINGS_WITH_WEIGHTS_BY_NAME,
-        )
-        if (self.node is None) == (setting is RANKING_WEIGHT):
-            raise ValueError("node is given on a weight row, and only there")
-        check_value(setting, self.value, "definition")
-        require_unique(self.flags, "flags")
-        check_flags(setting, self.value, self.flags, executed=False, rankings="definition")
-        return self
-
-
-_RANKING_INDEX: Final = next(
-    index for index, setting in enumerate(SCREEN_SETTINGS) if setting.name == "ranking"
-)
-
-
-def check_ranking_settings(settings: tuple[PlanSettingV1_2, ...]) -> None:
-    """Raises `ValueError` unless `settings` are the screen settings, in their documented order,
-    with at least one weight row right after `ranking` (weight rows). Whether the weight rows are
-    the definition's nodes, in its order, is checked against the definition."""
-    names = [row.setting for row in settings]
-    weights = len(names) - len(SCREEN_SETTINGS)
-    screen = [setting.name for setting in SCREEN_SETTINGS]
-    after = _RANKING_INDEX + 1
-    expected = [*screen[:after], *[RANKING_WEIGHT.name] * weights, *screen[after:]]
-    if weights < 1 or names != expected:
-        raise ValueError(
-            "settings must be the screen settings, in their documented order, with a weight row "
-            "for each node right after ranking"
-        )
-
-
-def read_nodes(nodes: str) -> "RankingDefinition":
-    """The definition a `rank_update`'s `nodes` holds, read by the rules of ranking definitions,
-    as a definition file's text is. Raises `ValueError` unless it's a definition Trial Folio
-    reads, whose text, each line end a line feed, is `nodes` exactly."""
-    # Imported here, not above: trialfolio.ranking_definitions applies an experiment
-    # configuration's ranking variants, and that configuration's module imports this one.
-    from trialfolio.ranking_definitions import DefinitionProblem, read_definition
-
-    try:
-        definition = read_definition(nodes.encode("utf-8"))
-    except (DefinitionProblem, UnicodeEncodeError):
-        raise ValueError(
-            "a rank_update's nodes is a ranking definition that Trial Folio reads"
-        ) from None
-    if definition.text != nodes:
-        raise ValueError("a rank_update's nodes ends each line with a line feed alone")
-    return definition
-
-
-def _definition_setting(settings: tuple[PlanSettingV1_2, ...]) -> DefinitionRankingSetting:
-    """The `ranking` setting of a case whose settings are valid: a definition's hash and its
-    ranking method."""
-    (value,) = (row.value for row in settings if row.setting == "ranking")
-    if not isinstance(value, DefinitionRankingSetting):  # each row's value is checked first
-        raise ValueError("a ranking given as a definition holds its hash and its ranking method")
-    return value
-
-
-def check_ranking_case(
-    requests: tuple[RankUpdateRequest, PlanRequest], settings: tuple[PlanSettingV1_2, ...]
-) -> "RankingDefinition":
-    """Raises `ValueError` unless a case with a ranking definition is consistent (plans with a
-    ranking definition): its settings are the screen settings, in order, with its weight rows
-    right after `ranking`; its `rank_update` writes the definition whose hash its `ranking`
-    setting holds, with that setting's ranking method; its weight rows are the weights that
-    definition gives its nodes, in its order, by their canonical paths; and its backtest ranks by
-    `ApiRankingSystem`, and is otherwise what its settings send. Returns its definition."""
-    check_ranking_settings(settings)
-    ranking = _definition_setting(settings)
-    update = requests[0].params
-    definition = read_nodes(update.nodes)
-    if definition.hash != ranking.definition:
-        raise ValueError(
-            "a rank_update's nodes is the definition whose hash its case's ranking setting holds"
-        )
-    if update.rankingMethod != RANKING_METHOD_NUMBERS[ranking.ranking_method]:
-        raise ValueError("a rank_update's rankingMethod is the number of its case's ranking method")
-    weights = [(row.node, row.value) for row in settings if row.setting == RANKING_WEIGHT.name]
-    if weights != [(node.path, format(node.weight, "f")) for node in definition.nodes]:
-        raise ValueError(
-            "a case's weight rows are the weights its definition gives its nodes, in the "
-            "definition's order, by their canonical paths"
-        )
-    backtest = requests[1].params
-    if backtest.screen.ranking != API_RANKING_SYSTEM:
-        raise ValueError(f"a backtest with a ranking definition ranks by {API_RANKING_SYSTEM}")
-    values = {row.setting: row.value for row in settings if row.node is None}
-    if backtest != screen_backtest_params(values):
-        raise ValueError("the backtest's params must be what the settings send")
-    return definition
-
-
 class PlanCaseV1_2(ContractModel):
     """The one case of a screen whose ranking is a definition: its `rank_update`, then its
     backtest, ranked by `ApiRankingSystem`, and its settings, with a weight row for each node."""
@@ -537,41 +104,6 @@ class PlanCaseV1_2(ContractModel):
     def _consistent(self) -> Self:
         check_ranking_case(self.requests, self.settings)
         return self
-
-
-class OperationCost(ContractModel):
-    """One operation's documented cost, in credits, when the plan was made, and its source."""
-
-    operation: Literal["rank_update", "screen_backtest"]
-    credits_per_request: Annotated[int, Field(ge=0)]
-    source: DocumentedSource
-
-
-def ranking_credits(provider_requests: int, costs: tuple[OperationCost, OperationCost]) -> int:
-    """The most `provider_requests` can cost at `costs`, the `rank_update`'s and then the
-    backtest's, sent as a plan with a ranking definition sends them: each backtest follows its
-    case's `rank_update` in the same attempt, so at most half of them, rounded down, are
-    backtests, and the rest cost what a `rank_update` does (plans with a ranking definition)."""
-    rank_update, backtest = costs
-    backtests = provider_requests // 2
-    return (
-        backtests * backtest.credits_per_request
-        + (provider_requests - backtests) * rank_update.credits_per_request
-    )
-
-
-def check_costs(
-    costs: tuple[OperationCost, OperationCost], provider_requests: int, credits: int
-) -> None:
-    """Raises `ValueError` unless `costs` gives the `rank_update`'s cost, then the backtest's,
-    and `credits` is the most `provider_requests` can cost at them."""
-    if tuple(cost.operation for cost in costs) != ("rank_update", "screen_backtest"):
-        raise ValueError("costs gives rank_update's cost, then screen_backtest's")
-    if credits != ranking_credits(provider_requests, costs):
-        raise ValueError(
-            "credits is the most the provider requests can cost at the costs given, with half of "
-            "them, rounded down, backtests, and the rest rank_updates"
-        )
 
 
 class PlanBudgetV1_2(ContractModel):
@@ -589,65 +121,6 @@ class PlanBudgetV1_2(ContractModel):
     @model_validator(mode="after")
     def _costs(self) -> Self:
         check_costs(self.costs, self.provider_requests, self.credits)
-        return self
-
-
-class RankingSource(ContractModel):
-    """Where the plan's ranking definition came from, which the plan hash covers and no `case_id`
-    does: a file, by the definition's hash, or a snapshot, by its system's name and the
-    `artifact_id`s of its `snapshot.json` and `definition.xml` (ranking definitions). Each field
-    is always written, null where the form has none."""
-
-    form: Literal["definition", "snapshot"]
-    definition: Sha256Digest
-    """The definition's hash, which the baseline's `ranking` setting holds too."""
-    system: str | None
-    """A snapshot's system's name, as its record gives it in `system.name`; null for a file."""
-    snapshot_record: Sha256Digest | None
-    """The `artifact_id` of a snapshot's `snapshot.json`; null for a file."""
-    snapshot_definition: Sha256Digest | None
-    """The `artifact_id` of a snapshot's `definition.xml`; null for a file."""
-
-    @model_validator(mode="after")
-    def _follows_its_form(self) -> Self:
-        snapshot = (self.system, self.snapshot_record, self.snapshot_definition)
-        if self.form == "definition" and snapshot != (None, None, None):
-            raise ValueError("a file's ranking_source gives no system or snapshot files")
-        if self.form == "snapshot" and None in snapshot:
-            raise ValueError(
-                "a snapshot's ranking_source gives its system's name and its files' artifact_ids"
-            )
-        return self
-
-
-def check_ranking_source(source: RankingSource, baseline: tuple[PlanSettingV1_2, ...]) -> None:
-    """Raises `ValueError` unless `source` gives the definition the baseline's `ranking` setting
-    names by hash (plans with a ranking definition)."""
-    if source.definition != _definition_setting(baseline).definition:
-        raise ValueError("ranking_source's definition is the hash of the baseline's definition")
-
-
-DATA_SENT_SETTINGS_V1_2: Final[dict[DataCategory, frozenset[str]]] = {
-    **DATA_SENT_SETTINGS,
-    "strategy_definition": _STRATEGY_DEFINITION | {RANKING_WEIGHT.name},
-}
-"""The settings each `data_sent` category carries in a plan with a ranking definition: 1.0.0's,
-with the weights in `strategy_definition`, since each `rank_update` sends them."""
-
-
-class DataSentV1_2(ContractModel):
-    """A category of data that leaves the machine, in a plan with a ranking definition."""
-
-    category: DataCategory
-    recipient: Literal["Portfolio123"]
-    via: Literal["p123api"]
-    settings: tuple[SettingName, ...]
-
-    @model_validator(mode="after")
-    def _known_settings(self) -> Self:
-        if frozenset(self.settings) != DATA_SENT_SETTINGS_V1_2[self.category]:
-            raise ValueError(f"{self.category} must carry exactly its documented settings")
-        require_unique(self.settings, "settings")
         return self
 
 

@@ -30,6 +30,7 @@ from trialfolio.contracts.common import (
     SemanticVersion,
     Sha256Digest,
     check_outcome,
+    check_repeat_count,
     optional_key,
     require_unique,
 )
@@ -169,12 +170,18 @@ class JsonSummaryV1_1(ContractModel):
         _check_summary(self.outcome, self.exit_code, self.error, self.output_dir, self.outputs)
         if isinstance(self.counts, RunCounts) != (self.command in ("run", "demo")):
             raise ValueError("counts are given exactly for run and demo")
-        if isinstance(self.counts, ReviewCounts) != (self.command == "review"):
-            raise ValueError("a review's counts are given exactly for review")
-        claimed = self.command == "review" and self.output_dir is not None
-        if ("review_id" in self.ids) != claimed:
-            raise ValueError("review_id is given exactly once a review has claimed its output")
+        _check_review(self)
         return self
+
+
+def _check_review(summary: "JsonSummaryV1_1 | JsonSummaryV1_2") -> None:
+    """Raises `ValueError` unless a review's counts are given exactly for `review`, and its
+    `review_id` exactly once it has claimed its output directory: rules 1.1.0 and 1.2.0 share."""
+    if isinstance(summary.counts, ReviewCounts) != (summary.command == "review"):
+        raise ValueError("a review's counts are given exactly for review")
+    claimed = summary.command == "review" and summary.output_dir is not None
+    if ("review_id" in summary.ids) != claimed:
+        raise ValueError("review_id is given exactly once a review has claimed its output")
 
 
 @with_config(ConfigDict(strict=True, extra="forbid"))
@@ -243,8 +250,7 @@ class ExperimentCounts(ContractModel):
                 "cases_planned must equal the cases succeeded, failed, skipped, unknown, and not "
                 "yet run"
             )
-        if self.repeats > self.attempts:
-            raise ValueError("repeats counts attempts, so it's at most their number")
+        check_repeat_count(self.repeats, self.attempts)
         return self
 
 
@@ -283,11 +289,7 @@ class JsonSummaryV1_2(ContractModel):
         _check_summary(self.outcome, self.exit_code, self.error, self.output_dir, self.outputs)
         if self.cases is None and "cases" in self.model_fields_set:
             raise ValueError("cases is left out when it isn't given, never null")
-        if isinstance(self.counts, ReviewCounts) != (self.command == "review"):
-            raise ValueError("a review's counts are given exactly for review")
-        claimed = self.command == "review" and self.output_dir is not None
-        if ("review_id" in self.ids) != claimed:
-            raise ValueError("review_id is given exactly once a review has claimed its output")
+        _check_review(self)
         if "experiment_id" not in self.ids:
             if self.cases is not None or "session" in self.ids:
                 raise ValueError("cases and a session are given only for an experiment")
@@ -299,7 +301,9 @@ class JsonSummaryV1_2(ContractModel):
         self._check_experiment()
         return self
 
-    def _check_experiment(self) -> None:  # noqa: C901 - RF-T10 shortens it.
+    def _check_experiment(self) -> None:
+        """Raises `ValueError` unless an experiment's summary is consistent: its command, IDs,
+        counts, outputs, and, once its plan is built, its cases."""
         if self.command != "run":
             raise ValueError("an experiment is run with run")
         if "case_id" in self.ids or "attempt_id" in self.ids:
@@ -314,16 +318,21 @@ class JsonSummaryV1_2(ContractModel):
             raise ValueError("an experiment's outputs are its session's manifest and report")
         # A run ends completed or partial only once it has run its plan, as its session's
         # manifest's outcome does.
-        ended = self.outcome != "failed"
         if self.cases is None:
-            if ended:
+            if self.outcome != "failed":
                 raise ValueError("an experiment's run that ends completed or partial gives cases")
             return
-        if self.cases[0].case_key != BASELINE_CASE_KEY:
+        self._check_cases(self.cases)
+
+    def _check_cases(self, cases: tuple[SummaryCase, ...]) -> None:
+        """Raises `ValueError` unless an experiment's cases are the baseline first, each once,
+        with the outcome they give the run, and the counts they give."""
+        if cases[0].case_key != BASELINE_CASE_KEY:
             raise ValueError("an experiment's cases are the baseline first, and its variants")
-        require_unique(tuple(case.case_key for case in self.cases), "case keys")
-        require_unique(tuple(case.case_id for case in self.cases), "case IDs")
-        every_case_succeeded = all(case.outcome == "succeeded" for case in self.cases)
+        require_unique(tuple(case.case_key for case in cases), "case keys")
+        require_unique(tuple(case.case_id for case in cases), "case IDs")
+        ended = self.outcome != "failed"
+        every_case_succeeded = all(case.outcome == "succeeded" for case in cases)
         if ended and (self.outcome == "completed") != every_case_succeeded:
             raise ValueError(
                 "an experiment's run is completed exactly when every case succeeded, and "
@@ -338,7 +347,7 @@ class JsonSummaryV1_2(ContractModel):
                 "an experiment's cases come with its counts, except after experiment.locked"
             )
         if isinstance(counts, ExperimentCounts):
-            outcomes = [case.outcome for case in self.cases]
+            outcomes = [case.outcome for case in cases]
             if (
                 counts.cases_planned,
                 counts.cases_succeeded,

@@ -47,7 +47,8 @@ from trialfolio.contracts.experiment_manifest import ExperimentManifestV1_1
 from trialfolio.contracts.experiment_plan import ExperimentPlanCaseV1_3, PlanV1_3
 from trialfolio.contracts.experiment_record import ExperimentRecordV1_1
 from trialfolio.contracts.manifest import RunManifestV1_1
-from trialfolio.contracts.plan import Plan, PlanV1_2, read_nodes
+from trialfolio.contracts.plan import Plan, PlanV1_2
+from trialfolio.contracts.plan_parts import read_nodes
 from trialfolio.contracts.ranking_snapshot import (
     RankingSnapshotManifest,
     RankingSnapshotPlan,

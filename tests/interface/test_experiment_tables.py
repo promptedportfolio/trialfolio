@@ -37,7 +37,7 @@ from trialfolio.contracts.common import FlagCode, UnavailableReason
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase
 from trialfolio.contracts.experiment_record import ExperimentRecord, SessionRecord
-from trialfolio.contracts.manifest import ParserVersion
+from trialfolio.contracts.manifest_parts import ParserVersion
 from trialfolio.normalization import LAYOUT, LAYOUT_VERSION, PARSER_VERSION
 from trialfolio.planning import build_experiment_plan, installed_versions
 from trialfolio.storage import ArtifactStore, LocalArtifactStore

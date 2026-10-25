@@ -39,7 +39,7 @@ from types import MappingProxyType
 from typing import Final, Literal, Self, TypedDict, get_args
 
 from trialfolio.contracts.common import CRITICAL_CATEGORIES, FlagCode, SettingCategory
-from trialfolio.contracts.plan import PlanSettingV1_2
+from trialfolio.contracts.plan_parts import PlanSettingV1_2
 from trialfolio.contracts.review_manifest import MetricRowCounts, SettingRowCounts
 from trialfolio.contracts.screen_configuration import FormulaRanking
 from trialfolio.contracts.screen_settings import (

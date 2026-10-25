@@ -13,7 +13,7 @@ either.
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Annotated, Final, Literal, cast
@@ -254,45 +254,69 @@ def check_row(
     interpretation, or provenance differs from the documented row; when `critical` doesn't
     follow the category; or when an inference rule is given for a value that isn't inferred, or
     missing for one that is."""
-    setting = settings.get(name)
-    if setting is None:
-        raise ValueError(f"{name} isn't one of the screen settings")
-    if (category, unit) != (setting.category, setting.unit):
-        raise ValueError(f"{name} must have its documented category and unit")
+    setting = documented_setting(name, category, unit, settings)
     if interpretation != setting.interpretation:
         raise ValueError(f"{name} must be {setting.interpretation}")
     if provenance != setting.provenance:
         raise ValueError(f"{name} must have {setting.provenance} provenance")
-    if critical != (setting.category in CRITICAL_CATEGORIES):
-        raise ValueError("critical must be true exactly for the critical categories")
+    check_critical(setting, critical)
     if (inference_rule is None) == (provenance == "inferred"):
         raise ValueError("inference_rule must be given exactly for inferred values")
     return setting
 
 
-def check_value(setting: ScreenSetting, value: object, rankings: RankingValues = "forms") -> None:  # noqa: C901 - RF-T10 shortens it.
+def documented_setting(
+    name: str, category: str | None, unit: str | None, settings: Mapping[str, ScreenSetting]
+) -> ScreenSetting:
+    """Returns the documented setting `name`, of `settings`. Raises `ValueError` when there's
+    none, or when the row's category or unit differs from the documented row's."""
+    setting = settings.get(name)
+    if setting is None:
+        raise ValueError(f"{name} isn't one of the screen settings")
+    if (category, unit) != (setting.category, setting.unit):
+        raise ValueError(f"{name} must have its documented category and unit")
+    return setting
+
+
+def check_critical(setting: ScreenSetting, critical: bool | None) -> None:
+    """Raises `ValueError` unless a row of `setting` is `critical` exactly when its category is
+    one of the critical categories."""
+    if critical != (setting.category in CRITICAL_CATEGORIES):
+        raise ValueError("critical must be true exactly for the critical categories")
+
+
+def _text_list(value: object) -> None:
+    items = tuple(cast("list[object]", value)) if isinstance(value, list) else value
+    _TEXT_LIST.validate_python(items)
+
+
+def _decimal(value: object) -> None:
+    if not isinstance(value, str) or not _NORMALIZED_DECIMAL.fullmatch(value):
+        raise ValueError
+    normalize_decimal(Decimal(value))
+
+
+_KIND_CHECKS: Final[dict[SettingKind, Callable[[object], object]]] = {
+    "text": _TEXT.validate_python,
+    "integer": _INTEGER.validate_python,
+    "date": _DATE.validate_python,
+    "text_list": _text_list,
+    "weight": _weight,
+    "decimal": _decimal,
+}
+"""The check of a value of each kind but a ranking, whose forms depend on the row: each raises
+`ValueError`, or a `ValidationError`, for a value that isn't valid."""
+
+
+def check_value(setting: ScreenSetting, value: object, rankings: RankingValues = "forms") -> None:
     """Raises `ValueError` unless `value` is a valid value of the setting in its JSON type, as a
     plan holds it, and one of its `allowed` values when it has any. A `ranking` row's may be any
     form `rankings` allows."""
     try:
-        match setting.kind:
-            case "text":
-                _TEXT.validate_python(value)
-            case "integer":
-                _INTEGER.validate_python(value)
-            case "date":
-                _DATE.validate_python(value)
-            case "text_list":
-                items = tuple(cast("list[object]", value)) if isinstance(value, list) else value
-                _TEXT_LIST.validate_python(items)
-            case "ranking":
-                read_ranking_setting(value, rankings)
-            case "weight":
-                _weight(value)
-            case "decimal":
-                if not isinstance(value, str) or not _NORMALIZED_DECIMAL.fullmatch(value):
-                    raise ValueError
-                normalize_decimal(Decimal(value))
+        if setting.kind == "ranking":
+            read_ranking_setting(value, rankings)
+        else:
+            _KIND_CHECKS[setting.kind](value)
     except (ValidationError, ValueError):
         expected = _RANKINGS_EXPECTED[rankings] if setting.kind == "ranking" else None
         raise ValueError(
