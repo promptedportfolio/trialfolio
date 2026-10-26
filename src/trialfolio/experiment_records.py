@@ -208,7 +208,7 @@ from trialfolio.normalization import (
     case_metrics_rows,
     case_tables_path,
 )
-from trialfolio.planning import retired_cases, retired_cases_v1_1
+from trialfolio.planning import retired_cases_v1_1
 from trialfolio.record_checks import (
     RecordChecks,
     artifact_id,
@@ -980,11 +980,7 @@ class SavedExperiment:
         records give them: those the manifest of a session that sent nothing under `plan` would
         give. The executor counts its own session's attempts with the same rules."""
         invalid = {case_id for case_id in self.missing if not self.valid(case_id)}
-        record = self.current.record
-        if isinstance(record, ExperimentRecord) and isinstance(plan, PlanV1_1):
-            retired = len(retired_cases(record, plan))
-        else:
-            retired = len(retired_cases_v1_1(record, plan))
+        retired = len(retired_cases_v1_1(self.current.record, plan))
         return experiment_counts(plan, self.attempts, invalid=invalid, retired=retired)
 
     def metrics_unavailable(self, plan: AnyPlan) -> int:

@@ -234,18 +234,14 @@ from trialfolio.normalization import (
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
 from trialfolio.pause import REAL_PAUSE, Pause
 from trialfolio.planning import (
-    PlanRevision,
     PlanRevisionV1_1,
     Versions,
     build_experiment_plan_v1_1,
     check_approval,
     first_experiment_record_v1_1,
-    plan_changes,
     plan_changes_v1_1,
     plan_hash,
-    retired_cases,
     retired_cases_v1_1,
-    revised_experiment_record,
     revised_experiment_record_v1_1,
 )
 from trialfolio.provider import DecodedResponse, ScreenBacktestClient, provider_message_of
@@ -654,7 +650,7 @@ class ExperimentExecution:
             raise ValueError(
                 "an experiment with a ranking definition, and only one, takes the lock"
             )
-        self._revision: PlanRevision | PlanRevisionV1_1 | None = None
+        self._revision: PlanRevisionV1_1 | None = None
         self._reason: str | None = None
         self._repeats: dict[str, Repeat] = {}
         self._used: tuple[Repeat, ...] = ()
@@ -791,16 +787,8 @@ class ExperimentExecution:
             self._reason = _REASON.validate_python(reason)
         except ValidationError:
             raise ValueError("the reason isn't a valid revision reason") from None
-        record = experiment.current.record
-        if (
-            isinstance(record, ExperimentRecord)
-            and isinstance(current, PlanV1_1)
-            and isinstance(plan, PlanV1_1)
-        ):
-            self._revision = PlanRevision(plan, plan_changes(current, plan))
-            return
-        # Once a plan of the experiment has a ranking definition, release 0.4.0's rules record
-        # its revisions, in experiment.json 1.1.0.
+        # Release 0.4.0's rules give what changed, which `revised_experiment_record_v1_1` records
+        # as 0.3.0's while no plan of the experiment has a ranking definition.
         self._revision = PlanRevisionV1_1(plan, plan_changes_v1_1(current, plan))
 
     @property
@@ -1085,7 +1073,7 @@ class ExperimentExecution:
 
     def _write_revision(
         self,
-        revision: PlanRevision | PlanRevisionV1_1,
+        revision: PlanRevisionV1_1,
         configuration: bytes,
         copies: tuple["_Copy", ...],
     ) -> None:
@@ -1130,7 +1118,7 @@ class ExperimentExecution:
     def _revised_record(
         self,
         previous: ExperimentRecord | ExperimentRecordV1_1,
-        revision: PlanRevision | PlanRevisionV1_1,
+        revision: PlanRevisionV1_1,
         number: int,
         plan: StoredFile,
         configuration: StoredFile,
@@ -1139,29 +1127,15 @@ class ExperimentExecution:
         `previous`, written once its `plan.json` and its `configuration.yaml` are: 1.0.0 by
         0.3.0's rules while no plan of the experiment has a ranking definition, and 1.1.0 by
         release 0.4.0's once one has."""
-        reason, created_at = str(self._reason), utc(self._clock())
-        if isinstance(revision, PlanRevision) and isinstance(previous, ExperimentRecord):
-            return revised_experiment_record(
-                previous,
-                revision,
-                number=number,
-                reason=reason,
-                plan_artifact_id=plan.artifact_id,
-                configuration_artifact_id=configuration.artifact_id,
-                approval=self._approval,
-                created_at=created_at,
-            )
-        if isinstance(revision, PlanRevision):  # an experiment.json 1.1.0 takes 0.4.0's changes
-            raise TypeError("a revision recorded in experiment.json 1.1.0 is a PlanRevisionV1_1")
         return revised_experiment_record_v1_1(
             previous,
             revision,
             number=number,
-            reason=reason,
+            reason=str(self._reason),
             plan_artifact_id=plan.artifact_id,
             configuration_artifact_id=configuration.artifact_id,
             approval=self._approval,
-            created_at=created_at,
+            created_at=utc(self._clock()),
         )
 
     def _complete_records(self, experiment: SavedExperiment) -> None:
@@ -1770,8 +1744,6 @@ class ExperimentExecution:
         record = self._record
         if record is None:  # a new experiment's, before its first plan is recorded
             return 0
-        if isinstance(record, ExperimentRecord) and isinstance(self._plan, PlanV1_1):
-            return len(retired_cases(record, self._plan))
         return len(retired_cases_v1_1(record, self._plan))
 
     def _experiment_record(self) -> ExperimentRecord | ExperimentRecordV1_1:

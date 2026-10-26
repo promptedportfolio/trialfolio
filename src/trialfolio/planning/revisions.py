@@ -12,9 +12,16 @@ revisions, `experiment.json`, and plans with a ranking definition).
   setting, and a plan 1.1.0 can be revised into a 1.3.0, or back; and
   `first_experiment_record_v1_1` and `revised_experiment_record_v1_1` give its `experiment.json`,
   1.1.0 once a plan of the experiment is 1.3.0, and 1.0.0 otherwise.
+
+Each of 0.3.0's functions and its 0.4.0 counterpart share their steps, and differ only in the
+models they build, and in the form of a case's variant, which 1.1.0 gives with `set` and
+`remove`. The 0.4.0 functions take either version, so a caller needn't choose between the two:
+`revised_experiment_record_v1_1` records a revision's changes as 0.3.0's while the experiment's
+`experiment.json` is 1.0.0, and the retired cases of `retired_cases_v1_1` are those of
+`retired_cases`, one for one.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
@@ -110,6 +117,18 @@ def _check_experiment(
         )
 
 
+def _revised[P: (PlanV1_1, PlanV1_1 | PlanV1_3)](
+    build: Callable[[str | None], P], current: PlanV1_1 | PlanV1_3
+) -> P | None:
+    """The plan `build` gives, with its `revises` set to the hash of `current`, the experiment's
+    current plan, recomputed from its contents; or None when `build` gives the current plan, with
+    the current plan's own `revises`."""
+    current_hash = plan_hash(current)
+    if build(current.revises).plan_hash == current_hash:
+        return None
+    return build(current_hash)
+
+
 def plan_revision(
     configuration: ExperimentConfiguration, versions: Versions, current: PlanV1_1
 ) -> PlanRevision | None:
@@ -127,11 +146,10 @@ def plan_revision(
     revision. Raises it with `environment.unsupported` as `build_experiment_plan` does.
     """
     _check_experiment(configuration, current)
-    current_hash = plan_hash(current)
-    if build_experiment_plan(configuration, versions, current.revises).plan_hash == current_hash:
-        return None
-    revision = build_experiment_plan(configuration, versions, current_hash)
-    return PlanRevision(revision, plan_changes(current, revision))
+    revision = _revised(
+        lambda revises: build_experiment_plan(configuration, versions, revises), current
+    )
+    return None if revision is None else PlanRevision(revision, plan_changes(current, revision))
 
 
 def plan_revision_v1_1(
@@ -153,11 +171,14 @@ def plan_revision_v1_1(
     does.
     """
     _check_experiment(read.configuration, current)
-    current_hash = plan_hash(current)
-    if build_experiment_plan_v1_1(read, versions, current.revises).plan_hash == current_hash:
-        return None
-    revision = build_experiment_plan_v1_1(read, versions, current_hash)
-    return PlanRevisionV1_1(revision, plan_changes_v1_1(current, revision))
+    revision = _revised(
+        lambda revises: build_experiment_plan_v1_1(read, versions, revises), current
+    )
+    return (
+        None
+        if revision is None
+        else PlanRevisionV1_1(revision, plan_changes_v1_1(current, revision))
+    )
 
 
 def _variant_v1_3(variant: PlanVariant | PlanVariantV1_3 | None) -> PlanVariantV1_3 | None:
@@ -255,7 +276,10 @@ def plan_changes_v1_1(
 # experiment.json
 
 
-def _recorded(case: ExperimentPlanCase | RecordedCase) -> dict[str, object]:
+def _recorded(
+    case: ExperimentPlanCase | ExperimentPlanCaseV1_3 | RecordedCase | RecordedCaseV1_1,
+) -> dict[str, object]:
+    """A case as `experiment.json` 1.0.0 records it."""
     return {
         "case_key": case.case_key,
         "case_id": case.case_id,
@@ -267,29 +291,40 @@ def _recorded(case: ExperimentPlanCase | RecordedCase) -> dict[str, object]:
 def _recorded_v1_1(
     case: ExperimentPlanCase | ExperimentPlanCaseV1_3 | RecordedCase | RecordedCaseV1_1,
 ) -> dict[str, object]:
+    """A case as `experiment.json` 1.1.0 records it: as 1.0.0 does, with its variant in plan
+    1.3.0's form."""
+    return _recorded(case) | {"variant": _variant_v1_3(case.variant)}
+
+
+def _record_fields(
+    plan: PlanV1_1 | PlanV1_3,
+    planned: Sequence[RecordedCase] | Sequence[RecordedCaseV1_1],
+    retired: Sequence[RetiredCase] | Sequence[RetiredCaseV1_1],
+    plans: Sequence[PlanEntry] | Sequence[PlanEntryV1_1],
+    at: datetime,
+) -> dict[str, object]:
+    """What `experiment.json` holds, but its schema version: the experiment as `plan` declares
+    it, its planned and retired cases, and the history of its plans, written at `at`."""
     return {
-        "case_key": case.case_key,
-        "case_id": case.case_id,
-        "description": case.description,
-        "variant": _variant_v1_3(case.variant),
+        # Written in the run that built the plan, so by the Trial Folio the plan records.
+        "trialfolio_version": plan.trialfolio_version,
+        "created_at": at,
+        "experiment_id": plan.experiment_id,
+        "title": plan.title,
+        "purpose": plan.purpose,
+        "prior_research": plan.prior_research,
+        "planned_cases": tuple(planned),
+        "retired_cases": tuple(retired),
+        "plans": tuple(plans),
     }
 
 
 def _record(
     plan: PlanV1_1, retired: tuple[RetiredCase, ...], plans: tuple[PlanEntry, ...], at: datetime
 ) -> ExperimentRecord:
-    return ExperimentRecord(
-        schema_version="1.0.0",
-        # Written in the run that built the plan, so by the Trial Folio the plan records.
-        trialfolio_version=plan.trialfolio_version,
-        created_at=at,
-        experiment_id=plan.experiment_id,
-        title=plan.title,
-        purpose=plan.purpose,
-        prior_research=plan.prior_research,
-        planned_cases=tuple(RecordedCase.model_validate(_recorded(case)) for case in plan.cases),
-        retired_cases=retired,
-        plans=plans,
+    planned = [RecordedCase.model_validate(_recorded(case)) for case in plan.cases]
+    return ExperimentRecord.model_validate(
+        {"schema_version": "1.0.0", **_record_fields(plan, planned, retired, plans, at)}
     )
 
 
@@ -299,20 +334,36 @@ def _record_v1_1(
     plans: tuple[PlanEntryV1_1, ...],
     at: datetime,
 ) -> ExperimentRecordV1_1:
-    return ExperimentRecordV1_1(
-        schema_version="1.1.0",
-        # Written in the run that built the plan, so by the Trial Folio the plan records.
-        trialfolio_version=plan.trialfolio_version,
-        created_at=at,
-        experiment_id=plan.experiment_id,
-        title=plan.title,
-        purpose=plan.purpose,
-        prior_research=plan.prior_research,
-        planned_cases=tuple(
-            RecordedCaseV1_1.model_validate(_recorded_v1_1(case)) for case in plan.cases
-        ),
-        retired_cases=retired,
-        plans=plans,
+    planned = [RecordedCaseV1_1.model_validate(_recorded_v1_1(case)) for case in plan.cases]
+    return ExperimentRecordV1_1.model_validate(
+        {"schema_version": "1.1.0", **_record_fields(plan, planned, retired, plans, at)}
+    )
+
+
+def _entry[E: (PlanEntry, PlanEntryV1_1)](
+    model: type[E],
+    number: int,
+    plan: PlanV1_1 | PlanV1_3,
+    *,
+    plan_artifact_id: str,
+    configuration_artifact_id: str,
+    approval: Approval,
+    reason: str | None = None,
+    changes: PlanChanges | PlanChangesV1_1 | None = None,
+) -> E:
+    """The entry of `plan`, the experiment's plan `number`, in the history of its plans, as
+    `model`, 1.0.0's or 1.1.0's: with no reason or changes for the first plan."""
+    return model.model_validate(
+        {
+            "plan": number,
+            "plan_hash": plan_hash(plan),
+            "revises": plan.revises,
+            "plan_artifact_id": plan_artifact_id,
+            "configuration_artifact_id": configuration_artifact_id,
+            "approval": approval,
+            "reason": reason,
+            "changes": changes,
+        }
     )
 
 
@@ -334,15 +385,13 @@ def first_experiment_record(
 
     Raises `ValueError` when `plan` revises another plan.
     """
-    entry = PlanEntry(
-        plan=1,
-        plan_hash=plan_hash(plan),
-        revises=plan.revises,
+    entry = _entry(
+        PlanEntry,
+        1,
+        plan,
         plan_artifact_id=plan_artifact_id,
         configuration_artifact_id=configuration_artifact_id,
         approval=approval,
-        reason=None,
-        changes=None,
     )
     return _record(plan, (), (entry,), created_at)
 
@@ -369,17 +418,30 @@ def first_experiment_record_v1_1(
             approval=approval,
             created_at=created_at,
         )
-    entry = PlanEntryV1_1(
-        plan=1,
-        plan_hash=plan_hash(plan),
-        revises=plan.revises,
+    entry = _entry(
+        PlanEntryV1_1,
+        1,
+        plan,
         plan_artifact_id=plan_artifact_id,
         configuration_artifact_id=configuration_artifact_id,
         approval=approval,
-        reason=None,
-        changes=None,
     )
     return _record_v1_1(plan, (), (entry,), created_at)
+
+
+def _retired(
+    previous: ExperimentRecord | ExperimentRecordV1_1, plan: PlanV1_1 | PlanV1_3
+) -> list[tuple[RecordedCase | RecordedCaseV1_1, int]]:
+    """Each retired case of the experiment once `plan` is its current plan, with the number of
+    the last plan that included it: `previous`'s retired cases, without each case `plan` includes
+    again, followed by each case the current plan included and `plan` doesn't, as the current plan
+    held it, with its number."""
+    planned = {case.case_id for case in plan.cases}
+    current = previous.plans[-1].plan
+    return [
+        *((case, case.plan) for case in previous.retired_cases if case.case_id not in planned),
+        *((case, current) for case in previous.planned_cases if case.case_id not in planned),
+    ]
 
 
 def retired_cases(previous: ExperimentRecord, plan: PlanV1_1) -> tuple[RetiredCase, ...]:
@@ -387,15 +449,9 @@ def retired_cases(previous: ExperimentRecord, plan: PlanV1_1) -> tuple[RetiredCa
     current plan's `experiment.json`: `previous`'s retired cases, without each case `plan`
     includes again, followed by each case the current plan included and `plan` doesn't, as the
     current plan held it, with its number. With the current plan itself, they're `previous`'s."""
-    planned = {case.case_id for case in plan.cases}
-    current = previous.plans[-1].plan
-    return (
-        *(case for case in previous.retired_cases if case.case_id not in planned),
-        *(
-            RetiredCase.model_validate({**_recorded(case), "plan": current})
-            for case in previous.planned_cases
-            if case.case_id not in planned
-        ),
+    return tuple(
+        RetiredCase.model_validate({**_recorded(case), "plan": number})
+        for case, number in _retired(previous, plan)
     )
 
 
@@ -405,19 +461,9 @@ def retired_cases_v1_1(
     """The retired cases of the experiment once `plan`, 1.1.0 or 1.3.0, is its current plan, as
     `retired_cases` gives them, as `experiment.json` 1.1.0 holds them: an entry taken from a
     1.0.0 `experiment.json` with its variant's `set` and `remove` null."""
-    planned = {case.case_id for case in plan.cases}
-    current = previous.plans[-1].plan
-    return (
-        *(
-            RetiredCaseV1_1.model_validate({**_recorded_v1_1(case), "plan": case.plan})
-            for case in previous.retired_cases
-            if case.case_id not in planned
-        ),
-        *(
-            RetiredCaseV1_1.model_validate({**_recorded_v1_1(case), "plan": current})
-            for case in previous.planned_cases
-            if case.case_id not in planned
-        ),
+    return tuple(
+        RetiredCaseV1_1.model_validate({**_recorded_v1_1(case), "plan": number})
+        for case, number in _retired(previous, plan)
     )
 
 
@@ -446,10 +492,10 @@ def revised_experiment_record(
     revision's changes show; or when `reason` isn't a valid reason.
     """
     retired = retired_cases(previous, revision.plan)
-    entry = PlanEntry(
-        plan=number,
-        plan_hash=plan_hash(revision.plan),
-        revises=revision.plan.revises,
+    entry = _entry(
+        PlanEntry,
+        number,
+        revision.plan,
         plan_artifact_id=plan_artifact_id,
         configuration_artifact_id=configuration_artifact_id,
         approval=approval,
@@ -495,10 +541,10 @@ def revised_experiment_record_v1_1(
             approval=approval,
             created_at=created_at,
         )
-    entry = PlanEntryV1_1(
-        plan=number,
-        plan_hash=plan_hash(plan),
-        revises=plan.revises,
+    entry = _entry(
+        PlanEntryV1_1,
+        number,
+        plan,
         plan_artifact_id=plan_artifact_id,
         configuration_artifact_id=configuration_artifact_id,
         approval=approval,
