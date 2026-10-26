@@ -49,7 +49,7 @@ from trialfolio.attempts import (
     utc_now,
 )
 from trialfolio.configuration import read_ranking_snapshot_configuration
-from trialfolio.contracts.attempt import AttemptRecordV1_2
+from trialfolio.contracts.attempt import AttemptRecord, AttemptRecordV1_2
 from trialfolio.contracts.common import Approval, ErrorDetail
 from trialfolio.contracts.manifest_parts import SourceRecordV1_1
 from trialfolio.contracts.ranking_snapshot import (
@@ -220,23 +220,13 @@ class SnapshotExecution(SingleAttemptExecution[RankingSnapshotPlan, SnapshotAtte
     def _list(self, role: Literal["plan", "configuration"] | AttemptRole, file: StoredFile) -> None:
         self._files.append((cast("SnapshotArtifactRole", role), file))
 
-    def _end(
+    def _write_from_response(
         self, configuration: bytes, result: AttemptResult, error: TrialFolioError | None
     ) -> TrialFolioError | None:
-        """Steps 4 and 5: `definition.xml` and `snapshot.json`, and the manifest."""
-        record = result.record
-        if not isinstance(record, AttemptRecordV1_2):  # a snapshot's attempt writes 1.2.0
-            raise TypeError("a snapshot's attempt record is version 1.2.0")
-        error = self._save_system(result, error)
-        self._manifest.write(self._build_manifest(record, error))
-        return error
-
-    def _save_system(
-        self, result: AttemptResult, error: TrialFolioError | None
-    ) -> TrialFolioError | None:
-        """Writes `definition.xml`, then `snapshot.json`, from a saved response that has the
-        structure a snapshot needs. Returns the snapshot's error: `provider.response_invalid`
+        """Step 4: writes `definition.xml`, then `snapshot.json`, from a saved response that has
+        the structure a snapshot needs. Returns the snapshot's error: `provider.response_invalid`
         when the response doesn't have it."""
+        attempt_record = _attempt_record(result.record)
         response = result.response
         if error is not None or response is None:
             return error
@@ -261,8 +251,8 @@ class SnapshotExecution(SingleAttemptExecution[RankingSnapshotPlan, SnapshotAtte
             trialfolio_version=self._plan.trialfolio_version,
             requested=self._plan.system,
             system=system,
-            taken_at=result.record.ended_at,
-            attempt_id=result.record.attempt_id,
+            taken_at=attempt_record.ended_at,
+            attempt_id=attempt_record.attempt_id,
             plan_hash=self._plan.plan_hash,
             definition=definition.artifact_id,
             response=saved.artifact_id,
@@ -272,6 +262,12 @@ class SnapshotExecution(SingleAttemptExecution[RankingSnapshotPlan, SnapshotAtte
         self._record = record
         self._problems = tuple(ranking_problems(system, xml))
         return None
+
+    def _write_ending(
+        self, record: AttemptRecord | AttemptRecordV1_2, error: TrialFolioError | None
+    ) -> None:
+        """Step 5: writes `manifest.json`."""
+        self._manifest.write(self._build_manifest(_attempt_record(record), error))
 
     def _running_detail(self, attempt: SnapshotAttempt) -> str:
         return running_detail(name="rank_get request")
@@ -362,6 +358,13 @@ def _system(response: DecodedResponse) -> tuple[SnapshotSystem | None, bytes | N
         type=kind,
     )
     return system, encoded[1]
+
+
+def _attempt_record(record: AttemptRecord | AttemptRecordV1_2) -> AttemptRecordV1_2:
+    """The snapshot's attempt record, which its attempt writes as version 1.2.0."""
+    if not isinstance(record, AttemptRecordV1_2):
+        raise TypeError("a snapshot's attempt record is version 1.2.0")
+    return record
 
 
 def _invalid(problem: str) -> TrialFolioError:

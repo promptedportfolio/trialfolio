@@ -414,11 +414,11 @@ class Execution(SingleAttemptExecution[Plan | PlanV1_2, Attempt | RankingAttempt
             or (self._snapshot_named and self._snapshot is None)
         )
 
-    def _normalize(
+    def _write_from_response(
         self, configuration: bytes, result: AttemptResult, error: TrialFolioError | None
     ) -> TrialFolioError | None:
-        """Writes the tables from a response that was saved. Returns the run's error, which is
-        `provider.response_invalid` when the response fails validation."""
+        """Step 4: writes the tables from a response that was saved. Returns the run's error,
+        which is `provider.response_invalid` when the response fails validation."""
         response = result.record.response
         if error is not None or response is None or self._configuration is None:
             return error
@@ -445,20 +445,12 @@ class Execution(SingleAttemptExecution[Plan | PlanV1_2, Attempt | RankingAttempt
         self._files.extend((("metrics", self._tables.metrics), ("settings", self._tables.settings)))
         return None
 
-    def _end(
-        self, configuration: bytes, result: AttemptResult, error: TrialFolioError | None
-    ) -> TrialFolioError | None:
-        """Steps 4 to 6: the tables, the report, and the manifest."""
-        error = self._normalize(configuration, result, error)
-        self._write_ending(result.record, error)
-        return error
-
     def _write_ending(
         self, record: AttemptRecord | AttemptRecordV1_2, error: TrialFolioError | None
     ) -> None:
-        """Writes `report.html`, rendered from the manifest as it will be written, without the
-        report, then `manifest.json`, which lists the report too. `record` is the attempt's
-        record, and `error` the run's."""
+        """Steps 5 and 6: writes `report.html`, rendered from the manifest as it will be written,
+        without the report, then `manifest.json`, which lists the report too. `record` is the
+        attempt's record, and `error` the run's."""
         created_at = utc(self._clock())
         snapshot = None if self._read is None else self._read.snapshot
         saved = SavedRun(

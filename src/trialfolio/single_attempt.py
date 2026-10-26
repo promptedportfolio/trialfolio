@@ -13,8 +13,11 @@ its own: `Execution`, in `trialfolio.execution`, a screen run's, and `SnapshotEx
    after the claim and before the attempt authenticates is recorded by the attempt.
 4. Takes the executor's steps that end with its manifest, after an attempt whose record was
    written, unless an interrupt or a storage failure decided the error code, or a file every
-   manifest lists wasn't written; and then logs how the execution ended, under the executor's
-   logger, so the event keeps its `component`.
+   manifest lists wasn't written: first those that write what the saved response gives, which
+   decide whether it's `provider.response_invalid`, then those that write the ending, the
+   manifest last. An interrupt or a storage failure that ends them keeps the message of the
+   error it overrides, the response's included, after "Before that:". Otherwise it then logs how
+   the execution ended, under the executor's logger, so the event keeps its `component`.
 
 Every other ending is returned without a manifest, with what the records say of the manifest, and
 `ending_detail` says what the attempt's records say of its requests, in the executor's words.
@@ -212,7 +215,10 @@ class SingleAttemptExecution[
         ):
             return self._without_manifest(error)
         with EndingWithoutManifest(after="the attempt ended") as ended:
-            error = self._end(configuration, result, error)
+            # The response's error is kept before the ending is written, so an interrupt or a
+            # storage failure while it's written still gives its message.
+            error = self._write_from_response(configuration, result, error)
+            self._write_ending(result.record, error)
         if ended.error is not None:
             return prevailing(ended.error.with_detail(self.ending_detail()), error)
         self._kind.logger.log(
@@ -319,11 +325,19 @@ class SingleAttemptExecution[
         return True
 
     @abstractmethod
-    def _end(
+    def _write_from_response(
         self, configuration: bytes, result: AttemptResult, error: TrialFolioError | None
     ) -> TrialFolioError | None:
-        """The executor's steps after its attempt, which end by writing its manifest. Returns the
-        error the command reports."""
+        """The executor's first steps after its attempt: what it writes from a response that was
+        saved. Returns the error the command reports: `error`, the attempt's, or
+        `provider.response_invalid` when the response doesn't have what the executor needs."""
+
+    @abstractmethod
+    def _write_ending(
+        self, record: AttemptRecord | AttemptRecordV1_2, error: TrialFolioError | None
+    ) -> None:
+        """The executor's last steps, which end by writing its manifest. `record` is the
+        attempt's record, and `error` the one the command reports."""
 
     @abstractmethod
     def _running_detail(self, attempt: A) -> str:
