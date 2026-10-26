@@ -18,8 +18,8 @@ from trialfolio.experiment_approval.run import (
     RepeatOption,
     repeat_option,
 )
-from trialfolio.experiment_execution import Repeat
 from trialfolio.experiment_records import SavedExperimentAttempt
+from trialfolio.experiment_repeats import Repeat
 
 REPEAT_ANSWER: Final = "repeat"
 """What the user types to confirm the repeats shown. Any other answer is a refusal."""

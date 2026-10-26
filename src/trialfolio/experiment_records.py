@@ -36,9 +36,10 @@ each file once, and checks them:
 An attempt with a start record and no attempt record is `running`, and one whose only record is
 its authentication record stopped before its send. `SavedExperimentAttempt` reads each as the
 resume's step 8 will record it: the first `succeeded` with a saved response and `unknown` without
-one, possibly charged either way, and the second `failed`, not possibly charged, and
-`completed_record` gives the attempt record step 8 writes. The case states, and the budget's
-counts, read them the same way, by the rules in `case_state.py`, which the executor shares.
+one, possibly charged either way, and the second `failed`, not possibly charged; the resume's
+code, `trialfolio.experiment_execution.completion`, builds from its records the attempt record
+step 8 writes. The case states, and the budget's counts, read them the same way, by the rules in
+`case_state.py`, which the executor shares.
 
 The check also prepares the tables a stopped run didn't write: for each case whose latest
 succeeded attempt has no `settings.csv`, the rows its `metrics.csv` will hold, from the response's
@@ -85,7 +86,6 @@ configuration value, never a value. The checks it shares with a run's reader, `r
 `record_checks.py`, and the paths of the output directory in `experiment_paths.py`.
 """
 
-import json
 import re
 import uuid
 from collections import Counter
@@ -111,10 +111,7 @@ from trialfolio.attempts import (
     authentication_calls,
     follows_update,
     holds_earlier,
-    provider_metadata,
     provider_requests,
-    ranking_detail,
-    request_detail,
     same_values,
 )
 from trialfolio.case_state import (
@@ -141,9 +138,6 @@ from trialfolio.contracts.attempt import (
     AttemptRecordV1_1,
     AttemptRecordV1_3,
     AuthenticationRecord,
-    Exchange,
-    ProviderMetadata,
-    RankingUpdate,
     RankUpdateResponse,
     SavedResponse,
     StartRecordV1_1,
@@ -153,7 +147,6 @@ from trialfolio.contracts.common import (
     AUTHENTICATION_REQUEST,
     RANK_UPDATE_REQUEST,
     SCREEN_BACKTEST_REQUEST,
-    ErrorDetail,
 )
 from trialfolio.contracts.experiment_manifest import (
     ExperimentArtifact,
@@ -490,283 +483,10 @@ class SavedExperimentAttempt:
             return authentication_calls(self.opening.exchanges)
         return 1
 
-    def completed_record(self, plan: AnyPlan, ended_at: datetime) -> AnyAttemptRecord:
-        """The attempt record a resume writes for this attempt, which has none, keeping its
-        records' contents, `session`, `sequence`, and `repeat_of` (docs/contracts.md, uncertain
-        completion, and experiment attempts). `plan` is the plan it ran under, and `ended_at`
-        when the record is written, or its start time when the clock reads earlier.
-
-        - **A `running` attempt with a saved response** is `succeeded`: its request's exchange is
-          recorded as a `response` with status 200 and the note `completed_from_saved_response`.
-        - **A `running` attempt without one** is `unknown`, possibly charged, with its start
-          record's exchanges, and `command.interrupted`, as an interrupt during the send gives.
-        - **An attempt with only its authentication record** is `failed`, not possibly charged,
-          with `command.interrupted`, and its one exchange, the authentication call's, recorded
-          as `interrupted`. A `request.json` it wrote isn't referenced.
-
-        Under a plan 1.3.0, the record is 1.3.0, with the `rank_update`'s files in its
-        `ranking_update`, and a `running` attempt's exchanges are its start record's, the
-        `rank_update`'s 200 among them. An attempt whose latest record is its update record is
-        recorded as sending a definition says: with the `rank_update`'s saved response, its
-        exchange is a `response` with status 200 and the note `completed_from_saved_response`,
-        and the attempt is `failed`, with `command.interrupted`, or `provider.response_invalid`
-        for a response saved undecoded; without it, the exchange is `interrupted`, and the
-        attempt `unknown`, with `command.interrupted`. Either way, it's possibly charged, and a
-        backtest's `request.json` it wrote isn't referenced.
-
-        Raises `ValueError` when it has an attempt record.
-        """
-        if self.record is not None:
-            raise ValueError("the attempt has its attempt record")
-        ended_at = max(ended_at, self.started_at)
-        if isinstance(plan, PlanV1_3):
-            return self._completed_v1_3(plan, ended_at)
-        start = self.start
-        if start is None:
-            return AttemptRecordV1_1.model_validate(
-                {
-                    **self._identity("1.1.0"),
-                    "authenticated_by": None,
-                    "repeat_of": self.repeat_of,
-                    "started_at": self.started_at,
-                    "provider_wrapper": plan.provider_wrapper,
-                    "transport": plan.transport,
-                    "ended_at": ended_at,
-                    "outcome": "failed",
-                    "error": _stopped_authenticating(ranking=False),
-                    "exchanges": (_AUTHENTICATION_INTERRUPTED,),
-                    "possibly_charged": False,
-                    "request": None,
-                    "response": None,
-                    "provider_metadata": _NO_METADATA,
-                }
-            )
-        common = {
-            **self._identity("1.1.0"),
-            "authenticated_by": start.authenticated_by,
-            "repeat_of": start.repeat_of,
-            "started_at": start.started_at,
-            "provider_wrapper": start.provider_wrapper,
-            "transport": start.transport,
-            "ended_at": ended_at,
-            "possibly_charged": True,
-            "request": self._reference(REQUEST),
-        }
-        return AttemptRecordV1_1.model_validate({**common, **self._backtest_ending(start)})
-
-    def _completed_v1_3(self, plan: PlanV1_3, ended_at: datetime) -> AttemptRecordV1_3:
-        """The attempt record 1.3.0 a resume writes for an attempt under a plan 1.3.0, as
-        `completed_record` says."""
-        opening = self.opening
-        if opening is None:
-            return AttemptRecordV1_3.model_validate(
-                {
-                    **self._identity("1.3.0"),
-                    "operation": "screen_backtest",
-                    "authenticated_by": None,
-                    "repeat_of": self.repeat_of,
-                    "started_at": self.started_at,
-                    "provider_wrapper": plan.provider_wrapper,
-                    "transport": plan.transport,
-                    "ended_at": ended_at,
-                    "outcome": "failed",
-                    "error": _stopped_authenticating(ranking=True),
-                    "exchanges": (_AUTHENTICATION_INTERRUPTED,),
-                    "possibly_charged": False,
-                    "ranking_update": RankingUpdate(
-                        request=None, response=None, provider_metadata=_NO_METADATA
-                    ),
-                    "request": None,
-                    "response": None,
-                    "provider_metadata": _NO_METADATA,
-                }
-            )
-        common = {
-            **self._identity("1.3.0"),
-            "operation": "screen_backtest",
-            "authenticated_by": opening.authenticated_by,
-            "repeat_of": opening.repeat_of,
-            "started_at": opening.started_at,
-            "provider_wrapper": opening.provider_wrapper,
-            "transport": opening.transport,
-            "ended_at": ended_at,
-            "possibly_charged": True,
-            "ranking_update": self._ranking_update(),
-        }
-        if self.start is not None:
-            return AttemptRecordV1_3.model_validate(
-                {**common, "request": self._reference(REQUEST), **self._backtest_ending(self.start)}
-            )
-        return AttemptRecordV1_3.model_validate(
-            {
-                **common,
-                **self._update_ending(cast("StartRecordV1_3", self.update)),
-                "request": None,
-                "response": None,
-                "provider_metadata": _NO_METADATA,
-            }
-        )
-
-    def _backtest_ending(self, start: AnyStart) -> dict[str, object]:
-        """The ending of a `running` attempt: `succeeded` from its saved response, or `unknown`
-        without one (uncertain completion)."""
-        ranking = isinstance(start, StartRecordV1_3)
-        if self.response is None:
-            detail = (
-                ranking_detail("unknown", possibly_charged=True, backtest_sent=True)
-                if ranking
-                else request_detail("unknown", possibly_charged=True)
-            )
-            return {
-                "outcome": "unknown",
-                "error": ErrorDetail(
-                    code="command.interrupted",
-                    message=(
-                        "The run that started the attempt stopped after its start record was"
-                        f" written, before a response was saved. {detail}"
-                    ),
-                ),
-                "exchanges": start.exchanges,
-                "response": None,
-                "provider_metadata": _NO_METADATA,
-            }
-        saved, content = self.response
-        return {
-            "outcome": "succeeded",
-            "error": None,
-            "exchanges": (
-                *start.exchanges,
-                Exchange(
-                    request=SCREEN_BACKTEST_REQUEST,
-                    result="response",
-                    status=200,
-                    note="completed_from_saved_response",
-                ),
-            ),
-            "response": saved,
-            "provider_metadata": _metadata(saved, content),
-        }
-
-    def _update_ending(self, update: StartRecordV1_3) -> dict[str, object]:
-        """The ending of an attempt whose latest record is its update record (an attempt stopped
-        after its update record): `failed` with the `rank_update`'s saved response, and `unknown`
-        without it."""
-        if self.rank_response is None:
-            detail = ranking_detail("unknown", possibly_charged=True, backtest_sent=False)
-            return {
-                "outcome": "unknown",
-                "error": ErrorDetail(
-                    code="command.interrupted",
-                    message=(
-                        "The run that started the attempt stopped after its update record was"
-                        f" written, before the rank_update's response was saved. {detail}"
-                    ),
-                ),
-                "exchanges": (
-                    *update.exchanges,
-                    Exchange(
-                        request=RANK_UPDATE_REQUEST, result="interrupted", status=None, note=None
-                    ),
-                ),
-            }
-        saved, _ = self.rank_response
-        detail = ranking_detail("failed", possibly_charged=True, backtest_sent=False)
-        if saved.form == "undecoded":
-            error = ErrorDetail(
-                code="provider.response_invalid",
-                message=(
-                    "Portfolio123 answered the rank_update request with a 200 whose body couldn't"
-                    f" be decoded as JSON, so it was saved as it came, as {RANK_UPDATE_RESPONSE_RAW}."
-                    " Trial Folio sends the case's screen backtest only after one whose response"
-                    f" it could read, and the run that started the attempt stopped. {detail}"
-                ),
-            )
-        else:
-            error = ErrorDetail(
-                code="command.interrupted",
-                message=(
-                    "The run that started the attempt stopped after the rank_update's response"
-                    f" was saved, before the screen backtest request was sent. {detail}"
-                ),
-            )
-        return {
-            "outcome": "failed",
-            "error": error,
-            "exchanges": (
-                *update.exchanges,
-                Exchange(
-                    request=RANK_UPDATE_REQUEST,
-                    result="response",
-                    status=200,
-                    note="completed_from_saved_response",
-                ),
-            ),
-        }
-
-    def _ranking_update(self) -> RankingUpdate:
-        """The `rank_update`'s files, as the attempt record references them: its request, and its
-        saved response, with what that response reports of its charge."""
-        response = None
-        metadata = _NO_METADATA
-        if self.rank_response is not None:
-            response, content = self.rank_response
-            metadata = _metadata(response, content)
-        return RankingUpdate(
-            request=self._reference(RANK_UPDATE_REQUEST_FILE),
-            response=response,
-            provider_metadata=metadata,
-        )
-
-    def _reference(self, name: str) -> ArtifactReference:
-        """A reference to the file `name` of its directory, which the records check found."""
-        path = f"{self.directory}/{name}"
-        stored = next(file.file for file in self.files if file.file.path == path)
-        return ArtifactReference(path=stored.path, artifact_id=stored.artifact_id)
-
     @property
     def started_at(self) -> datetime:
         records = (self.record, self.start, self.update, self.authentication)
         return next(record.started_at for record in records if record is not None)
-
-    def _identity(self, schema_version: str) -> dict[str, object]:
-        records = (self.update, self.start, self.authentication)
-        version = next(record.trialfolio_version for record in records if record is not None)
-        plan_hash_ = next(record.plan_hash for record in records if record is not None)
-        return {
-            "schema_version": schema_version,
-            "trialfolio_version": version,
-            "attempt_id": self.attempt_id,
-            "case_id": self.case_id,
-            "plan_hash": plan_hash_,
-            "session": self.session,
-            "sequence": self.sequence,
-        }
-
-
-_NO_METADATA: Final = ProviderMetadata(cost=None, quota_remaining=None)
-"""What a request without a decoded response reports of its charge: nothing."""
-
-_AUTHENTICATION_INTERRUPTED: Final = Exchange(
-    request=AUTHENTICATION_REQUEST, result="interrupted", status=None, note=None
-)
-"""The authentication call of an attempt whose only record is its authentication record: nothing
-shows whether it was made, or how it ended."""
-
-
-def _stopped_authenticating(*, ranking: bool) -> ErrorDetail:
-    """The error of an attempt whose only record is its authentication record."""
-    detail = (
-        ranking_detail("failed", possibly_charged=False, backtest_sent=False)
-        if ranking
-        else request_detail("failed", possibly_charged=False)
-    )
-    return ErrorDetail(
-        code="command.interrupted",
-        message=(
-            "The run that started the attempt stopped while it authenticated, before its request"
-            f" was sent. {detail}"
-        ),
-    )
 
 
 @dataclass(frozen=True)
@@ -2362,18 +2082,6 @@ def _originals(
             f"{named(path)} isn't a configuration this version reads for its case, so the tables a"
             " stopped run didn't write can't be written."
         ) from None
-
-
-def _metadata(response: SavedResponse | RankUpdateResponse, content: bytes) -> ProviderMetadata:
-    """`cost` and `quotaRemaining` from the top level of a saved decoded response, as the
-    attempt that saved it would have recorded them."""
-    if response.form == "undecoded":
-        return ProviderMetadata(cost=None, quota_remaining=None)
-    try:
-        payload: object = json.loads(content)
-    except (UnicodeDecodeError, ValueError, RecursionError):
-        return ProviderMetadata(cost=None, quota_remaining=None)
-    return provider_metadata(payload)
 
 
 # Refusing

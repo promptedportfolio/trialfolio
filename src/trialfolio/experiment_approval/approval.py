@@ -21,7 +21,7 @@ from trialfolio.errors import TrialFolioError
 from trialfolio.experiment_approval.display import format_experiment_plan, format_experiment_summary
 from trialfolio.experiment_approval.repeats import CheckedRepeats, ask_repeats, check_repeats
 from trialfolio.experiment_approval.run import ExperimentRun
-from trialfolio.experiment_execution import Repeat
+from trialfolio.experiment_repeats import Repeat
 from trialfolio.planning import plan_hash
 
 
