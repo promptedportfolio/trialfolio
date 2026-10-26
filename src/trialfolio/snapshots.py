@@ -23,30 +23,35 @@ ranking when:
 executor is given them, and `ranking_problems` gives the rules of the second step but the
 synthetic one, which `trialfolio run` of a snapshot configuration says of the snapshot it took.
 
-It checks its records as `trialfolio.record_checks` checks a run's, with its own few checks:
-importing that module here would import the configuration's reader, which imports this one.
+It checks its manifest, its listed files, and its records with `trialfolio.file_checks`, as
+`trialfolio.record_checks` checks a run's, in its own sentences: importing `record_checks` here
+would import the configuration's reader, which imports this one.
 
 Messages name a file by its path in the snapshot, never a value: not the system's name, its ID,
 or its definition, which hold the user's strategy definition.
 """
 
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Final, cast
+from typing import Final
 
-from pydantic import BaseModel, ValidationError
-
-from trialfolio.canonical import sha256_hex
 from trialfolio.contracts.common import RANKING_METHOD_NUMBERS, RankingMethod
 from trialfolio.contracts.ranking_snapshot import (
     RankingSnapshotManifest,
     RankingSnapshotRecord,
-    SnapshotArtifact,
     SnapshotSystem,
 )
-from trialfolio.display import visible
-from trialfolio.errors import TrialFolioError, reason_of
+from trialfolio.errors import TrialFolioError
+from trialfolio.file_checks import (
+    Refused,
+    artifact_id,
+    check_version,
+    json_object,
+    named,
+    read_listed,
+    read_manifest,
+    validated,
+)
 from trialfolio.ranking_definitions import DefinitionProblem, RankingDefinition, read_definition
 from trialfolio.storage import StoreReader
 
@@ -128,17 +133,23 @@ def read_snapshot(store: StoreReader, name: SnapshotName) -> SnapshotRead:
     `artifact.unknown_schema_version` when its manifest or its record has a schema version with
     no reader; and `NotARanking` when it can't be a ranking. Writes nothing.
     """
+    refused = _refused(name)
     manifest = _manifest(store, name)
-    contents = {artifact.path: _listed(store, name, artifact) for artifact in manifest.artifacts}
+    contents = {
+        artifact.path: read_listed(store, artifact, "the snapshot was taken", refused)
+        for artifact in manifest.artifacts
+    }
     if DEFINITION not in contents or RECORD not in contents:
         raise _not_a_snapshot(name, f"its manifest doesn't list its {DEFINITION} and {RECORD}.")
     (entry,) = (a for a in manifest.artifacts if a.role == "ranking_snapshot_record")
     if entry.schema_version not in _READABLE:
         raise _unknown_version(name, RECORD, "its manifest gives it")
     files = SnapshotFiles(definition=contents[DEFINITION], record=contents[RECORD])
-    fields = _json_object(name, files.record, RECORD)
+    fields = json_object(files.record, _its(RECORD), refused)
     _check_version(name, fields.get("schema_version"), RECORD)
-    record = _validated(name, RankingSnapshotRecord, files.record, RECORD, "snapshot record")
+    record = validated(
+        RankingSnapshotRecord, files.record, _its(RECORD), "snapshot record", refused
+    )
     if record.definition != artifact_id(files.definition):
         raise _not_a_snapshot(
             name, f"its {RECORD} doesn't name its {DEFINITION} by that file's artifact_id."
@@ -195,31 +206,15 @@ def _ranking(files: SnapshotFiles, record: RankingSnapshotRecord) -> SnapshotRea
     )
 
 
-def artifact_id(content: bytes) -> str:
-    """The `artifact_id` of a file that holds `content`: `sha256:` and the hex SHA-256 of its
-    bytes."""
-    return "sha256:" + sha256_hex(content)
-
-
 def _manifest(store: StoreReader, name: SnapshotName) -> RankingSnapshotManifest:
-    try:
-        content = store.read(MANIFEST)
-    except FileNotFoundError:
-        raise _not_a_snapshot(
-            name,
-            f"it has no {MANIFEST}. Trial Folio writes a snapshot's manifest last, so a snapshot"
-            " without one didn't finish.",
-        ) from None
-    except NotADirectoryError:
-        raise _not_a_snapshot(name, "it isn't a directory.") from None
-    except OSError as error:
-        raise _not_a_snapshot(name, f"its {MANIFEST} can't be read ({reason_of(error)}).") from None
-    fields = _json_object(name, content, MANIFEST)
+    refused = _refused(name)
+    content = read_manifest(store, MANIFEST, "snapshot", refused)
+    fields = json_object(content, _its(MANIFEST), refused)
     if fields.get("artifact_type") != "ranking-snapshot":
         raise _not_a_snapshot(name, f"its {MANIFEST} isn't a ranking snapshot's manifest.")
     _check_version(name, fields.get("schema_version"), MANIFEST)
-    manifest = _validated(
-        name, RankingSnapshotManifest, content, MANIFEST, "ranking snapshot manifest"
+    manifest = validated(
+        RankingSnapshotManifest, content, _its(MANIFEST), "ranking snapshot manifest", refused
     )
     if manifest.outcome != "completed":
         raise _not_a_snapshot(
@@ -230,78 +225,31 @@ def _manifest(store: StoreReader, name: SnapshotName) -> RankingSnapshotManifest
     return manifest
 
 
-def _listed(store: StoreReader, name: SnapshotName, entry: SnapshotArtifact) -> bytes:
-    """The bytes of a file the manifest lists, checked against its size and `artifact_id`."""
-    try:
-        content = store.read(entry.path)
-    except FileNotFoundError:
-        raise _not_a_snapshot(
-            name, f"its manifest lists {named(entry.path)}, which is missing."
-        ) from None
-    except OSError as error:
-        raise _not_a_snapshot(
-            name,
-            f"{named(entry.path)}, which its manifest lists, can't be read ({reason_of(error)}).",
-        ) from None
-    if len(content) != entry.size or artifact_id(content) != entry.artifact_id:
-        raise _not_a_snapshot(
-            name,
-            f"{named(entry.path)} doesn't match its artifact_id in the manifest, so it changed"
-            " after the snapshot was taken.",
-        )
-    return content
-
-
-def _json_object(name: SnapshotName, content: bytes, path: str) -> dict[str, object]:
-    """The JSON object in `content`, the snapshot's file at `path`."""
-    try:
-        loaded: object = json.loads(content)
-    except (UnicodeDecodeError, ValueError, RecursionError):
-        raise _not_a_snapshot(name, f"its {named(path)} isn't JSON.") from None
-    if not isinstance(loaded, dict):
-        raise _not_a_snapshot(name, f"its {named(path)} isn't a JSON object.")
-    return cast("dict[str, object]", loaded)
-
-
 def _check_version(name: SnapshotName, version: object, path: str) -> None:
     """Checks the schema version a snapshot's manifest or record holds: one this version reads."""
-    if version in _READABLE:
-        return
-    if not isinstance(version, str):
-        raise _not_a_snapshot(name, f"its {named(path)} has no schema version.")
-    raise _unknown_version(name, path, "it has")
+    check_version(
+        version,
+        _READABLE,
+        _its(path),
+        _refused(name),
+        lambda: _unknown_version(name, path, "it has"),
+    )
 
 
-def _validated[M: BaseModel](
-    name: SnapshotName, model: type[M], content: bytes, path: str, what: str
-) -> M:
-    """`content`, the snapshot's file at `path`, as `model`, which `what` names in a message.
-    Only the model's own fields are named: an unexpected key is text from the file."""
-    try:
-        return model.model_validate_json(content)
-    except ValidationError as error:
-        details = error.errors(include_url=False, include_input=False, include_context=False)
-        fields = sorted(
-            {
-                str(detail["loc"][0])
-                for detail in details
-                if detail["loc"] and detail["loc"][0] in model.model_fields
-            }
-        )
-        check = f"check `{'`, `'.join(fields)}`" if fields else "check its fields"
-        raise _not_a_snapshot(name, f"its {named(path)} isn't a valid {what}: {check}.") from None
-
-
-def named(path: str) -> str:
-    """A path as a message names it: in backticks, with each character that isn't visible
-    escaped."""
-    return f"`{visible(path)}`"
+def _its(path: str) -> str:
+    """How a message names the snapshot's file at `path`, as in "its `snapshot.json`"."""
+    return f"its {named(path)}"
 
 
 _TAKE_ONE: Final = (
     "Name the directory of a snapshot that finished, as trialfolio run of a ranking snapshot"
     " configuration wrote it. Nothing was sent, and no output was created."
 )
+
+
+def _refused(name: SnapshotName) -> Refused:
+    """Makes `input.not_a_run` for the snapshot `name` names, for a problem."""
+    return lambda problem: _not_a_snapshot(name, problem)
 
 
 def _not_a_snapshot(name: SnapshotName, problem: str) -> TrialFolioError:
