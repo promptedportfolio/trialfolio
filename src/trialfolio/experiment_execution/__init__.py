@@ -99,16 +99,16 @@ to the caller's callback, as events that name each case by its `case_id` and hol
 the configuration, and the caller may cancel from any thread. Logs name the plan by its hash and
 each case by its `case_id`, never by its key.
 
-The package's modules, each importing only those before it: `progress`, the progress events and
-the cancellation; `context`, what every part of an execution reads, and the fields of its logs;
-`ledger`, what the experiment's records hold so far, which the budget, the counts, the report,
-the manifest, and the ending messages read; `completion`, the attempt records step 8 writes;
-`records`, the writer of the session's records; `authorization`, the checks of the approval and
-the repeats; `cases`, the case runner; `manifest`, the builder of the session's manifest and of
-its report's evidence; `ending`, the messages that end a session; and `execution`,
-`ExperimentExecution`, which takes the steps in their order. The modules that log, `records`,
-`cases`, and `execution`, log as `trialfolio.experiment_execution`, so each event keeps its
-`component`. A confirmed repeat, `Repeat`, and the core's check of the repeats are in
+The package's modules, each importing only those before it: `progress`, the progress events and the
+cancellation; `context`, what the writer, the case runner, the manifest's builder, and the executor
+read, and the fields of its logs; `ledger`, what the experiment's records hold so far, which the
+budget, the counts, the report, the manifest, and the ending messages read; `completion`, the
+attempt records step 8 writes; `records`, the writer of the session's records; `authorization`, the
+checks of the approval and the repeats; `cases`, the case runner; `manifest`, the builder of the
+session's manifest and of its report's evidence; `ending`, the messages that end a session; and
+`execution`, `ExperimentExecution`, which takes the steps in their order. The modules that log,
+`records`, `cases`, and `execution`, log as `trialfolio.experiment_execution`, so each event keeps
+its `component`. A confirmed repeat, `Repeat`, and the core's check of the repeats are in
 `trialfolio.experiment_repeats`, which the CLI's approval imports without the executor.
 """
 

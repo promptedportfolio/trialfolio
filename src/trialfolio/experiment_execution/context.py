@@ -1,5 +1,5 @@
-"""What every part of an experiment's execution reads, and none changes: the plan it runs, how
-it was approved, the store, the clock, whether it's synthetic, the session's number, the
+"""What an experiment's executor and three of its parts read, and none changes: the plan it runs,
+how it was approved, the store, the clock, whether it's synthetic, the session's number, the
 experiment's records when it resumes one, and the command; and the fields of its logs.
 """
 
@@ -14,8 +14,8 @@ from trialfolio.storage import ArtifactStore
 
 @dataclass(frozen=True)
 class SessionContext:
-    """One execution's inputs, which its ledger, its writer, its case runner, and its manifest's
-    builder share."""
+    """One execution's inputs, which the executor, its writer, its case runner, and its manifest's
+    builder share; its ledger takes only the plan and the experiment's records."""
 
     plan: AnyPlan
     """The plan the session runs: the current plan, or a revision of it."""
