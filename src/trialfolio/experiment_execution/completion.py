@@ -248,28 +248,9 @@ def _update_ending(attempt: SavedExperimentAttempt, update: StartRecordV1_3) -> 
             ),
         }
     saved, _ = attempt.rank_response
-    detail = ranking_detail("failed", possibly_charged=True, backtest_sent=False)
-    if saved.form == "undecoded":
-        error = ErrorDetail(
-            code="provider.response_invalid",
-            message=(
-                "Portfolio123 answered the rank_update request with a 200 whose body couldn't"
-                f" be decoded as JSON, so it was saved as it came, as {RANK_UPDATE_RESPONSE_RAW}."
-                " Trial Folio sends the case's screen backtest only after one whose response"
-                f" it could read, and the run that started the attempt stopped. {detail}"
-            ),
-        )
-    else:
-        error = ErrorDetail(
-            code="command.interrupted",
-            message=(
-                "The run that started the attempt stopped after the rank_update's response"
-                f" was saved, before the screen backtest request was sent. {detail}"
-            ),
-        )
     return {
         "outcome": "failed",
-        "error": error,
+        "error": _stopped_after_update(saved),
         "exchanges": (
             *update.exchanges,
             Exchange(
@@ -280,6 +261,30 @@ def _update_ending(attempt: SavedExperimentAttempt, update: StartRecordV1_3) -> 
             ),
         ),
     }
+
+
+def _stopped_after_update(saved: RankUpdateResponse) -> ErrorDetail:
+    """The error of an attempt stopped after its `rank_update`'s response, `saved`, was saved:
+    `provider.response_invalid` for one saved undecoded, which no backtest follows, and
+    `command.interrupted` otherwise."""
+    detail = ranking_detail("failed", possibly_charged=True, backtest_sent=False)
+    if saved.form == "undecoded":
+        return ErrorDetail(
+            code="provider.response_invalid",
+            message=(
+                "Portfolio123 answered the rank_update request with a 200 whose body couldn't"
+                f" be decoded as JSON, so it was saved as it came, as {RANK_UPDATE_RESPONSE_RAW}."
+                " Trial Folio sends the case's screen backtest only after one whose response"
+                f" it could read, and the run that started the attempt stopped. {detail}"
+            ),
+        )
+    return ErrorDetail(
+        code="command.interrupted",
+        message=(
+            "The run that started the attempt stopped after the rank_update's response"
+            f" was saved, before the screen backtest request was sent. {detail}"
+        ),
+    )
 
 
 def _ranking_update(attempt: SavedExperimentAttempt) -> RankingUpdate:
