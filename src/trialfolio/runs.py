@@ -61,6 +61,8 @@ from trialfolio.attempts import (
     AttemptStatus,
     attempt_status,
     check_records,
+    follows_update,
+    holds_earlier,
 )
 from trialfolio.contracts.attempt import (
     ArtifactReference,
@@ -458,24 +460,9 @@ def _check_held(
     being the update record's, then the `rank_update`'s, and the attempt record holds both's.
     Raises `ValueError` when they don't."""
     shared = set(StartRecordV1_2.model_fields) - {"operation", "exchanges"}
-    if (
-        update is not None
-        and start is not None
-        and (
-            update.model_dump(include=shared) != start.model_dump(include=shared)
-            or start.exchanges[:-1] != update.exchanges
-        )
-    ):
+    if update is not None and start is not None and not follows_update(start, update, shared):
         raise ValueError("the start record doesn't hold the update record's values and exchanges")
-    latest = start if start is not None else update
-    if (
-        record is not None
-        and latest is not None
-        and (
-            record.model_dump(include=shared) != latest.model_dump(include=shared)
-            or record.exchanges[: len(latest.exchanges)] != latest.exchanges
-        )
-    ):
+    if record is not None and not holds_earlier(record, start, update, shared):
         raise ValueError("the attempt record doesn't hold its start records' contents")
 
 

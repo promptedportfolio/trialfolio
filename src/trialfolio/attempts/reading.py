@@ -1,12 +1,19 @@
 """Reading attempts (docs/contracts.md, uncertain completion, and sending a definition, counting
 the requests): how a saved attempt reads, from its attempt record, or, without one, from its
-start record or its update record, as `running`; and what an attempt's records count: the sends
-of its requests that may have reached Portfolio123, Trial Folio's own authentication calls, and
-the credits Portfolio123 reported charging.
+start record or its update record, as `running`; whether its records agree, as each reader of
+saved records checks them; and what an attempt's records count: the sends of its requests that
+may have reached Portfolio123, Trial Folio's own authentication calls, and the credits
+Portfolio123 reported charging.
+
+An attempt's records agree when the attempt record holds what the records written before it
+hold, and, for an attempt that sends a definition, `started.json` follows its update record
+(`holds_earlier`, `follows_update`). `check_records` checks a screen run's records 1.0.0 so; the
+readers of a run's records 1.2.0, and of an experiment's, check them with these tests too, each
+in its own sentences, beside the checks only its records need.
 """
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -20,7 +27,9 @@ from trialfolio.contracts.attempt import (
     AttemptRecordV1_3,
     Exchange,
     StartRecord,
+    StartRecordV1_1,
     StartRecordV1_2,
+    StartRecordV1_3,
 )
 from trialfolio.contracts.common import AUTHENTICATION_REQUEST, SCREEN_BACKTEST_REQUEST
 from trialfolio.storage import StoreReader
@@ -28,6 +37,13 @@ from trialfolio.storage import StoreReader
 type AnyAttemptRecord = AttemptRecord | AttemptRecordV1_1 | AttemptRecordV1_2 | AttemptRecordV1_3
 """An attempt record of any version: a screen run's, 1.0.0, or 1.2.0 with a definition, and an
 experiment's, 1.1.0, or 1.3.0 with a definition."""
+
+type AnyStartRecord = StartRecord | StartRecordV1_1 | StartRecordV1_2 | StartRecordV1_3
+"""A start record of any version: a backtest's `started.json`, or an update record,
+`updating.json`, of version 1.2.0 or 1.3.0."""
+
+_SHARED: frozenset[str] = frozenset(StartRecord.model_fields) - {"exchanges"}
+"""What a screen run's attempt record 1.0.0 holds of its start record, besides its exchanges."""
 
 
 @dataclass(frozen=True)
@@ -113,12 +129,39 @@ def check_records(
     for read in (start, record):
         if read is not None and (read.case_id, read.attempt_id) != (case_id, attempt_id):
             raise ValueError("the record names another attempt than its directory")
-    if record is not None and start is not None:
-        shared = set(StartRecord.model_fields) - {"exchanges"}
-        if record.model_dump(include=shared) != start.model_dump(include=shared) or (
-            record.exchanges[: len(start.exchanges)] != start.exchanges
-        ):
-            raise ValueError("the attempt record doesn't hold its start record's contents")
+    if record is not None and not holds_earlier(record, start, None, _SHARED):
+        raise ValueError("the attempt record doesn't hold its start record's contents")
+
+
+def same_values(one: BaseModel, other: BaseModel, fields: Collection[str]) -> bool:
+    """Whether two of an attempt's records give the same values of `fields`."""
+    return one.model_dump(include=set(fields)) == other.model_dump(include=set(fields))
+
+
+def holds_earlier(
+    record: AnyAttemptRecord,
+    start: AnyStartRecord | None,
+    update: StartRecordV1_2 | StartRecordV1_3 | None,
+    fields: Collection[str],
+) -> bool:
+    """Whether the attempt record holds what the records written before it hold: their values of
+    `fields`, and their exchanges, first. It's compared with `started.json`, `start`, when there
+    is one, and otherwise with the update record, `update`, which a `started.json` that follows it
+    holds (`follows_update`). True when there's neither."""
+    earlier = start if start is not None else update
+    return earlier is None or (
+        same_values(record, earlier, fields)
+        and record.exchanges[: len(earlier.exchanges)] == earlier.exchanges
+    )
+
+
+def follows_update(
+    start: AnyStartRecord, update: StartRecordV1_2 | StartRecordV1_3, fields: Collection[str]
+) -> bool:
+    """Whether `started.json`, `start`, follows the update record of an attempt that sends a
+    definition: it holds the update record's values of `fields`, and its exchanges, then one more,
+    the `rank_update`'s 200 (sending a definition)."""
+    return same_values(start, update, fields) and start.exchanges[:-1] == update.exchanges
 
 
 def attempt_status(

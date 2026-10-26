@@ -109,10 +109,13 @@ from trialfolio.attempts import (
     AttemptRole,
     attempt_directory,
     authentication_calls,
+    follows_update,
+    holds_earlier,
     provider_metadata,
     provider_requests,
     ranking_detail,
     request_detail,
+    same_values,
 )
 from trialfolio.case_state import (
     CaseOutcome,
@@ -1714,7 +1717,7 @@ def _check_agreement(
         # hold an attempt that authenticated to one successful `POST /auth` exchange, first, and
         # one sent with another's token to none.
         fields = set(type(start).model_fields) - {"operation", "exchanges"}
-        if record.model_dump(include=fields) != start.model_dump(include=fields):
+        if not same_values(record, start, fields):
             raise _refused(f"{disagree}: the attempt record doesn't hold its start record's.")
     if update is not None:
         _check_update(update, start, record, shared, disagree)
@@ -1770,19 +1773,12 @@ def _check_update(
             f"{disagree}: the attempt record shows that its backtest was sent, or may have been,"
             " without the start record written before it."
         )
-    if start is not None and (
-        start.model_dump(include=shared) != update.model_dump(include=shared)
-        or start.exchanges[:-1] != update.exchanges
-    ):
+    if start is not None and not follows_update(start, update, shared):
         raise _refused(
             f"{disagree}: the start record doesn't hold the update record's values, and its"
             " exchanges, then the rank_update's."
         )
-    latest = start if start is not None else update
-    if record is not None and (
-        record.model_dump(include=shared) != update.model_dump(include=shared)
-        or record.exchanges[: len(latest.exchanges)] != latest.exchanges
-    ):
+    if record is not None and not holds_earlier(record, start, update, shared):
         raise _refused(f"{disagree}: the attempt record doesn't hold its start records'.")
 
 
