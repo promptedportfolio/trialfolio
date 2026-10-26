@@ -35,6 +35,8 @@ from trialfolio.contracts.common import (
     require_unique,
 )
 from trialfolio.contracts.manifest_parts import (
+    SOURCE_ROLES,
+    SOURCE_ROLES_V1_1,
     AttemptCounts,
     Capabilities,
     ParserVersion,
@@ -59,11 +61,6 @@ ExperimentArtifactRole = Literal[
     "session_record",
     "report",
 ]
-
-SOURCE_ROLES: Final[frozenset[ExperimentArtifactRole]] = frozenset(
-    {"configuration", "provider_request", "provider_response", "provider_response_undecoded"}
-)
-"""The roles of source artifacts, which carry a source record (INV-04, source artifacts)."""
 
 EXPERIMENT_CONFIGURATION_FORMAT: Final = "experiment-configuration"
 """The format the source record of a plan's `configuration.yaml` gives."""
@@ -376,17 +373,6 @@ ExperimentArtifactRoleV1_1 = Literal[
 ]
 """1.0.0's roles, with those a ranking definition adds: a plan's `definition.xml` and
 `snapshot.json`, and an attempt's update record and `rank_update` files."""
-
-SOURCE_ROLES_V1_1: Final[frozenset[ExperimentArtifactRoleV1_1]] = frozenset(
-    {
-        *SOURCE_ROLES,
-        "ranking_definition",
-        "rank_update_request",
-        "rank_update_response",
-        "rank_update_response_undecoded",
-    }
-)
-"""The roles of source artifacts in experiment manifest 1.1.0 (INV-04, source artifacts)."""
 
 ROLE_PATHS_V1_1: Final[dict[str, re.Pattern[str]]] = {
     **ROLE_PATHS,

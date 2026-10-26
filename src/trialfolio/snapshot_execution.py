@@ -30,7 +30,9 @@ Logs name the snapshot by its plan hash and its attempt ID, never by the system'
 configuration text, or its ID, which comes from the provider's response.
 
 Its reader of the `rank_get`'s response, `p123api-rank-get` version 1, is parser version 1: it
-reads the six fields a snapshot needs, and preserves the others without interpreting them.
+reads the six fields a snapshot needs, and preserves the others without interpreting them. The
+manifest lists it, and gives the source records of the `rank_get`'s files, from the snapshot
+manifest's tables, which its model checks them against (`trialfolio.contracts.ranking_snapshot`).
 """
 
 import logging
@@ -51,8 +53,10 @@ from trialfolio.attempts import (
 from trialfolio.configuration import read_ranking_snapshot_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_2
 from trialfolio.contracts.common import ErrorDetail
-from trialfolio.contracts.manifest_parts import AttemptCounts, ParserVersion, SourceRecordV1_1
+from trialfolio.contracts.manifest_parts import AttemptCounts, SourceRecordV1_1
 from trialfolio.contracts.ranking_snapshot import (
+    SNAPSHOT_CONFIGURATION_FORMAT,
+    SNAPSHOT_PARSERS,
     RankingSnapshotManifest,
     RankingSnapshotPlan,
     RankingSnapshotRecord,
@@ -68,10 +72,13 @@ from trialfolio.manifests import (
     EndingWithoutManifest,
     ManifestDetails,
     ManifestFile,
+    attempt_source,
+    configuration_source,
     ends_without_manifest,
     model_json,
     running_detail,
     snapshot_definition_source,
+    source_v1_1,
     utc,
 )
 from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
@@ -95,20 +102,6 @@ SCHEMA_VERSION: Final = "1.0.0"
 
 RECORDS_SCHEMA_VERSION: Final = "1.2.0"
 """The schema version of the attempt's start and attempt records."""
-
-LAYOUT: Final = "p123api-rank-get"
-LAYOUT_VERSION: Final = 1
-PARSER_VERSION: Final = 1
-"""The reader of `p123api-rank-get` version 1, which reads the system's six fields."""
-
-_CONFIGURATION_FORMAT: Final = "ranking-snapshot-configuration"
-
-_SOURCES: Final[dict[str, tuple[str, int | None]]] = {
-    "provider_request": (f"{LAYOUT}-request", None),
-    "provider_response": (LAYOUT, PARSER_VERSION),
-    "provider_response_undecoded": (f"{LAYOUT}-response_undecoded", None),
-}
-"""The format and the parser version of each file of the `rank_get`'s, at version 1."""
 
 _SCHEMA_VERSIONS: Final[dict[SnapshotArtifactRole, str]] = {
     "plan": SCHEMA_VERSION,
@@ -402,11 +395,7 @@ class SnapshotExecution:
             outcome="completed" if error is None else "failed",
             error=None if error is None else ErrorDetail(code=error.code, message=error.message),
             artifacts=tuple(self._listed(role, file, record) for role, file in self._files),
-            parsers=(
-                ParserVersion(
-                    layout=LAYOUT, layout_version=LAYOUT_VERSION, parser_version=PARSER_VERSION
-                ),
-            ),
+            parsers=SNAPSHOT_PARSERS,
             license_id=LICENSE_ID,
             notice_version=NOTICE_VERSION,
             counts=SnapshotCounts(
@@ -444,27 +433,15 @@ class SnapshotExecution:
         which the `rank_get` read, dated when the snapshot was taken (ranking snapshot output,
         the manifest). None for any other role."""
         if role == "configuration":
-            return SourceRecordV1_1(
-                acquired_at=self._acquired(),
-                format=_CONFIGURATION_FORMAT,
-                format_version=SCHEMA_VERSION,
-                parser_version=None,
-                provenance="user_supplied",
-                operation=None,
+            # The version of the snapshot's own records, where a run's gives its configuration's
+            # schema version: both are 1.0.0, and the snapshot records what it always has.
+            source = configuration_source(
+                SNAPSHOT_CONFIGURATION_FORMAT, SCHEMA_VERSION, self._acquired()
             )
+            return source_v1_1(source)
         if role == "ranking_definition":
             return snapshot_definition_source(record.ended_at)
-        if role in _SOURCES:
-            file_format, parser = _SOURCES[role]
-            return SourceRecordV1_1(
-                acquired_at=record.started_at if role == "provider_request" else record.ended_at,
-                format=file_format,
-                format_version="1",
-                parser_version=parser,
-                provenance="verified",
-                operation="rank_get",
-            )
-        return None
+        return attempt_source(role, lambda: (record.started_at, record.ended_at), snapshot=True)
 
     def _acquired(self) -> datetime:
         """When the configuration was acquired: when the command started, or, for a snapshot

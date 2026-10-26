@@ -201,10 +201,10 @@ from trialfolio.experiment_records import (
 )
 from trialfolio.manifests import (
     PROVIDER_ROLES,
-    RANK_UPDATE_ROLES,
     EndingWithoutManifest,
     ManifestDetails,
     ManifestFile,
+    attempt_source,
     capabilities,
     configuration_source,
     definition_source,
@@ -212,7 +212,6 @@ from trialfolio.manifests import (
     model_json,
     parsers,
     provider_source,
-    rank_update_source,
     reproducibility,
     running_detail,
     snapshot_definition_source,
@@ -1936,12 +1935,8 @@ class ExperimentExecution:
                 if snapshot is None
                 else snapshot_definition_source(snapshot.record.taken_at)
             )
-        elif attempt is not None and role in PROVIDER_ROLES:
-            started, ended = self._attempt_times(attempt)
-            source = source_v1_1(provider_source(role, started_at=started, ended_at=ended))
-        elif attempt is not None and role in RANK_UPDATE_ROLES:
-            started, ended = self._attempt_times(attempt)
-            source = rank_update_source(role, started_at=started, ended_at=ended)
+        elif attempt is not None:
+            source = attempt_source(role, lambda: self._attempt_times(attempt))
         return ExperimentArtifactV1_1(
             path=stored.path,
             artifact_id=stored.artifact_id,

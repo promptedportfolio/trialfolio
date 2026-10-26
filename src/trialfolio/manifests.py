@@ -8,7 +8,10 @@ code, and interrupts).
   artifact's entry, whose schema definitions differ. From 0.4.0, a manifest with a ranking
   definition, run manifest 1.1.0 and experiment manifest 1.1.0, also gives the source records
   of the definition's copy and of the `rank_update`'s request and response (a run with a
-  ranking definition), in the source record of version 1.1.0.
+  ranking definition), in the source record of version 1.1.0, as a snapshot's manifest gives
+  its own, of its `rank_get`'s files. `attempt_source` gives the source record of each file an
+  attempt saved, for all three. The formats a contract checks come from its tables
+  (`trialfolio.contracts`).
 - **Writing the manifest.** `ManifestFile` writes it last, and discards it when its write fails,
   an interrupt included, if the store had published it already, so an output whose command
   failed never reads as complete. It says which of three states the manifest is in, in the
@@ -25,7 +28,7 @@ code, and interrupts).
 Nothing here logs, so a log event keeps the `component` of the module that logs it.
 """
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from types import TracebackType
@@ -35,6 +38,7 @@ from pydantic import BaseModel
 
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase, ExperimentPlanCaseV1_3
 from trialfolio.contracts.manifest_parts import (
+    RANK_UPDATE_FORMATS,
     Capabilities,
     ExternalReference,
     ParserVersion,
@@ -43,6 +47,7 @@ from trialfolio.contracts.manifest_parts import (
     SourceRecordV1_1,
 )
 from trialfolio.contracts.plan import PlanCase, PlanCaseV1_2
+from trialfolio.contracts.ranking_snapshot import SNAPSHOT_SOURCES
 from trialfolio.errors import ErrorCode, TrialFolioError, interrupted
 from trialfolio.normalization import LAYOUT, LAYOUT_VERSION, PARSER_VERSION
 from trialfolio.storage import ArtifactStore, StoredFile
@@ -63,12 +68,6 @@ RANK_UPDATE_ROLES: Final[tuple[RankUpdateRole, ...]] = (
 
 RANKING_DEFINITION_FORMAT: Final = "ranking-definition"
 """The source format of a definition's copy, `definition.xml`, at version 1 (artifact storage)."""
-
-_RANK_UPDATE_FORMATS: Final[dict[RankUpdateRole, str]] = {
-    "rank_update_request": "p123api-rank-update-request",
-    "rank_update_response": "p123api-rank-update",
-    "rank_update_response_undecoded": "p123api-rank-update-response_undecoded",
-}
 
 PROVIDER_ROLES: Final[tuple[ProviderRole, ...]] = (
     "provider_request",
@@ -157,12 +156,48 @@ def rank_update_source(
     ended. No parser reads either (`p123api-rank-update` version 1)."""
     return SourceRecordV1_1(
         acquired_at=started_at if role == "rank_update_request" else ended_at,
-        format=_RANK_UPDATE_FORMATS[role],
+        format=RANK_UPDATE_FORMATS[role],
         format_version="1",
         parser_version=None,
         provenance="verified",
         operation="rank_update",
     )
+
+
+def snapshot_source(
+    role: ProviderRole, *, started_at: datetime, ended_at: datetime
+) -> SourceRecordV1_1:
+    """The source record of a ranking snapshot's file of Portfolio123's that its attempt saved,
+    the `rank_get`'s request or response, dated as `provider_source` dates a backtest's, in the
+    format, version, and parser version the snapshot manifest's table gives (ranking snapshot
+    output, the manifest)."""
+    file_format, (version,), parser, operation = SNAPSHOT_SOURCES[role]
+    return SourceRecordV1_1(
+        acquired_at=started_at if role == "provider_request" else ended_at,
+        format=file_format,
+        format_version=version,
+        parser_version=parser,
+        provenance="verified",
+        operation=operation,
+    )
+
+
+def attempt_source(
+    role: str, times: Callable[[], tuple[datetime, datetime]], *, snapshot: bool = False
+) -> SourceRecordV1_1 | None:
+    """The source record, in version 1.1.0, of a file of the role `role` that an attempt saved:
+    Portfolio123's request or response, a backtest's, or, for a `snapshot`, its `rank_get`'s;
+    or the `rank_update`'s. `times` gives when the attempt started and ended, which date them, and
+    is called only for such a file. None for a file of any other role, such as a record."""
+    if role in PROVIDER_ROLES:
+        started_at, ended_at = times()
+        if snapshot:
+            return snapshot_source(role, started_at=started_at, ended_at=ended_at)
+        return source_v1_1(provider_source(role, started_at=started_at, ended_at=ended_at))
+    if role in RANK_UPDATE_ROLES:
+        started_at, ended_at = times()
+        return rank_update_source(role, started_at=started_at, ended_at=ended_at)
+    return None
 
 
 def parsers(versions: Iterable[int] = ()) -> tuple[ParserVersion, ...]:

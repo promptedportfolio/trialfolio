@@ -102,10 +102,10 @@ from trialfolio.demo import SyntheticScreenBacktestClient
 from trialfolio.errors import TrialFolioError
 from trialfolio.manifests import (
     PROVIDER_ROLES,
-    RANK_UPDATE_ROLES,
     EndingWithoutManifest,
     ManifestDetails,
     ManifestFile,
+    attempt_source,
     capabilities,
     configuration_source,
     definition_source,
@@ -113,7 +113,6 @@ from trialfolio.manifests import (
     model_json,
     parsers,
     provider_source,
-    rank_update_source,
     reproducibility,
     running_detail,
     snapshot_definition_source,
@@ -687,9 +686,7 @@ class Execution:
         """The source record of a source artifact 1.0.0 names: the configuration, the request,
         and the response (INV-04, source artifacts). None for any other role."""
         if role == "configuration":
-            return configuration_source(
-                _SCREEN_CONFIGURATION_FORMAT, self._configuration_version, self._acquired()
-            )
+            return self._configuration_source()
         if role in PROVIDER_ROLES:
             return provider_source(role, started_at=record.started_at, ended_at=record.ended_at)
         return None
@@ -700,15 +697,19 @@ class Execution:
         """The source record of a source artifact of a run with a ranking definition: 1.0.0's,
         and those of a definition's copy, acquired with the configuration, and of the
         `rank_update`'s request and response (a run with a ranking definition)."""
+        if role == "configuration":
+            return source_v1_1(self._configuration_source())
         if role == "ranking_definition":
             snapshot = None if self._read is None else self._read.snapshot
             if snapshot is not None:
                 return snapshot_definition_source(snapshot.record.taken_at)
             return definition_source(self._acquired())
-        if role in RANK_UPDATE_ROLES:
-            return rank_update_source(role, started_at=record.started_at, ended_at=record.ended_at)
-        source = self._source(role, record)
-        return None if source is None else source_v1_1(source)
+        return attempt_source(role, lambda: (record.started_at, record.ended_at))
+
+    def _configuration_source(self) -> SourceRecord:
+        return configuration_source(
+            _SCREEN_CONFIGURATION_FORMAT, self._configuration_version, self._acquired()
+        )
 
     def _acquired(self) -> datetime:
         """When the configuration was acquired: when the command started, or, for a run without

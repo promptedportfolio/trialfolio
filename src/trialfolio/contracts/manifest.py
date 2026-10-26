@@ -9,7 +9,7 @@ The parts every kind's manifest shares, such as the source records, are in
 `trialfolio.contracts.manifest_parts`.
 """
 
-from typing import Final, Literal, Self
+from typing import Literal, Self
 
 from pydantic import model_validator
 
@@ -28,6 +28,8 @@ from trialfolio.contracts.common import (
     require_unique,
 )
 from trialfolio.contracts.manifest_parts import (
+    SOURCE_ROLES,
+    SOURCE_ROLES_V1_1,
     AttemptCounts,
     Capabilities,
     ParserVersion,
@@ -49,11 +51,6 @@ ArtifactRole = Literal[
     "settings",
     "report",
 ]
-
-SOURCE_ROLES: frozenset[ArtifactRole] = frozenset(
-    {"configuration", "provider_request", "provider_response", "provider_response_undecoded"}
-)
-"""The roles of source artifacts, which carry a source record (INV-04, source artifacts)."""
 
 
 class CommandRecord(ContractModel):
@@ -157,18 +154,6 @@ ArtifactRoleV1_1 = Literal[
 ]
 """1.0.0's roles, with a ranking definition's: the copy of the definition, `definition.xml`; a
 snapshot's record, `snapshot.json`; and an attempt's update record and `rank_update` files."""
-
-SOURCE_ROLES_V1_1: Final[frozenset[ArtifactRoleV1_1]] = frozenset(
-    {
-        *SOURCE_ROLES,
-        "ranking_definition",
-        "rank_update_request",
-        "rank_update_response",
-        "rank_update_response_undecoded",
-    }
-)
-"""The roles of source artifacts in a manifest with a ranking definition: 1.0.0's, the copy of
-the definition, and the `rank_update`'s request and response (artifact storage)."""
 
 
 class ManifestArtifactV1_1(ContractModel):

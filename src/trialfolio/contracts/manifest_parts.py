@@ -1,7 +1,8 @@
 """The parts of a manifest that a run's, a review's, an experiment's, and a ranking snapshot's
-share (docs/contracts.md, artifact storage): a source artifact's source record, the parser
-versions, the capabilities, the reproducibility, the attempts by outcome, and the check of a file
-of a role a ranking definition adds.
+share (docs/contracts.md, artifact storage): a source artifact's source record, the roles of the
+source artifacts, the parser versions, the capabilities, the reproducibility, the attempts by
+outcome, and the check of a file of a role a ranking definition adds, with the formats of the
+`rank_update`'s files, which the manifests' writers give too (`trialfolio.manifests`).
 """
 
 from typing import Annotated, Final, Literal, Self
@@ -17,6 +18,25 @@ from trialfolio.contracts.common import (
     SettingName,
     UtcDatetime,
 )
+
+SOURCE_ROLES: Final[frozenset[str]] = frozenset(
+    {"configuration", "provider_request", "provider_response", "provider_response_undecoded"}
+)
+"""The roles of source artifacts, which carry a source record (INV-04, source artifacts), in a
+run's manifest and an experiment's, and, with a definition's copy, a snapshot's."""
+
+SOURCE_ROLES_V1_1: Final[frozenset[str]] = frozenset(
+    {
+        *SOURCE_ROLES,
+        "ranking_definition",
+        "rank_update_request",
+        "rank_update_response",
+        "rank_update_response_undecoded",
+    }
+)
+"""The roles of source artifacts in a manifest with a ranking definition, run manifest 1.1.0 and
+experiment manifest 1.1.0: 1.0.0's, the copy of the definition, and the `rank_update`'s request
+and response (artifact storage)."""
 
 
 class SourceRecord(ContractModel):
@@ -107,11 +127,12 @@ RANKING_FILES: Final[dict[str, str]] = {
 }
 """The file each role a ranking definition adds names."""
 
-_RANK_UPDATE_FORMATS: Final = {
+RANK_UPDATE_FORMATS: Final[dict[str, str]] = {
     "rank_update_request": "p123api-rank-update-request",
     "rank_update_response": "p123api-rank-update",
     "rank_update_response_undecoded": "p123api-rank-update-response_undecoded",
 }
+"""The source format of each of the `rank_update`'s files, at version 1, which no parser reads."""
 
 
 def check_ranking_artifact(
@@ -141,11 +162,11 @@ def check_ranking_artifact(
                 "a definition's copy is the format ranking-definition, version 1, with no "
                 "parser: user_supplied from a file, or verified, by rank_get, from a snapshot"
             )
-    elif shape != (_RANK_UPDATE_FORMATS[role], "1", None) or (
+    elif shape != (RANK_UPDATE_FORMATS[role], "1", None) or (
         source.provenance,
         source.operation,
     ) != ("verified", "rank_update"):
         raise ValueError(
-            f"a rank_update's file of the role {role} is the format {_RANK_UPDATE_FORMATS[role]}, "
+            f"a rank_update's file of the role {role} is the format {RANK_UPDATE_FORMATS[role]}, "
             "version 1, verified, from rank_update, with no parser"
         )
