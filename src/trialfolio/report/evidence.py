@@ -4,7 +4,9 @@ kind of report's sections read.
 - **The evidence.** A run's report reads a `SavedRun`, from `trialfolio.runs`. A review's reads a
   `ReviewEvidence`, and an experiment session's an `ExperimentEvidence`, with a `CaseView` for
   each planned case, a `RetiredCaseView` for each retired one, and, from release 0.4.0, a
-  `PlanRanking` for each plan, where its ranking definition came from, which the core builds.
+  `PlanRanking` for each plan, where its ranking definition came from, which the core builds. A
+  `CaseView` reads its case's state by the rules the executor and the plan display read it by,
+  `trialfolio.case_state`'s, from the attempt records it holds.
 - **The contexts.** `RunContext`, `ReviewContext`, and `ExperimentContext` each hold the evidence
   of one report, the version rendering it, and the lookups its sections share, such as its
   settings by name, so each section is a function of its report's context.
@@ -17,6 +19,7 @@ from datetime import datetime
 from typing import Final, Literal, Self
 from uuid import UUID
 
+from trialfolio.case_state import case_state, invalid_success, latest_charged, outcome_code
 from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3
 from trialfolio.contracts.common import Approval, ErrorDetail
 from trialfolio.contracts.experiment_manifest import (
@@ -265,17 +268,52 @@ class CaseView:
         `attempt_id` confirms the repeat; otherwise None (repeating a case). A case whose
         succeeded attempt's response failed validation awaits one, and its succeeded attempt
         can be that attempt (D-45)."""
-        if self.invalid is None and any(a.outcome == "succeeded" for a in self.attempts):
+        attempts = self._recorded
+        if case_state(attempts, valid=self.invalid is None) != "awaiting_repeat":
             return None
-        charged = [attempt for attempt in self.attempts if attempt.possibly_charged]
-        return charged[-1] if charged else None
+        latest = latest_charged(attempts)
+        return None if latest is None else latest.record
 
     @property
     def invalid_success(self) -> bool:
         """Whether the case awaits a repeat because its latest possibly charged attempt
         succeeded, and its response failed validation, which `invalid` gives (D-45)."""
-        attempt = self.repeat_attempt
-        return attempt is not None and attempt.outcome == "succeeded"
+        return invalid_success(self._recorded, valid=self.invalid is None)
+
+    @property
+    def outcome_code(self) -> str | None:
+        """The error code that gives the case's outcome: None for a case that succeeded or
+        hasn't run; otherwise the error of its latest possibly charged attempt, or else of its
+        latest attempt, or, when that succeeded, its response's `provider.response_invalid`."""
+        return outcome_code(self._recorded, valid=self.invalid is None)
+
+    @property
+    def _recorded(self) -> list["_RecordedAttempt"]:
+        return [_RecordedAttempt(attempt) for attempt in self.attempts]
+
+
+@dataclass(frozen=True)
+class _RecordedAttempt:
+    """One of a case's attempts, as `trialfolio.case_state` reads it: from its attempt record,
+    since every attempt the report shows has one."""
+
+    record: AttemptRecordV1_1 | AttemptRecordV1_3
+
+    @property
+    def attempt_id(self) -> UUID:
+        return self.record.attempt_id
+
+    @property
+    def outcome(self) -> Literal["succeeded", "failed", "unknown"]:
+        return self.record.outcome
+
+    @property
+    def possibly_charged(self) -> bool:
+        return self.record.possibly_charged
+
+    @property
+    def error_code(self) -> str | None:
+        return None if self.record.error is None else self.record.error.code
 
 
 @dataclass(frozen=True)
