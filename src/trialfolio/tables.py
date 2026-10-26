@@ -13,7 +13,8 @@ documented order. A cell is written as follows:
 Reading is the named CSV adapter step before model validation (ADR 0002): it reverses the above,
 so an empty cell is `None`, `critical` and `flagged` booleans, `source_decimals` and
 `difference_decimals` integers, the period dates dates, and `flags` a tuple of codes, and then
-validates each row with its model.
+validates each row with its model. A row that isn't valid is refused naming its fields that aren't,
+as a record that isn't is (`trialfolio.file_checks`).
 """
 
 import csv
@@ -39,6 +40,7 @@ from trialfolio.contracts.tables import (
     SettingsRowV1_1,
 )
 from trialfolio.errors import TrialFolioError
+from trialfolio.file_checks import invalid_fields
 
 _BOM: Final = "\ufeff"
 _INTEGER: Final = re.compile(INTEGER_PATTERN)
@@ -164,7 +166,7 @@ def _read[M: BaseModel](
         try:
             rows.append(model.model_validate(fields))
         except ValidationError as error:
-            located = sorted({str(detail["loc"][0]) for detail in error.errors() if detail["loc"]})
+            located = invalid_fields(error, model)
             where = f"`{'`, `'.join(located)}`" if located else "its cells"
             raise _not_a_table(
                 source_name, f"line {number} isn't a valid row: check {where}."

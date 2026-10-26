@@ -60,8 +60,9 @@ The package's modules, each importing only those before it:
 
 - `files`: the names and roles of an attempt's files, its directory, and `AttemptFiles`, the file
   writer, which writes each file once and lists every file the attempt wrote.
-- `reading`: how a saved attempt reads, `running` included, and what its records count: its
-  provider requests, its authentication calls, and the cost Portfolio123 reported.
+- `reading`: how a saved attempt reads, `running` included, whether its records agree, and what
+  its records count: its provider requests, its authentication calls, and the cost Portfolio123
+  reported.
 - `endings`: the ending policy, `AttemptEnding`, which classifies an attempt from its exchanges,
   decides the command's error, writes the attempt record whatever ended the attempt, and logs how
   it ended; and what an attempt's messages say of its requests.
@@ -115,13 +116,17 @@ from trialfolio.attempts.kinds import (
 )
 from trialfolio.attempts.reading import (
     AnyAttemptRecord,
+    AnyStartRecord,
     AttemptStatus,
     attempt_status,
     authentication_calls,
     check_records,
+    follows_update,
+    holds_earlier,
     provider_requests,
     read_attempt,
     reported_cost,
+    same_values,
 )
 
 __all__ = [
@@ -140,6 +145,7 @@ __all__ = [
     "START_RECORD",
     "UPDATE_RECORD",
     "AnyAttemptRecord",
+    "AnyStartRecord",
     "Attempt",
     "AttemptFile",
     "AttemptResult",
@@ -157,6 +163,8 @@ __all__ = [
     "attempt_status",
     "authentication_calls",
     "check_records",
+    "follows_update",
+    "holds_earlier",
     "prevailing",
     "provider_metadata",
     "provider_requests",
@@ -165,6 +173,7 @@ __all__ = [
     "record_detail",
     "reported_cost",
     "request_detail",
+    "same_values",
     "snapshot_attempt_directory",
     "utc_now",
 ]

@@ -1,12 +1,14 @@
 """The platform's primitives that the local artifact store builds on (docs/contracts.md, artifact
 storage): publishing a file under its final name without replacing one, syncing files and
-directories as durably as the platform allows, the experiment lock, and deferring SIGINT while
-a creation's ownership is recorded. Each says what Linux, macOS, and Windows do, and what Trial
-Folio does on each.
+directories as durably as the platform allows, a lock taken without waiting, and deferring SIGINT
+while a creation's ownership is recorded. Each says what Linux, macOS, and Windows do, and what
+Trial Folio does on each.
 
-`trialfolio.storage`'s `LocalArtifactStore` uses them. Nothing here logs: a sync that's less
-durable than it should be is told to its caller, as the sentence that says why, and the store
-logs it, once for each output directory, under `trialfolio.storage`'s name.
+`trialfolio.storage`'s `LocalArtifactStore` uses them. So does the ranking lock
+(`trialfolio.ranking_lock`), which takes and releases its lock as the experiment lock is taken
+and released, in its own words. Nothing here logs: a sync that's less durable than it should be
+is told to its caller, as the sentence that says why, and the store logs it, once for each output
+directory, under `trialfolio.storage`'s name.
 
 R01-T08 checked what each platform reports, on macOS 26.6.2 with Python 3.12.13:
 
@@ -76,7 +78,7 @@ _LOCK_HELD: Final = (
     if sys.platform == "win32"
     else frozenset({errno.EAGAIN, errno.EWOULDBLOCK})
 )
-"""How taking the experiment lock reports that another process holds it: `EWOULDBLOCK`, which
+"""How taking a lock without waiting reports that another process holds it: `EWOULDBLOCK`, which
 is `EAGAIN` on Linux and macOS, from `flock`, and `EACCES` from `msvcrt.locking` on Windows,
 whose C runtime documents it as a locking violation. Any other error refuses the lock, `EACCES`
 from `flock` included."""
@@ -164,21 +166,34 @@ def sync_directories(directories: Iterable[Path], degraded: Degraded) -> None:
             os.close(descriptor)
 
 
+def lock_without_waiting(descriptor: int) -> None:
+    """Takes a lock on the file `descriptor` holds open, without waiting: an exclusive `flock` on
+    Linux and macOS, which a process loses only when every descriptor of its open file is closed,
+    and `msvcrt.locking` on the file's first byte on Windows. Raises the `OSError` the platform
+    gives when it can't, which `lock_held` reads."""
+    if sys.platform == "win32":
+        msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+    else:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def lock_held(error: OSError) -> bool:
+    """Whether `error`, from `lock_without_waiting`, says that another process holds the lock,
+    rather than that the file system refuses it."""
+    return error.errno in _LOCK_HELD
+
+
 def take_lock(descriptor: int, name: str) -> None:
-    """Takes the experiment lock on `descriptor`, without waiting: an exclusive `flock` on Linux
-    and macOS, which a process loses only when every descriptor of its open file is closed, and
-    `msvcrt.locking` on the file's first byte on Windows (docs/contracts.md, the lock).
+    """Takes the experiment lock on `descriptor`, without waiting, as `lock_without_waiting`
+    takes a lock (docs/contracts.md, the lock).
 
     Raises `TrialFolioError` with `experiment.locked` if another process holds it, and with
     `storage.write_failed` if the file system refuses it for any other reason.
     """
     try:
-        if sys.platform == "win32":
-            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
-        else:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_without_waiting(descriptor)
     except OSError as error:
-        if error.errno in _LOCK_HELD:
+        if lock_held(error):
             raise TrialFolioError(
                 "experiment.locked",
                 f"Another process is running this experiment: it holds the experiment lock,"
@@ -195,12 +210,13 @@ def take_lock(descriptor: int, name: str) -> None:
 
 
 def release_lock(descriptor: int) -> None:
-    """Releases the experiment lock that `descriptor` holds, and closes it. On Windows, it first
-    unlocks the file's first byte, as Microsoft's `_locking` documentation asks before a file is
-    closed: the system releases a lock left at close only when its resources allow, so the
-    store's owner could find it still held. `msvcrt.locking` unlocks from the file's position,
-    which writing the claim's line moved. Closing releases `flock`'s lock on Linux and macOS.
-    Errors are ignored, since closing the descriptor releases the lock either way."""
+    """Releases the lock that `descriptor` holds, the experiment lock or the ranking lock, and
+    closes it. On Windows, it first unlocks the file's first byte, as Microsoft's `_locking`
+    documentation asks before a file is closed: the system releases a lock left at close only when
+    its resources allow, so the lock's owner could find it still held. `msvcrt.locking` unlocks
+    from the file's position, which writing the claim's line moved. Closing releases `flock`'s
+    lock on Linux and macOS. Errors are ignored, since closing the descriptor releases the lock
+    either way."""
     if sys.platform == "win32":
         with suppress(OSError):
             os.lseek(descriptor, 0, os.SEEK_SET)

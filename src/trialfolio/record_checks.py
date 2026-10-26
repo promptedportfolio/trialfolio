@@ -18,30 +18,51 @@ The two readers refuse differently: a run's error names the run as its reader is
 the check has failed, and an experiment's names the output directory. So `RecordChecks` takes the
 functions that make a reader's errors, and the schema versions it reads. Each reader words the
 problems with a listed file and with the tables in its own sentences, and checks the tables in its
-own order, so for those this module gives only the tests.
+own order, so for those this module gives only the tests. The checks of a record's JSON, its
+schema version, and its model are `trialfolio.file_checks`', which a snapshot's reader shares.
 
 Nothing here reads a file, writes, or logs.
 """
 
-import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final, cast
+from typing import Final
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
-from trialfolio.canonical import sha256_hex
 from trialfolio.contracts.experiment_manifest import ExperimentArtifact, ExperimentArtifactV1_1
 from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
 from trialfolio.contracts.manifest import ManifestArtifact, ManifestArtifactV1_1
 from trialfolio.contracts.plan import Plan, PlanV1_2
 from trialfolio.contracts.plan_parts import PlanSetting, PlanSettingV1_2
 from trialfolio.contracts.tables import MetricsRow, SettingsRow, SettingsRowV1_1
-from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError
+from trialfolio.file_checks import (
+    artifact_id,
+    check_version,
+    json_object,
+    matches,
+    named,
+    validated,
+)
 from trialfolio.normalization import METRICS, setting_text
 from trialfolio.planning import plan_hash
 from trialfolio.ranking_definitions import DefinitionProblem, read_definition
+
+__all__ = [
+    "AnyArtifact",
+    "AnySettingsRow",
+    "RecordChecks",
+    "artifact_id",
+    "definition_hash",
+    "drawn_from",
+    "holds_each_metric",
+    "holds_each_setting",
+    "holds_each_weight",
+    "labeled",
+    "matches",
+    "named",
+]
 
 _METRIC_ROWS: Final = tuple((metric.subject, metric.metric_id, metric.unit) for metric in METRICS)
 """`metrics.csv`'s rows, in order, by subject and `metric_id`, with the unit the layout fixes."""
@@ -80,49 +101,32 @@ class RecordChecks:
 
     def json_object(self, content: bytes, path: str) -> dict[str, object]:
         """The JSON object in `content`, the file at `path`."""
-        try:
-            loaded: object = json.loads(content)
-        except (UnicodeDecodeError, ValueError, RecursionError):
-            raise self.refused(f"{named(path)} isn't JSON.") from None
-        if not isinstance(loaded, dict):
-            raise self.refused(f"{named(path)} isn't a JSON object.")
-        return cast("dict[str, object]", loaded)
+        return json_object(content, named(path), self.refused)
 
     def check_version(self, version: object, path: str, kind: str, *, listed: bool = False) -> None:
         """Checks the schema version of the file at `path`, from the file itself or, when
         `listed`, from its manifest's entry, where a file without one has none. A kind of file
         whose version the reader doesn't check, such as a saved response, passes."""
-        if kind not in self.readable:
+        if kind not in self.readable or (listed and version is None):
             return
         name, readable = self.readable[kind]
-        if (listed and version is None) or version in readable:
-            return
-        if not isinstance(version, str):
-            raise self.refused(f"{named(path)} has no schema version.")
         where = f"{self.manifest} gives it" if listed else "it has"
-        raise self.unknown_version(
-            path,
-            f"{where} a schema version this version has no reader for. It reads {name}"
-            f" {' or '.join(readable)}.",
+        check_version(
+            version,
+            readable,
+            named(path),
+            self.refused,
+            lambda: self.unknown_version(
+                path,
+                f"{where} a schema version this version has no reader for. It reads {name}"
+                f" {' or '.join(readable)}.",
+            ),
         )
 
     def validated[M: BaseModel](self, model: type[M], content: bytes, path: str, what: str) -> M:
         """`content`, the file at `path`, as `model`. `what` names the model in a message, such
         as "run manifest"."""
-        try:
-            return model.model_validate_json(content)
-        except ValidationError as error:
-            # Only the model's own fields are named: an unexpected key is text from the file.
-            details = error.errors(include_url=False, include_input=False, include_context=False)
-            named_fields = sorted(
-                {
-                    str(detail["loc"][0])
-                    for detail in details
-                    if detail["loc"] and detail["loc"][0] in model.model_fields
-                }
-            )
-            check = f"check `{'`, `'.join(named_fields)}`" if named_fields else "check its fields"
-            raise self.refused(f"{named(path)} isn't a valid {what}: {check}.") from None
+        return validated(model, content, named(path), what, self.refused)
 
     def check_plan_hash(self, plan: Plan | PlanV1_1 | PlanV1_2 | PlanV1_3, file: str) -> None:
         """Checks that `plan` recomputes to its `plan_hash`. `file` names its file in the
@@ -147,23 +151,6 @@ class RecordChecks:
         except TrialFolioError as error:
             # The tables' messages name the line and the column, never a value.
             raise self.refused(error.message) from None
-
-
-def named(path: str) -> str:
-    """A path as a message names it: in backticks, with each character that isn't visible
-    escaped."""
-    return f"`{visible(path)}`"
-
-
-def artifact_id(content: bytes) -> str:
-    """The `artifact_id` of a file that holds `content`: `sha256:` and the hex SHA-256 of its
-    bytes."""
-    return "sha256:" + sha256_hex(content)
-
-
-def matches(content: bytes, artifact: AnyArtifact) -> bool:
-    """Whether `content` has the size and `artifact_id` the manifest's entry records."""
-    return len(content) == artifact.size and artifact_id(content) == artifact.artifact_id
 
 
 def labeled(rows: Iterable[MetricsRow | AnySettingsRow], case_id: str) -> bool:

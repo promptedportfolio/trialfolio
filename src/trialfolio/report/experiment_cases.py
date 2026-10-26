@@ -143,7 +143,7 @@ def _outcome(experiment: ExperimentContext, view: CaseView) -> str:
     """The case's outcome, with the error code of the attempt that gives it, what it means,
     and whether it awaits a repeat or a resume sends it."""
     outcome = view.outcome
-    error = _outcome_code(view)
+    error = view.outcome_code
     shown = code(outcome) + (f" ({code(error)})" if error is not None else "")
     if outcome == "succeeded":
         response = "invented response" if experiment.synthetic else "response"
@@ -172,19 +172,6 @@ def _outcome(experiment: ExperimentContext, view: CaseView) -> str:
     else:
         meaning = "it has no attempt. A resume sends it, within the budget."
     return f"{shown}: {meaning}"
-
-
-def _outcome_code(view: CaseView) -> str | None:
-    """The error code that gives a case's outcome: the error of its latest possibly charged
-    attempt, or else of its latest attempt, or, when that succeeded, its response's
-    `provider.response_invalid`."""
-    if view.outcome in ("succeeded", "not_yet_run"):
-        return None
-    charged = [attempt for attempt in view.attempts if attempt.possibly_charged]
-    latest = (charged or list(view.attempts))[-1]
-    if latest.outcome == "succeeded" and view.invalid is not None:
-        return view.invalid.code
-    return None if latest.error is None else latest.error.code
 
 
 def _attempt_count(attempts: Sequence[AttemptRecordV1_1 | AttemptRecordV1_3]) -> str:

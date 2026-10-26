@@ -43,6 +43,7 @@ from trialfolio.contracts.common import (
     require_unique,
 )
 from trialfolio.contracts.manifest_parts import (
+    SOURCE_ROLES,
     AttemptCounts,
     ParserVersion,
     SourceRecordV1_1,
@@ -180,15 +181,9 @@ SnapshotArtifactRole = Literal[
     "ranking_snapshot_record",
 ]
 
-_SNAPSHOT_SOURCE_ROLES: Final[frozenset[SnapshotArtifactRole]] = frozenset(
-    {
-        "configuration",
-        "provider_request",
-        "provider_response",
-        "provider_response_undecoded",
-        "ranking_definition",
-    }
-)
+_SNAPSHOT_SOURCE_ROLES: Final = SOURCE_ROLES | {"ranking_definition"}
+"""The roles of a snapshot's source artifacts: a run's, and the copy of the definition its
+`rank_get` read."""
 
 _ATTEMPT = rf"attempts/{UUID4_PATTERN}/"
 
@@ -205,13 +200,13 @@ SNAPSHOT_ROLE_PATHS: Final[dict[str, re.Pattern[str]]] = {
 }
 """Where the file of each role is in a snapshot's directory (ranking snapshot output)."""
 
-_SNAPSHOT_SOURCES: Final[dict[str, tuple[str, tuple[str, ...], int | None, str | None]]] = {
-    "configuration": (
-        "ranking-snapshot-configuration",
-        RANKING_SNAPSHOT_SCHEMA_VERSIONS,
-        None,
-        None,
-    ),
+SNAPSHOT_CONFIGURATION_FORMAT: Final = "ranking-snapshot-configuration"
+"""The format the source record of a snapshot's `configuration.yaml` gives."""
+
+SNAPSHOT_SOURCES: Final[
+    dict[str, tuple[str, tuple[str, ...], int | None, Literal["rank_get"] | None]]
+] = {
+    "configuration": (SNAPSHOT_CONFIGURATION_FORMAT, RANKING_SNAPSHOT_SCHEMA_VERSIONS, None, None),
     "provider_request": ("p123api-rank-get-request", ("1",), None, "rank_get"),
     "provider_response": ("p123api-rank-get", ("1",), 1, "rank_get"),
     "provider_response_undecoded": (
@@ -223,13 +218,14 @@ _SNAPSHOT_SOURCES: Final[dict[str, tuple[str, tuple[str, ...], int | None, str |
 }
 """Each source artifact's format, its format versions, its parser version, and its provider
 operation, but the definition's copy, which a run's manifest checks too. The configuration's
-format version is its schema version, and each of the `rank_get`'s files is version 1."""
+format version is its schema version, and each of the `rank_get`'s files is version 1. The
+snapshot's writer gives its source records from this table (`trialfolio.manifests`)."""
 
-_SNAPSHOT_PARSERS: Final = (
+SNAPSHOT_PARSERS: Final = (
     ParserVersion(layout="p123api-rank-get", layout_version=1, parser_version=1),
 )
 """A snapshot's parsers: the one that reads its `rank_get`'s response, as its source record
-names it (ranking snapshot output)."""
+names it (ranking snapshot output). The snapshot's writer lists these."""
 
 
 class SnapshotArtifact(ContractModel):
@@ -255,7 +251,7 @@ class SnapshotArtifact(ContractModel):
         ):
             raise ValueError("a snapshot's definition comes from its rank_get")
         check_ranking_artifact(self.role, self.path, self.schema_version, self.source)
-        expected = _SNAPSHOT_SOURCES.get(self.role)
+        expected = SNAPSHOT_SOURCES.get(self.role)
         if expected is not None and self.source is not None:
             format_, versions, parser, operation = expected
             provenance = "user_supplied" if self.role == "configuration" else "verified"
@@ -347,7 +343,7 @@ class RankingSnapshotManifest(ContractModel):
             raise ValueError("a snapshot that isn't synthetic names the command that took it")
         check_outcome(self.outcome, self.error)
         require_unique(tuple(artifact.path for artifact in self.artifacts), "artifact paths")
-        if self.parsers != _SNAPSHOT_PARSERS:
+        if self.parsers != SNAPSHOT_PARSERS:
             raise ValueError(
                 "a snapshot's parsers are p123api-rank-get, layout version 1, parser version 1, "
                 "and no other"

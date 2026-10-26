@@ -38,7 +38,8 @@ compares its weight rows (release 0.4.0's R04-T11), and also gives back the byte
 which a review writes its copies, so a file changed after the check can't be copied.
 
 The checks it shares with an experiment's reader, `experiment_records.py`, are in
-`record_checks.py`.
+`record_checks.py`, and those it shares with a snapshot's reader too, of its manifest and its
+listed files, in `file_checks.py`.
 
 A `SavedRun` is also what the report renders when `run` writes it, before the manifest.
 """
@@ -60,6 +61,8 @@ from trialfolio.attempts import (
     AttemptStatus,
     attempt_status,
     check_records,
+    follows_update,
+    holds_earlier,
 )
 from trialfolio.contracts.attempt import (
     ArtifactReference,
@@ -86,8 +89,9 @@ from trialfolio.contracts.tables import (
     SettingsRow,
     SettingsRowV1_1,
 )
-from trialfolio.errors import ErrorCode, TrialFolioError, reason_of
+from trialfolio.errors import ErrorCode, TrialFolioError
 from trialfolio.experiment_paths import REQUEST
+from trialfolio.file_checks import read_listed, read_manifest
 from trialfolio.normalization import METRICS_PATH, SETTINGS_PATH
 from trialfolio.record_checks import (
     RecordChecks,
@@ -98,7 +102,6 @@ from trialfolio.record_checks import (
     holds_each_setting,
     holds_each_weight,
     labeled,
-    matches,
     named,
 )
 from trialfolio.storage import StoreReader
@@ -239,9 +242,12 @@ def check_run(store: StoreReader, name: RunName = THE_RUN_DIRECTORY) -> CheckedR
     with the bytes it checked. Its errors name the run as `name` says."""
     checks = _CHECKS
     try:
-        content = _read_manifest(store)
+        content = read_manifest(store, MANIFEST_PATH, "run", _not_a_run)
         manifest = _manifest(content, checks)
-        contents = {artifact.path: _listed(store, artifact) for artifact in manifest.artifacts}
+        contents = {
+            artifact.path: read_listed(store, artifact, "the run wrote it", _not_a_run)
+            for artifact in manifest.artifacts
+        }
         plan = _plan(manifest, contents, checks)
         definition, snapshot = _definition(manifest, contents, plan)
         attempts = _attempts(manifest, contents, plan, checks)
@@ -258,20 +264,6 @@ def not_a_run(name: RunName, problem: str) -> TrialFolioError:
     return _not_a_run(problem).error(name)
 
 
-def _read_manifest(store: StoreReader) -> bytes:
-    try:
-        return store.read(MANIFEST_PATH)
-    except FileNotFoundError:
-        raise _not_a_run(
-            "it has no manifest.json. Trial Folio writes a run's manifest last, so a run without"
-            " one didn't finish."
-        ) from None
-    except NotADirectoryError:
-        raise _not_a_run("it isn't a directory.") from None
-    except OSError as error:
-        raise _not_a_run(f"its manifest.json can't be read ({reason_of(error)}).") from None
-
-
 def _manifest(content: bytes, checks: RecordChecks) -> AnyManifest:
     fields = checks.json_object(content, MANIFEST_PATH)
     if fields.get("artifact_type") != "run":
@@ -281,24 +273,6 @@ def _manifest(content: bytes, checks: RecordChecks) -> AnyManifest:
     if version == "1.1.0":
         return checks.validated(RunManifestV1_1, content, MANIFEST_PATH, "run manifest")
     return checks.validated(RunManifest, content, MANIFEST_PATH, "run manifest")
-
-
-def _listed(store: StoreReader, artifact: AnyArtifact) -> bytes:
-    """The bytes of a file the manifest lists, checked against its size and `artifact_id`."""
-    try:
-        content = store.read(artifact.path)
-    except FileNotFoundError:
-        raise _not_a_run(f"its manifest lists {named(artifact.path)}, which is missing.") from None
-    except OSError as error:
-        raise _not_a_run(
-            f"{named(artifact.path)}, which its manifest lists, can't be read ({reason_of(error)})."
-        ) from None
-    if not matches(content, artifact):
-        raise _not_a_run(
-            f"{named(artifact.path)} doesn't match its artifact_id in the manifest, so it changed"
-            " after the run wrote it."
-        )
-    return content
 
 
 def _plan(
@@ -486,24 +460,9 @@ def _check_held(
     being the update record's, then the `rank_update`'s, and the attempt record holds both's.
     Raises `ValueError` when they don't."""
     shared = set(StartRecordV1_2.model_fields) - {"operation", "exchanges"}
-    if (
-        update is not None
-        and start is not None
-        and (
-            update.model_dump(include=shared) != start.model_dump(include=shared)
-            or start.exchanges[:-1] != update.exchanges
-        )
-    ):
+    if update is not None and start is not None and not follows_update(start, update, shared):
         raise ValueError("the start record doesn't hold the update record's values and exchanges")
-    latest = start if start is not None else update
-    if (
-        record is not None
-        and latest is not None
-        and (
-            record.model_dump(include=shared) != latest.model_dump(include=shared)
-            or record.exchanges[: len(latest.exchanges)] != latest.exchanges
-        )
-    ):
+    if record is not None and not holds_earlier(record, start, update, shared):
         raise ValueError("the attempt record doesn't hold its start records' contents")
 
 

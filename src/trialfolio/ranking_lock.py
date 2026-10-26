@@ -17,10 +17,11 @@ caller gives it the file, which `ranking_lock_path` gives from the environment t
   whatever the umask, on Linux and macOS. It's never written, truncated, or removed: it stays
   empty. Once it's open, anything but a regular file, such as a FIFO or a directory, is refused,
   and so is a symbolic link at the path, which Windows's open follows, before it's locked.
-- **The lock** is the experiment lock's kind: `fcntl.flock` with `LOCK_EX | LOCK_NB` on Linux and
-  macOS, and `msvcrt.locking` with `LK_NBLCK` on the file's first byte on Windows, which
-  Microsoft's documentation allows on a handle with read access, beyond the end of the file. The
-  Windows parts come from that documentation, not from a check on Windows.
+- **The lock** is the experiment lock's kind, which `trialfolio.filesystem` takes and releases for
+  both: `fcntl.flock` with `LOCK_EX | LOCK_NB` on Linux and macOS, and `msvcrt.locking` with
+  `LK_NBLCK` on the file's first byte on Windows, which Microsoft's documentation allows on a
+  handle with read access, beyond the end of the file. The Windows parts come from that
+  documentation, not from a check on Windows.
 - **A file replaced before it's locked.** Once it holds the lock, it checks that the path still
   names the file it locked, by its device and inode, and otherwise opens the path again; on
   Windows, by the volume and file ID that CPython's `os.stat` and `os.fstat` both give, which comes
@@ -32,7 +33,6 @@ caller gives it the file, which `ranking_lock_path` gives from the environment t
   `TRIALFOLIO_LOCK_DIR` can name another directory. The logged messages leave the path out.
 """
 
-import errno
 import logging
 import os
 import stat
@@ -45,11 +45,7 @@ from typing import Final, Self
 
 from trialfolio.display import visible
 from trialfolio.errors import TrialFolioError, reason_of
-
-if sys.platform == "win32":
-    import msvcrt
-else:
-    import fcntl
+from trialfolio.filesystem import BINARY, lock_held, lock_without_waiting, release_lock
 
 _logger = logging.getLogger(__name__)
 
@@ -70,7 +66,7 @@ _OPEN: Final[int] = (
     | getattr(os, "O_NOFOLLOW", 0)
     | getattr(os, "O_NONBLOCK", 0)
     | getattr(os, "O_CLOEXEC", 0)
-    | getattr(os, "O_BINARY", 0)
+    | BINARY
 )
 """Only for reading, never through a symbolic link on Linux and macOS, without waiting, as opening
 a FIFO for reading would until a writer opens it, and closed in a program it runs. Windows has
@@ -80,14 +76,6 @@ regular file doesn't wait."""
 _ATTEMPTS: Final = 8
 """How many times it opens the path again, when the file it opened or locked was replaced, before
 it gives up: each needs another process to remove the file at that moment."""
-
-_HELD: Final = (
-    frozenset({errno.EACCES})
-    if sys.platform == "win32"
-    else frozenset({errno.EAGAIN, errno.EWOULDBLOCK})
-)
-"""How taking the lock reports that another process holds it, as for the experiment lock:
-`EWOULDBLOCK`, `EAGAIN` on Linux and macOS, from `flock`, and `EACCES` from `msvcrt.locking`."""
 
 _HINT: Final = (
     f" {LOCK_DIRECTORY_VARIABLE} can name another directory for it; every process that uses the"
@@ -177,7 +165,7 @@ class RankingLock:
         descriptor, self._descriptor = self._descriptor, None
         if descriptor is None:
             return
-        _release(descriptor)
+        release_lock(descriptor)
         _logger.debug(
             "Released the ranking lock after %.3f s.",
             time.monotonic() - self._taken,
@@ -246,12 +234,9 @@ def _lock(path: Path, descriptor: int) -> None:
     `experiment.locked` when another process holds it, and with `storage.write_failed` when the
     file system refuses it for any other reason."""
     try:
-        if sys.platform == "win32":
-            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
-        else:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_without_waiting(descriptor)
     except OSError as error:
-        if error.errno in _HELD:
+        if lock_held(error):
             raise TrialFolioError(
                 "experiment.locked",
                 "Another Trial Folio process on this machine is writing ApiRankingSystem, for an"
@@ -279,22 +264,6 @@ def _still_named(path: Path, descriptor: int) -> bool:
         held.st_dev,
         held.st_ino,
     )
-
-
-def _release(descriptor: int) -> None:
-    """Releases the lock `descriptor` holds, and closes it. On Windows, it first unlocks the
-    file's first byte, as Microsoft's `_locking` documentation asks before a file is closed.
-    Errors are ignored, since closing the descriptor releases the lock either way."""
-    if sys.platform == "win32":
-        try:
-            os.lseek(descriptor, 0, os.SEEK_SET)
-            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
-        except OSError:
-            pass
-    try:
-        os.close(descriptor)
-    except OSError:
-        pass
 
 
 def _unavailable(path: Path, reason: str) -> TrialFolioError:
