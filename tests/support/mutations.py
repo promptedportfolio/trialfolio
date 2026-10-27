@@ -26,20 +26,26 @@ not the repository's main checkout, which other agents may share, and whose `src
 changes, so a restored module is the committed one. It first checks that the tests import each
 module the list changes from this checkout's `src/`, and not from another checkout's, which an
 environment synced elsewhere would give. It then runs every test the list names, unchanged, which
-must pass. For each mutation, it saves the module's bytes, applies the change, runs the mutation's
-tests, records which of them fail, then writes the saved bytes back, never with `git checkout`, and
-checks them. Before each run, and after each restore, it removes each `__pycache__` under `src/`,
+must pass, since a skipped test catches nothing: it refuses when none passes, as when each skips,
+and, for a list that gives a marker, such as the reference tests', when any skips. For each
+mutation, it saves the module's bytes, applies the change, runs the mutation's tests, records which
+of them fail, then writes the saved bytes back, never with `git checkout`, and checks them, whatever
+stops the run. Before each run, and after each restore, it removes each `__pycache__` under `src/`,
 since a change of the same size, within the same second, could leave stale bytecode that still
-runs. A mutation is caught when its tests don't pass, or time out, at five times the unchanged
-run's time, and at least a minute. It writes the results into `<out>`, a new JSON file. `--base`
-runs each mutation's `base_tests` where the list gives them.
+runs, and the tests run without `PYTHONPYCACHEPREFIX`, which would put their bytecode elsewhere. A
+mutation is caught when its tests don't pass, or time out, at five times the unchanged run's time,
+and at least a minute. It writes the results into `<out>`, a new JSON file. `--base` runs each
+mutation's `base_tests` where the list gives them.
 
 `compare <before> <after>` compares the base's results with the branch's. It lists each mutation as
 kept, caught at the base and on the branch; lost, caught at the base only; gained, caught on the
 branch only; or missed, caught by neither; and each test in `caught_by` that didn't fail with its
-mutation on the branch. It fails when a mutation is lost, or a test in `caught_by` didn't fail. It
-fails too, with the error, and exit code 2, as for a wrong usage, when it can't read either file,
-or the two didn't run the same mutations.
+mutation on the branch: pytest's summary gives as failed neither it, nor one of its parameters, nor
+its module, as for a module that doesn't import. A mutation whose tests timed out has no summary,
+so it lists each such mutation that gives `caught_by`, whose tests can't be shown to have failed.
+It fails when a mutation is lost, or a test in `caught_by` didn't fail, or can't be shown to have.
+It fails too, with the error, and exit code 2, as for a wrong usage, when it can't read either
+file, or the two didn't run the same mutations.
 
 For a task, run its list on its base and on its branch, each in a worktree of its own, synced with
 `uv sync`, then compare them from the branch:
@@ -57,6 +63,7 @@ TS-T01 wrote it. Its base had no copy, so it ran there from a copy of this file.
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -79,6 +86,9 @@ _TIMEOUT_FACTOR: Final = 5
 _SHORTEST_TIMEOUT_SECONDS: Final = 60.0
 _FAILURES: Final = ("FAILED ", "ERROR ")
 """The words that start a line of pytest's short summary for a test that failed or erred."""
+_COUNTS: Final = re.compile(r"^(?:=+ )?\d+ \w+.* in [\d.]+s\b")
+"""pytest's last line, such as `3 passed, 1 skipped in 0.12s`."""
+_COUNT: Final = re.compile(r"(\d+) (\w+)")
 
 
 class Refused(Exception):
@@ -256,7 +266,7 @@ def _run_tests(
     """pytest's exit code for `tests`, or None when it timed out, what it wrote, and how long it
     took. Its output goes to a file, not a pipe, so a process a test leaves running can't hold the
     run open."""
-    command = [sys.executable, "-m", "pytest", "-q", "--tb=no", "-rfE", "-p", "no:cacheprovider"]
+    command = [sys.executable, "-m", "pytest", "-q", "--tb=no", "-rfEs", "-p", "no:cacheprovider"]
     command += ["-m", marker] if marker else []
     started = time.monotonic()
     with tempfile.TemporaryFile("w+", encoding="utf-8") as output:
@@ -274,6 +284,14 @@ def _run_tests(
             exit_code = None
         output.seek(0)
         return exit_code, output.read(), time.monotonic() - started
+
+
+def _counts(output: str) -> Counter[str]:
+    """How many tests passed, skipped, and so on, as pytest's last line, in `output`, gives them,
+    or none when it gives no such line."""
+    lines = [line for line in output.splitlines() if _COUNTS.match(line)]
+    counts = _COUNT.findall(lines[-1].split(" in ")[0]) if lines else []
+    return Counter({word: int(count) for count, word in counts})
 
 
 def failed_tests(output: str, known: set[str]) -> list[str]:
@@ -295,11 +313,11 @@ def failed_tests(output: str, known: set[str]) -> list[str]:
 @contextmanager
 def applied(path: Path, mutation: Mutation) -> Iterator[None]:
     """Applies `mutation` to `path` for the block, then writes the saved bytes back, and checks
-    them, whatever the block raised, a SIGTERM's `SystemExit` or a Ctrl-C's `KeyboardInterrupt`
-    included."""
+    them, whatever the change or the block raised, a SIGTERM's `SystemExit` or a Ctrl-C's
+    `KeyboardInterrupt` included."""
     saved = path.read_bytes()
-    path.write_bytes(saved.replace(mutation.old.encode(), mutation.new.encode(), 1))
     try:
+        path.write_bytes(saved.replace(mutation.old.encode(), mutation.new.encode(), 1))
         yield
     finally:
         path.write_bytes(saved)
@@ -351,10 +369,14 @@ def _mutated(
 ) -> Outcome:
     """Runs `mutation`'s tests with it applied, and gives what they did."""
     tests = listed.tests_of(mutation, base=base)
-    with applied(root / mutation.file, mutation):
+    try:
+        with applied(root / mutation.file, mutation):
+            _remove_bytecode(root)
+            exit_code, output, seconds = _run_tests(
+                root, tests, listed.marker, run.env, run.timeout
+            )
+    finally:
         _remove_bytecode(root)
-        exit_code, output, seconds = _run_tests(root, tests, listed.marker, run.env, run.timeout)
-    _remove_bytecode(root)
     return Outcome(
         name=mutation.name,
         file=mutation.file,
@@ -379,8 +401,13 @@ def run(
     """Runs `listed` in `root`, as the module says, with `env` for the tests, and gives the
     results. A mutation's tests time out at `_TIMEOUT_FACTOR` times the unchanged run's time, and
     at least `shortest_timeout` seconds. Raises `Refused` when it can't run them, before any
-    mutation is applied."""
-    env = environment() if env is None else env
+    mutation is applied. The tests run without `PYTHONPYCACHEPREFIX`, so their bytecode of `src/`
+    is in the `__pycache__` folders the run removes."""
+    env = {
+        name: value
+        for name, value in (environment() if env is None else env).items()
+        if name != "PYTHONPYCACHEPREFIX"
+    }
     every = list(
         dict.fromkeys(
             test for mutation in listed.mutation for test in listed.tests_of(mutation, base=base)
@@ -391,6 +418,16 @@ def run(
     exit_code, output, unchanged = _run_tests(root, every, listed.marker, env, None)
     if exit_code != 0:
         raise Refused(f"the tests don't pass unchanged, so no mutation runs:\n{output}")
+    counts = _counts(output)
+    if not counts["passed"]:
+        raise Refused(
+            f"no test passes unchanged, as when each skips, so no mutation runs:\n{output}"
+        )
+    if listed.marker and counts["skipped"]:
+        raise Refused(
+            f"{counts['skipped']} of the tests skip unchanged, and a list with a marker runs only "
+            f"when none does, so no mutation runs:\n{output}"
+        )
     shared = _Run(env, known, max(shortest_timeout, _TIMEOUT_FACTOR * unchanged))
     outcomes: list[Outcome] = []
     previous = signal.signal(signal.SIGTERM, _terminated)
@@ -448,19 +485,26 @@ def compared(before: Results, after: Results) -> tuple[list[str], bool]:
             f"{status}: {on_the_branch.name} (base: {_described(at_the_base)}; "
             f"branch: {_described(on_the_branch)})"
         )
+    timed_out = [
+        f"timed out, so it can't show its tests in caught_by failed: {outcome.name}"
+        for outcome in after.mutations
+        if outcome.caught_by and outcome.exit_code is None
+    ]
     not_caught = [
         f"not caught by {test}: {outcome.name}"
         for outcome in after.mutations
+        if outcome.exit_code is not None
         for test in outcome.caught_by
-        if not any(covers(test, failed) for failed in outcome.failed)
+        if not any(covers(test, failed) or covers(failed, test) for failed in outcome.failed)
     ]
-    lines += not_caught
+    lines += timed_out + not_caught
     lines.append(
         f"{len(after.mutations)} mutations: {counts['kept']} kept, {counts['lost']} lost, "
         f"{counts['gained']} gained, {counts['missed']} missed; "
-        f"{len(not_caught)} tests in caught_by didn't fail."
+        f"{len(not_caught)} tests in caught_by didn't fail, and {len(timed_out)} mutations with "
+        "caught_by timed out."
     )
-    return lines, bool(counts["lost"] or not_caught)
+    return lines, bool(counts["lost"] or not_caught or timed_out)
 
 
 def compare(before: Path, after: Path) -> int:

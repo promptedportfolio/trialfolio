@@ -3,17 +3,21 @@ TS-AC05 runs on a task's base and on its branch (docs/test-refactoring.md).
 
 Traces to TS-AC05: each mutation is applied alone, in a linked worktree whose `src/` has no
 changes, and its tests record which of them fail, by their IDs, an ID that holds " - " included;
-bytecode left from before can't hide a mutation; each module takes back its saved bytes, whatever
-stops the run; a list that can't run, or tests that don't pass unchanged, refuse before any
-mutation is applied; and the comparison fails for a mutation caught at the base and missed on the
-branch, and for a test in `caught_by` that didn't fail. TS-T01 wrote the mutations, and these
-tests, with them.
+bytecode left from before, beside the module or under a prefix, can't hide a mutation; each module
+takes back its saved bytes, and no bytecode is left, whatever stops the run, a SIGTERM included; a
+list that can't run, or tests that don't pass unchanged, or skip, refuse before any mutation is
+applied; and the comparison fails for a mutation caught at the base and missed on the branch, and
+for a test in `caught_by` that didn't fail, or can't be shown to have. TS-T01 wrote the mutations,
+and these tests, with them.
 """
 
 import importlib.util
 import json
 import py_compile
+import signal
 import subprocess
+import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,7 +25,7 @@ from typing import Any
 import pytest
 
 from tests.support.git import outside_any_repository
-from tests.support.inventory import environment
+from tests.support.inventory import ROOT, environment
 from tests.support.mutations import (
     Mutation,
     MutationList,
@@ -64,15 +68,31 @@ def test_label(count, expected):
     assert label(count) == expected
 
 
+def test_elsewhere():
+    pytest.skip("runs elsewhere")
+
+
 @pytest.mark.broken
 def test_broken():
     assert False
+
+
+@pytest.mark.data
+def test_with_data():
+    pass
+
+
+@pytest.mark.data
+def test_without_data():
+    pytest.skip("no data")
 """
 
 _FILES = {
     ".gitignore": "__pycache__/\n",
     "pyproject.toml": (
-        '[tool.pytest.ini_options]\naddopts = ["-m", "not broken"]\nmarkers = ["broken: b"]\n'
+        "[tool.pytest.ini_options]\n"
+        'addopts = ["-m", "not broken and not data"]\n'
+        'markers = ["broken: b", "data: d"]\n'
     ),
     "src/sample/__init__.py": "",
     "src/sample/core.py": _CORE,
@@ -111,9 +131,8 @@ def _git(root: Path, *argv: str) -> str:
     ).stdout
 
 
-@pytest.fixture(scope="module")
-def sample(tmp_path_factory: pytest.TempPathFactory) -> Sample:
-    main = tmp_path_factory.mktemp("sample")
+def _sample(main: Path) -> Sample:
+    """A repository of `_FILES` in `main`, and a linked worktree of it beside `main`."""
     for name, text in _FILES.items():
         (main / name).parent.mkdir(parents=True, exist_ok=True)
         (main / name).write_text(text, encoding="utf-8")
@@ -123,6 +142,11 @@ def sample(tmp_path_factory: pytest.TempPathFactory) -> Sample:
     worktree = main.parent / "worktree"
     _git(main, "worktree", "add", "--quiet", "--detach", str(worktree))
     return Sample(main, worktree)
+
+
+@pytest.fixture(scope="module")
+def sample(tmp_path_factory: pytest.TempPathFactory) -> Sample:
+    return _sample(tmp_path_factory.mktemp("sample"))
 
 
 def _mutation(name: str, old: str, new: str, **fields: Any) -> Mutation:
@@ -176,6 +200,100 @@ def test_a_mutation_restores_its_module_whatever_stops_the_run(tmp_path: Path) -
     assert module.read_bytes() == b"value = 1\n"
 
 
+def test_a_mutation_stopped_while_it_s_written_restores_its_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = tmp_path / "module.py"
+    module.write_bytes(b"value = 1\n")
+    write_bytes = Path.write_bytes
+    stopped: list[bytes] = []
+
+    def stopped_once(path: Path, data: bytes) -> int:
+        """The first write is stopped by a Ctrl-C, after a part of it is written."""
+        if stopped:
+            return write_bytes(path, data)
+        stopped.append(data)
+        write_bytes(path, data[:3])
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Path, "write_bytes", stopped_once)
+    with pytest.raises(KeyboardInterrupt), applied(module, _mutation("m", "1", "2")):
+        pytest.fail("the block ran, though the change was stopped")
+    monkeypatch.undo()
+    assert stopped == [b"value = 2\n"]
+    assert module.read_bytes() == b"value = 1\n"
+
+
+_STOPPED_RUN = """\
+import json, sys
+from pathlib import Path
+from tests.support.mutations import MutationList, run
+run(MutationList.model_validate_json(sys.argv[1]), base=False, root=Path(sys.argv[2]),
+    env=json.loads(sys.argv[3]))
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no SIGTERM to handle")
+def test_a_sigterm_during_a_mutation_s_tests_restores_its_module_and_leaves_no_bytecode(
+    tmp_path: Path,
+) -> None:
+    sample = _sample(tmp_path / "main")
+    started = tmp_path / "started"
+    waiting = _mutation(
+        "a total that waits",
+        "sum(values)",
+        f"__import__('pathlib').Path({str(started)!r}).touch() or "
+        "__import__('time').sleep(30) or sum(values)",
+    )
+    listed = MutationList(tests=[_TOTAL], mutation=[waiting])
+    bytecode = {"PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX"}
+    env = {name: value for name, value in sample.env.items() if name not in bytecode}
+    command = [sys.executable, "-c", _STOPPED_RUN, listed.model_dump_json(), str(sample.worktree)]
+    runner = subprocess.Popen(
+        [*command, json.dumps(env)],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 60
+        while not started.exists():
+            assert runner.poll() is None, runner.communicate()[0]
+            assert time.monotonic() < deadline, "the mutation's tests didn't start"
+            time.sleep(0.05)
+        assert list((sample.core.parent / "__pycache__").glob("core.*.pyc"))
+        runner.send_signal(signal.SIGTERM)
+        output, _ = runner.communicate(timeout=60)
+    finally:
+        if runner.poll() is None:
+            runner.kill()
+            runner.wait()
+    assert runner.returncode == 128 + signal.SIGTERM, output
+    assert sample.core.read_text(encoding="utf-8") == _CORE
+    assert _git(sample.worktree, "status", "--porcelain", "--ignored", "--", "src") == ""
+
+
+def test_bytecode_under_a_prefix_can_t_hide_a_mutation(
+    sample: Sample, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bytecode of the unchanged module, under the prefix `PYTHONPYCACHEPREFIX` names, which
+    Python would take without reading the module."""
+    prefix = tmp_path / "bytecode"
+    with monkeypatch.context() as prefixed:
+        prefixed.setattr(sys, "pycache_prefix", str(prefix))
+        cached = importlib.util.cache_from_source(str(sample.core))
+    py_compile.compile(
+        str(sample.core),
+        cfile=cached,
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    )
+    listed = MutationList(tests=[_TOTAL], mutation=[_TOTAL_PLUS_ONE])
+    env = sample.env | {"PYTHONPYCACHEPREFIX": str(prefix)}
+    (outcome,) = run(listed, base=False, root=sample.worktree, env=env).mutations
+    assert (outcome.exit_code, outcome.failed) == (1, [_TOTAL])
+
+
 def test_a_mutation_caught_at_the_base_and_missed_on_the_branch_is_lost(sample: Sample) -> None:
     listed = MutationList(
         tests=["tests/test_core.py::test_label"],
@@ -196,8 +314,10 @@ def test_a_mutation_whose_tests_time_out_is_caught(sample: Sample) -> None:
         "a total that never ends", "return sum(values)", "while True:\n        pass"
     )
     listed = MutationList(tests=[_TOTAL], mutation=[looping])
-    timed = run(listed, base=False, root=sample.worktree, env=sample.env, shortest_timeout=1)
-    assert timed.timeout_seconds == pytest.approx(max(1, 5 * timed.unchanged_seconds), abs=0.5)
+    timed = run(listed, base=False, root=sample.worktree, env=sample.env, shortest_timeout=0)
+    # Each is rounded to a tenth, so they differ by 0.3 at most, and by 0.4 at least without the
+    # factor of 5.
+    assert timed.timeout_seconds == pytest.approx(5 * timed.unchanged_seconds, abs=0.35)
     (outcome,) = timed.mutations
     assert outcome.exit_code is None
     assert outcome.caught
@@ -259,6 +379,14 @@ def test_a_run_whose_tests_import_another_checkout_s_module_is_refused(sample: S
             MutationList(tests=["tests/test_core.py"], marker="broken", mutation=[_UNUSED]),
             "don't pass unchanged",
         ),
+        (
+            MutationList(tests=["tests/test_core.py::test_elsewhere"], mutation=[_UNUSED]),
+            "no test passes unchanged",
+        ),
+        (
+            MutationList(tests=["tests/test_core.py"], marker="data", mutation=[_UNUSED]),
+            "1 of the tests skip unchanged, and a list with a marker",
+        ),
     ],
     ids=[
         "old text twice",
@@ -267,6 +395,8 @@ def test_a_run_whose_tests_import_another_checkout_s_module_is_refused(sample: S
         "tests the default deselects",
         "a mutation's own tests that select none",
         "tests that fail unchanged",
+        "tests that all skip",
+        "a marker's tests of which one skips",
     ],
 )
 def test_a_list_that_can_t_run_is_refused_before_any_mutation(
@@ -286,20 +416,37 @@ new = '''return 2'''
 """
 
 
+_NOT_A_LIST = "isn't a list of mutations"
+_NOT_IN_SRC = "isn't a module of src/"
+
+
 @pytest.mark.parametrize(
-    "text",
+    ("text", "refusal"),
     [
-        'tests = ["t"]\n' + _MUTATION + "caughtby = []\n",
-        'tests = ["t"]\n' + _MUTATION.replace("src/sample/core.py", "tests/test_core.py"),
-        'tests = ["t"]\n' + _MUTATION.replace("src/sample/core.py", "src/../sample/core.py"),
-        'tests = ["t"]\n' + _MUTATION.replace("core.py", "core.txt"),
-        'tests = ["t"]\n' + _MUTATION.replace("return 2", "return 1"),
-        'tests = ["t"]\n' + _MUTATION + _MUTATION,
-        _MUTATION,
-        'base_tests = ["t"]\n' + _MUTATION,
-        'tests = ["t"]\n',
-        "tests = []\n" + _MUTATION,
-        "tests = [",
+        ('tests = ["t"]\n' + _MUTATION + "caughtby = []\n", _NOT_A_LIST),
+        (
+            'tests = ["t"]\n' + _MUTATION.replace("src/sample/core.py", "tests/test_core.py"),
+            _NOT_IN_SRC,
+        ),
+        (
+            'tests = ["t"]\n' + _MUTATION.replace("src/sample/core.py", "src/../sample/core.py"),
+            _NOT_IN_SRC,
+        ),
+        ('tests = ["t"]\n' + _MUTATION.replace("core.py", "core.txt"), _NOT_IN_SRC),
+        ('tests = ["t"]\n' + _MUTATION.replace("return 2", "return 1"), "'m' changes nothing"),
+        ('tests = ["t"]\n' + _MUTATION + _MUTATION, "two mutations have the same name"),
+        (_MUTATION, "a mutation names no tests, and the list gives none"),
+        (
+            'base_tests = ["t"]\n' + _MUTATION + 'tests = ["u"]\n',
+            "the list gives base_tests without its tests",
+        ),
+        (
+            'tests = ["t"]\n' + _MUTATION + 'base_tests = ["u"]\n',
+            "'m' gives base_tests without its tests",
+        ),
+        ('tests = ["t"]\n', _NOT_A_LIST),
+        ("tests = []\n" + _MUTATION, _NOT_A_LIST),
+        ("tests = [", _NOT_A_LIST),
     ],
     ids=[
         "an unknown key",
@@ -309,17 +456,19 @@ new = '''return 2'''
         "a change of nothing",
         "two mutations of one name",
         "no tests",
-        "base_tests without tests",
+        "the list's base_tests without its tests",
+        "a mutation's base_tests without its tests",
         "no mutation",
         "an empty list of tests",
         "not TOML",
     ],
 )
-def test_a_file_that_isn_t_a_list_is_refused(tmp_path: Path, text: str) -> None:
+def test_a_file_that_isn_t_a_list_is_refused(tmp_path: Path, text: str, refusal: str) -> None:
     path = tmp_path / "list.toml"
     path.write_text(text, encoding="utf-8")
-    with pytest.raises(Refused, match="isn't a list of mutations"):
+    with pytest.raises(Refused, match=_NOT_A_LIST) as refused:
         read_list(path)
+    assert refusal in str(refused.value)
 
 
 def test_a_list_reads_as_the_module_gives_it(tmp_path: Path) -> None:
@@ -348,7 +497,12 @@ def test_a_summary_line_gives_the_test_s_id_though_it_holds_the_separator() -> N
 
 
 def _outcome(
-    name: str, *, caught: bool, failed: tuple[str, ...] = (), caught_by: tuple[str, ...] = ()
+    name: str,
+    *,
+    caught: bool,
+    failed: tuple[str, ...] = (),
+    caught_by: tuple[str, ...] = (),
+    timed_out: bool = False,
 ) -> Outcome:
     return Outcome(
         name=name,
@@ -357,7 +511,7 @@ def _outcome(
         new="b",
         tests=["t"],
         caught_by=list(caught_by),
-        exit_code=1 if caught else 0,
+        exit_code=None if timed_out else 1 if caught else 0,
         failed=list(failed),
         seconds=0.1,
     )
@@ -389,7 +543,8 @@ def test_the_comparison_names_each_mutation_s_status_and_fails_only_for_a_lost_o
         "missed: missed",
     ]
     assert lines[-1] == (
-        "3 mutations: 1 kept, 0 lost, 1 gained, 1 missed; 0 tests in caught_by didn't fail."
+        "3 mutations: 1 kept, 0 lost, 1 gained, 1 missed; 0 tests in caught_by didn't fail, "
+        "and 0 mutations with caught_by timed out."
     )
     assert not failed
 
@@ -402,6 +557,33 @@ def test_the_comparison_fails_for_a_test_in_caught_by_that_didn_t_fail() -> None
     )
     lines, failed = compared(before, after)
     assert lines[1:-1] == ["not caught by tests/a.py::test_y: m"]
+    assert failed
+
+
+def test_a_module_that_doesn_t_import_fails_each_of_its_tests_in_caught_by() -> None:
+    before = _results("base", _outcome("m", caught=False))
+    after = _results(
+        "branch",
+        _outcome("m", caught=True, failed=("tests/a.py",), caught_by=("tests/a.py::test_x",)),
+    )
+    lines, failed = compared(before, after)
+    assert lines[1:-1] == []
+    assert not failed
+
+
+def test_a_mutation_whose_tests_time_out_can_t_show_its_tests_in_caught_by_failed() -> None:
+    before = _results("base", _outcome("m", caught=True, timed_out=True))
+    after = _results(
+        "branch", _outcome("m", caught=True, timed_out=True, caught_by=("tests/a.py::test_x",))
+    )
+    lines, failed = compared(before, after)
+    assert lines[1:] == [
+        "timed out, so it can't show its tests in caught_by failed: m",
+        (
+            "1 mutations: 1 kept, 0 lost, 0 gained, 0 missed; 0 tests in caught_by didn't fail, "
+            "and 1 mutations with caught_by timed out."
+        ),
+    ]
     assert failed
 
 
