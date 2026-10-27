@@ -11,12 +11,13 @@ its own, in this checkout, with this interpreter, and without the `PYTEST_` vari
 add options to those pyproject.toml gives.
 
 `compare <before> <after> [<task>]` compares two such files, suite by suite. Each ID at the base is
-kept, when the branch collects it, or moved, when the task's map gives what it became and the
-branch collects that. It lists each ID that's dropped, at the base and neither kept nor moved, and
-each that's added, on the branch and neither kept nor what the map gives. It lists, too, each name
-the map gives that the base or the branch doesn't collect. It fails when it lists a dropped test or
-a name the map gives, and not for an added one, since a task may add tests. It fails too, with the
-error, and exit code 2, as for a wrong usage, when it can't read either file or the map.
+kept, when the branch collects it and no row of the task's map names the test itself, or moved, when
+the map gives what it became and the branch collects that. It lists each ID that's dropped, at the
+base and neither kept nor moved, and each that's added, on the branch and neither kept nor what the
+map gives. It lists, too, each name the map gives that the base or the branch doesn't collect. It
+fails when it lists a dropped test or a name the map gives, and not for an added one, since a task
+may add tests. It fails too, with the error, and exit code 2, as for a wrong usage, when it can't
+read either file or the map.
 
 The map is the task's rows of the table in docs/test-refactoring.md's "Where the tests moved", whose
 columns are Task, Had, and Has. Had gives one name in backticks, and Has the one or more it became,
@@ -26,8 +27,9 @@ parameters. The most specific of the task's rows that covers a test moves it, an
 gives, with the rest of the test's ID kept, stands for what the test became, each of its parameters
 included. A test in a module or a class the row names is moved when the branch collects it under
 any of those names, so a separated module's row gives each module its tests went to. A test the row
-names itself, with or without its parameters, is moved only when the branch collects it under every
-one, so a test split in two keeps each of its parameters in both. Without `<task>`, nothing is
+names itself, with or without its parameters, is never kept: it's moved only when the branch
+collects it under every one, even when one of them is its own name, so a test split in two keeps
+each of its parameters in both, whichever part keeps the test's name. Without `<task>`, nothing is
 moved.
 
 For a task, list the tests on its base and on its branch, each in a worktree of its own, synced
@@ -192,14 +194,20 @@ def _move_of(test_id: str, moves: Sequence[Move]) -> Move | None:
     return max(covering, key=lambda move: len(move.had), default=None)
 
 
+def _names(move: Move, test_id: str) -> bool:
+    """Whether `move` names the test `test_id` itself, with or without its parameters, rather than
+    its module or its class."""
+    return not test_id[len(move.had) :].startswith("::")
+
+
 def _became(test_id: str, move: Move, branch: Sequence[str]) -> list[str]:
     """The IDs of `branch` that `test_id` became under `move`, or none when it didn't move. Each
     name the move gives, with the rest of `test_id` kept, covers the IDs it became. A test in a
-    module or a class the move names became any of them, and a test the move names itself, with
-    or without its parameters, every one."""
+    module or a class the move names became any of them, and a test the move names itself every
+    one."""
     rest = test_id[len(move.had) :]
     each = [[new for new in branch if covers(name + rest, new)] for name in move.has]
-    if not rest.startswith("::") and not all(each):
+    if _names(move, test_id) and not all(each):
         return []
     return [new for ids in each for new in ids]
 
@@ -233,7 +241,7 @@ def differences(before: Inventory, after: Inventory, moves: Sequence[Move] = ())
         became: set[str] = set()
         for test_id in base:
             move = _move_of(test_id, moves)
-            if test_id in branch:
+            if test_id in branch and not (move and _names(move, test_id)):
                 kept += 1
             elif move and (found := _became(test_id, move, after[suite])):
                 moved += 1

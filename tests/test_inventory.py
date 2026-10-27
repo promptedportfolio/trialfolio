@@ -226,6 +226,21 @@ def test_a_split_test_moves_only_when_each_of_its_parameters_is_in_each_test_it_
     assert comparison.failed
 
 
+def test_a_split_test_that_keeps_its_name_moves_only_with_each_parameter_in_each_part() -> None:
+    before = _one_suite("tests/a.py::test_whole[p1]", "tests/a.py::test_whole[p2]")
+    moves = [Move("tests/a.py::test_whole", ("tests/a.py::test_whole", "tests/a.py::test_second"))]
+    parts = (*before["default"], "tests/a.py::test_second[p1]")
+    comparison = differences(before, _one_suite(*parts), moves)
+    assert comparison.dropped == ["dropped from default: tests/a.py::test_whole[p2]"]
+    assert comparison.added == []
+    assert comparison.failed
+    comparison = differences(before, _one_suite(*parts, "tests/a.py::test_second[p2]"), moves)
+    assert (comparison.dropped, comparison.added, comparison.unmatched) == ([], [], [])
+    assert comparison.counts[0] == (
+        "default: 2 at the base, 4 on the branch; 0 kept, 2 moved, 0 dropped, 0 added."
+    )
+
+
 def test_a_test_split_in_two_without_one_of_them_on_the_branch_is_dropped() -> None:
     comparison = differences(
         _one_suite("tests/a.py::test_split"),
