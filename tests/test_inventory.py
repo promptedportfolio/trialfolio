@@ -3,8 +3,9 @@ TS-AC04 runs on a task's base and on its branch (docs/test-refactoring.md).
 
 Traces to TS-AC04: the inventory lists the IDs each suite collects, the default suite and those
 `-m packaging`, `-m reference`, and `-m live` select, by collecting only, as pyproject.toml selects
-them; and the comparison finds each test that's dropped, unless the task's map gives what it
-became, each that's added, and each name the map gives that isn't there. The map is the task's rows
+them, into a new file; and the comparison finds each test that's dropped, unless the task's map
+gives what it became, a split test's every part included, each that's added, and each name the map
+gives that isn't there. The map is the task's rows
 of docs/test-refactoring.md's "Where the tests moved", which stays readable. TS-T01 wrote the
 inventory, and these tests, with it.
 """
@@ -28,6 +29,7 @@ from tests.support.inventory import (
     inventory,
     main,
     moves_of,
+    read,
 )
 
 _SAMPLE_CONFIGURATION = """\
@@ -209,6 +211,33 @@ def test_a_separated_module_s_tests_may_go_to_any_module_its_row_gives() -> None
     assert not comparison.failed and comparison.added == []
 
 
+def test_a_split_test_moves_only_when_each_of_its_parameters_is_in_each_test_it_became() -> None:
+    comparison = differences(
+        _one_suite("tests/a.py::test_whole[p1]", "tests/a.py::test_whole[p2]"),
+        _one_suite(
+            "tests/a.py::test_first[p1]",
+            "tests/a.py::test_second[p1]",
+            "tests/a.py::test_first[p2]",
+        ),
+        [Move("tests/a.py::test_whole", ("tests/a.py::test_first", "tests/a.py::test_second"))],
+    )
+    assert comparison.dropped == ["dropped from default: tests/a.py::test_whole[p2]"]
+    assert comparison.added == ["added to default: tests/a.py::test_first[p2]"]
+    assert comparison.failed
+
+
+def test_a_test_split_into_parametrized_tests_moves_to_each_of_their_parameters() -> None:
+    comparison = differences(
+        _one_suite("tests/c.py::test_doc"),
+        _one_suite("tests/c.py::test_a[x]", "tests/c.py::test_a[y]", "tests/c.py::test_b[z]"),
+        [Move("tests/c.py::test_doc", ("tests/c.py::test_a", "tests/c.py::test_b"))],
+    )
+    assert (comparison.dropped, comparison.added, comparison.unmatched) == ([], [], [])
+    assert comparison.counts[0] == (
+        "default: 1 at the base, 3 on the branch; 0 kept, 1 moved, 0 dropped, 0 added."
+    )
+
+
 def test_two_tests_that_become_one_parametrized_test_each_move() -> None:
     comparison = differences(
         _one_suite("tests/a.py::test_x", "tests/b.py::test_x"),
@@ -223,16 +252,16 @@ def test_two_tests_that_become_one_parametrized_test_each_move() -> None:
 
 def test_each_name_the_map_gives_that_isn_t_there_fails_the_comparison() -> None:
     comparison = differences(
-        _one_suite("tests/a.py::test_split"),
-        _one_suite("tests/a.py::test_first"),
+        _one_suite("tests/a.py::test_x"),
+        _one_suite("tests/b.py::test_x"),
         [
-            Move("tests/a.py::test_split", ("tests/a.py::test_first", "tests/a.py::test_second")),
-            Move("tests/a.py::test_never", ("tests/a.py::test_first",)),
+            Move("tests/a.py", ("tests/b.py", "tests/c.py")),
+            Move("tests/a.py::test_never", ("tests/b.py::test_x",)),
         ],
     )
     assert comparison.dropped == []
     assert comparison.unmatched == [
-        "the map's tests/a.py::test_second isn't on the branch",
+        "the map's tests/c.py isn't on the branch",
         "the map's tests/a.py::test_never isn't at the base",
     ]
     assert comparison.failed
@@ -300,6 +329,24 @@ def test_a_text_without_the_section_fails_the_map() -> None:
 
 def test_the_plan_s_map_reads() -> None:
     moves_of(MAP.read_text(encoding="utf-8"), "TS-T01")
+
+
+def test_the_listing_writes_a_new_inventory_that_reads_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    listed = _one_suite("tests/a.py::test_x", "tests/a.py::test_y")
+    monkeypatch.setattr("tests.support.inventory.inventory", lambda: listed)
+    out = tmp_path / "inventory.json"
+    assert main(["list", str(out)]) == 0
+    assert read(out) == listed
+    assert capsys.readouterr().out == (
+        f"Listed 2 default, 0 packaging, 0 reference, 0 live tests into {out}.\n"
+    )
+    written = out.read_bytes()
+    monkeypatch.setattr("tests.support.inventory.inventory", lambda: _one_suite("tests/a.py::t"))
+    assert main(["list", str(out)]) == 2
+    assert capsys.readouterr().err.startswith("Can't list the tests: ")
+    assert out.read_bytes() == written
 
 
 def _written(path: Path, found: Inventory) -> Path:

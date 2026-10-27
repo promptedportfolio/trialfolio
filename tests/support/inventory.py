@@ -22,9 +22,13 @@ The map is the task's rows of the table in docs/test-refactoring.md's "Where the
 columns are Task, Had, and Has. Had gives one name in backticks, and Has the one or more it became,
 each in backticks. A name is a test's ID, or the start of one, up to a `::` or a `[`: a module, such
 as `tests/core/test_report.py`, stands for every test in it, and a test's name for each of its
-parameters. A test that the most specific of the task's rows covers is moved when the branch
-collects it under any name the row gives, with the rest of its ID kept, so a separated module's row
-gives each module its tests went to. Without `<task>`, nothing is moved.
+parameters. The most specific of the task's rows that covers a test moves it, and each name the row
+gives, with the rest of the test's ID kept, stands for what the test became, each of its parameters
+included. A test in a module or a class the row names is moved when the branch collects it under
+any of those names, so a separated module's row gives each module its tests went to. A test the row
+names itself, with or without its parameters, is moved only when the branch collects it under every
+one, so a test split in two keeps each of its parameters in both. Without `<task>`, nothing is
+moved.
 
 For a task, list the tests on its base and on its branch, each in a worktree of its own, synced
 with `uv sync`, then compare them from the branch:
@@ -188,6 +192,18 @@ def _move_of(test_id: str, moves: Sequence[Move]) -> Move | None:
     return max(covering, key=lambda move: len(move.had), default=None)
 
 
+def _became(test_id: str, move: Move, branch: Sequence[str]) -> list[str]:
+    """The IDs of `branch` that `test_id` became under `move`, or none when it didn't move. Each
+    name the move gives, with the rest of `test_id` kept, covers the IDs it became. A test in a
+    module or a class the move names became any of them, and a test the move names itself, with
+    or without its parameters, every one."""
+    rest = test_id[len(move.had) :]
+    each = [[new for new in branch if covers(name + rest, new)] for name in move.has]
+    if not rest.startswith("::") and not all(each):
+        return []
+    return [new for ids in each for new in ids]
+
+
 @dataclass
 class Comparison:
     """What `compare` lists, and its counts, suite by suite."""
@@ -217,10 +233,9 @@ def differences(before: Inventory, after: Inventory, moves: Sequence[Move] = ())
         became: set[str] = set()
         for test_id in base:
             move = _move_of(test_id, moves)
-            names = [name + test_id[len(move.had) :] for name in move.has] if move else []
             if test_id in branch:
                 kept += 1
-            elif found := [name for name in names if name in branch]:
+            elif move and (found := _became(test_id, move, after[suite])):
                 moved += 1
                 became.update(found)
             else:
