@@ -381,11 +381,11 @@ def test_a_run_whose_tests_import_another_checkout_s_module_is_refused(sample: S
         ),
         (
             MutationList(tests=["tests/test_core.py::test_elsewhere"], mutation=[_UNUSED]),
-            "no test passes unchanged",
+            "(?s)no test passes unchanged.*runs elsewhere",
         ),
         (
             MutationList(tests=["tests/test_core.py"], marker="data", mutation=[_UNUSED]),
-            "1 of the tests skip unchanged, and a list with a marker",
+            "(?s)1 of the tests skip unchanged, and a list with a marker.*no data",
         ),
     ],
     ids=[

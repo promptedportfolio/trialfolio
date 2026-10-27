@@ -226,6 +226,16 @@ def test_a_split_test_moves_only_when_each_of_its_parameters_is_in_each_test_it_
     assert comparison.failed
 
 
+def test_a_test_split_in_two_without_one_of_them_on_the_branch_is_dropped() -> None:
+    comparison = differences(
+        _one_suite("tests/a.py::test_split"),
+        _one_suite("tests/a.py::test_first"),
+        [Move("tests/a.py::test_split", ("tests/a.py::test_first", "tests/a.py::test_second"))],
+    )
+    assert comparison.dropped == ["dropped from default: tests/a.py::test_split"]
+    assert comparison.unmatched == ["the map's tests/a.py::test_second isn't on the branch"]
+
+
 def test_a_test_split_into_parametrized_tests_moves_to_each_of_their_parameters() -> None:
     comparison = differences(
         _one_suite("tests/c.py::test_doc"),
