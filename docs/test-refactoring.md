@@ -1,6 +1,6 @@
 # Readability refactor of the tests
 
-**Status:** Ready. The owner decided each of its [open questions](#open-questions) on 2026-10-27, confirmed the corrections the review of its pull request made, and set it to Ready the same day, once that review had ended. TS-T01 wrote the check of the tests on 2026-10-27: the inventory and the mutations, with their tests ([what TS-T01 settled](#what-ts-t01-settled)). TS-T02 is next.
+**Status:** Ready. The owner decided each of its [open questions](#open-questions) on 2026-10-27, confirmed the corrections the review of its pull request made, and set it to Ready the same day, once that review had ended. TS-T01 wrote the check of the tests on 2026-10-27: the inventory and the mutations, with their tests ([what TS-T01 settled](#what-ts-t01-settled)). The owner confirmed the details it settled on 2026-10-28, with what the review of its pull request changed in details 2, 7, 8, and 10, and added as detail 11. TS-T02 is next.
 **Decided by:** [D-46](spec.md#decisions), from the [readability refactor](refactoring.md)'s decisions 8 (2026-10-13) and 20 (2026-10-26), and on 2026-10-27
 **Depends on:** the code on `main` at f02e5d4, the merge of RF-T11 (#122), the readability refactor's last task, against which the findings below were checked.
 
@@ -285,7 +285,7 @@ No test has moved yet.
 
 ## What TS-T01 settled
 
-**Details from TS-T01 (2026-10-27), awaiting the owner's confirmation.** TS-T01 writes the [check of the tests](#the-check-of-the-tests), as its row gives. It covers no finding, and changes no test module but its own two. Each item is a detail this file left open:
+**Details from TS-T01 (2026-10-27), confirmed by the owner on 2026-10-28, with what the review of its pull request changed in details 2, 7, 8, and 10, and added as detail 11.** TS-T01 writes the [check of the tests](#the-check-of-the-tests), as its row gives. It covers no finding, and changes no test module but its own two. Each item is a detail this file left open:
 
 1. **Two modules, one for each half.** The inventory is `tests/support/inventory.py`, and the mutations `tests/support/mutations.py`, each run with `uv run python -m`, as the check of the reports is. The mutations import the inventory's collection and its rule of names. The alternative was one module with four commands, which would hold two tools that read different inputs.
 2. **Their tests, beside the network guard's.** `tests/test_inventory.py` and `tests/test_mutations.py` are at the top of `tests/`, beside `tests/test_network_guard.py`, which tests the suite's other tool that runs pytest itself. They run the check over small projects in temporary directories, not over this repository's tests, so the default suite collects 83 more tests, which take about 6 seconds. The alternative was `tests/interface/`, beside the check of the reports' tests, whose modules run Trial Folio's CLI.
