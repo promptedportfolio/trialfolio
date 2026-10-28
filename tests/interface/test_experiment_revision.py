@@ -21,7 +21,6 @@ Folio for a first run, and the terminal is a real pseudo-terminal in the test pr
 
 import sys
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -117,10 +116,10 @@ def test_a_revision_without_its_reason_and_its_hash_fails_and_writes_nothing(
     assert len(cli.server.received) == received
     summary = outcome.summary
     assert summary["output_dir"] is None
-    assert cast("dict[str, str]", summary["ids"])["plan_hash"] == revised
+    assert outcome.ids["plan_hash"] == revised
     # The cases the revision would hold: the new holdings-50 case not yet run, and the old one
     # counted as retired.
-    cases = cast("list[dict[str, object]]", summary["cases"])
+    cases = outcome.cases
     assert [case["outcome"] for case in cases] == [
         "succeeded",
         "succeeded",
@@ -128,7 +127,7 @@ def test_a_revision_without_its_reason_and_its_hash_fails_and_writes_nothing(
         "succeeded",
         "succeeded",
     ]
-    counts = cast("dict[str, int]", summary["counts"])
+    counts = outcome.counts
     assert (counts["cases_retired"], counts["attempts"]) == (1, 5)
 
 
@@ -171,9 +170,8 @@ def test_an_approved_revision_sends_only_its_new_case_and_keeps_the_retired_one(
     assert (retired.description, retired.variant) == (old.description, old.variant)
     counts = session_manifest(out, 2, ExperimentManifest).counts
     assert (counts.retired_cases, counts.attempts.succeeded, counts.cases.succeeded) == (1, 6, 5)
-    summary = outcome.summary
-    assert cast("dict[str, int]", summary["counts"])["cases_retired"] == 1
-    assert summary["output_dir"] == str(out)
+    assert outcome.counts["cases_retired"] == 1
+    assert outcome.summary["output_dir"] == str(out)
 
 
 @pytest.mark.parametrize(

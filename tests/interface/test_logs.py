@@ -51,7 +51,6 @@ import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -620,10 +619,10 @@ def test_a_screen_run_with_a_definition_logs_no_canary_and_names_its_rank_update
     # The rank_update's event names the operation, the case, and the attempt.
     events = lines(experiment_log(out))
     (started,) = (event for event in events if event["event"] == RANK_UPDATE_STARTED)
-    summary = cast("dict[str, dict[str, str]]", outcome.summary)
-    assert started["case_id"] == summary["ids"]["case_id"]
-    assert started["attempt_id"] == summary["ids"]["attempt_id"]
-    assert started["plan_hash"] == summary["ids"]["plan_hash"]
+    ids = outcome.ids
+    assert started["case_id"] == ids["case_id"]
+    assert started["attempt_id"] == ids["attempt_id"]
+    assert started["plan_hash"] == ids["plan_hash"]
     assert "rank_update" in str(started["message"])
 
 

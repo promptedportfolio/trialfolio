@@ -83,9 +83,8 @@ def claimed(outcome: Outcome, out: Path) -> None:
     log's events carry, and the directory as given."""
     summary = outcome.summary
     assert summary["output_dir"] == str(out)
-    ids = summary["ids"]
-    assert isinstance(ids, dict)
-    assert list(ids) == ["review_id"]  # pyright: ignore[reportUnknownArgumentType]
+    ids = outcome.ids
+    assert list(ids) == ["review_id"]
     log = (out / "logs" / "trialfolio.log").read_text(encoding="utf-8")
     events = [json.loads(line) for line in log.splitlines()]
     assert events[-1]["event"] == "cli.command.completed"
@@ -151,9 +150,8 @@ def test_an_interrupt_before_the_command_records_the_claim_still_names_the_revie
     # The summary still names the directory the review claimed, with its review_id.
     summary = outcome.summary
     assert summary["output_dir"] == str(out)
-    ids = summary["ids"]
-    assert isinstance(ids, dict)
-    assert list(ids) == ["review_id"]  # pyright: ignore[reportUnknownArgumentType]
+    ids = outcome.ids
+    assert list(ids) == ["review_id"]
 
 
 @pytest.mark.parametrize("published", [False, True], ids=["report", "published-manifest"])

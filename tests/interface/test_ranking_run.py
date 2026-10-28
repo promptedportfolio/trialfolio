@@ -25,7 +25,6 @@ import json
 import shutil
 import sys
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -242,7 +241,7 @@ def test_an_approved_run_writes_the_definition_then_backtests_and_counts_both(cl
     assert (manifest.outcome, manifest.synthetic) == ("completed", False)
     summary = outcome.summary
     assert summary["outcome"] == "completed"
-    ids = cast("dict[str, str]", summary["ids"])
+    ids = outcome.ids
     assert (ids["plan_hash"], ids["case_id"]) == (plan.plan_hash, plan.cases[0].case_id)
     assert "attempt_id" in ids
     assert summary["outputs"] == {

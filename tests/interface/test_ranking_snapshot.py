@@ -21,7 +21,6 @@ plan through `trialfolio run` are in `tests/interface/test_ranking_run.py` and
 import json
 import sys
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -308,7 +307,7 @@ def test_a_snapshots_json_summary_gives_a_runs_keys(cli: Cli) -> None:
     assert summary["output_dir"] == str(out)
     assert summary["outputs"] == {"manifest": "manifest.json"}
     assert "cases" not in summary
-    counts = cast("dict[str, object]", summary["counts"])
+    counts = outcome.counts
     assert {
         key: counts[key] for key in ("attempts", "provider_requests", "metrics_unavailable", "cost")
     } == {

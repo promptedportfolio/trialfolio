@@ -175,14 +175,14 @@ def test_a_run_that_succeeds(cli: Cli) -> None:
     serve_success(cli.server)
     out = cli.tmp / "out"
 
-    summary = summary_of(approved(cli, out), "run")
+    outcome = approved(cli, out)
+    summary = summary_of(outcome, "run")
 
     assert summary["outcome"] == "completed"
     assert summary["error"] is None
     assert summary["output_dir"] == str(out)
-    ids = summary["ids"]
-    assert isinstance(ids, dict)
-    assert set(ids) == {"plan_hash", "case_id", "attempt_id"}  # pyright: ignore[reportUnknownArgumentType]
+    ids = outcome.ids
+    assert set(ids) == {"plan_hash", "case_id", "attempt_id"}
     assert ids["plan_hash"] == plan_hash_for(screen_config("formula.yaml"))
     assert summary["outputs"] == {
         "manifest": "manifest.json",
@@ -208,9 +208,8 @@ def test_a_run_without_approval_gives_the_plan_hash_and_creates_nothing(cli: Cli
 
     assert outcome.exit_code == 2
     assert outcome.error_code == "plan.approval_required"
-    ids = summary["ids"]
-    assert isinstance(ids, dict)
-    assert set(ids) == {"plan_hash", "case_id"}  # pyright: ignore[reportUnknownArgumentType]
+    ids = outcome.ids
+    assert set(ids) == {"plan_hash", "case_id"}
     assert ids["plan_hash"] == plan_hash_for(screen_config("formula.yaml"))
     assert str(ids["case_id"]).startswith("case-")
     assert summary["output_dir"] is None
@@ -260,9 +259,8 @@ def test_missing_credentials(cli: Cli) -> None:
 
     assert outcome.exit_code == 5
     assert outcome.error_code == "provider.auth_failed"
-    ids = summary["ids"]
-    assert isinstance(ids, dict)
-    assert set(ids) == {"plan_hash", "case_id"}  # pyright: ignore[reportUnknownArgumentType]
+    ids = outcome.ids
+    assert set(ids) == {"plan_hash", "case_id"}
     assert summary["output_dir"] is None
     assert not out.exists()
     assert cli.server.requests() == []
@@ -278,12 +276,10 @@ def test_a_failed_authentication_names_its_attempt(cli: Cli) -> None:
 
     assert outcome.exit_code == 5
     assert outcome.error_code == "provider.auth_failed"
-    ids = summary["ids"]
-    assert isinstance(ids, dict)
-    assert set(ids) == {"plan_hash", "case_id", "attempt_id"}  # pyright: ignore[reportUnknownArgumentType]
+    ids = outcome.ids
+    assert set(ids) == {"plan_hash", "case_id", "attempt_id"}
     assert summary["output_dir"] == str(out)
-    outputs = summary["outputs"]
-    assert isinstance(outputs, dict)
+    outputs = outcome.outputs
     assert "metrics" not in outputs
     assert "settings" not in outputs
     assert outcome.counts["attempts"] == 1
@@ -328,9 +324,8 @@ def test_demo(cli: Cli) -> None:
 
     assert summary["outcome"] == "completed"
     assert summary["output_dir"] == str(out)
-    ids = summary["ids"]
-    assert isinstance(ids, dict)
-    assert set(ids) == {"plan_hash", "case_id", "attempt_id"}  # pyright: ignore[reportUnknownArgumentType]
+    ids = outcome.ids
+    assert set(ids) == {"plan_hash", "case_id", "attempt_id"}
     assert set(outcome.outputs) == {"manifest", "report", "metrics", "settings"}
     assert outcome.counts["cost"] is None
     assert cli.server.requests() == []
@@ -565,9 +560,8 @@ def test_a_review_that_fails_after_the_claim(
 
     assert outcome.error_code == code
     assert summary["output_dir"] == str(out)
-    ids = summary["ids"]
-    assert isinstance(ids, dict)
-    assert set(ids) == {"review_id"}  # pyright: ignore[reportUnknownArgumentType]
+    ids = outcome.ids
+    assert set(ids) == {"review_id"}
     assert summary["outputs"] == {"differences": "normalized/differences.csv"}
     assert not (out / "manifest.json").exists()
 
@@ -675,13 +669,12 @@ def test_a_configuration_path_that_isnt_utf8_text_is_escaped_in_the_error(cli: C
     cli.accept_license()
 
     outcome = cli("run", cli.tmp / f"missing-{NOT_UTF8}.yaml", "--out", cli.tmp / "out", "--json")
-    summary = summary_of(outcome, "run")
+    summary_of(outcome, "run")
 
     assert outcome.exit_code == 3
-    error = summary["error"]
-    assert isinstance(error, dict)
+    error = outcome.error
     assert error["code"] == "input.not_found"
-    assert f"missing-{ESCAPED}.yaml" in error["message"]  # pyright: ignore[reportOperatorIssue]
+    assert f"missing-{ESCAPED}.yaml" in error["message"]
     assert not (cli.tmp / "out").exists()
 
 
@@ -689,13 +682,12 @@ def test_a_run_directory_path_that_isnt_utf8_text_is_escaped_in_the_error(cli: C
     cli.accept_license()
 
     outcome = cli("report", cli.tmp / f"run-{NOT_UTF8}", "--out", cli.tmp / "report", "--json")
-    summary = summary_of(outcome, "report")
+    summary_of(outcome, "report")
 
     assert outcome.exit_code == 3
-    error = summary["error"]
-    assert isinstance(error, dict)
+    error = outcome.error
     assert error["code"] == "input.not_found"
-    assert f"run-{ESCAPED}" in error["message"]  # pyright: ignore[reportOperatorIssue]
+    assert f"run-{ESCAPED}" in error["message"]
     assert not (cli.tmp / "report").exists()
 
 
@@ -922,18 +914,19 @@ def test_an_experiment_that_completes(cli: Cli, experiments: ExperimentBuilder[O
     cli.ready()
     out = cli.tmp / "experiment"
 
-    summary = experiment_summary_of(
-        experiments.run(EXAMPLE, out, sends=[returns("missing-metrics.json"), *[returns()] * 4])
+    outcome = experiments.run(
+        EXAMPLE, out, sends=[returns("missing-metrics.json"), *[returns()] * 4]
     )
+    summary = experiment_summary_of(outcome)
 
     assert summary["outcome"] == "completed"
     assert summary["output_dir"] == str(out)
     assert all(outcome == "succeeded" for _, outcome in case_outcomes(summary))
     assert_recorded(summary, EXAMPLE, out)
-    counts = cast("dict[str, int]", summary["counts"])
+    counts = outcome.counts
     assert (counts["cases_succeeded"], counts["attempts"], counts["provider_requests"]) == (5, 5, 5)
     assert counts["authentication_calls"] == 1
-    assert counts["metrics_unavailable"] > 0
+    assert (counts["metrics_unavailable"] or 0) > 0
 
 
 def test_an_experiment_with_a_failed_case_ends_partial_and_gives_its_repeat(
@@ -973,7 +966,7 @@ def test_an_experiment_without_approval_or_credentials(
     ):
         summary = experiment_summary_of(ran)
         assert ran.error_code == code
-        assert set(cast("dict[str, str]", summary["ids"])) == {"experiment_id", "plan_hash"}
+        assert set(ran.ids) == {"experiment_id", "plan_hash"}
         assert summary["output_dir"] is None
         assert all(outcome == "not_yet_run" for _, outcome in case_outcomes(summary))
         # Every case of the plan the core builds, in its order, with its case_id.
@@ -1027,7 +1020,7 @@ def test_a_resume_that_stops_before_its_session_gives_the_records_counts_and_rep
 
     assert outcome.error_code == "plan.approval_required"
     assert summary["output_dir"] is None
-    counts = cast("dict[str, int | None]", summary["counts"])
+    counts = outcome.counts
     recorded = ExperimentManifest.model_validate_json(
         (out / "sessions/2/manifest.json").read_bytes()
     )
@@ -1081,13 +1074,13 @@ def test_an_experiment_whose_revision_isnt_approved_gives_the_revisions_cases(
     summary = experiment_summary_of(outcome)
 
     assert outcome.error_code == "plan.changed"
-    assert cast("dict[str, str]", summary["ids"])["plan_hash"] == plan_hash(changed, out)
+    assert outcome.ids["plan_hash"] == plan_hash(changed, out)
     assert summary["output_dir"] is None
     assert snapshot(out) == before
     # The revision's cases: its kept cases with their outcomes, and its new one not yet run.
     assert_recorded(summary, changed, out)
     assert ("holdings-50", "not_yet_run") in case_outcomes(summary)
-    counts = cast("dict[str, int]", summary["counts"])
+    counts = outcome.counts
     assert (counts["cases_retired"], counts["cases_succeeded"], counts["attempts"]) == (1, 4, 5)
 
 
@@ -1165,9 +1158,9 @@ def test_an_experiment_that_stops_without_its_manifest(
 
     assert outcome.error_code == code
     assert summary["output_dir"] == str(out)
-    assert cast("dict[str, int]", summary["ids"])["session"] == 1
+    assert outcome.ids["session"] == 1
     assert summary["outputs"] == {}
-    counts = cast("dict[str, int]", summary["counts"])
+    counts = outcome.counts
     on_disk = len(list(out.glob("cases/*/attempts/*/started.json")))
     assert (counts["attempts"], counts["provider_requests"]) == (on_disk, on_disk)
 
@@ -1208,7 +1201,7 @@ def test_a_metrics_table_written_without_its_settings_table_is_counted(
 
     assert outcome.error_code == code
     assert list(out.glob("cases/*/normalized/settings.csv")) == []
-    counts = cast("dict[str, int]", summary["counts"])
+    counts = outcome.counts
     assert counts["metrics_unavailable"] == unavailable_rows(out, summary) > 0
 
 
@@ -1241,18 +1234,16 @@ def test_an_attempt_record_published_before_its_write_failed_is_read_as_written(
         "succeeded",
         None,
     )
-    counts = cast("dict[str, int | None]", summary["counts"])
+    counts = outcome.counts
     assert (counts["cases_succeeded"], counts["cases_unknown"], counts["cost"]) == (
         1,
         0,
         record.provider_metadata.cost,
     )
     # A resume reads the records the same way.
-    resumed = experiment_summary_of(experiments.run(EXAMPLE, out, approve=False))
-    assert resumed["cases"] == summary["cases"]
-    assert without_warnings(cast("dict[str, int | None]", resumed["counts"])) == without_warnings(
-        counts
-    )
+    resumed = experiments.run(EXAMPLE, out, approve=False)
+    assert experiment_summary_of(resumed)["cases"] == summary["cases"]
+    assert without_warnings(resumed.counts) == without_warnings(counts)
 
 
 def test_an_attempt_record_a_resume_published_before_its_write_failed_is_counted(
@@ -1277,13 +1268,11 @@ def test_an_attempt_record_a_resume_published_before_its_write_failed_is_counted
 
     assert outcome.error_code == "storage.write_failed"
     assert [path for path in resume.published if path.endswith("/attempt.json")] != []
-    counts = cast("dict[str, int | None]", summary["counts"])
+    counts = outcome.counts
     assert counts["cost"] is not None
-    records = experiment_summary_of(experiments.run(EXAMPLE, out, approve=False))
-    assert summary["cases"] == records["cases"]
-    assert without_warnings(counts) == without_warnings(
-        cast("dict[str, int | None]", records["counts"])
-    )
+    records = experiments.run(EXAMPLE, out, approve=False)
+    assert summary["cases"] == experiment_summary_of(records)["cases"]
+    assert without_warnings(counts) == without_warnings(records.counts)
 
 
 class RefusingLock(LocalArtifactStore):
@@ -1360,7 +1349,7 @@ def test_a_new_experiment_whose_claim_fails_gives_no_output_directory_and_its_co
     assert outcome.error_code == "storage.write_failed"
     assert summary["output_dir"] is None
     assert_recorded(summary, EXAMPLE, out)
-    counts = cast("dict[str, int | None]", summary["counts"])
+    counts = outcome.counts
     assert (counts["attempts"], counts["provider_requests"], counts["cost"]) == (0, 0, None)
     assert cli.server.requests() == []
 
@@ -1408,7 +1397,7 @@ def test_an_experiment_that_a_provider_failure_leaves_partial_or_stops(
     assert (summary["outcome"], summary["exit_code"]) == ("partial", 6)
     assert outcome.error_code == "execution.partial"
     assert summary["output_dir"] == str(out)
-    assert cast("dict[str, int]", summary["ids"])["session"] == 1
+    assert outcome.ids["session"] == 1
     assert [outcome for _, outcome in case_outcomes(summary)] == outcomes
     assert_recorded(summary, EXAMPLE, out)
 
@@ -1425,15 +1414,14 @@ def test_an_approved_revision_gives_its_plan_hash_and_its_cases(
     changed = experiment_config("revisions/holdings-40.yaml")
     revised = plan_hash(changed, out)
 
-    summary = experiment_summary_of(
-        experiments.run(changed, out, "--revision-reason", REVISION_REASON, sends=[returns()])
-    )
+    outcome = experiments.run(changed, out, "--revision-reason", REVISION_REASON, sends=[returns()])
+    summary = experiment_summary_of(outcome)
 
     assert summary["outcome"] == "completed"
-    ids = cast("dict[str, object]", summary["ids"])
+    ids = outcome.ids
     assert (ids["plan_hash"], ids["session"]) == (revised, 2)
     assert_recorded(summary, changed, out)
-    counts = cast("dict[str, int]", summary["counts"])
+    counts = outcome.counts
     assert (counts["cases_retired"], counts["attempts"]) == (1, 6)
 
 
@@ -1502,7 +1490,7 @@ def assert_refused_before_the_session(
     summary = experiment_summary_of(outcome)
     assert outcome.error_code == "plan.approval_required"
     assert summary["output_dir"] is None
-    assert set(cast("dict[str, object]", summary["ids"])) == {"experiment_id", "plan_hash"}
+    assert set(outcome.ids) == {"experiment_id", "plan_hash"}
     assert_recorded(summary, EXAMPLE, out)
     recorded = ExperimentManifest.model_validate_json(
         (out / "sessions/1/manifest.json").read_bytes()
@@ -1580,7 +1568,7 @@ def test_a_repeat_with_a_new_experiment_or_a_screen_gives_its_summary(cli: Cli) 
         assert summary["output_dir"] is None
     assert_recorded(experiment, EXAMPLE, new)
     assert experiment_run.counts["attempts"] == 0
-    assert set(cast("dict[str, str]", run["ids"])) == {"plan_hash", "case_id"}
+    assert set(screen_run.ids) == {"plan_hash", "case_id"}
     assert not new.exists()
     assert not screen.exists()
 
@@ -1594,20 +1582,19 @@ def test_a_confirmed_repeat_and_then_its_used_confirmation_give_the_records_case
     out, first = first_run(cli, experiments, "unknown")
     option = f"holdings-50:{attempt_of(out, first, 'holdings-50')}"
 
-    repeated = experiment_summary_of(
-        experiments.run(EXAMPLE, out, "--repeat", option, sends=[returns()])
-    )
+    repeated = experiments.run(EXAMPLE, out, "--repeat", option, sends=[returns()])
     received = len(cli.server.received)
-    again = experiment_summary_of(experiments.run(EXAMPLE, out, "--repeat", option))
+    again = experiments.run(EXAMPLE, out, "--repeat", option)
     # A key alone for a complete case resumes the rest.
-    alone = experiment_summary_of(experiments.run(EXAMPLE, out, "--repeat", "baseline"))
+    alone = experiments.run(EXAMPLE, out, "--repeat", "baseline")
 
     assert len(cli.server.received) == received
-    for summary, session in ((repeated, 2), (again, 3), (alone, 4)):
+    for ran, session in ((repeated, 2), (again, 3), (alone, 4)):
+        summary = experiment_summary_of(ran)
         assert summary["outcome"] == "completed"
-        assert cast("dict[str, int]", summary["ids"])["session"] == session
+        assert ran.ids["session"] == session
         assert_recorded(summary, EXAMPLE, out)
-        assert cast("dict[str, int]", summary["counts"])["repeats"] == 1
+        assert ran.counts["repeats"] == 1
 
 
 def test_a_repeat_whose_authentication_fails_keeps_its_confirmation_in_the_summary(
@@ -1616,12 +1603,13 @@ def test_a_repeat_whose_authentication_fails_keeps_its_confirmation_in_the_summa
     out, first = first_run(cli, experiments, "unknown")
     attempt = attempt_of(out, first, "holdings-50")
 
-    summary = experiment_summary_of(
-        experiments.run(EXAMPLE, out, "--repeat", f"holdings-50:{attempt}", authenticates=[REFUSED])
+    outcome = experiments.run(
+        EXAMPLE, out, "--repeat", f"holdings-50:{attempt}", authenticates=[REFUSED]
     )
+    summary = experiment_summary_of(outcome)
 
     assert (summary["outcome"], summary["exit_code"]) == ("partial", 6)
-    assert cast("dict[str, int]", summary["ids"])["session"] == 2
+    assert outcome.ids["session"] == 2
     assert_recorded(summary, EXAMPLE, out)
     # The repeat sent nothing, so the same attempt still confirms it.
     holdings = cast("list[dict[str, str | None]]", summary["cases"])[2]
@@ -1653,7 +1641,7 @@ def test_a_repeat_interrupted_during_its_send_gives_its_own_attempt_to_confirm(
     assert interrupted.error_code == "command.interrupted"
     # From the resume's session record.
     assert summary["output_dir"] == str(out)
-    assert cast("dict[str, int]", summary["ids"])["session"] == 2
+    assert interrupted.ids["session"] == 2
     assert summary["outputs"] == {}
     assert_recorded(summary, EXAMPLE, out)
     holdings = cast("list[dict[str, str | None]]", summary["cases"])[2]
@@ -1732,9 +1720,9 @@ def test_an_experiment_that_stops_gives_its_output_directory_once_it_writes_ther
     summary = experiment_summary_of(outcome)
 
     assert outcome.error_code == code
-    outputs = cast("dict[str, str]", summary["outputs"])
+    outputs = outcome.outputs
     assert "manifest" not in outputs
-    ids = cast("dict[str, int]", summary["ids"])
+    ids = outcome.ids
     # A new experiment's, from its claim; a resume's, from its session record.
     if kind == "new" or session:
         assert summary["output_dir"] == str(out)
@@ -1776,9 +1764,9 @@ def test_a_session_record_published_before_its_write_failed_reserves_its_session
 
     assert outcome.error_code == code
     assert (out / f"sessions/{session}/session.json").is_file()
-    assert cast("dict[str, int]", summary["ids"])["session"] == session
+    assert outcome.ids["session"] == session
     assert summary["output_dir"] == str(out)
-    assert "manifest" not in cast("dict[str, str]", summary["outputs"])
+    assert "manifest" not in outcome.outputs
     assert_recorded(summary, EXAMPLE, out)
 
 
@@ -1794,7 +1782,7 @@ def test_a_manifest_whose_write_fails_once_published_isnt_among_the_outputs(
 
     assert outcome.error_code == "storage.write_failed"
     assert summary["output_dir"] == str(out)
-    assert cast("dict[str, int]", summary["ids"])["session"] == 1
+    assert outcome.ids["session"] == 1
     # The store discarded the manifest it had published, and the report stays.
     assert summary["outputs"] == {"report": "sessions/1/report.html"}
     assert not (out / "sessions/1/manifest.json").exists()
