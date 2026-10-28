@@ -1,8 +1,10 @@
 """A resume with a ranking definition, in the core: the records check of attempts that send a
 definition, and of a plan's `definition.xml`, in a resume and in a complete run, which
 `trialfolio report` reads; the attempt record a resume writes for an attempt stopped after its
-update record, or after `started.json`; the budget across runs with both of a case's requests; a
-repeat that sends both again; the revisions with a definition; and the ranking lock in a resume.
+update record, or after `started.json`, and its message for each place an attempt stops; a case's
+`settings.csv` 1.1.0, which isn't written without its weight rows' originals; the budget across
+runs with both of a case's requests; a repeat that sends both again; the revisions with a
+definition; and the ranking lock in a resume.
 
 Traces to docs/contracts.md, sending a definition (an attempt stopped after its update record,
 and counting the requests), running an experiment (a resumed experiment, step 7's ranking lock,
@@ -32,7 +34,7 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -62,6 +64,7 @@ from trialfolio.experiment_execution import (
     Repeat,
 )
 from trialfolio.experiment_records import SavedExperiment, open_experiment, read_experiment
+from trialfolio.normalization import write_case_settings
 from trialfolio.planning import (
     build_experiment_plan_v1_1,
     build_plan_v1_1,
@@ -73,7 +76,7 @@ from trialfolio.provider import Credentials, P123ScreenBacktestClient, ScreenBac
 from trialfolio.ranking_lock import LOCK_FILE, RankingLock
 from trialfolio.report import HtmlReportRenderer
 from trialfolio.runs import check_run, read_run
-from trialfolio.storage import ArtifactStore, LocalArtifactStore
+from trialfolio.storage import ArtifactStore, LocalArtifactStore, StoredFile
 from trialfolio.tables import read_settings_csv_v1_1, settings_csv_v1_1
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -556,6 +559,27 @@ def test_a_metrics_table_without_its_settings_table_is_completed_with_its_weight
     assert listed[f"cases/{baseline}/normalized/settings.csv"].schema_version == "1.1.0"
 
 
+def test_the_settings_table_of_a_case_ranked_by_a_definition_needs_its_weights_originals(
+    tmp_path: Path,
+) -> None:
+    """Without the originals of its weight rows, a case's `settings.csv` 1.1.0 isn't written: the
+    writer refuses before it reads the coverage from `metrics`, which here has none to read
+    (docs/test-refactoring.md, the missing tests' item 2)."""
+    with LocalArtifactStore(tmp_path / "experiment") as store:
+        store.claim("plan.json", b"{}\n")
+
+        with pytest.raises(ValueError, match="needs its weights' originals"):
+            write_case_settings(
+                store,
+                EXAMPLE.cases[0],
+                {},
+                configuration=StoredFile.of("plans/1/configuration.yaml", b"kind: experiment\n"),
+                metrics=(),
+            )
+
+        assert [path.name for path in store.root.iterdir()] == ["plan.json"]
+
+
 def test_an_attempt_with_only_its_authentication_record_is_failed_and_its_case_is_sent(
     lab: Lab,
 ) -> None:
@@ -577,6 +601,94 @@ def test_an_attempt_with_only_its_authentication_record_is_failed_and_its_case_i
     assert stopped.exchanges == (exchange(AUTH, None, "interrupted"),)
     assert stopped.ranking_update.request is None
     assert sent.outcome == "succeeded" and sent.repeat_of is None
+
+
+UPDATE: Final = (
+    "The rank_update request, which writes the case's ranking definition into ApiRankingSystem,"
+)
+NEVER: Final = (
+    "Trial Folio never retries it automatically: check the account's API credits on"
+    " Portfolio123's website before running the command again."
+)
+UPDATE_ONLY: Final = (
+    f"{UPDATE} reached Portfolio123, and may have been charged. The screen backtest request"
+    " wasn't sent."
+)
+
+STOPPED: Final = {
+    "while it authenticated": (
+        updated(),
+        (("rank-update-request.json", "unexpected"), ("attempt.json", "unexpected")),
+        (
+            "The run that started the attempt stopped while it authenticated, before its request was"
+            " sent. Neither the rank_update request nor the screen backtest request was sent."
+        ),
+    ),
+    "after its start record": (
+        updated(),
+        (("response.json", "os"), ("attempt.json", "unexpected")),
+        (
+            "The run that started the attempt stopped after its start record was written, before a"
+            f" response was saved. {UPDATE} succeeded. The screen backtest request may have been"
+            f" charged, and its outcome is unknown: no response was saved. {NEVER}"
+        ),
+    ),
+    "after its update record": (
+        updated(),
+        (("rank-update-response.json", "os"), ("attempt.json", "unexpected")),
+        (
+            "The run that started the attempt stopped after its update record was written, before"
+            f" the rank_update's response was saved. {UPDATE} may have been charged, and its outcome"
+            f" is unknown: no response was saved. The screen backtest request wasn't sent. {NEVER}"
+        ),
+    ),
+    "after its rank_update's response was saved": (
+        updated(),
+        (("request.json", "unexpected"), ("attempt.json", "unexpected")),
+        (
+            "The run that started the attempt stopped after the rank_update's response was saved,"
+            f" before the screen backtest request was sent. {UPDATE_ONLY}"
+        ),
+    ),
+    "after that response was saved undecoded": (
+        Reply(200, b"<html>not JSON</html>"),
+        (("attempt.json", "unexpected"),),
+        (
+            "Portfolio123 answered the rank_update request with a 200 whose body couldn't be decoded"
+            " as JSON, so it was saved as it came, as rank-update-response.raw. Trial Folio sends the"
+            " case's screen backtest only after one whose response it could read, and the run that"
+            f" started the attempt stopped. {UPDATE_ONLY}"
+        ),
+    ),
+}
+"""Where the first case's attempt stopped, without its attempt record: the reply to its
+`rank_update`, the faults that stop it there, and the message of the attempt record the resume
+writes for it, in step 8, as written by hand."""
+
+
+@pytest.mark.parametrize("where", STOPPED)
+def test_the_attempt_record_a_resume_writes_says_where_its_run_stopped(
+    lab: Lab, where: str
+) -> None:
+    """Each message of an attempt record that step 8 writes (docs/test-refactoring.md, the missing
+    tests' item 5)."""
+    first_rank, faults, message = STOPPED[where]
+    script(
+        lab.server,
+        auths=2,
+        ranks=[first_rank, *(updated() for _ in range(3))],
+        backtests=[complete()] * 4,
+    )
+    lab.new(arm=first_case_faults(*faults))
+    baseline = EXAMPLE.cases[0].case_id
+    assert not (lab.directory(baseline) / "attempt.json").exists()
+
+    lab.resume()
+
+    stopped = lab.attempts(baseline)[0]
+    assert stopped.session == 1
+    assert stopped.error is not None
+    assert stopped.error.message == message
 
 
 def _stopped_after_update(lab: Lab) -> Path:

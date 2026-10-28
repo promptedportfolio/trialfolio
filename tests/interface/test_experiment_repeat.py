@@ -2,8 +2,9 @@
 `--repeat` names it and the possible repeat charge is confirmed, by typing `repeat` on a terminal,
 or with the attempt ID that names the case's latest possibly charged attempt; a confirmed repeat
 is one new attempt of the case, whose records name that attempt; once it may have reached
-Portfolio123, the same command, run again, doesn't repeat the case again; and a repeat that can't
-apply fails before anything is sent.
+Portfolio123, the same command, run again, doesn't repeat the case again; a repeat that can't
+apply fails before anything is sent; and in a resume with no case due, an option whose repeat is
+made sends it beside options that make none, each of which says why, in the options' order.
 
 Traces to R03-AC14's interface part (D-31), and to docs/contracts.md, repeating a case (the
 prompt, the usage errors, and what fails and what doesn't), running an experiment (the plan
@@ -231,6 +232,36 @@ def test_a_key_alone_for_a_complete_case_resumes_the_rest(cli: Cli, experiments:
     assert len(cli.server.received) == received
     assert "Case baseline isn't repeated: it's complete" in outcome.stderr
     assert (out / "sessions/2/manifest.json").is_file()
+
+
+def test_a_repeat_made_beside_options_that_make_none_is_sent_and_their_notes_keep_their_order(
+    cli: Cli, experiments: Builder
+) -> None:
+    """With no case due, one option whose repeat is made sends it, whatever the options beside it
+    that make none, and each of those says why, in the order the options are given, not the
+    plan's (docs/test-refactoring.md, the missing tests' item 3)."""
+    out, case_id, attempt = unknown_case(cli, experiments)
+    received = len(cli.server.received)
+
+    outcome = experiments.run(
+        EXAMPLE,
+        out,
+        "--repeat",
+        "slippage-050",
+        "--repeat",
+        f"{HOLDINGS}:{attempt}",
+        "--repeat",
+        "baseline",
+        sends=[returns()],
+    )
+
+    assert outcome.exit_code == 0, outcome.stderr
+    assert cli.server.requests()[received:] == ["POST /auth", "POST /screen/backtest"]
+    repeat = attempts_of(out, case_id)[-1]
+    assert (repeat.outcome, str(repeat.repeat_of)) == ("succeeded", attempt)
+    assert outcome.stderr.count("isn't repeated") == 2
+    later = outcome.stderr.index("Case slippage-050 isn't repeated: it's complete")
+    assert later < outcome.stderr.index("Case baseline isn't repeated: it's complete")
 
 
 def test_a_repeat_whose_authentication_fails_sends_nothing_and_its_confirmation_stays_unused(

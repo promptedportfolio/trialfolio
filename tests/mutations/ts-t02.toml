@@ -1,0 +1,178 @@
+# TS-T02's list of the check of the tests (docs/test-refactoring.md), which it ran on its base and
+# on its branch. TS-T02 adds the five missing tests, and changes no test that was there. Four
+# mutations, those without caught_by, are caught by a test that was there in each test module it
+# changes, at the base and on the branch. Each of the others shows what one of the new tests
+# checks: no test caught it at the base, and the tests caught_by names catch it on the branch.
+
+# The missing tests' item 1: a date that isn't a calendar date.
+
+[[mutation]]
+name = "a YAML date reads as the first day of its month"
+file = "src/trialfolio/strict_yaml.py"
+old = '''return date.fromisoformat(text)'''
+new = '''return date.fromisoformat(text).replace(day=1)'''
+tests = ["tests/contract/test_screen_configuration.py"]
+
+[[mutation]]
+name = "a date no calendar has is refused in other words"
+file = "src/trialfolio/strict_yaml.py"
+old = '''raise YamlRefused(path, "isn't a valid date.") from None'''
+new = '''raise YamlRefused(path, "isn't a date.") from None'''
+tests = ["tests/contract/test_screen_configuration.py"]
+caught_by = [
+    "tests/contract/test_screen_configuration.py::test_a_date_that_isnt_a_calendar_date_is_rejected",
+]
+
+[[mutation]]
+name = "a date no calendar has isn't refused as a configuration's problem"
+file = "src/trialfolio/strict_yaml.py"
+old = '''    except ValueError:
+        raise YamlRefused(path, "isn't a valid date.") from None'''
+new = '''    except TypeError:
+        raise YamlRefused(path, "isn't a valid date.") from None'''
+tests = ["tests/contract/test_screen_configuration.py"]
+caught_by = [
+    "tests/contract/test_screen_configuration.py::test_a_date_that_isnt_a_calendar_date_is_rejected",
+    "tests/contract/test_screen_configuration.py::test_invalid_configuration_is_rejected_naming_its_key[date-impossible]",
+]
+
+# The missing tests' item 2: a definition's settings without its weights' originals.
+
+[[mutation]]
+name = "a case ranked by a definition writes its settings without its weights' originals"
+file = "src/trialfolio/normalization/writer.py"
+old = '''        if originals.ranking is None:'''
+new = '''        if False:'''
+tests = ["tests/core/test_ranking_resume.py"]
+caught_by = [
+    "tests/core/test_ranking_resume.py::test_the_settings_table_of_a_case_ranked_by_a_definition_needs_its_weights_originals",
+]
+
+[[mutation]]
+name = "a case's settings read the coverage from its metrics before the check of the originals"
+file = "src/trialfolio/normalization/writer.py"
+old = '''coverage=lambda: _coverage_of(metrics),'''
+new = '''coverage=(lambda read: lambda: read)(_coverage_of(metrics)),'''
+tests = ["tests/core/test_ranking_resume.py"]
+caught_by = [
+    "tests/core/test_ranking_resume.py::test_the_settings_table_of_a_case_ranked_by_a_definition_needs_its_weights_originals",
+]
+
+# The missing tests' item 3: several repeats in a resume with nothing due.
+
+[[mutation]]
+name = "a used confirmation repeats its case again"
+file = "src/trialfolio/experiment_approval/repeats.py"
+old = '''if not confirmation_used(saved.attempts, attempt_id):'''
+new = '''if True:'''
+tests = ["tests/interface/test_experiment_repeat.py"]
+
+[[mutation]]
+name = "a resume's repeats are made only when every option makes one"
+file = "src/trialfolio/experiment_approval/repeats.py"
+old = '''any(check.made for check in checks),'''
+new = '''all(check.made for check in checks),'''
+tests = ["tests/interface/test_experiment_repeat.py"]
+caught_by = [
+    "tests/interface/test_experiment_repeat.py::test_a_repeat_made_beside_options_that_make_none_is_sent_and_their_notes_keep_their_order",
+]
+
+[[mutation]]
+name = "the notes of the options that make no repeat come in reverse order"
+file = "src/trialfolio/experiment_approval/repeats.py"
+old = '''tuple(note for check in checks for note in check.notes),'''
+new = '''tuple(note for check in reversed(checks) for note in check.notes),'''
+tests = ["tests/interface/test_experiment_repeat.py"]
+caught_by = [
+    "tests/interface/test_experiment_repeat.py::test_a_repeat_made_beside_options_that_make_none_is_sent_and_their_notes_keep_their_order",
+]
+
+# The missing tests' item 4: a failed ending after an invalid response.
+
+[[mutation]]
+name = "an ending before the attempt record doesn't say the output has no manifest"
+file = "src/trialfolio/single_attempt.py"
+old = '''return error.with_detail(detail)'''
+new = '''return error'''
+tests = ["tests/interface/test_ranking_storage.py"]
+
+[[mutation]]
+name = "a fault at the ending loses the message of the response that failed validation"
+file = "src/trialfolio/single_attempt.py"
+old = '''return prevailing(ended.error.with_detail(self.ending_detail()), error)'''
+new = '''return prevailing(ended.error.with_detail(self.ending_detail()), result.error)'''
+tests = ["tests/interface/test_ranking_storage.py"]
+caught_by = [
+    "tests/interface/test_ranking_storage.py::test_a_fault_at_the_ending_after_an_invalid_response_keeps_its_message_after_before_that",
+]
+
+# The missing tests' item 5: the messages of the attempt records a resume completes.
+
+[[mutation]]
+name = "an attempt stopped while it authenticated is recorded as possibly charged"
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''        "possibly_charged": False,'''
+new = '''        "possibly_charged": True,'''
+tests = ["tests/core/test_ranking_resume.py", "tests/core/test_experiment_resume.py"]
+
+[[mutation]]
+name = "the record of an attempt stopped while it authenticated says it stopped elsewhere"
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''stopped while it authenticated, before its request'''
+new = '''stopped while it connected, before its request'''
+tests = ["tests/core/test_ranking_resume.py", "tests/core/test_experiment_resume.py"]
+caught_by = [
+    "tests/core/test_ranking_resume.py::test_the_attempt_record_a_resume_writes_says_where_its_run_stopped[while it authenticated]",
+    "tests/core/test_experiment_resume.py::test_the_attempt_record_a_resume_writes_says_where_its_run_stopped[while it authenticated]",
+]
+
+[[mutation]]
+name = "the record of an attempt stopped while it authenticated says its rank_update may have been charged"
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''ranking_detail("failed", possibly_charged=False, backtest_sent=False)'''
+new = '''ranking_detail("failed", possibly_charged=True, backtest_sent=False)'''
+tests = ["tests/core/test_ranking_resume.py"]
+caught_by = [
+    "tests/core/test_ranking_resume.py::test_the_attempt_record_a_resume_writes_says_where_its_run_stopped[while it authenticated]",
+]
+
+[[mutation]]
+name = "the record of an attempt stopped after its start record says it stopped elsewhere"
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''f" written, before a response was saved. {detail}"'''
+new = '''f" written, before a request was saved. {detail}"'''
+tests = ["tests/core/test_ranking_resume.py", "tests/core/test_experiment_resume.py"]
+caught_by = [
+    "tests/core/test_ranking_resume.py::test_the_attempt_record_a_resume_writes_says_where_its_run_stopped[after its start record]",
+    "tests/core/test_experiment_resume.py::test_the_attempt_record_a_resume_writes_says_where_its_run_stopped[after its start record]",
+]
+
+[[mutation]]
+name = "the record of an attempt stopped after its update record says it stopped elsewhere"
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''f" written, before the rank_update's response was saved. {detail}"'''
+new = '''f" written, before the rank_update's request was saved. {detail}"'''
+tests = ["tests/core/test_ranking_resume.py"]
+caught_by = [
+    "tests/core/test_ranking_resume.py::test_the_attempt_record_a_resume_writes_says_where_its_run_stopped[after its update record]",
+]
+
+[[mutation]]
+name = "the record of an attempt stopped after its rank_update's response says it stopped elsewhere"
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''f" was saved, before the screen backtest request was sent. {detail}"'''
+new = '''f" was saved, before the screen backtest request was made. {detail}"'''
+tests = ["tests/core/test_ranking_resume.py"]
+caught_by = [
+    "tests/core/test_ranking_resume.py::test_the_attempt_record_a_resume_writes_says_where_its_run_stopped[after its rank_update's response was saved]",
+]
+
+[[mutation]]
+name = "the record of an attempt whose rank_update's response was saved undecoded says it was read"
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''f" be decoded as JSON, so it was saved as it came, as {RANK_UPDATE_RESPONSE_RAW}."'''
+new = '''f" be read as JSON, so it was saved as it came, as {RANK_UPDATE_RESPONSE_RAW}."'''
+tests = ["tests/core/test_ranking_resume.py"]
+caught_by = [
+    "tests/core/test_ranking_resume.py::test_the_attempt_record_a_resume_writes_says_where_its_run_stopped[after that response was saved undecoded]",
+]

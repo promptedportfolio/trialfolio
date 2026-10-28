@@ -1,7 +1,8 @@
 """A resume, in the core: it reads and checks the experiment's records under the lock, records
-the attempts a stopped run left without their attempt records, writes the tables a stopped run
-didn't, sends only the cases that are due and those a confirmed repeat names, revises the plan
-when it's given a revision with its reason, and counts every attempt of the experiment.
+the attempts a stopped run left without their attempt records, each with a message that says
+where it stopped, writes the tables a stopped run didn't, sends only the cases that are due and
+those a confirmed repeat names, revises the plan when it's given a revision with its reason, and
+counts every attempt of the experiment.
 
 Traces to docs/contracts.md, running an experiment (a resumed experiment, checking the records, the
 cases that are due, and the executor), uncertain completion, experiment attempts, an experiment's
@@ -30,7 +31,7 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -536,6 +537,55 @@ def test_an_attempt_with_only_its_authentication_record_is_failed_and_its_case_i
     assert f"{old.case_id}/attempts/{old.attempt_id}/request.json" in "".join(
         a.path for a in lab.manifest(2).artifacts
     )
+
+
+STOPPED: Final = {
+    "while it authenticated": (
+        "started.json",
+        (
+            "The run that started the attempt stopped while it authenticated, before its request was"
+            " sent. The screen backtest request wasn't sent."
+        ),
+    ),
+    "after its start record": (
+        "response.json",
+        (
+            "The run that started the attempt stopped after its start record was written, before a"
+            " response was saved. The screen backtest request may have been charged, and its outcome"
+            " is unknown: no response was saved. Trial Folio never retries it automatically: check"
+            " the account's API credits on Portfolio123's website before running the command again."
+        ),
+    ),
+}
+"""Where the first case's attempt stopped, without its attempt record: the file whose write fails
+with a full disk, before an unexpected failure at the attempt record, and the message of the
+attempt record the resume writes for it, in step 8, as written by hand."""
+
+
+@pytest.mark.parametrize("where", STOPPED)
+def test_the_attempt_record_a_resume_writes_says_where_its_run_stopped(
+    lab: Lab, where: str
+) -> None:
+    """Each message of an attempt record that step 8 writes under a plan 1.1.0, whose attempt
+    sends one request (docs/test-refactoring.md, the missing tests' item 5)."""
+    stopped_at, message = STOPPED[where]
+    lab.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
+    lab.server.reply("/screen/backtest", complete(), complete(), complete())
+    baseline, _ = ids(DEFAULT_ONLY)
+
+    def arm(store: StorageFaults) -> None:
+        store.fail_os(stopped_at)
+        store.fail_before("attempt.json", RuntimeError())
+
+    lab.new("default-only.yaml", arm=arm)
+    assert not (lab.attempt_directories(baseline)[0] / "attempt.json").exists()
+
+    lab.resume("default-only.yaml")
+
+    stopped = lab.attempts(baseline)[0]
+    assert stopped.session == 1
+    assert stopped.error is not None
+    assert stopped.error.message == message
 
 
 def test_an_attempt_directory_without_its_records_is_no_attempt(lab: Lab) -> None:

@@ -16,12 +16,18 @@ requests, the attempt's own, then that the output has no manifest: for a run wit
 definition too, since the rule is 0.1.0's. Neither is resumed, so what the start record says
 isn't added, as it is to an experiment session's message, whose resume reads it.
 
+After a saved response that failed validation, `provider.response_invalid`, a fault while a run
+writes its report or its manifest, or while a snapshot writes its manifest, says the output has
+no manifest, then keeps the response's message after "Before that:", which TS-T02 added (the
+missing tests' item 4, in docs/test-refactoring.md).
+
 Traces to R04-AC13, as release 0.4.0's test pairing gives it for
 `tests/interface/test_ranking_storage.py`, and to docs/contracts.md, sending a definition (the
 attempt's files, and the backtest only after the write), ranking snapshot output, running an
-experiment (an ending without a manifest), endings that decide the error code, and CLI behavior
-(which directories `run` resumes, and what a run writes after its attempt), and to the corrected
-defects the review of R04-T13's pull request found. Through the CLI's entry function in the test
+experiment (an ending without a manifest), endings that decide the error code, execution outcomes
+and attempts (an error that decides the code keeps the message of the one it overrides), and CLI
+behavior (which directories `run` resumes, and what a run writes after its attempt), and to the
+corrected defects the review of R04-T13's pull request found. Through the CLI's entry function in the test
 process, over the fake server, with storage faults wrapping the real store: at a whole path, such
 as `/definition.xml`, or at a file of a case, in its attempt. A screen run is of
 `screen-configs/definition.yaml`, or `formula.yaml` without a definition, an experiment of
@@ -583,3 +589,72 @@ def test_an_experiments_storage_failure_at_the_attempt_record_gives_its_start_re
     )
     assert sent(cli) == [AUTH, RANK, BACKTEST]
     assert not (out / "sessions/1/manifest.json").exists()
+
+
+# An ending after a response that failed validation
+
+
+RESPONSE_INVALID: Final = {
+    "run": (
+        (
+            "Portfolio123's response was saved, as {saved}, but Trial Folio can't read it as"
+            " p123api-screen-backtest version 1:"
+        ),
+        (
+            "So the normalized result is unavailable. The saved response is kept as it came; report"
+            " the problem if it persists."
+        ),
+    ),
+    "snapshot": (
+        (
+            "Portfolio123's answer to the rank_get request was saved, as {saved}, but it doesn't"
+            " have the structure a snapshot needs:"
+        ),
+        (
+            "The snapshot has no definition.xml or snapshot.json. The saved response is kept as it"
+            " came; report the problem if it persists."
+        ),
+    ),
+}
+"""How the message of `provider.response_invalid` starts and ends, for a run and for a snapshot,
+as written by hand: `invalid-structure.json`'s answer to a run's backtest, and
+`rank-get-without-xml.json`'s to a snapshot's `rank_get`."""
+
+ENDINGS_AFTER_AN_INVALID_RESPONSE: Final = {
+    "a run's report": (DEFINITION, "/report.html", "run", RUN_INCOMPLETE),
+    "a run's manifest": (DEFINITION, "/manifest.json", "run", RUN_INCOMPLETE),
+    "a snapshot's manifest": (SNAPSHOT, "/manifest.json", "snapshot", SNAPSHOT_INCOMPLETE),
+}
+"""Each file of the ending a fault strikes after the saved response failed validation: a run's
+report and its manifest, and a snapshot's manifest."""
+
+
+@pytest.mark.parametrize("kind", FAULTS)
+@pytest.mark.parametrize("at", ENDINGS_AFTER_AN_INVALID_RESPONSE)
+def test_a_fault_at_the_ending_after_an_invalid_response_keeps_its_message_after_before_that(
+    cli: Cli, faults: FaultyStores, at: str, kind: str
+) -> None:
+    configuration, name, what, incomplete = ENDINGS_AFTER_AN_INVALID_RESPONSE[at]
+    cli.ready()
+    cli.server.reply("/auth", AUTHENTICATED)
+    cli.server.reply("/rank", response("rank-update.json"), method="POST")
+    cli.server.reply("/rank", rank_get("rank-get-without-xml.json"), method="GET")
+    cli.server.reply("/screen/backtest", response("invalid-structure.json"))
+    out = cli.tmp / "out"
+    approve = snapshot_plan_hash() if configuration == SNAPSHOT else plan_hash_for(configuration)
+    arm(faults, kind, name)
+
+    outcome = cli(
+        "run", configuration, "--out", out, "--approve", approve, "--json", store_factory=faults
+    )
+
+    # The fault decides the code, and its message says the output has no manifest, then keeps
+    # the response's own after "Before that:" (execution outcomes and attempts).
+    ending, earlier = failed(outcome, kind).split(" Before that: ")
+    assert ending.endswith(incomplete)
+    (saved,) = out.glob("**/response.json")
+    start, end = RESPONSE_INVALID[what]
+    assert earlier.startswith(start.format(saved=saved.relative_to(out).as_posix()))
+    assert earlier.endswith(end)
+    assert not (out / "manifest.json").exists()
+    written_once(faults)
