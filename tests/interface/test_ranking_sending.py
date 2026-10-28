@@ -39,7 +39,7 @@ from typing import cast
 
 import pytest
 
-from tests.support.cli import Cli, plan_hash_for
+from tests.support.cli import Cli
 from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     ExperimentBuilder,
@@ -118,10 +118,9 @@ def run_screen(
     cli: Cli, out: Path, faults: FaultyStores | None = None, timeout: int | None = None
 ) -> Outcome:
     """Runs `definition.yaml` into `out`, approved with its plan's hash, with `--json`."""
-    argv = ("run", DEFINITION, "--out", out, "--approve", plan_hash_for(DEFINITION), "--json")
     if faults is None:
-        return cli(*argv, timeout=timeout)
-    return cli(*argv, store_factory=faults, timeout=timeout)
+        return cli.run_approved(DEFINITION, out, "--json", timeout=timeout)
+    return cli.run_approved(DEFINITION, out, "--json", store_factory=faults, timeout=timeout)
 
 
 def received(cli: Cli, request: str) -> list[Received]:

@@ -15,7 +15,7 @@ import sys
 
 import pytest
 
-from tests.support.cli import Cli, occupied, plan_hash_for
+from tests.support.cli import Cli, occupied
 from tests.support.directories import metadata
 from tests.support.environment import Outcome
 from tests.support.fake_portfolio123 import serve_success
@@ -41,11 +41,8 @@ def test_run_refuses_a_directory_that_isnt_empty(cli: Cli, name: str) -> None:
     serve_success(cli.server)
     out = occupied(cli, name)
     before = metadata(out)
-    approve = plan_hash_for(screen_config("formula.yaml"))
 
-    outcome = cli(
-        "run", screen_config("formula.yaml"), "--out", out, "--approve", approve, "--json"
-    )
+    outcome = cli.run_approved(screen_config("formula.yaml"), out, "--json")
 
     assert_not_empty(cli, outcome)
     assert metadata(out) == before
@@ -83,18 +80,8 @@ def test_a_file_written_before_the_claim_fails_it_and_is_left_alone(cli: Cli) ->
     cli.ready()
     serve_success(cli.server)
     out = cli.tmp / "out"
-    approve = plan_hash_for(screen_config("formula.yaml"))
 
-    outcome = cli(
-        "run",
-        screen_config("formula.yaml"),
-        "--out",
-        out,
-        "--approve",
-        approve,
-        "--json",
-        store_factory=Intruded,
-    )
+    outcome = cli.run_approved(screen_config("formula.yaml"), out, "--json", store_factory=Intruded)
 
     assert_not_empty(cli, outcome)
     assert sorted(os.listdir(out)) == ["other.txt"]
