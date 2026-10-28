@@ -8,7 +8,6 @@ process (`tests/support/terminal.py`), except for typing `approve` under the tes
 runs the command in its own process under one.
 """
 
-import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -192,7 +191,7 @@ def test_typing_approve_under_the_test_launcher_runs_the_plan_shown(cli: Cli) ->
     manifest = RunManifest.model_validate_json((out / "manifest.json").read_bytes())
     assert manifest.approval == "interactive"
     assert manifest.plan_hash == plan.plan_hash
-    summary = json.loads(terminal.stdout)
-    assert summary["outcome"] == "completed"
-    assert summary["ids"]["plan_hash"] == plan.plan_hash
+    outcome = Outcome(exit_code, terminal.stdout, shown)
+    assert outcome.summary["outcome"] == "completed"
+    assert outcome.ids["plan_hash"] == plan.plan_hash
     assert cli.server.requests() == ["POST /auth", "POST /screen/backtest"]

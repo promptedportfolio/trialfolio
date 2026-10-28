@@ -110,20 +110,21 @@ def test_run_json_gives_the_same_plan_hash_in_separate_processes_and_output_dire
     # Each process hashes text with a seed of its own, so the plan can't depend on a set's order.
     for seed in ("1", "2"):
         out = cli.tmp / f"experiment-{seed}"
-        result = subprocess.run(
-            launcher.command(cli.server.endpoint, "run", EXAMPLE, "--out", out, "--json"),
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            check=False,
-            cwd=cli.tmp,
-            env={**os.environ, "PYTHONHASHSEED": seed},
+        outcome = Outcome.of(
+            subprocess.run(
+                launcher.command(cli.server.endpoint, "run", EXAMPLE, "--out", out, "--json"),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=cli.tmp,
+                env={**os.environ, "PYTHONHASHSEED": seed},
+            )
         )
         # Without approval: the summary gives the hash to approve, and nothing is created.
-        assert result.returncode == 2, result.stderr
-        summary = json.loads(result.stdout)
-        assert summary["error"]["code"] == "plan.approval_required"
-        hashes.append(summary["ids"]["plan_hash"])
+        assert outcome.exit_code == 2, outcome.stderr
+        assert outcome.error_code == "plan.approval_required"
+        hashes.append(outcome.ids["plan_hash"])
         assert not out.exists()
 
     assert hashes == [plan_of(EXAMPLE).plan_hash] * 2

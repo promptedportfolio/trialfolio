@@ -431,10 +431,23 @@ name = '''a summary isn't followed by a newline'''
 file = "src/trialfolio/cli/invocation.py"
 old = '''result = json.dumps(summary.model_dump(mode="json")) + "\n"'''
 new = '''result = json.dumps(summary.model_dump(mode="json"))'''
-tests = ["tests/interface/test_plan_hash.py", "tests/interface/test_environment.py"]
+tests = [
+    "tests/interface/test_plan_hash.py",
+    "tests/interface/test_environment.py",
+    "tests/interface/test_experiment_resume.py::test_run_json_gives_the_same_plan_hash_in_separate_processes_and_output_directories",
+    "tests/interface/test_experiment_lock.py::test_two_new_experiments_claiming_one_directory_at_once_give_at_most_one_success",
+    "tests/interface/test_interrupts.py::test_ctrl_c_at_the_approval_prompt_under_the_test_launcher_leaves_nothing",
+    "tests/interface/test_output_directory.py::test_another_process_writing_while_run_waits_for_approval_fails_the_claim",
+    "tests/interface/test_run_approval.py::test_typing_approve_under_the_test_launcher_runs_the_plan_shown",
+]
 caught_by = [
     "tests/interface/test_plan_hash.py::test_the_same_settings_give_the_same_hash_in_separate_processes",
     "tests/interface/test_environment.py::test_an_unverified_version_fails_before_the_plan",
+    "tests/interface/test_experiment_resume.py::test_run_json_gives_the_same_plan_hash_in_separate_processes_and_output_directories",
+    "tests/interface/test_experiment_lock.py::test_two_new_experiments_claiming_one_directory_at_once_give_at_most_one_success",
+    "tests/interface/test_interrupts.py::test_ctrl_c_at_the_approval_prompt_under_the_test_launcher_leaves_nothing",
+    "tests/interface/test_output_directory.py::test_another_process_writing_while_run_waits_for_approval_fails_the_claim",
+    "tests/interface/test_run_approval.py::test_typing_approve_under_the_test_launcher_runs_the_plan_shown",
 ]
 
 [[mutation]]

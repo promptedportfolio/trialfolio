@@ -21,7 +21,6 @@ Each ending after the claim leaves no manifest, so the output is visibly incompl
 faults and socket faults inject the interrupts, at the boundaries the release allows.
 """
 
-import json
 import os
 import signal
 import sys
@@ -126,11 +125,10 @@ def test_ctrl_c_at_the_approval_prompt_under_the_test_launcher_leaves_nothing(cl
         terminal.press(CTRL_C)
         exit_code = terminal.wait()
     shown = terminal.shown()
+    outcome = Outcome(exit_code, terminal.stdout, shown)
 
-    assert exit_code == 130, shown
-    summary = json.loads(terminal.stdout)
-    assert summary["error"]["code"] == "command.interrupted"
-    assert summary["output_dir"] is None
+    interrupted(outcome)
+    assert outcome.summary["output_dir"] is None
     assert "Nothing was sent, and no output was created." in shown
     assert not out.exists()
     assert cli.server.received == ()

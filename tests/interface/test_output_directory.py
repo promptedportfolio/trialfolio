@@ -9,7 +9,6 @@ the test process, where the other process's file appears just before the claim, 
 function's `store_factory`.
 """
 
-import json
 import os
 import subprocess
 import sys
@@ -125,11 +124,11 @@ def test_another_process_writing_while_run_waits_for_approval_fails_the_claim(cl
         subprocess.run([sys.executable, "-c", ANOTHER_PROCESS, str(out)], check=True)
         terminal.press("approve\n")
         exit_code = terminal.wait()
+    outcome = Outcome(exit_code, terminal.stdout, terminal.shown())
 
-    assert exit_code == 4, terminal.shown()
-    summary = json.loads(terminal.stdout)
-    assert summary["error"]["code"] == "output.not_empty"
-    assert summary["output_dir"] is None
+    assert outcome.exit_code == 4, outcome.stderr
+    assert outcome.error_code == "output.not_empty"
+    assert outcome.summary["output_dir"] is None
     assert cli.server.received == ()
     assert sorted(os.listdir(out)) == ["other.txt"]
     assert (out / "other.txt").read_bytes() == b"another process's file\n"
