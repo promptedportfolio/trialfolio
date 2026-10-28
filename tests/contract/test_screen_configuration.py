@@ -186,6 +186,14 @@ def test_dates_and_slippage_have_no_default(name: str) -> None:
     assert f"`{key}` is required." in rejection(path.read_bytes(), path.name)
 
 
+def test_a_date_that_isnt_a_calendar_date_is_rejected() -> None:
+    """R01-AC02: a plain `YYYY-MM-DD` that no calendar has is refused as an invalid date, not
+    read as another one (docs/test-refactoring.md, the missing tests' item 1)."""
+    path = INVALID / "date-impossible.yaml"
+
+    assert "`start_date` isn't a valid date." in rejection(path.read_bytes(), path.name)
+
+
 def test_written_differently_reads_the_same() -> None:
     """Key order, `0.250`, and quoted dates don't change the configuration (R01-AC25's input)."""
     assert read_fixture("written-differently.yaml") == read_fixture("vendor-factset.yaml")

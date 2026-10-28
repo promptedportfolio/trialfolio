@@ -116,6 +116,7 @@ R04-T06 wrote this one, which reads the file a definition names, from the config
 | `end-equals-start.yaml` | `end_date` is later than `start_date` | `end_date` |
 | `date-with-time.yaml` | Dates have no time part | `start_date` |
 | `date-not-iso.yaml` | A date as a string is exactly `YYYY-MM-DD` | `start_date` |
+| `date-impossible.yaml` | A date is a calendar date: February has no 30th | `start_date` |
 
 ## Decimals
 
