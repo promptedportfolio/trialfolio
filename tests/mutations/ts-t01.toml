@@ -1,0 +1,22 @@
+# The example list of the check of the tests (docs/test-refactoring.md), which TS-T01 ran on its
+# base and on its branch. TS-T01 changes no test that reaches src/, so each mutation does the same
+# on both. A test catches the first, the one caught_by names. No test catches the second, as
+# RF-T10's detail 16 found, which TS-T02's third missing test is for.
+
+tests = ["tests/contract/test_ranking_definitions.py"]
+
+[[mutation]]
+name = "a sentence lists three items or more without a comma before the last"
+file = "src/trialfolio/display.py"
+old = '''return f"{', '.join(items[:-1])}, and {items[-1]}"'''
+new = '''return f"{', '.join(items[:-1])} and {items[-1]}"'''
+caught_by = [
+    "tests/contract/test_ranking_definitions.py::test_a_removal_s_set_leaving_out_a_node_names_it_by_its_position",
+]
+
+[[mutation]]
+name = "a resume's repeats are made only when every option makes one"
+file = "src/trialfolio/experiment_approval/repeats.py"
+old = '''any(check.made for check in checks),'''
+new = '''all(check.made for check in checks),'''
+tests = ["tests/interface/test_experiment_repeat.py"]
