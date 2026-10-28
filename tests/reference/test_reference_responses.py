@@ -32,8 +32,8 @@ from typing import Any
 
 import pytest
 
-from tests.interface.conftest import AUTHENTICATED, Cli
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.cli import Cli
+from tests.support.fake_portfolio123 import AUTHENTICATED, FakePortfolio123, Reply
 from trialfolio.configuration import read_screen_configuration
 from trialfolio.planning import build_plan, installed_versions
 from trialfolio.tables import read_metrics_csv, read_settings_csv

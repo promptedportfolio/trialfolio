@@ -37,7 +37,8 @@ from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     RANK_UPDATED,
@@ -48,6 +49,7 @@ from tests.support.experiment_builder import (
     returns_each,
 )
 from tests.support.fake_portfolio123 import FakePortfolio123
+from tests.support.saved_records import session_manifest
 from tests.support.terminal import PseudoTerminal
 from trialfolio.contracts.attempt import AttemptRecordV1_3
 from trialfolio.contracts.experiment_manifest import ExperimentManifestV1_1
@@ -75,26 +77,6 @@ CASE_IDS = {
 """`ranking-example.yaml`'s cases, by key, as release 0.4.0 gives them, written by hand."""
 
 type Builder = ExperimentBuilder[Outcome]
-
-
-def error_of(outcome: Outcome) -> dict[str, str]:
-    return cast("dict[str, str]", outcome.summary["error"])
-
-
-def counts(outcome: Outcome) -> dict[str, object]:
-    return cast("dict[str, object]", outcome.summary["counts"])
-
-
-def cases_of(outcome: Outcome) -> dict[str, dict[str, object]]:
-    """The summary's cases, by key."""
-    cases = cast("list[dict[str, object]]", outcome.summary["cases"])
-    return {cast("str", case["case_key"]): case for case in cases}
-
-
-def manifest(out: Path, session: int) -> ExperimentManifestV1_1:
-    return ExperimentManifestV1_1.model_validate_json(
-        (out / f"sessions/{session}/manifest.json").read_bytes()
-    )
 
 
 def plan_of(out: Path, number: int) -> PlanV1_1 | PlanV1_3:
@@ -166,9 +148,9 @@ def test_both_kinds_of_request_count_against_the_budget_and_in_the_cost(
     outcome = completed(cli, experiments, out)
 
     # 4 rank_updates and 4 backtests: the budget's 8 requests, and 4 times 1 and 5 credits.
-    assert (counts(outcome)["provider_requests"], counts(outcome)["cost"]) == (8, 24)
-    assert counts(outcome)["authentication_calls"] == 1
-    totals = manifest(out, 1).counts
+    assert (outcome.counts["provider_requests"], outcome.counts["cost"]) == (8, 24)
+    assert outcome.counts["authentication_calls"] == 1
+    totals = session_manifest(out, 1, ExperimentManifestV1_1).counts
     assert (totals.provider_requests, totals.cost) == (8, 24)
     assert (totals.budget.provider_requests, totals.budget.authentication_calls) == (8, 8)
     for case_id in CASE_IDS.values():
@@ -198,8 +180,8 @@ def test_a_repeat_the_counted_requests_leave_no_room_for_waits_for_a_raised_budg
         EXAMPLE, out, ranks=[RANK_UPDATED] * 4, sends=[*returns_each(3), UNAVAILABLE]
     )
     assert first.exit_code == 6, first.stderr
-    assert counts(first)["provider_requests"] == 8
-    attempt = cast("str", cases_of(first)["no-sales-yield"]["repeat_attempt_id"])
+    assert first.counts["provider_requests"] == 8
+    attempt = cast("str", first.cases_by_key["no-sales-yield"]["repeat_attempt_id"])
     option = f"no-sales-yield:{attempt}"
     received = cli.server.requests()
 
@@ -207,16 +189,16 @@ def test_a_repeat_the_counted_requests_leave_no_room_for_waits_for_a_raised_budg
 
     # Its two requests don't fit, so it isn't started, and nothing is sent.
     assert spent.exit_code == 6, spent.stderr
-    assert error_of(spent)["code"] == "execution.partial"
+    assert spent.error["code"] == "execution.partial"
     assert (
         "The experiment's budget couldn't cover the next case, so it and the cases after it"
         " weren't started. A revision that raises budget.provider_requests lets them run."
-    ) in error_of(spent)["message"]
+    ) in spent.error["message"]
     assert cli.server.requests() == received
-    assert counts(spent)["provider_requests"] == 8
-    assert manifest(out, 2).counts.attempts.repeats == 0
+    assert spent.counts["provider_requests"] == 8
+    assert session_manifest(out, 2, ExperimentManifestV1_1).counts.attempts.repeats == 0
     # Its confirmation is unused, so the summary still names the same attempt.
-    assert cases_of(spent)["no-sales-yield"]["repeat_attempt_id"] == attempt
+    assert spent.cases_by_key["no-sales-yield"]["repeat_attempt_id"] == attempt
 
     raised = experiments.run(
         BUDGET_RAISED,
@@ -232,8 +214,8 @@ def test_a_repeat_the_counted_requests_leave_no_room_for_waits_for_a_raised_budg
     # The same confirmation repeats it under the raised budget: both its requests, within 10.
     assert raised.exit_code == 0, raised.stderr
     assert cli.server.requests()[len(received) :] == [AUTH, RANK, BACKTEST]
-    assert counts(raised)["provider_requests"] == 10
-    assert manifest(out, 3).counts.attempts.repeats == 1
+    assert raised.counts["provider_requests"] == 10
+    assert session_manifest(out, 3, ExperimentManifestV1_1).counts.attempts.repeats == 1
     each_backtest_follows_its_cases_rank_update(cli.server, out)
 
 
@@ -272,7 +254,7 @@ def test_a_changed_definition_keeps_its_unchanged_cases_attempts_and_sends_two_n
     for key, files in kept.items():
         assert cases[key] == CASE_IDS[key]
         assert attempt_files(out, CASE_IDS[key]) == files
-        assert cases_of(revised)[key]["outcome"] == "succeeded"
+        assert revised.cases_by_key[key]["outcome"] == "succeeded"
     # The other two are new cases, sent with the revised definition: within the budget of 12, the
     # 8 requests counted and their 4.
     assert {key: cases[key] == CASE_IDS[key] for key in ("baseline", "value-heavy")} == {
@@ -289,7 +271,7 @@ def test_a_changed_definition_keeps_its_unchanged_cases_attempts_and_sends_two_n
     assert [request.request for request in sent] == [AUTH, RANK, BACKTEST, RANK, BACKTEST]
     revised_definition = (DEFINITIONS / "value-momentum-revised.xml").read_text(encoding="utf-8")
     assert json.loads(sent[1].body)["nodes"] == revised_definition
-    assert counts(revised)["provider_requests"] == 8 + 4
+    assert revised.counts["provider_requests"] == 8 + 4
     assert plan.budget.provider_requests == 12
     each_backtest_follows_its_cases_rank_update(cli.server, out)
 
@@ -307,10 +289,10 @@ def test_a_changed_ranking_method_retires_every_case_and_its_spent_budget_sends_
     # The ranking method is in every case's ranking row, so every case is new, and the 8
     # requests counted leave the budget of 8 nothing for them.
     assert revised.exit_code == 6, revised.stderr
-    assert error_of(revised)["code"] == "execution.partial"
+    assert revised.error["code"] == "execution.partial"
     assert cli.server.requests() == received
-    assert counts(revised)["cases_retired"] == 4
-    new = cases_of(revised)
+    assert revised.counts["cases_retired"] == 4
+    new = revised.cases_by_key
     assert {case["outcome"] for case in new.values()} == {"not_yet_run"}
     assert set(new) == set(CASE_IDS)
     assert {cast("str", case["case_id"]) for case in new.values()}.isdisjoint(CASE_IDS.values())
@@ -320,7 +302,7 @@ def test_a_changed_ranking_method_retires_every_case_and_its_spent_budget_sends_
     changes = record.plans[-1].changes
     assert changes is not None
     assert [case.case_key for case in changes.cases_retired] == list(CASE_IDS)
-    assert counts(revised)["provider_requests"] == 8
+    assert revised.counts["provider_requests"] == 8
 
 
 @posix_only
@@ -365,6 +347,6 @@ def test_a_revision_from_a_formula_gives_what_the_counted_backtests_and_the_rest
     assert isinstance(first_plan, PlanV1_1) and isinstance(second, PlanV1_3)
     assert second.revises == first_plan.plan_hash
     assert cli.server.requests()[since:] == [AUTH, *(RANK, BACKTEST) * 5]
-    assert counts(outcome)["provider_requests"] == 5 + 10
-    assert counts(outcome)["cases_retired"] == 5
+    assert outcome.counts["provider_requests"] == 5 + 10
+    assert outcome.counts["cases_retired"] == 5
     each_backtest_follows_its_cases_rank_update(cli.server, out, since=since)

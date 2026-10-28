@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.interface.conftest import Cli
+from tests.support.cli import Cli
 from tests.support.fake_portfolio123 import FakePortfolio123
 from trialfolio.contracts.review_manifest import ReviewManifest
 from trialfolio.tables import read_differences_csv

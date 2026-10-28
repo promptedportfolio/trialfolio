@@ -28,11 +28,9 @@ import json
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, FaultyStores, Outcome, snapshot
 from tests.support.broken_runs import (
     BROKEN_EXPERIMENTS,
     UNKNOWN_EXPERIMENT_SCHEMA_VERSIONS,
@@ -45,6 +43,9 @@ from tests.support.broken_runs import (
     edit_record,
     unreadable,
 )
+from tests.support.cli import Cli
+from tests.support.directories import snapshot
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     REFUSED,
@@ -55,6 +56,7 @@ from tests.support.experiment_builder import (
     returns,
 )
 from tests.support.fake_portfolio123 import Reply
+from tests.support.storage_faults import FaultyStores
 from tests.support.synthetic_experiment import FIRST, REVISED, SYNTHETIC_EXPERIMENT
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.planning import build_experiment_plan, installed_versions
@@ -83,7 +85,7 @@ def refused(cli: Cli, config: Path, out: Path, approve: str, code: str, exit_cod
     outcome = cli("run", config, "--out", out, "--approve", approve, "--json")
 
     assert outcome.exit_code == exit_code, outcome.stderr
-    error = cast("dict[str, str]", outcome.summary["error"])
+    error = outcome.error
     assert error["code"] == code
     assert f"Error ({code}): {error['message']}" in outcome.stderr
     assert len(cli.server.received) == received

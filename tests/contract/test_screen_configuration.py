@@ -671,15 +671,11 @@ def test_version_1_1_0_reads_each_ranking_form(ranking: str, expected: RankingV1
     assert configuration.ranking == expected
 
 
-def test_version_1_1_0_reads_a_ranking_named_by_a_snapshot(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_version_1_1_0_reads_a_ranking_named_by_a_snapshot(tmp_path: Path) -> None:
     """The snapshot form, which release 0.4.0's R04-T10 reads: the snapshot the test takes over
     the fake server, beside the configuration. R04-T05's parametrized test above read this form
     with the others before any reader read a snapshot's directory."""
-    SnapshotBuilder(monkeypatch, tmp_path / "home").snapshot(
-        tmp_path / "ranking" / "value-momentum"
-    )
+    SnapshotBuilder(tmp_path / "home").snapshot(tmp_path / "ranking" / "value-momentum")
     path = tmp_path / "screen.yaml"
 
     read = read_screen_configuration_v1_1(

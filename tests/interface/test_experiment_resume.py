@@ -28,8 +28,9 @@ from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, FaultyStores, Outcome
 from tests.support import launcher
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     UNAVAILABLE,
@@ -39,6 +40,8 @@ from tests.support.experiment_builder import (
     returns,
 )
 from tests.support.fake_portfolio123 import FakePortfolio123
+from tests.support.saved_records import attempt_directories, attempt_records, session_manifest
+from tests.support.storage_faults import FaultyStores
 from tests.support.terminal import PseudoTerminal
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1, AuthenticationRecord, StartRecordV1_1
@@ -67,16 +70,6 @@ def plan_of(path: Path) -> PlanV1_1:
     return build_experiment_plan(configuration, installed_versions())
 
 
-def error_code(outcome: Outcome) -> str:
-    return cast("dict[str, str]", outcome.summary["error"])["code"]
-
-
-def cases_of(outcome: Outcome) -> dict[str, dict[str, object]]:
-    """The summary's cases, by key."""
-    cases = cast("list[dict[str, object]]", outcome.summary["cases"])
-    return {cast("str", case["case_key"]): case for case in cases}
-
-
 def sent(server: FakePortfolio123, plan: PlanV1_1, start: int = 0) -> list[str]:
     """The key of the case whose request each request the server received, from the `start`th on,
     sends, by its body, in order."""
@@ -97,32 +90,13 @@ def complete_cases_sent_once(server: FakePortfolio123, plan: PlanV1_1, outcome: 
     """The server received the request of each case that `outcome` gives as complete only once,
     in every run of the experiment."""
     keys = sent(server, plan)
-    complete = [key for key, case in cases_of(outcome).items() if case["outcome"] == "succeeded"]
+    complete = [key for key, case in outcome.cases_by_key.items() if case["outcome"] == "succeeded"]
     assert complete
     assert all(keys.count(key) == 1 for key in complete), keys
 
 
-def attempt_directories(out: Path, case_id: str) -> list[Path]:
-    return sorted((out / "cases" / case_id / "attempts").iterdir())
-
-
 def names(directory: Path) -> set[str]:
     return {path.name for path in directory.iterdir()}
-
-
-def attempts_of(out: Path, case_id: str) -> list[AttemptRecordV1_1]:
-    """The case's attempt records, by session and then sequence."""
-    records = [
-        AttemptRecordV1_1.model_validate_json(path.read_bytes())
-        for path in (out / "cases" / case_id / "attempts").glob("*/attempt.json")
-    ]
-    return sorted(records, key=lambda record: (record.session, record.sequence))
-
-
-def manifest(out: Path, session: int) -> ExperimentManifest:
-    return ExperimentManifest.model_validate_json(
-        (out / f"sessions/{session}/manifest.json").read_bytes()
-    )
 
 
 # Case and attempt identities (R03-AC02)
@@ -171,7 +145,7 @@ def interrupted_resumed_and_repeated(
     assert interrupted.exit_code == 130, interrupted.stderr
     resumed = experiments.run(EXAMPLE, out, sends=[UNAVAILABLE, returns(), returns()])
     assert resumed.exit_code == 6, resumed.stderr
-    attempt = cases_of(resumed)["holdings-50"]["repeat_attempt_id"]
+    attempt = resumed.cases_by_key["holdings-50"]["repeat_attempt_id"]
     repeated = experiments.run(
         EXAMPLE, out, "--repeat", f"holdings-50:{attempt}", sends=[returns()]
     )
@@ -189,7 +163,7 @@ def test_an_interrupted_and_resumed_experiment_names_each_case_by_one_case_id_ev
 
     # Each run's summary, the plan, and its experiment.json give each key the same case_id.
     for outcome in outcomes:
-        cases = cast("list[dict[str, object]]", outcome.summary["cases"])
+        cases = outcome.cases
         assert [(case["case_key"], case["case_id"]) for case in cases] == identities
     saved_plan = json.loads((out / "plans/1/plan.json").read_bytes())
     assert [(case["case_key"], case["case_id"]) for case in saved_plan["cases"]] == identities
@@ -214,7 +188,7 @@ def test_an_interrupted_and_resumed_experiment_names_each_case_by_one_case_id_ev
     # Each manifest lists every case's files under that case_id, and names no other.
     assert not (out / "sessions/1/manifest.json").exists()
     for session in (2, 3):
-        listed = manifest(out, session).artifacts
+        listed = session_manifest(out, session, ExperimentManifest).artifacts
         assert {a.path.split("/")[1] for a in listed if a.path.startswith("cases/")} == ids
         data = (out / f"sessions/{session}/manifest.json").read_bytes()
         assert {found.decode() for found in CASE_ID.findall(data)} == ids
@@ -247,10 +221,10 @@ def test_every_attempt_a_repeat_included_has_a_distinct_version_4_uuid_in_canoni
             assert loaded["attempt_id"] == directory.name
             for key in ("authenticated_by", "repeat_of"):
                 assert loaded.get(key) is None or loaded[key] in attempt_ids
-    first, repeat = attempts_of(out, holdings)
+    first, repeat = attempt_records(out, holdings, AttemptRecordV1_1)
     assert repeat.repeat_of == first.attempt_id != repeat.attempt_id
     _, resumed, _ = outcomes
-    assert cases_of(resumed)["holdings-50"]["repeat_attempt_id"] == str(first.attempt_id)
+    assert resumed.cases_by_key["holdings-50"]["repeat_attempt_id"] == str(first.attempt_id)
 
 
 # An interruption after case n resumes at case n + 1 (R03-AC04)
@@ -271,7 +245,7 @@ def test_an_interrupt_after_case_n_resumes_at_case_n_plus_1_and_sends_no_request
     )
 
     assert interrupted.exit_code == 130
-    assert error_code(interrupted) == "command.interrupted"
+    assert interrupted.error_code == "command.interrupted"
     assert not (out / "sessions/1/manifest.json").exists()
     # The interrupt came just after case n's tables, the last files its attempt writes, after
     # its attempt record.
@@ -292,7 +266,7 @@ def test_an_interrupt_after_case_n_resumes_at_case_n_plus_1_and_sends_no_request
     keys = [case.case_key for case in plan.cases]
     assert sent(cli.server, plan, received) == keys[n:]
     assert sent(cli.server, plan) == keys
-    counts = manifest(out, 2).counts
+    counts = session_manifest(out, 2, ExperimentManifest).counts
     assert counts.cases.succeeded == 5
     attempts = counts.attempts
     assert (attempts.succeeded, attempts.failed, attempts.unknown, attempts.running) == (5, 0, 0, 0)
@@ -337,8 +311,8 @@ def test_a_send_killed_mid_flight_is_recorded_as_unknown_and_awaits_a_repeat_uns
     case_line = f"Case {second.case_key} ({second.case_id}):"
     assert shown.index(case_line) < shown.index(awaiting) < shown.index("Type approve")
     assert outcome.exit_code == 6, shown
-    assert error_code(outcome) == "execution.partial"
-    assert cases_of(outcome)[second.case_key] == {
+    assert outcome.error_code == "execution.partial"
+    assert outcome.cases_by_key[second.case_key] == {
         "case_key": second.case_key,
         "case_id": second.case_id,
         "outcome": "unknown",
@@ -382,7 +356,7 @@ def test_a_repeat_killed_mid_flight_is_recorded_with_its_start_records_exchanges
         EXAMPLE, out, sends=[returns(), returns(), UNAVAILABLE, returns(), returns()]
     )
     assert first.exit_code == 6, first.stderr
-    repeated = cast("str", cases_of(first)[holdings.case_key]["repeat_attempt_id"])
+    repeated = cast("str", first.cases_by_key[holdings.case_key]["repeat_attempt_id"])
 
     experiments.kill(
         EXAMPLE,
@@ -416,7 +390,7 @@ def test_a_repeat_killed_mid_flight_is_recorded_with_its_start_records_exchanges
     assert [(e.request, e.status) for e in record.exchanges] == [(AUTH, 200)]
     assert (record.session, record.sequence) == (2, 1)
     # The killed repeat is now the case's latest possibly charged attempt.
-    assert cases_of(resumed)[holdings.case_key]["repeat_attempt_id"] == str(record.attempt_id)
+    assert resumed.cases_by_key[holdings.case_key]["repeat_attempt_id"] == str(record.attempt_id)
     complete_cases_sent_once(cli.server, plan, resumed)
 
 
@@ -435,7 +409,7 @@ def test_an_attempt_record_unwritten_after_its_response_was_saved_is_completed_f
     interrupted = experiments.run(DEFAULT_ONLY, out, sends=[returns()], store_factory=faults)
 
     assert interrupted.exit_code == 130
-    assert error_code(interrupted) == "command.interrupted"
+    assert interrupted.error_code == "command.interrupted"
     (directory,) = attempt_directories(out, baseline.case_id)
     assert names(directory) == {
         "authenticating.json",
@@ -469,7 +443,7 @@ def test_an_attempt_record_unwritten_after_its_response_was_saved_is_completed_f
     settings = read_settings_csv((normalized / "settings.csv").read_bytes(), "settings")
     assert {row.source_artifact for row in metrics} == {record.response.artifact_id}
     assert {row.label for row in (*metrics, *settings)} == {baseline.case_id}
-    assert cases_of(resumed)[baseline.case_key]["outcome"] == "succeeded"
+    assert resumed.cases_by_key[baseline.case_key]["outcome"] == "succeeded"
 
 
 @posix_only
@@ -490,8 +464,8 @@ def test_an_authentication_call_killed_mid_flight_is_failed_counted_and_its_case
     )
     # Its record alone counts the call against the budget, before a resume records the attempt.
     unapproved = experiments.run(DEFAULT_ONLY, out, approve=False)
-    assert error_code(unapproved) == "plan.approval_required"
-    counts = cast("dict[str, object]", unapproved.summary["counts"])
+    assert unapproved.error_code == "plan.approval_required"
+    counts = unapproved.counts
     assert (counts["authentication_calls"], counts["provider_requests"]) == (1, 0)
     assert "0 provider requests and 1 authentication call" in unapproved.stderr
     received = len(cli.server.received)
@@ -502,7 +476,7 @@ def test_an_authentication_call_killed_mid_flight_is_failed_counted_and_its_case
     # Nothing was sent, so the case is due, and the resume sends it.
     assert cli.server.requests()[received:] == [AUTH, SEND, SEND]
     assert sent(cli.server, plan, received) == [case.case_key for case in plan.cases]
-    old, new = attempts_of(out, baseline.case_id)
+    old, new = attempt_records(out, baseline.case_id, AttemptRecordV1_1)
     assert old.attempt_id == authentication.attempt_id
     assert (old.outcome, old.possibly_charged, old.request) == ("failed", False, None)
     assert old.error is not None and old.error.code == "command.interrupted"
@@ -514,9 +488,9 @@ def test_an_authentication_call_killed_mid_flight_is_failed_counted_and_its_case
     )
     assert (new.session, new.outcome) == (2, "succeeded")
     # The killed call counts against the budget, beside the resume's.
-    counts = manifest(out, 2).counts
+    counts = session_manifest(out, 2, ExperimentManifest).counts
     assert (counts.authentication_calls, counts.provider_requests) == (2, 2)
-    assert cast("dict[str, object]", resumed.summary["counts"])["authentication_calls"] == 2
+    assert resumed.counts["authentication_calls"] == 2
 
 
 def test_a_read_timeout_leaves_its_case_unknown_the_later_cases_run_and_a_resume_doesnt_send_it(
@@ -544,14 +518,14 @@ def test_a_read_timeout_leaves_its_case_unknown_the_later_cases_run_and_a_resume
     )
 
     assert outcome.exit_code == 6, outcome.stderr
-    assert error_code(outcome) == "execution.partial"
-    (record,) = attempts_of(out, second.case_id)
+    assert outcome.error_code == "execution.partial"
+    (record,) = attempt_records(out, second.case_id, AttemptRecordV1_1)
     assert (record.outcome, record.possibly_charged) == ("unknown", True)
     assert record.error is not None and record.error.code == "provider.outcome_unknown"
     assert [(e.request, e.result) for e in record.exchanges] == [(SEND, "interrupted")]
     # The later cases still ran.
     assert sent(cli.server, plan) == [case.case_key for case in plan.cases]
-    outcomes = [case["outcome"] for case in cases_of(outcome).values()]
+    outcomes = [case["outcome"] for case in outcome.cases_by_key.values()]
     assert outcomes == ["succeeded", "unknown", "succeeded", "succeeded", "succeeded"]
     received = len(cli.server.received)
 
@@ -561,6 +535,6 @@ def test_a_read_timeout_leaves_its_case_unknown_the_later_cases_run_and_a_resume
     assert len(cli.server.received) == received
     # Nor does it start an attempt of any case.
     assert len(list(out.glob("cases/*/attempts/*"))) == 5
-    assert cases_of(resumed)[second.case_key]["outcome"] == "unknown"
-    assert cases_of(resumed)[second.case_key]["repeat_attempt_id"] == str(record.attempt_id)
+    assert resumed.cases_by_key[second.case_key]["outcome"] == "unknown"
+    assert resumed.cases_by_key[second.case_key]["repeat_attempt_id"] == str(record.attempt_id)
     complete_cases_sent_once(cli.server, plan, resumed)

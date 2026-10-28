@@ -659,7 +659,7 @@ def test_a_path_written_wrongly_fails_before_what_its_segments_name(tmp_path: Pa
 
 
 def test_a_position_too_long_to_read_as_a_number_is_past_its_parent_s_last_node(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """By default, Python reads no whole number of more than 4,300 digits. A position of more is
     written correctly, so it's past its parent's last node, in a `set` and in `remove`, through
@@ -692,9 +692,7 @@ def test_a_position_too_long_to_read_as_a_number_is_past_its_parent_s_last_node(
             "parent's last node."
         ),
     ]
-    SnapshotBuilder(monkeypatch, tmp_path / "home").snapshot(
-        tmp_path / "ranking" / "value-momentum"
-    )
+    SnapshotBuilder(tmp_path / "home").snapshot(tmp_path / "ranking" / "value-momentum")
     text = EXAMPLE.read_text(encoding="utf-8")
     start, end = text.index("  ranking:\n    - key:"), text.index("  rebalance_weeks: []")
     path = tmp_path / "experiment.yaml"
@@ -1140,17 +1138,13 @@ def test_messages_never_hold_a_node_s_name() -> None:
             assert node_name not in problem
 
 
-def test_a_snapshot_baseline_s_variants_give_the_file_s_cases(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_a_snapshot_baseline_s_variants_give_the_file_s_cases(tmp_path: Path) -> None:
     """Release 0.4.0's R04-T10 reads the snapshot a baseline names, whose definition gives the
     ranking variants' cases, as a file's does; and what's written wrongly in a path fails as it
     does against a file. Until then, R04-T06's reader checked only how a snapshot baseline's
     paths were written, and gave no case, which this test held; the snapshot is now taken during
     the test, over the fake server, of `value-momentum.xml`'s definition."""
-    SnapshotBuilder(monkeypatch, tmp_path / "home").snapshot(
-        tmp_path / "ranking" / "value-momentum"
-    )
+    SnapshotBuilder(tmp_path / "home").snapshot(tmp_path / "ranking" / "value-momentum")
     text = EXAMPLE.read_text(encoding="utf-8").replace(
         "    definition: 'ranking/value-momentum.xml'\n    ranking_method: percentile_nas_negative\n",
         "    snapshot: 'ranking/value-momentum/'\n",

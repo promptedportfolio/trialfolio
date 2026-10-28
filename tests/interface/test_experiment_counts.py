@@ -23,11 +23,11 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     REFUSED,
@@ -239,20 +239,14 @@ def assert_counts(outcome: Outcome, out: Path, session: int, expected: Expected)
     )
     assert recorded(manifest.counts) == expected.recorded()
     assert shown(document) == recorded(manifest.counts)
-    assert cast("dict[str, object]", outcome.summary["ids"])["session"] == session
+    assert outcome.ids["session"] == session
     assert outcome.summary["counts"] == expected.summary()
     assert len(logged_warnings(out)) == expected.warnings
 
 
-def summary_cases(outcome: Outcome) -> dict[str, dict[str, object]]:
-    """The summary's cases, by key."""
-    cases = cast("list[dict[str, object]]", outcome.summary["cases"])
-    return {cast("str", case["case_key"]): case for case in cases}
-
-
 def repeat_option(outcome: Outcome, key: str) -> str:
     """The `--repeat` value that confirms a repeat of the case `key`, from the summary."""
-    return f"{key}:{summary_cases(outcome)[key]['repeat_attempt_id']}"
+    return f"{key}:{outcome.cases_by_key[key]['repeat_attempt_id']}"
 
 
 def outcome_shown(out: Path, session: int, key: str) -> str:
@@ -869,5 +863,5 @@ def test_a_repeat_is_counted_and_its_case_by_its_latest_attempt_that_may_have_be
 
     assert repeated.exit_code == (0 if outcome == "succeeded" else 6), repeated.stderr
     assert_counts(repeated, out, 2, expected)
-    assert summary_cases(repeated)[HOLDINGS]["outcome"] == outcome
+    assert repeated.cases_by_key[HOLDINGS]["outcome"] == outcome
     assert outcome_shown(out, 2, HOLDINGS) == outcome

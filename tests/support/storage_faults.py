@@ -24,18 +24,23 @@ failed `os.link`, R02-T08 added whole paths, and R03-T11 a case's files.
 `placeholder_identities` stands for the other way FAT and exFAT differ on macOS: each new, empty
 file has a temporary inode of its own until its first write gives it a lasting one. It patches
 `os` for the whole test, so it applies to any store, wrapped or not.
+
+`FaultyStores` is a command's `store_factory`, which wraps each output directory's real store in
+storage faults, set up before the command runs. TS-T03 moved it here from the interface's
+conftest. `Intruded`, the real store with another process's file written into the output
+directory just before the claim, is TS-T03's too, for the two modules that each wrote it.
 """
 
 import errno
 import os
 import stat
 import sys
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from pathlib import Path
 
 import pytest
 
-from trialfolio.storage import ArtifactStore, StoredFile
+from trialfolio.storage import ArtifactStore, LocalArtifactStore, StoredFile
 
 _NO_HARD_LINKS = errno.ENOTSUP if sys.platform == "darwin" else errno.EPERM
 """How `os.link` reports a file system without hard links: `ENOTSUP` on macOS, as R01-T08 saw
@@ -193,6 +198,52 @@ class StorageFaults:
 
     def entries(self, path: str) -> tuple[str, ...]:
         return self._store.entries(path)
+
+
+class Intruded(LocalArtifactStore):
+    """The output directory's real store, with another process's file, `other.txt`, written into
+    the directory just before the claim: as when another process writes there while `run` waits
+    for approval."""
+
+    def claim(self, path: str, data: bytes, *, lock: bool = False) -> StoredFile:
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "other.txt").write_bytes(b"another process's file\n")
+        return super().claim(path, data, lock=lock)
+
+
+class FaultyStores:
+    """A `store_factory` that wraps each output directory's real store in storage faults, set up
+    as the test asks before the command runs."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._monkeypatch = monkeypatch
+        self._setups: list[Callable[[StorageFaults], None]] = []
+        self.stores: list[StorageFaults] = []
+
+    def fail_os(self, name: str) -> None:
+        self._setups.append(lambda store: store.fail_os(name))
+
+    def fail_before(self, name: str, error: BaseException) -> None:
+        self._setups.append(lambda store: store.fail_before(name, error))
+
+    def fail_after(self, name: str, error: BaseException) -> None:
+        self._setups.append(lambda store: store.fail_after(name, error))
+
+    def fail_link(self, name: str) -> None:
+        self._setups.append(lambda store: store.fail_link(name))
+
+    def __call__(self, root: str) -> ArtifactStore:
+        store = StorageFaults(LocalArtifactStore(root), self._monkeypatch)
+        for setup in self._setups:
+            setup(store)
+        self.stores.append(store)
+        return store
+
+    @property
+    def published(self) -> list[str]:
+        """Every path the store published, in order."""
+        (store,) = self.stores
+        return store.published
 
 
 def _key(path: str, faults: Collection[str]) -> str:

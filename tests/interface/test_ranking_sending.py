@@ -39,14 +39,17 @@ from typing import cast
 
 import pytest
 
-from tests.interface.conftest import AUTHENTICATED, Cli, FaultyStores, Outcome, plan_hash_for
+from tests.support.cli import Cli, plan_hash_for
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     ExperimentBuilder,
     experiment_config,
     returns,
     returns_each,
 )
-from tests.support.fake_portfolio123 import Received, Reply
+from tests.support.fake_portfolio123 import AUTHENTICATED, Received, Reply
+from tests.support.saved_records import attempt_directories
+from tests.support.storage_faults import FaultyStores
 from trialfolio.contracts.attempt import (
     AttemptRecordV1_2,
     AttemptRecordV1_3,
@@ -129,12 +132,8 @@ def nodes(rank: Received) -> str:
     return cast("str", json.loads(rank.body)["nodes"])
 
 
-def error_code(outcome: Outcome) -> str:
-    return cast("dict[str, str]", outcome.summary["error"])["code"]
-
-
 def attempt_of(out: Path, case_id: str) -> Path:
-    (attempt,) = sorted((out / "cases" / case_id / "attempts").iterdir())
+    (attempt,) = attempt_directories(out, case_id)
     return attempt
 
 
@@ -248,7 +247,7 @@ def test_after_a_failing_reply_to_a_screen_runs_rank_update_its_backtest_isnt_se
     ran = run_screen(cli, out)
 
     assert ran.exit_code == 5, ran.stderr
-    assert error_code(ran) == code
+    assert ran.error_code == code
     assert cli.server.requests() == [AUTH, RANK]
     plan = PlanV1_2.model_validate_json((out / "plan.json").read_bytes())
     attempt = attempt_of(out, plan.cases[0].case_id)
@@ -270,7 +269,7 @@ def test_a_screen_runs_rank_update_that_times_out_is_unknown_and_sends_no_backte
     ran = run_screen(cli, out, timeout=1)
 
     assert ran.exit_code == 5, ran.stderr
-    assert error_code(ran) == "provider.outcome_unknown"
+    assert ran.error_code == "provider.outcome_unknown"
     assert cli.server.requests() == [AUTH, RANK]
     plan = PlanV1_2.model_validate_json((out / "plan.json").read_bytes())
     attempt = attempt_of(out, plan.cases[0].case_id)
@@ -422,7 +421,7 @@ def test_after_a_failing_reply_to_a_cases_rank_update_the_next_case_is_sent(
     ran = experiments.run(EXAMPLE, out, ranks=(reply, *(RANK_UPDATED,) * 3), sends=returns_each(3))
 
     assert ran.exit_code == 6, ran.stderr
-    assert error_code(ran) == "execution.partial"
+    assert ran.error_code == "execution.partial"
     assert cli.server.requests() == [AUTH, RANK, RANK, BACKTEST, RANK, BACKTEST, RANK, BACKTEST]
     baseline = attempt_of(out, read_plan(out).cases[0].case_id)
     record = AttemptRecordV1_3.model_validate_json((baseline / "attempt.json").read_bytes())
@@ -442,8 +441,8 @@ def test_a_rank_updates_402_stops_the_experiment(
     ran = experiments.run(EXAMPLE, out, ranks=(Reply(402, b""),))
 
     assert ran.exit_code == 6, ran.stderr
-    assert error_code(ran) == "execution.partial"
-    assert "provider.quota_exceeded" in cast("dict[str, str]", ran.summary["error"])["message"]
+    assert ran.error_code == "execution.partial"
+    assert "provider.quota_exceeded" in ran.error["message"]
     assert cli.server.requests() == [AUTH, RANK]
     plan = read_plan(out)
     baseline = attempt_of(out, plan.cases[0].case_id)

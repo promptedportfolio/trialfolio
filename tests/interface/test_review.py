@@ -26,9 +26,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome, snapshot
 from tests.support import launcher
+from tests.support.cli import Cli
 from tests.support.clock import STARTED
+from tests.support.directories import snapshot
+from tests.support.environment import Outcome
 from tests.support.run_builder import REVIEW_CONFIGS
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.contracts.plan import Plan
@@ -347,7 +349,7 @@ def test_results_that_share_a_response_are_warned_of_and_named_in_the_manifest(
     assert len(warnings) == 2
     assert warnings[0].startswith("Warning: Results 1 and 2 have byte-identical saved responses")
     assert warnings[1].startswith("Warning: Results 3 and 4 have byte-identical saved responses")
-    assert outcome.summary["counts"]["warnings"] == 2  # pyright: ignore[reportIndexIssue]
+    assert outcome.counts["warnings"] == 2
     results = {result.label: result for result in manifest_of(out).results}
     runs = path.parent / "runs"
     baseline, differently = results["baseline"], results["written-differently"]
@@ -426,8 +428,7 @@ def test_a_provider_package_that_cant_be_imported_is_an_unsupported_environment(
     outcome = cli.without_module("p123api", "review", built("example.yaml"), "--out", out, "--json")
 
     assert outcome.exit_code == 3, outcome.stderr
-    error = outcome.summary["error"]
-    assert isinstance(error, dict)
+    error = outcome.error
     assert error["code"] == "environment.unsupported"
     assert "p123api can't be imported" in error["message"]
     assert not out.exists()

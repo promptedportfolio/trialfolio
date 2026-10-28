@@ -20,7 +20,8 @@ from typing import cast
 
 import pytest
 
-from tests.interface.conftest import AUTHENTICATED, Cli, Outcome
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     RANK_UPDATED,
     ExperimentBuilder,
@@ -28,7 +29,7 @@ from tests.support.experiment_builder import (
     returns,
     returns_each,
 )
-from tests.support.fake_portfolio123 import Reply
+from tests.support.fake_portfolio123 import AUTHENTICATED, Reply
 from tests.support.terminal import PseudoTerminal
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows has no pseudo-terminals")
@@ -48,13 +49,8 @@ SAME_RESULTS = Reply(
 """`complete.json`'s results, with another `cost` and `quotaRemaining`."""
 
 
-def summary_cases(outcome: Outcome) -> dict[str, dict[str, object]]:
-    cases = cast("list[dict[str, object]]", outcome.summary["cases"])
-    return {cast("str", case["case_key"]): case for case in cases}
-
-
 def error(outcome: Outcome) -> dict[str, str]:
-    return cast("dict[str, str]", outcome.summary["error"])
+    return outcome.error
 
 
 def stale_value_heavy(experiments: ExperimentBuilder[Outcome], out: Path) -> tuple[Outcome, str]:
@@ -68,7 +64,7 @@ def stale_value_heavy(experiments: ExperimentBuilder[Outcome], out: Path) -> tup
         sends=(returns(), SAME_RESULTS, returns("changed-metrics.json"), returns()),
     )
     assert outcome.exit_code == 6, outcome.stderr
-    attempt = summary_cases(outcome)["value-heavy"]["repeat_attempt_id"]
+    attempt = outcome.cases_by_key["value-heavy"]["repeat_attempt_id"]
     assert isinstance(attempt, str)
     return outcome, attempt
 
@@ -81,7 +77,7 @@ def test_a_stale_backtest_fails_its_case_and_the_runs_message_gives_its_repeat_o
 
     outcome, attempt = stale_value_heavy(experiments, out)
 
-    cases = summary_cases(outcome)
+    cases = outcome.cases_by_key
     assert {key: case["outcome"] for key, case in cases.items()} == {
         "baseline": "succeeded",
         "value-heavy": "failed",
@@ -91,7 +87,7 @@ def test_a_stale_backtest_fails_its_case_and_the_runs_message_gives_its_repeat_o
     assert [case["repeat_attempt_id"] for key, case in cases.items() if key != "value-heavy"] == [
         None
     ] * 3
-    assert cast("dict[str, int]", outcome.summary["counts"])["cases_failed"] == 1
+    assert outcome.counts["cases_failed"] == 1
     failure = error(outcome)
     assert failure["code"] == "execution.partial"
     message = failure["message"]
@@ -176,12 +172,12 @@ def test_a_resumes_display_and_its_repeats_prompt_say_the_response_failed_valida
         f" charged again: --repeat value-heavy:{attempt}"
     ) in shown
     assert (
-        f"value-heavy ({summary_cases(outcome)['value-heavy']['case_id']}): its attempt"
+        f"value-heavy ({outcome.cases_by_key['value-heavy']['case_id']}): its attempt"
         f" {attempt} succeeded, but its saved response failed validation"
         " (provider.response_invalid), and its request may already have been charged."
     ) in shown
     assert cli.server.requests()[before:] == ["POST /auth", "POST /rank", "POST /screen/backtest"]
-    cases = summary_cases(outcome)
+    cases = outcome.cases_by_key
     assert {case["outcome"] for case in cases.values()} == {"succeeded"}
     assert {case["repeat_attempt_id"] for case in cases.values()} == {None}
 
@@ -210,7 +206,7 @@ def test_the_same_command_after_its_repeat_completed_the_case_repeats_nothing_an
         f"Case value-heavy isn't repeated: the repeat confirmed for its attempt {attempt} was made"
         " already, and may have reached Portfolio123. The run resumes the rest of the experiment."
     ) in again.stderr
-    assert {case["outcome"] for case in summary_cases(again).values()} == {"succeeded"}
+    assert {case["outcome"] for case in again.cases_by_key.values()} == {"succeeded"}
 
 
 def test_a_case_whose_response_had_no_required_structure_awaits_a_repeat_that_completes_it(
@@ -222,7 +218,7 @@ def test_a_case_whose_response_had_no_required_structure_awaits_a_repeat_that_co
     first = experiments.run(DEFAULT_ONLY, out, sends=(returns(), returns("invalid-structure.json")))
     assert first.exit_code == 6, first.stderr
     ((key, invalid),) = [
-        (key, case) for key, case in summary_cases(first).items() if case["outcome"] == "failed"
+        (key, case) for key, case in first.cases_by_key.items() if case["outcome"] == "failed"
     ]
     attempt = invalid["repeat_attempt_id"]
     assert isinstance(attempt, str)
@@ -239,6 +235,6 @@ def test_a_case_whose_response_had_no_required_structure_awaits_a_repeat_that_co
     )
 
     assert repeated.exit_code == 0, repeated.stderr
-    assert {case["outcome"] for case in summary_cases(repeated).values()} == {"succeeded"}
+    assert {case["outcome"] for case in repeated.cases_by_key.values()} == {"succeeded"}
     tables = out / "cases" / cast("str", invalid["case_id"]) / "normalized"
     assert sorted(path.name for path in tables.iterdir()) == ["metrics.csv", "settings.csv"]

@@ -24,12 +24,12 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome
 from tests.support import canaries, launcher, terminal
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     REFUSED,
@@ -99,7 +99,7 @@ def test_a_run_while_a_resume_waits_at_its_prompt_is_locked_out_until_the_resume
 
     assert killed == -signal.SIGKILL
     assert locked.exit_code == 4
-    error = cast("dict[str, str]", locked.summary["error"])
+    error = locked.error
     assert error["code"] == "experiment.locked"
     assert "Nothing was sent, and nothing was written." in error["message"]
     # It wrote nothing, so it gives no output directory, and read nothing, so no counts.

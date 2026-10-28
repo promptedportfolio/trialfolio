@@ -17,14 +17,12 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import AUTHENTICATED, Cli, Outcome, plan_hash_for, response
-from tests.interface.test_ranking_snapshot import serve as serve_snapshot
-from tests.interface.test_ranking_snapshot import take
+from tests.support.cli import Cli
 from tests.support.clock import Slept
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     RANK_UPDATED,
     UNAVAILABLE,
@@ -32,6 +30,8 @@ from tests.support.experiment_builder import (
     experiment_config,
     returns_each,
 )
+from tests.support.fake_portfolio123 import AUTHENTICATED, response
+from tests.support.snapshot_builder import serve_snapshot, take_snapshot
 from tests.support.storage_faults import StorageFaults
 from tests.support.terminal import PseudoTerminal
 from trialfolio.cli import main
@@ -59,10 +59,6 @@ SAYS_10_SECONDS = (
 )
 
 
-def summary_cases(outcome: Outcome) -> list[dict[str, object]]:
-    return cast("list[dict[str, object]]", outcome.summary["cases"])
-
-
 def waited_after(*received: str) -> Slept:
     """A wait of 10 seconds, which began once the server had received `received`."""
     return Slept(UPDATE_PAUSE_SECONDS, received)
@@ -75,7 +71,7 @@ def test_a_screen_runs_backtest_waits_10_seconds_after_its_rank_update(cli: Cli)
     cli.server.reply("/screen/backtest", response("complete.json"))
     out = cli.tmp / "run"
 
-    outcome = cli("run", DEFINITION, "--out", out, "--approve", plan_hash_for(DEFINITION))
+    outcome = cli.run_approved(DEFINITION, out)
 
     assert outcome.exit_code == 0, outcome.stderr
     assert cli.pause.slept == [waited_after(AUTH, RANK)]
@@ -133,7 +129,7 @@ def test_each_attempt_of_an_experiment_waits_in_a_new_session_a_resume_and_a_rep
         waited_after(*sent[:5], AUTH, RANK),
         waited_after(*sent[:5], AUTH, RANK, BACKTEST, RANK),
     ]
-    (second,) = [case for case in summary_cases(resumed) if case["case_key"] == "value-heavy"]
+    (second,) = [case for case in resumed.cases if case["case_key"] == "value-heavy"]
 
     repeated = experiments.run(
         BUDGET_RAISED,
@@ -153,12 +149,12 @@ def test_each_attempt_of_an_experiment_waits_in_a_new_session_a_resume_and_a_rep
 def test_a_snapshot_and_a_run_without_a_definition_never_wait(cli: Cli) -> None:
     cli.ready()
     serve_snapshot(cli)
-    snapshot = take(cli, cli.tmp / "snapshot")
+    snapshot = take_snapshot(cli, cli.tmp / "snapshot")
     assert snapshot.exit_code == 0, snapshot.stderr
     cli.server.reply("/auth", AUTHENTICATED)
     cli.server.reply("/screen/backtest", response("complete.json"))
 
-    formula = cli("run", FORMULA, "--out", cli.tmp / "run", "--approve", plan_hash_for(FORMULA))
+    formula = cli.run_approved(FORMULA, cli.tmp / "run")
 
     assert formula.exit_code == 0, formula.stderr
     assert cli.pause.slept == []

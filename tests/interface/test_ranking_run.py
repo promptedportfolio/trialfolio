@@ -29,16 +29,11 @@ from typing import cast
 
 import pytest
 
-from tests.interface.conftest import (
-    AUTHENTICATED,
-    Cli,
-    FaultyStores,
-    Outcome,
-    plan_hash_for,
-    response,
-)
-from tests.support.fake_portfolio123 import Reply
+from tests.support.cli import Cli, plan_hash_for
+from tests.support.environment import Outcome
+from tests.support.fake_portfolio123 import AUTHENTICATED, Reply, response
 from tests.support.snapshot_builder import SnapshotBuilder, naming
+from tests.support.storage_faults import FaultyStores
 from trialfolio.contracts.manifest import RunManifestV1_1
 from trialfolio.contracts.plan import PlanV1_2
 from trialfolio.contracts.ranking_snapshot import RankingSnapshotRecord
@@ -69,15 +64,7 @@ def serve(cli: Cli, rank: Reply = RANK_UPDATED, backtest: Reply | None = None) -
 
 def run(cli: Cli, out: Path, *args: str | Path, config: Path = DEFINITION) -> Outcome:
     """Runs `config` into `out`, approved with `--approve` and its plan's hash, with `--json`."""
-    return cli("run", config, "--out", out, "--approve", plan_hash_for(config), "--json", *args)
-
-
-def error_code(outcome: Outcome) -> str:
-    return cast("dict[str, str]", outcome.summary["error"])["code"]
-
-
-def counts(outcome: Outcome) -> dict[str, object]:
-    return cast("dict[str, object]", outcome.summary["counts"])
+    return cli.run_approved(config, out, "--json", *args)
 
 
 def copied(cli: Cli) -> Path:
@@ -182,10 +169,10 @@ def test_without_a_terminal_stderr_gives_the_hash_the_budget_and_the_overwrite(c
     outcome = cli("run", DEFINITION, "--out", out, "--json")
 
     assert outcome.exit_code == 2
-    assert error_code(outcome) == "plan.approval_required"
+    assert outcome.error_code == "plan.approval_required"
     assert not out.exists()
     assert cli.server.requests() == []
-    ids = cast("dict[str, str]", outcome.summary["ids"])
+    ids = outcome.ids
     assert ids["plan_hash"] == plan_hash_for(DEFINITION)
     assert set(ids) == {"plan_hash", "case_id"}
     assert outcome.stderr.splitlines()[:7] == [
@@ -264,7 +251,7 @@ def test_an_approved_run_writes_the_definition_then_backtests_and_counts_both(cl
         "metrics": "normalized/metrics.csv",
         "settings": "normalized/settings.csv",
     }
-    assert {key: counts(outcome)[key] for key in ("attempts", "provider_requests", "cost")} == {
+    assert {key: outcome.counts[key] for key in ("attempts", "provider_requests", "cost")} == {
         "attempts": 1,
         "provider_requests": 2,
         "cost": 6,
@@ -281,9 +268,9 @@ def test_a_rank_update_that_fails_counts_one_request_and_sends_no_backtest(cli: 
     outcome = run(cli, out)
 
     assert outcome.exit_code == 5
-    assert error_code(outcome) == "provider.outcome_unknown"
+    assert outcome.error_code == "provider.outcome_unknown"
     assert cli.server.requests() == ["POST /auth", "POST /rank"]
-    assert {key: counts(outcome)[key] for key in ("attempts", "provider_requests", "cost")} == {
+    assert {key: outcome.counts[key] for key in ("attempts", "provider_requests", "cost")} == {
         "attempts": 1,
         "provider_requests": 1,
         "cost": None,
@@ -306,21 +293,12 @@ def test_without_its_attempt_record_the_summary_counts_each_start_record(
     faults.fail_os("attempt.json")
     out = cli.tmp / "run"
 
-    outcome = cli(
-        "run",
-        DEFINITION,
-        "--out",
-        out,
-        "--approve",
-        plan_hash_for(DEFINITION),
-        "--json",
-        store_factory=faults,
-    )
+    outcome = cli.run_approved(DEFINITION, out, "--json", store_factory=faults)
 
     assert outcome.exit_code == 4
-    assert error_code(outcome) == "storage.write_failed"
-    assert (counts(outcome)["attempts"], counts(outcome)["provider_requests"]) == (1, sent)
-    assert "attempt_id" in cast("dict[str, str]", outcome.summary["ids"])
+    assert outcome.error_code == "storage.write_failed"
+    assert (outcome.counts["attempts"], outcome.counts["provider_requests"]) == (1, sent)
+    assert "attempt_id" in outcome.ids
 
 
 def test_a_screen_configuration_1_1_0_ranked_by_a_formula_runs_as_a_plan_1_0_0(cli: Cli) -> None:
@@ -352,14 +330,12 @@ def test_a_screen_configuration_1_1_0_ranked_by_a_formula_runs_as_a_plan_1_0_0(c
 # A snapshot as the ranking (R04-AC08)
 
 
-def test_a_configuration_naming_a_snapshot_plans_offline_and_copies_its_files(
-    cli: Cli, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_configuration_naming_a_snapshot_plans_offline_and_copies_its_files(cli: Cli) -> None:
     """`definition.yaml` with a snapshot in place of its definition builds its plan with no
     credentials and sends nothing, with the snapshot's source; its case is the definition file's;
     and, approved, the run copies the snapshot's `definition.xml` and `snapshot.json`, byte for
     byte, beside `configuration.yaml`, and sends the snapshot's definition."""
-    snapshot = SnapshotBuilder(monkeypatch, cli.tmp / "builder").snapshot(cli.tmp / "snapshot")
+    snapshot = SnapshotBuilder(cli.tmp / "builder").snapshot(cli.tmp / "snapshot")
     config = naming(DEFINITION, snapshot, cli.tmp / "configs")
     cli.accept_license()
     out = cli.tmp / "run"
@@ -367,12 +343,12 @@ def test_a_configuration_naming_a_snapshot_plans_offline_and_copies_its_files(
     offline = cli("run", config, "--out", out, "--json")
 
     assert offline.exit_code == 2
-    assert error_code(offline) == "plan.approval_required"
+    assert offline.error_code == "plan.approval_required"
     assert cli.server.requests() == []
     assert not out.exists()
-    ids = cast("dict[str, str]", offline.summary["ids"])
+    ids = offline.ids
     by_file = cli("run", DEFINITION, "--out", out, "--json")
-    assert ids["case_id"] == cast("dict[str, str]", by_file.summary["ids"])["case_id"]
+    assert ids["case_id"] == by_file.ids["case_id"]
     assert ids["plan_hash"] != plan_hash_for(DEFINITION)
 
     cli.credentials()
@@ -394,10 +370,8 @@ def test_a_configuration_naming_a_snapshot_plans_offline_and_copies_its_files(
 
 
 @posix_only
-def test_under_a_terminal_a_snapshot_source_gives_its_system_and_when_it_was_read(
-    cli: Cli, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    snapshot = SnapshotBuilder(monkeypatch, cli.tmp / "builder").snapshot(cli.tmp / "snapshot")
+def test_under_a_terminal_a_snapshot_source_gives_its_system_and_when_it_was_read(cli: Cli) -> None:
+    snapshot = SnapshotBuilder(cli.tmp / "builder").snapshot(cli.tmp / "snapshot")
     config = naming(DEFINITION, snapshot, cli.tmp / "configs")
     record = RankingSnapshotRecord.model_validate_json((snapshot / "snapshot.json").read_bytes())
     taken = record.taken_at.isoformat().replace("+00:00", "Z")
@@ -443,8 +417,8 @@ def test_a_synthetic_snapshot_named_as_the_ranking_is_config_invalid(cli: Cli) -
     outcome = cli("run", config, "--out", out, "--json")
 
     assert outcome.exit_code == 3
-    assert error_code(outcome) == "config.invalid"
-    message = cast("dict[str, str]", outcome.summary["error"])["message"]
+    assert outcome.error_code == "config.invalid"
+    message = outcome.error["message"]
     assert "`ranking.snapshot` names a snapshot that's synthetic" in message
     assert not out.exists()
     assert cli.server.requests() == []

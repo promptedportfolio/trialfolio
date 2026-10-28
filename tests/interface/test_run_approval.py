@@ -12,22 +12,19 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome, config, plan_hash_for, serve_success
 from tests.support import canaries
+from tests.support.cli import Cli, plan_hash_for
+from tests.support.environment import Outcome
+from tests.support.fake_portfolio123 import serve_success
+from tests.support.paths import screen_config
 from tests.support.terminal import PseudoTerminal
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.contracts.plan import Plan
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows has no pseudo-terminals")
-
-
-def error_code(outcome: Outcome) -> str:
-    error = cast("dict[str, str]", outcome.summary["error"])
-    return error["code"]
 
 
 def shown_hash(shown: str) -> str:
@@ -43,7 +40,7 @@ def shown_hash(shown: str) -> str:
 def assert_refused(cli: Cli, outcome: Outcome, out: Path) -> None:
     """`plan.approval_required`, exit 2, no output directory, and nothing sent."""
     assert outcome.exit_code == 2
-    assert error_code(outcome) == "plan.approval_required"
+    assert outcome.error_code == "plan.approval_required"
     assert outcome.summary["output_dir"] is None
     assert not out.exists()
     assert cli.server.requests() == []
@@ -54,11 +51,11 @@ def test_without_approve_or_a_terminal_nothing_is_sent(cli: Cli) -> None:
     serve_success(cli.server)
     out = cli.tmp / "out"
 
-    outcome = cli("run", config("formula.yaml"), "--out", out, "--json")
+    outcome = cli("run", screen_config("formula.yaml"), "--out", out, "--json")
 
     assert_refused(cli, outcome, out)
-    ids = cast("dict[str, str]", outcome.summary["ids"])
-    assert ids["plan_hash"] == plan_hash_for(config("formula.yaml"))
+    ids = outcome.ids
+    assert ids["plan_hash"] == plan_hash_for(screen_config("formula.yaml"))
     assert f"--approve {ids['plan_hash']}" in outcome.stderr
 
 
@@ -74,11 +71,11 @@ def test_a_hash_that_isnt_the_full_hash_is_refused(cli: Cli, given: Callable[[st
     cli.ready()
     serve_success(cli.server)
     out = cli.tmp / "out"
-    full = plan_hash_for(config("formula.yaml"))
+    full = plan_hash_for(screen_config("formula.yaml"))
     hashed = given(full)
     assert hashed != full
 
-    outcome = cli("run", config("formula.yaml"), "--out", out, "--approve", hashed, "--json")
+    outcome = cli("run", screen_config("formula.yaml"), "--out", out, "--approve", hashed, "--json")
 
     assert_refused(cli, outcome, out)
 
@@ -87,9 +84,9 @@ def test_the_full_hash_runs_without_a_prompt_and_is_recorded_as_option(cli: Cli)
     cli.ready()
     serve_success(cli.server)
     out = cli.tmp / "out"
-    full = plan_hash_for(config("formula.yaml"))
+    full = plan_hash_for(screen_config("formula.yaml"))
 
-    outcome = cli("run", config("formula.yaml"), "--out", out, "--approve", full, "--json")
+    outcome = cli("run", screen_config("formula.yaml"), "--out", out, "--approve", full, "--json")
 
     assert outcome.exit_code == 0, outcome.stderr
     assert "Type approve" not in outcome.stderr
@@ -103,10 +100,10 @@ def test_without_a_terminal_only_the_hash_and_the_budget_are_shown(cli: Cli) -> 
     cli.ready()
     out = cli.tmp / "out"
 
-    outcome = cli("run", config("canaries.yaml"), "--out", out, "--json")
+    outcome = cli("run", screen_config("canaries.yaml"), "--out", out, "--json")
 
     assert_refused(cli, outcome, out)
-    assert plan_hash_for(config("canaries.yaml")) in outcome.stderr
+    assert plan_hash_for(screen_config("canaries.yaml")) in outcome.stderr
     assert "at most 1 provider request" in outcome.stderr
     assert "5 credits" in outcome.stderr
     assert "in a terminal to see the full plan" in outcome.stderr
@@ -133,7 +130,7 @@ def test_any_other_answer_at_the_prompt_is_a_refusal(cli: Cli, keys: str) -> Non
         terminal.press(keys)
         outcome = cli(
             "run",
-            config("canaries.yaml"),
+            screen_config("canaries.yaml"),
             "--out",
             out,
             "--json",
@@ -159,7 +156,7 @@ def test_typing_approve_runs_the_plan_shown_and_is_recorded_as_interactive(cli: 
         terminal.press("approve\n")
         outcome = cli(
             "run",
-            config("formula.yaml"),
+            screen_config("formula.yaml"),
             "--out",
             out,
             "--json",
@@ -183,7 +180,7 @@ def test_typing_approve_under_the_test_launcher_runs_the_plan_shown(cli: Cli) ->
     serve_success(cli.server)
     out = cli.tmp / "out"
 
-    with cli.on_terminal("run", config("formula.yaml"), "--out", out, "--json") as terminal:
+    with cli.on_terminal("run", screen_config("formula.yaml"), "--out", out, "--json") as terminal:
         terminal.wait_for("Type approve")
         terminal.press("approve\n")
         exit_code = terminal.wait()

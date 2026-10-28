@@ -25,7 +25,9 @@ from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome, config, snapshot
+from tests.support.cli import Cli
+from tests.support.directories import snapshot
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     ExperimentBuilder,
@@ -34,6 +36,8 @@ from tests.support.experiment_builder import (
     returns,
 )
 from tests.support.package_versions import fake_distribution
+from tests.support.paths import screen_config
+from tests.support.saved_records import session_manifest
 from tests.support.terminal import PseudoTerminal
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.experiment_configuration import ExperimentConfiguration
@@ -57,16 +61,6 @@ def record(out: Path, plan: int) -> ExperimentRecord:
     return ExperimentRecord.model_validate_json(
         (out / f"plans/{plan}/experiment.json").read_bytes()
     )
-
-
-def manifest(out: Path, session: int) -> ExperimentManifest:
-    return ExperimentManifest.model_validate_json(
-        (out / f"sessions/{session}/manifest.json").read_bytes()
-    )
-
-
-def error_of(outcome: Outcome) -> dict[str, str]:
-    return cast("dict[str, str]", outcome.summary["error"])
 
 
 def completed(cli: Cli, experiments: Builder, path: Path = EXAMPLE) -> Path:
@@ -114,7 +108,7 @@ def test_a_revision_without_its_reason_and_its_hash_fails_and_writes_nothing(
     outcome = experiments.run(changed, out, *options, approve=False)
 
     assert outcome.exit_code == 3, outcome.stderr
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == "plan.changed"
     assert f"--approve {revised}" in error["message"]
     assert "--revision-reason" in error["message"]
@@ -175,7 +169,7 @@ def test_an_approved_revision_sends_only_its_new_case_and_keeps_the_retired_one(
     (retired,) = second.retired_cases
     assert (retired.case_id, retired.case_key, retired.plan) == (old.case_id, "holdings-50", 1)
     assert (retired.description, retired.variant) == (old.description, old.variant)
-    counts = manifest(out, 2).counts
+    counts = session_manifest(out, 2, ExperimentManifest).counts
     assert (counts.retired_cases, counts.attempts.succeeded, counts.cases.succeeded) == (1, 6, 5)
     summary = outcome.summary
     assert cast("dict[str, int]", summary["counts"])["cases_retired"] == 1
@@ -219,7 +213,7 @@ def test_a_revision_that_keeps_every_case_sends_nothing(
         (),
         (),
     )
-    assert manifest(out, 2).counts.cases.succeeded == 5
+    assert session_manifest(out, 2, ExperimentManifest).counts.cases.succeeded == 5
 
 
 def test_reordering_one_settings_variants_is_a_revision_that_keeps_every_case(
@@ -246,7 +240,7 @@ def test_reordering_one_settings_variants_is_a_revision_that_keeps_every_case(
     assert sorted(case.case_id for case in second.planned_cases) == sorted(
         case.case_id for case in first.planned_cases
     )
-    assert manifest(out, 2).counts.cases.succeeded == 6
+    assert session_manifest(out, 2, ExperimentManifest).counts.cases.succeeded == 6
 
 
 def test_a_removed_variant_is_retired_and_planning_it_again_brings_it_back_unsent(
@@ -286,7 +280,7 @@ def test_a_removed_variant_is_retired_and_planning_it_again_brings_it_back_unsen
     assert (retired.description, retired.variant) == (slippage.description, slippage.variant)
     assert retired.variant is not None
     assert (retired.variant.setting, retired.variant.value) == ("slippage_percent", "0.5")
-    assert manifest(out, 2).counts.retired_cases == 1
+    assert session_manifest(out, 2, ExperimentManifest).counts.retired_cases == 1
     third = record(out, 3)
     assert third.plans[:-1] == second.plans
     assert third.plans[-1].reason == "Brings slippage back."
@@ -294,7 +288,7 @@ def test_a_removed_variant_is_retired_and_planning_it_again_brings_it_back_unsen
     changes = third.plans[-1].changes
     assert changes is not None
     assert [case.case_id for case in changes.cases_added] == [slippage.case_id]
-    counts = manifest(out, 3).counts
+    counts = session_manifest(out, 3, ExperimentManifest).counts
     assert (counts.cases.succeeded, counts.retired_cases, counts.attempts.succeeded) == (5, 0, 5)
 
 
@@ -318,7 +312,7 @@ def test_a_reason_with_a_new_experiment_fails_and_creates_nothing(cli: Cli) -> N
     )
 
     assert outcome.exit_code == 2
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == "plan.approval_required"
     assert (
         "A new experiment has no plan to revise. Run the command without --revision-reason."
@@ -333,11 +327,11 @@ def test_a_reason_with_a_screen_fails_and_creates_nothing(cli: Cli) -> None:
     out = cli.tmp / "run"
 
     outcome = cli(
-        "run", config("formula.yaml"), "--out", out, "--revision-reason", REASON, "--json"
+        "run", screen_config("formula.yaml"), "--out", out, "--revision-reason", REASON, "--json"
     )
 
     assert outcome.exit_code == 2
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == "plan.approval_required"
     assert "--revision-reason applies only to an experiment's configuration" in error["message"]
     assert not out.exists()
@@ -357,10 +351,10 @@ def test_a_reason_with_the_current_plan_fails_unless_its_the_reason_the_plan_rec
 
     other = experiments.run(changed, out, "--revision-reason", "Another reason.")
     assert other.exit_code == 2
-    assert error_of(other)["code"] == "plan.approval_required"
+    assert other.error["code"] == "plan.approval_required"
     assert (
         "If you changed the configuration, check that this is the file you changed."
-        in (error_of(other)["message"])
+        in (other.error["message"])
     )
     assert snapshot(out) == before
 
@@ -387,7 +381,7 @@ def test_another_experiment_id_or_universe_is_another_experiment(
     outcome = cli("run", revision(name), "--out", out, "--revision-reason", REASON, "--json")
 
     assert outcome.exit_code == 4
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == "output.not_empty"
     assert "another experiment" in error["message"]
     assert snapshot(out) == before
@@ -414,7 +408,7 @@ def test_a_new_trialfolio_version_alone_is_a_revision_of_versions(
     revised = experiments.run(EXAMPLE, out, "--revision-reason", "Upgraded Trial Folio.")
 
     assert unrevised.exit_code == 3
-    assert error_of(unrevised)["code"] == "plan.changed"
+    assert unrevised.error["code"] == "plan.changed"
     assert revised.exit_code == 0, revised.stderr
     assert len(cli.server.received) == received
     # The entries before the last are the first plan's, unchanged, and the last has the reason
@@ -469,7 +463,7 @@ def test_on_a_terminal_the_revision_shows_what_changed_and_typing_approve_approv
     assert "Type approve to run this revision of the experiment's plan" in shown
     entry = record(out, 2).plans[-1]
     assert (entry.approval, entry.reason) == ("interactive", reason)
-    assert manifest(out, 2).approval == "interactive"
+    assert session_manifest(out, 2, ExperimentManifest).approval == "interactive"
 
 
 @posix_only
@@ -495,8 +489,8 @@ def test_on_a_terminal_a_refused_revision_fails_with_plan_changed(
     terminal.shown()
 
     assert outcome.exit_code == 3
-    assert error_of(outcome)["code"] == "plan.changed"
-    assert "the answer wasn't approve" in error_of(outcome)["message"]
+    assert outcome.error["code"] == "plan.changed"
+    assert "the answer wasn't approve" in outcome.error["message"]
     assert snapshot(out) == before
 
 
@@ -541,7 +535,7 @@ def test_on_a_terminal_a_revision_without_a_reason_fails_without_asking(
     shown = terminal.shown()
 
     assert outcome.exit_code == 3
-    assert error_of(outcome)["code"] == "plan.changed"
+    assert outcome.error["code"] == "plan.changed"
     assert "Reason for the revision: none given." in shown
     assert "Type approve" not in shown
     assert snapshot(out) == before

@@ -22,7 +22,7 @@ import csv
 import dataclasses
 import io
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -187,19 +187,18 @@ def reviewed(path: Path) -> Reviewed:
 
 
 @pytest.fixture(scope="module")
-def review(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Review]:
+def review(tmp_path_factory: pytest.TempPathFactory) -> Review:
     """Builds the runs a review configuration names, once for the module, and compares them."""
     root = tmp_path_factory.mktemp("reviews")
     built: dict[str, Reviewed] = {}
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        builder = RunBuilder(monkeypatch, root / "home")
+    builder = RunBuilder(root / "home")
 
-        def get(name: str) -> Reviewed:
-            if name not in built:
-                built[name] = reviewed(builder.review(name, root / name.removesuffix(".yaml")))
-            return built[name]
+    def get(name: str) -> Reviewed:
+        if name not in built:
+            built[name] = reviewed(builder.review(name, root / name.removesuffix(".yaml")))
+        return built[name]
 
-        yield get
+    return get
 
 
 def unweighted(differences: Differences) -> list[DifferencesRow]:

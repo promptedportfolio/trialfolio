@@ -26,12 +26,12 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, FaultyStores, Outcome, plan_hash_for, response
 from tests.support import launcher
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     RANK_UPDATED,
@@ -42,7 +42,8 @@ from tests.support.experiment_builder import (
     returns,
     returns_each,
 )
-from tests.support.fake_portfolio123 import Reply
+from tests.support.fake_portfolio123 import Reply, response
+from tests.support.storage_faults import FaultyStores
 from trialfolio.configuration import read_experiment_configuration_v1_1
 from trialfolio.planning import build_experiment_plan_v1_1, installed_versions
 from trialfolio.ranking_lock import LOCK_DIRECTORY_VARIABLE, LOCK_FILE, RankingLock
@@ -62,7 +63,7 @@ LOCKED = (
 
 
 def error(outcome: Outcome) -> dict[str, str]:
-    return cast("dict[str, str]", outcome.summary["error"])
+    return outcome.error
 
 
 def serve_run(cli: Cli) -> None:
@@ -73,7 +74,7 @@ def serve_run(cli: Cli) -> None:
 
 
 def screen_run(cli: Cli, out: Path, config: Path = DEFINITION) -> Outcome:
-    return cli("run", config, "--out", out, "--approve", plan_hash_for(config), "--json")
+    return cli.run_approved(config, out, "--json")
 
 
 def wait_for_requests(cli: Cli, count: int, process: subprocess.Popen[bytes]) -> None:
@@ -141,7 +142,7 @@ def test_runs_that_find_the_lock_held_send_and_write_nothing_until_it_ends(
     assert_locked(screen, cli.tmp / "screen")
     assert_locked(experiment, cli.tmp / "second")
     # The experiment's summary gives its cases, and `counts` {}, as after any experiment.locked.
-    assert len(cast("list[object]", experiment.summary["cases"])) == 4
+    assert len(experiment.cases) == 4
     assert experiment.summary["counts"] == {}
     assert received_while_held == ["POST /auth", "POST /rank"]
     requests = cli.server.requests()
@@ -197,7 +198,7 @@ def test_a_resume_meets_the_lock_before_its_session_record(
     assert LOCKED in error(locked)["message"]
     assert locked.summary["output_dir"] is None
     assert locked.summary["counts"] == {}
-    assert len(cast("list[object]", locked.summary["cases"])) == 4
+    assert len(locked.cases) == 4
     assert cli.server.requests() == received
     assert sorted(path.name for path in (out / "sessions").iterdir()) == ["1"]
 
@@ -248,7 +249,7 @@ def test_a_formula_ranked_run_and_a_resume_that_sends_nothing_run_beside_a_held_
 
     assert formula.exit_code == 0, formula.stderr
     assert resumed.exit_code == 0, resumed.stderr
-    assert cast("dict[str, object]", resumed.summary["ids"])["session"] == 2
+    assert resumed.ids["session"] == 2
 
 
 # When the lock can't be taken

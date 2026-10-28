@@ -32,53 +32,25 @@ from pathlib import Path
 
 import pytest
 
-from tests.interface.conftest import (
-    AUTHENTICATED,
-    Cli,
-    FaultyStores,
-    Outcome,
-    config,
-    plan_hash_for,
-    serve_success,
-)
-from tests.support.fake_portfolio123 import Reply
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
+from tests.support.fake_portfolio123 import AUTHENTICATED, Reply, serve_success
+from tests.support.paths import screen_config
+from tests.support.saved_records import only_attempt, only_attempt_record
 from tests.support.socket_faults import SocketFaults
+from tests.support.storage_faults import FaultyStores
 from tests.support.terminal import CTRL_C, PseudoTerminal
-from trialfolio.contracts.attempt import AttemptRecord
 from trialfolio.storage import ArtifactStore, LocalArtifactStore, StoredFile
 
-FORMULA = config("formula.yaml")
+FORMULA = screen_config("formula.yaml")
 PROVIDER_TEXT = "Unsupported value"
 """Portfolio123's own message for the 400."""
 
 
-def approved_run(cli: Cli, out: Path, **options: object) -> Outcome:
-    return cli(
-        "run",
-        FORMULA,
-        "--out",
-        out,
-        "--approve",
-        plan_hash_for(FORMULA),
-        "--json",
-        **options,  # pyright: ignore[reportArgumentType]
-    )
-
-
 def interrupted(outcome: Outcome) -> None:
     assert outcome.exit_code == 130, outcome.stderr
-    error = outcome.summary["error"]
-    assert isinstance(error, dict)
+    error = outcome.error
     assert error["code"] == "command.interrupted"
-
-
-def attempt_directory(out: Path) -> Path:
-    (directory,) = (out / "cases").glob("*/attempts/*")
-    return directory
-
-
-def record_of(out: Path) -> AttemptRecord:
-    return AttemptRecord.model_validate_json((attempt_directory(out) / "attempt.json").read_bytes())
 
 
 def written_once(faults: FaultyStores) -> None:
@@ -94,41 +66,20 @@ class AfterWrite:
         self._action = action
 
     def __call__(self, root: str) -> ArtifactStore:
-        return _AfterWriteStore(LocalArtifactStore(root), self._name, self._action)
+        return _AfterWriteStore(root, self._name, self._action)
 
 
-class _AfterWriteStore:
-    def __init__(self, store: LocalArtifactStore, name: str, action: Callable[[], object]) -> None:
-        self._store = store
+class _AfterWriteStore(LocalArtifactStore):
+    def __init__(self, root: str, name: str, action: Callable[[], object]) -> None:
+        super().__init__(root)
         self._name = name
         self._action = action
 
-    def check_empty(self) -> None:
-        self._store.check_empty()
-
-    def claim(self, path: str, data: bytes, *, lock: bool = False) -> StoredFile:
-        return self._store.claim(path, data, lock=lock)
-
-    def lock(self, path: str) -> None:
-        self._store.lock(path)
-
-    def close(self) -> None:
-        self._store.close()
-
     def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
-        stored = self._store.write(path, data, logged_as=logged_as)
+        stored = super().write(path, data, logged_as=logged_as)
         if path.rsplit("/", 1)[-1] == self._name:
             self._action()
         return stored
-
-    def discard(self, path: str, data: bytes) -> None:
-        self._store.discard(path, data)
-
-    def read(self, path: str) -> bytes:
-        return self._store.read(path)
-
-    def entries(self, path: str) -> tuple[str, ...]:
-        return self._store.entries(path)
 
 
 # Before the claim
@@ -209,7 +160,7 @@ def test_an_interrupt_while_the_claim_writes_the_plan_leaves_nothing(
     monkeypatch.setattr(os, "open", open_)
     monkeypatch.setattr(os, "write", write)
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
     interrupted(outcome)
     assert claim_files, "the claim never opened plan.json"
@@ -228,10 +179,10 @@ def test_an_interrupt_just_after_the_configuration_records_a_failed_attempt(
     out = cli.tmp / "out"
     faults.fail_after("configuration.yaml", KeyboardInterrupt())
 
-    outcome = approved_run(cli, out, store_factory=faults)
+    outcome = cli.run_approved(FORMULA, out, "--json", store_factory=faults)
 
     interrupted(outcome)
-    record = record_of(out)
+    record = only_attempt_record(out)
     assert record.outcome == "failed"
     assert record.possibly_charged is False
     assert record.exchanges == ()
@@ -239,8 +190,8 @@ def test_an_interrupt_just_after_the_configuration_records_a_failed_attempt(
     assert record.error.code == "command.interrupted"
     assert cli.server.received == ()
     assert not (out / "manifest.json").exists()
-    assert not (attempt_directory(out) / "started.json").exists()
-    assert outcome.summary["ids"]["attempt_id"] == attempt_directory(out).name  # pyright: ignore[reportIndexIssue]
+    assert not (only_attempt(out) / "started.json").exists()
+    assert outcome.ids["attempt_id"] == only_attempt(out).name
     written_once(faults)
 
 
@@ -252,15 +203,15 @@ def test_ctrl_c_during_authentication_records_a_failed_attempt(
     serve_success(cli.server)
     SocketFaults(monkeypatch).interrupt_send()
 
-    outcome = approved_run(cli, out, store_factory=faults)
+    outcome = cli.run_approved(FORMULA, out, "--json", store_factory=faults)
 
     interrupted(outcome)
-    record = record_of(out)
+    record = only_attempt_record(out)
     assert record.outcome == "failed"
     assert record.possibly_charged is False
     assert [(e.request, e.result) for e in record.exchanges] == [("POST /auth", "interrupted")]
     assert cli.server.received == ()
-    assert not (attempt_directory(out) / "started.json").exists()
+    assert not (only_attempt(out) / "started.json").exists()
     assert not (out / "manifest.json").exists()
     written_once(faults)
 
@@ -273,16 +224,16 @@ def test_an_interrupt_while_the_start_record_is_written_sends_nothing_to_the_bac
     serve_success(cli.server)
     faults.fail_before("started.json", KeyboardInterrupt())
 
-    outcome = approved_run(cli, out, store_factory=faults)
+    outcome = cli.run_approved(FORMULA, out, "--json", store_factory=faults)
 
     interrupted(outcome)
-    record = record_of(out)
+    record = only_attempt_record(out)
     assert record.outcome == "failed"
     assert record.possibly_charged is False
     assert [(e.request, e.status) for e in record.exchanges] == [("POST /auth", 200)]
     assert cli.server.requests() == ["POST /auth"]
-    assert not (attempt_directory(out) / "started.json").exists()
-    assert outcome.summary["counts"]["provider_requests"] == 0  # pyright: ignore[reportIndexIssue]
+    assert not (only_attempt(out) / "started.json").exists()
+    assert outcome.counts["provider_requests"] == 0
     written_once(faults)
 
 
@@ -297,12 +248,12 @@ def test_ctrl_c_during_the_backtest_send_is_unknown_and_possibly_charged(
     serve_success(cli.server)
     sockets = SocketFaults(monkeypatch)
 
-    outcome = approved_run(
-        cli, out, store_factory=AfterWrite("started.json", sockets.interrupt_send)
+    outcome = cli.run_approved(
+        FORMULA, out, "--json", store_factory=AfterWrite("started.json", sockets.interrupt_send)
     )
 
     interrupted(outcome)
-    record = record_of(out)
+    record = only_attempt_record(out)
     assert record.outcome == "unknown"
     assert record.possibly_charged is True
     assert [(e.request, e.result) for e in record.exchanges] == [
@@ -312,9 +263,9 @@ def test_ctrl_c_during_the_backtest_send_is_unknown_and_possibly_charged(
     assert record.error is not None
     assert record.error.code == "command.interrupted"
     assert cli.server.requests() == ["POST /auth"]
-    assert (attempt_directory(out) / "started.json").exists()
+    assert (only_attempt(out) / "started.json").exists()
     assert not (out / "manifest.json").exists()
-    assert outcome.summary["counts"]["provider_requests"] == 1  # pyright: ignore[reportIndexIssue]
+    assert outcome.counts["provider_requests"] == 1
 
 
 def test_an_interrupt_after_a_400_before_the_attempt_record_keeps_portfolio123s_message(
@@ -326,10 +277,10 @@ def test_an_interrupt_after_a_400_before_the_attempt_record_keeps_portfolio123s_
     cli.server.reply("/screen/backtest", Reply(400, PROVIDER_TEXT.encode()))
     faults.fail_before("attempt.json", KeyboardInterrupt())
 
-    outcome = approved_run(cli, out, store_factory=faults)
+    outcome = cli.run_approved(FORMULA, out, "--json", store_factory=faults)
 
     interrupted(outcome)
-    record = record_of(out)
+    record = only_attempt_record(out)
     assert record.outcome == "failed"
     assert record.possibly_charged is True
     assert [(e.request, e.status) for e in record.exchanges] == [
@@ -354,10 +305,10 @@ def test_an_interrupt_after_the_attempt_record_leaves_it_unchanged(
     cli.server.reply("/screen/backtest", Reply(400, PROVIDER_TEXT.encode()))
     faults.fail_after("attempt.json", KeyboardInterrupt())
 
-    outcome = approved_run(cli, out, store_factory=faults)
+    outcome = cli.run_approved(FORMULA, out, "--json", store_factory=faults)
 
     interrupted(outcome)
-    record = record_of(out)
+    record = only_attempt_record(out)
     assert record.outcome == "failed"
     assert record.error is not None
     assert record.error.code == "provider.unsupported_capability"
@@ -375,13 +326,13 @@ def test_an_interrupt_after_a_successful_attempt_record_leaves_no_manifest(
     serve_success(cli.server)
     faults.fail_after("attempt.json", KeyboardInterrupt())
 
-    outcome = approved_run(cli, out, store_factory=faults)
+    outcome = cli.run_approved(FORMULA, out, "--json", store_factory=faults)
 
     interrupted(outcome)
-    record = record_of(out)
+    record = only_attempt_record(out)
     assert record.outcome == "succeeded"
     assert record.error is None
-    assert (attempt_directory(out) / "response.json").exists()
+    assert (only_attempt(out) / "response.json").exists()
     assert not (out / "normalized").exists()
     assert not (out / "manifest.json").exists()
     written_once(faults)
@@ -395,13 +346,13 @@ def test_an_interrupt_after_the_manifest_is_published_discards_it(
     serve_success(cli.server)
     faults.fail_after("manifest.json", KeyboardInterrupt())
 
-    outcome = approved_run(cli, out, store_factory=faults)
+    outcome = cli.run_approved(FORMULA, out, "--json", store_factory=faults)
 
     interrupted(outcome)
     assert faults.published[-1] == "manifest.json"
     assert not (out / "manifest.json").exists()
     assert (out / "report.html").exists()
-    assert "manifest" not in outcome.summary["outputs"]  # pyright: ignore[reportOperatorIssue]
-    message = outcome.summary["error"]["message"]  # pyright: ignore[reportIndexIssue]
+    assert "manifest" not in outcome.outputs
+    message = outcome.error["message"]
     assert "The run has no manifest, so its output is incomplete." in message
     written_once(faults)

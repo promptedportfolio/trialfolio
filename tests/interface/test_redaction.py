@@ -9,25 +9,15 @@ temporary directory, which holds the output directory and the temporary home wit
 configuration and log directories, and stdout and stderr.
 """
 
-from pathlib import Path
-
 import pytest
 
-from tests.interface.conftest import (
-    AUTHENTICATED,
-    Cli,
-    Outcome,
-    config,
-    plan_hash_for,
-    response,
-)
 from tests.support import canaries
-from tests.support.fake_portfolio123 import Reply
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
+from tests.support.fake_portfolio123 import AUTHENTICATED, Reply, response
+from tests.support.paths import screen_config
 
-
-def approved_run(cli: Cli, out: Path) -> Outcome:
-    path = config("formula.yaml")
-    return cli("run", path, "--out", out, "--approve", plan_hash_for(path), "--json")
+FORMULA = screen_config("formula.yaml")
 
 
 def leaks(cli: Cli, outcome: Outcome) -> list[str]:
@@ -73,7 +63,7 @@ def test_no_credential_or_token_canary_appears_anywhere(
         cli.server.reply("/screen/backtest", backtest)
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
     assert outcome.exit_code == exit_code, outcome.stderr
     # The log holds DEBUG events, so the scan covers the most detailed level.
@@ -86,7 +76,7 @@ def test_the_wrappers_reauthentication_after_a_401_is_refused(cli: Cli) -> None:
     cli.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
     cli.server.reply("/screen/backtest", Reply(401, b"Unauthorized"))
 
-    outcome = approved_run(cli, cli.tmp / "out")
+    outcome = cli.run_approved(FORMULA, cli.tmp / "out", "--json")
 
     assert outcome.exit_code == 5
     assert cli.server.requests() == ["POST /auth", "POST /screen/backtest"]

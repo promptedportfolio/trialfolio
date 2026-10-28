@@ -24,14 +24,16 @@ import io
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Final, cast, get_args
+from typing import Final, get_args
 
 import pytest
 
-from tests.interface.conftest import Cli, FaultyStores, Outcome
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import ExperimentBuilder, experiment_config, returns
 from tests.support.package_versions import fake_distribution
 from tests.support.run_builder import Run, RunBuilder
+from tests.support.storage_faults import FaultyStores
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.common import FlagCode, UnavailableReason
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
@@ -214,10 +216,10 @@ def test_each_succeeded_case_has_its_tables_right_after_its_attempt_record(
 
 
 def test_a_cases_rows_equal_a_screen_runs_with_the_same_settings_and_response(
-    cli: Cli, experiments: Builder, monkeypatch: pytest.MonkeyPatch
+    cli: Cli, experiments: Builder
 ) -> None:
     out = written(cli, experiments)
-    builder = RunBuilder(monkeypatch, cli.tmp / "runs-home")
+    builder = RunBuilder(cli.tmp / "runs-home")
     compared = {
         # The baseline's settings are formula.yaml's, and holdings-50's are holdings-50.yaml's.
         "baseline": builder.run(Run("formula.yaml", ANSWERS[0]), cli.tmp / "formula"),
@@ -333,7 +335,7 @@ def test_a_case_answered_with_an_invalid_structure_has_no_tables_and_is_failed(
     outcome = experiments.run(EXAMPLE, out, sends=[returns(name) for name in answers])
 
     assert outcome.exit_code == 6, outcome.stderr
-    error = cast("dict[str, str]", outcome.summary["error"])
+    error = outcome.error
     assert error["code"] == "execution.partial"
     assert "`holdings-50`, failed (provider.response_invalid)" in error["message"]
     holdings = case_named(EXAMPLE, "holdings-50")
@@ -343,10 +345,7 @@ def test_a_case_answered_with_an_invalid_structure_has_no_tables_and_is_failed(
     for case in cases_of(EXAMPLE):
         if case != holdings:
             assert (tables(out, case.case_id) / "settings.csv").is_file()
-    outcomes = {
-        case["case_key"]: case["outcome"]
-        for case in cast("list[dict[str, str]]", outcome.summary["cases"])
-    }
+    outcomes = {case["case_key"]: case["outcome"] for case in outcome.cases}
     assert outcomes["holdings-50"] == "failed"
     manifest = ExperimentManifest.model_validate_json(
         (out / "sessions/1/manifest.json").read_bytes()
@@ -387,7 +386,7 @@ def test_a_resume_writes_the_settings_table_a_storage_fault_left_out(
     else:
         stopped = experiments.run(EXAMPLE, out, sends=sends, store_factory=faults)
     assert stopped.exit_code == 4, stopped.stderr
-    assert cast("dict[str, str]", stopped.summary["error"])["code"] == "storage.write_failed"
+    assert stopped.error_code == "storage.write_failed"
     directory = tables(out, case.case_id)
     assert sorted(path.name for path in directory.iterdir()) == ["metrics.csv"]
     session = SessionRecord.model_validate_json((out / "sessions/1/session.json").read_bytes())

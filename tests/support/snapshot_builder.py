@@ -12,32 +12,30 @@ returns.
 definition, beside the snapshot, with `ranking.snapshot` naming it in place of the definition and
 its ranking method, so a test reads the snapshot as a ranking.
 
+`serve_snapshot` and `take_snapshot` script and take the example's snapshot through the tests'
+`Cli`, over the test's own server, for the CLI's tests. TS-T03 moved them here from
+`tests/interface/test_ranking_snapshot.py`, from which `test_ranking_pause.py` imported them.
+
 The snapshot's values are invented, but nothing labels it synthetic, so a committed copy would
 read as a ranking system Portfolio123 returned. It exists only in the test's temporary directory.
 R04-T10 wrote it, with the snapshot's tests.
 """
 
-import io
 import os
 import re
-import sys
 from pathlib import Path
 from typing import Final
 
-import pytest
-
-from tests.support import canaries
-from tests.support.clock import FixedClock
-from tests.support.environment import VARIABLES
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
-from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
-from trialfolio.cli import API_ID_VARIABLE, API_KEY_VARIABLE, main
+from tests.support.cli import Cli
+from tests.support.environment import Outcome, isolated, run_cli
+from tests.support.fake_portfolio123 import AUTHENTICATED, FakePortfolio123, Reply
+from tests.support.paths import FIXTURES, RESPONSES
 from trialfolio.configuration import read_ranking_snapshot_configuration
 from trialfolio.planning import build_snapshot_plan, installed_versions
 
-FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
 SNAPSHOT_CONFIGS: Final = FIXTURES / "ranking-snapshot-configs"
-RESPONSES: Final = FIXTURES / "responses"
+EXAMPLE: Final = SNAPSHOT_CONFIGS / "example.yaml"
+"""The snapshot configuration a snapshot is of, unless a test gives another."""
 
 _DEFINITION: Final = re.compile(
     r"^(?P<indent> *)definition: .*\n(?P=indent)ranking_method: .*\n", re.MULTILINE
@@ -58,13 +56,27 @@ def snapshot_plan_hash(configuration: str = "example.yaml") -> str:
     return build_snapshot_plan(read, installed_versions()).plan_hash
 
 
+def serve_snapshot(cli: Cli, reply: Reply | None = None) -> None:
+    """Scripts a snapshot on `cli`'s server: authentication, then the `GET /rank`'s `reply`,
+    `rank-get.json`'s 200 by default."""
+    cli.server.reply("/auth", AUTHENTICATED)
+    cli.server.reply("/rank", rank_get() if reply is None else reply, method="GET")
+
+
+def take_snapshot(cli: Cli, out: Path, *args: str, timeout: int | None = None) -> Outcome:
+    """Runs the example's snapshot into `out` through `cli`, approved with `--approve`, with the
+    request timeout `timeout`, or the CLI's own."""
+    return cli(
+        "run", EXAMPLE, "--out", out, "--approve", snapshot_plan_hash(), *args, timeout=timeout
+    )
+
+
 class SnapshotBuilder:
     """Writes snapshots with `trialfolio run`, in the test process, with a temporary home and
     without the variables Trial Folio reads, apart from the license acknowledgment and the canary
-    credentials."""
+    credentials (`tests/support/environment.py`)."""
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
-        self._monkeypatch = monkeypatch
+    def __init__(self, home: Path) -> None:
         self._home = home
 
     def snapshot(
@@ -79,39 +91,26 @@ class SnapshotBuilder:
         response fixture it names, and returns `out`."""
         path = SNAPSHOT_CONFIGS / configuration
         server = FakePortfolio123()
-        stderr = io.StringIO()
         try:
-            server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+            server.reply("/auth", AUTHENTICATED)
             server.reply(
                 "/rank", rank_get(reply) if isinstance(reply, str) else reply, method="GET"
             )
-            with self._monkeypatch.context() as patch:
-                self._home.mkdir(parents=True, exist_ok=True)
-                patch.setenv("HOME", str(self._home))
-                for name in VARIABLES:
-                    patch.delenv(name, raising=False)
-                patch.setenv(ACCEPT_VARIABLE, ACCEPT_VALUE)
-                patch.setenv(API_ID_VARIABLE, canaries.API_ID)
-                patch.setenv(API_KEY_VARIABLE, canaries.API_KEY)
-                patch.setattr(sys, "stdin", io.StringIO())
-                patch.setattr(sys, "stdout", io.StringIO())
-                patch.setattr(sys, "stderr", stderr)
-                main(
-                    [
-                        "run",
-                        str(path),
-                        "--out",
-                        str(out),
-                        "--approve",
-                        snapshot_plan_hash(configuration),
-                    ],
+            self._home.mkdir(parents=True, exist_ok=True)
+            with isolated(self._home, licensed=True, credentials=True):
+                outcome = run_cli(
+                    "run",
+                    path,
+                    "--out",
+                    out,
+                    "--approve",
+                    snapshot_plan_hash(configuration),
                     endpoint=server.endpoint,
-                    clock=FixedClock(),
                 )
         finally:
             server.close()
         # A snapshot that fails still writes its manifest.
-        assert (out / "manifest.json").is_file(), stderr.getvalue()
+        assert (out / "manifest.json").is_file(), outcome.stderr
         return out
 
 

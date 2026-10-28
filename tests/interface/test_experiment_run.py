@@ -18,13 +18,14 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome, occupied, snapshot
 from tests.support import canaries
+from tests.support.cli import Cli, occupied
 from tests.support.clock import FixedClock
+from tests.support.directories import snapshot
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     REFUSED,
@@ -66,10 +67,6 @@ def plan_of(path: Path) -> PlanV1_1:
 def complete() -> list[Reply]:
     """A 200 with `complete.json` for each of `example.yaml`'s five cases."""
     return [returns() for _ in range(5)]
-
-
-def error_code(outcome: Outcome) -> str:
-    return cast("dict[str, str]", outcome.summary["error"])["code"]
 
 
 def sha256(path: Path) -> str:
@@ -129,7 +126,7 @@ def test_without_a_terminal_only_the_hash_and_the_budget_are_shown(cli: Cli) -> 
     outcome = cli("run", path, "--out", out, "--json")
 
     assert outcome.exit_code == 2
-    assert error_code(outcome) == "plan.approval_required"
+    assert outcome.error_code == "plan.approval_required"
     assert f"Plan hash: {plan_of(path).plan_hash}" in outcome.stderr
     assert "Budget: at most 6 provider requests" in outcome.stderr
     assert "Run the command in a terminal to see the full plan." in outcome.stderr
@@ -147,7 +144,7 @@ def test_without_approval_the_summary_gives_the_plan_hash_and_every_case(cli: Cl
     outcome = cli("run", EXAMPLE, "--out", out, "--json")
 
     assert outcome.exit_code == 2
-    assert error_code(outcome) == "plan.approval_required"
+    assert outcome.error_code == "plan.approval_required"
     assert f"--approve {plan.plan_hash}" in outcome.stderr
     summary = outcome.summary
     assert summary["ids"] == {"experiment_id": "earnyield-sensitivity", "plan_hash": plan.plan_hash}
@@ -172,7 +169,7 @@ def test_a_hash_that_isnt_the_plans_is_refused(cli: Cli) -> None:
     outcome = cli("run", EXAMPLE, "--out", out, "--approve", "sha256:" + "0" * 64, "--json")
 
     assert outcome.exit_code == 2
-    assert error_code(outcome) == "plan.approval_required"
+    assert outcome.error_code == "plan.approval_required"
     assert "isn't this plan's hash" in outcome.stderr
     assert not out.exists()
     assert cli.server.requests() == []
@@ -302,7 +299,7 @@ def test_where_the_experiments_records_are_escapes_the_output_directory(
         EXAMPLE, out, sends=[returns(), returns(), UNAVAILABLE, returns(), returns()]
     )
 
-    assert error_code(outcome) == "execution.partial"
+    assert outcome.error_code == "execution.partial"
     escaped = str(out).replace("\x1b", "\\u001b")
     assert f"The experiment's records are in {escaped}." in outcome.stderr
     assert "\x1b" not in outcome.stderr
@@ -320,11 +317,11 @@ def test_a_directory_that_isnt_an_experiments_is_refused_as_for_a_screen(cli: Cl
     outcome = cli("run", EXAMPLE, "--out", out, "--approve", plan_of(EXAMPLE).plan_hash, "--json")
 
     assert outcome.exit_code == 4
-    assert error_code(outcome) == "output.not_empty"
+    assert outcome.error_code == "output.not_empty"
     assert "The output directory isn't empty." in outcome.stderr
     assert snapshot(out) == before
     # The configuration is valid, so its counts are known: no case has run. No plan was built.
-    counts = cast("dict[str, int]", outcome.summary["counts"])
+    counts = outcome.counts
     assert (counts["cases_planned"], counts["cases_not_yet_run"], counts["attempts"]) == (5, 5, 0)
     assert "cases" not in outcome.summary
     assert cli.server.requests() == []
@@ -338,7 +335,7 @@ def test_an_output_path_that_is_a_file_is_refused(cli: Cli) -> None:
     outcome = cli("run", EXAMPLE, "--out", out, "--approve", plan_of(EXAMPLE).plan_hash, "--json")
 
     assert outcome.exit_code == 4
-    assert error_code(outcome) == "output.not_empty"
+    assert outcome.error_code == "output.not_empty"
     assert "The output path exists and isn't a directory." in outcome.stderr
     assert out.read_bytes() == b"a file\n"
 
@@ -367,7 +364,7 @@ def test_a_resume_checks_the_versions_once_it_holds_the_lock_and_before_the_reco
         holder.close()
 
     expected = "experiment.locked" if held else "environment.unsupported"
-    assert error_code(outcome) == expected
+    assert outcome.error_code == expected
     assert outcome.summary["counts"] == {}
     assert cli.server.requests()[5 + 1 :] == []
 
@@ -406,7 +403,7 @@ def test_a_resume_with_a_case_due_needs_credentials_and_writes_nothing_without_t
     outcome = experiments.run(EXAMPLE, out)
 
     assert outcome.exit_code == 5
-    assert error_code(outcome) == "provider.auth_failed"
+    assert outcome.error_code == "provider.auth_failed"
     assert snapshot(out) == before
     assert len(cli.server.received) == received
     assert outcome.summary["output_dir"] is None
@@ -434,7 +431,7 @@ def test_run_doesnt_resume_a_synthetic_experiment(cli: Cli, experiments: Builder
     outcome = experiments.run(EXAMPLE, out, approve=False)
 
     assert outcome.exit_code == 4
-    assert error_code(outcome) == "output.not_empty"
+    assert outcome.error_code == "output.not_empty"
     assert "trialfolio run doesn't resume one" in outcome.stderr
     assert "Plan hash" not in outcome.stderr
     # Its counts are invented, and the summary has no label that says so (R03-T13's review).

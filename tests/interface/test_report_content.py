@@ -22,8 +22,10 @@ from urllib.parse import unquote, urlsplit
 
 import pytest
 
-from tests.interface.conftest import Cli, config, plan_hash_for, serve_success
+from tests.support.cli import Cli
+from tests.support.fake_portfolio123 import serve_success
 from tests.support.html_report import Document, parse
+from tests.support.paths import screen_config
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.notices import (
     CONCISE_NOTICE,
@@ -57,9 +59,9 @@ def run_report(cli: Cli, body: str = "complete.json") -> Report:
     request with the response fixture `body`."""
     cli.ready()
     serve_success(cli.server, body)
-    path = config("formula.yaml")
+    path = screen_config("formula.yaml")
     out = cli.tmp / "runs" / "baseline"
-    outcome = cli("run", path, "--out", out, "--approve", plan_hash_for(path))
+    outcome = cli.run_approved(path, out)
     assert outcome.exit_code == 0, outcome.stderr
     return Report(parse((out / "report.html").read_text(encoding="utf-8")), out, out)
 

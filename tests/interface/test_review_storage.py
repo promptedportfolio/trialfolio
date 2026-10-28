@@ -25,8 +25,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.interface.conftest import Cli, FaultyStores, Outcome
-from tests.support.storage_faults import StorageFaults, placeholder_identities
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
+from tests.support.storage_faults import FaultyStores, StorageFaults, placeholder_identities
 from trialfolio.errors import TrialFolioError
 from trialfolio.storage import ArtifactStore, LocalArtifactStore
 
@@ -69,8 +70,7 @@ def review(
 def failed(outcome: Outcome, code: str, exit_code: int) -> str:
     """The error's message, once the outcome is checked."""
     assert outcome.exit_code == exit_code, outcome.stderr
-    error = outcome.summary["error"]
-    assert isinstance(error, dict)
+    error = outcome.error
     assert error["code"] == code
     message = error["message"]
     assert isinstance(message, str)
@@ -105,7 +105,7 @@ def test_a_storage_failure_leaves_no_manifest_and_says_the_review_is_incomplete(
     assert INCOMPLETE in message
     assert faults.published[-1] == LAST_PUBLISHED[at]
     assert not (out / "manifest.json").exists()
-    assert "manifest" not in outcome.summary["outputs"]  # pyright: ignore[reportOperatorIssue]
+    assert "manifest" not in outcome.outputs
     claimed(outcome, out)
     # Each file is written once, and nothing after the failure.
     assert len(faults.published) == len(set(faults.published))
@@ -183,7 +183,7 @@ def test_an_unexpected_exception_leaves_no_manifest_and_says_the_review_is_incom
         for event in (json.loads(line) for line in log.splitlines())
         if event["event"] == "cli.command.unexpected"
     )
-    assert unexpected["review_id"] == outcome.summary["ids"]["review_id"]  # pyright: ignore[reportIndexIssue]
+    assert unexpected["review_id"] == outcome.ids["review_id"]
     assert "its own message" not in log
 
 
@@ -243,7 +243,7 @@ def test_a_published_manifest_that_cant_be_discarded_is_named(
 
     message = failed(outcome, "storage.write_failed", 4)
     assert (out / "manifest.json").exists()
-    assert "manifest" not in outcome.summary["outputs"]  # pyright: ignore[reportOperatorIssue]
+    assert "manifest" not in outcome.outputs
     assert (
         "The review's manifest.json was published before the failure, and couldn't be removed,"
         " so the review reads as complete although the command failed."

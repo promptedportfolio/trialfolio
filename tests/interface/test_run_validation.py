@@ -20,12 +20,13 @@ definition and ranking variant at the reader.
 """
 
 import shutil
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, config, serve_success
+from tests.support.cli import Cli
 from tests.support.experiment_builder import RANK_UPDATED, experiment_config
+from tests.support.fake_portfolio123 import serve_success
+from tests.support.paths import screen_config
 
 
 @pytest.mark.parametrize(
@@ -43,10 +44,12 @@ def test_an_invalid_configuration_fails_before_anything_is_created_or_sent(
     serve_success(cli.server)
     out = cli.tmp / "out"
 
-    outcome = cli("run", config(name), "--out", out, "--approve", "sha256:" + "a" * 64, "--json")
+    outcome = cli(
+        "run", screen_config(name), "--out", out, "--approve", "sha256:" + "a" * 64, "--json"
+    )
 
     assert outcome.exit_code == 3
-    error = cast("dict[str, str]", outcome.summary["error"])
+    error = outcome.error
     assert error["code"] == "config.invalid"
     assert key in error["message"]
     assert f"Error (config.invalid): {error['message']}" in outcome.stderr
@@ -72,13 +75,13 @@ def test_a_key_in_an_error_message_cant_act_on_the_terminal(
     # reached the terminal, and a lone surrogate made the message one the summary can't hold.
     cli.ready()
     path = cli.tmp / "keys.yaml"
-    path.write_bytes(config("formula.yaml").read_bytes() + keys.encode())
+    path.write_bytes(screen_config("formula.yaml").read_bytes() + keys.encode())
     out = cli.tmp / "out"
 
     outcome = cli("run", path, "--out", out, "--approve", "sha256:" + "a" * 64, "--json")
 
     assert outcome.exit_code == 3
-    error = cast("dict[str, str]", outcome.summary["error"])
+    error = outcome.error
     assert error["code"] == "config.invalid"
     assert shown in error["message"]
     assert f"Error (config.invalid): {error['message']}" in outcome.stderr
@@ -105,7 +108,7 @@ def test_an_invalid_experiment_configuration_fails_before_anything_is_created_or
     )
 
     assert outcome.exit_code == 3
-    error = cast("dict[str, str]", outcome.summary["error"])
+    error = outcome.error
     assert error["code"] == "config.invalid"
     assert key in error["message"]
     assert outcome.summary["ids"] == {}
@@ -142,7 +145,7 @@ def test_run_takes_a_screen_an_experiment_or_a_snapshot_by_its_kind(
     outcome = cli("run", path, "--out", cli.tmp / "out", "--json")
 
     assert outcome.exit_code == 3
-    error = cast("dict[str, str]", outcome.summary["error"])
+    error = outcome.error
     assert error["code"] == "config.invalid"
     assert problem in error["message"]
 
@@ -174,7 +177,7 @@ def test_an_invalid_definition_fails_before_anything_is_created_or_sent(
     cli.ready()
     serve_ranking(cli)
     shutil.copyfile(INVALID_DEFINITIONS / name, cli.tmp / "ranking.xml")
-    text = config("definition.yaml").read_text(encoding="utf-8")
+    text = screen_config("definition.yaml").read_text(encoding="utf-8")
     assert text.count(DEFINITION_PATH) == 1
     path = cli.tmp / "definition.yaml"
     path.write_text(text.replace(DEFINITION_PATH, "'ranking.xml'"), encoding="utf-8")
@@ -183,7 +186,7 @@ def test_an_invalid_definition_fails_before_anything_is_created_or_sent(
     outcome = cli("run", path, "--out", out, "--approve", "sha256:" + "a" * 64, "--json")
 
     assert outcome.exit_code == 3
-    error = cast("dict[str, str]", outcome.summary["error"])
+    error = outcome.error
     assert error["code"] == "config.invalid"
     assert "`ranking.definition`" in error["message"]
     assert rule in error["message"]
@@ -222,7 +225,7 @@ def test_an_invalid_ranking_variant_fails_before_anything_is_created_or_sent(
     )
 
     assert outcome.exit_code == 3
-    error = cast("dict[str, str]", outcome.summary["error"])
+    error = outcome.error
     assert error["code"] == "config.invalid"
     assert key in error["message"]
     # The entry is named by its place, never by its path's text, the user's strategy definition.

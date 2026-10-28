@@ -57,16 +57,9 @@ from typing import NamedTuple, cast
 
 import pytest
 
-from tests.interface.conftest import (
-    Cli,
-    FaultyStores,
-    Outcome,
-    config,
-    occupied,
-    plan_hash_for,
-    serve_success,
-    snapshot,
-)
+from tests.support.cli import Cli, occupied, plan_hash_for
+from tests.support.directories import snapshot
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     REFUSED,
@@ -77,9 +70,11 @@ from tests.support.experiment_builder import (
     plan_hash,
     returns,
 )
-from tests.support.fake_portfolio123 import Reply
+from tests.support.fake_portfolio123 import Reply, serve_success
+from tests.support.paths import screen_config
 from tests.support.run_builder import REVIEW_CONFIGS, SYNTHETIC_RUN
 from tests.support.socket_faults import SocketFaults
+from tests.support.storage_faults import FaultyStores
 from tests.support.terminal import PseudoTerminal
 from trialfolio.cli import API_KEY_VARIABLE
 from trialfolio.configuration import read_experiment_configuration
@@ -90,7 +85,7 @@ from trialfolio.contracts.summary import JsonSummaryV1_2
 from trialfolio.errors import EXIT_CODES, ErrorCode, TrialFolioError
 from trialfolio.experiment_records import read_experiment
 from trialfolio.planning import build_experiment_plan, installed_versions, plan_revision
-from trialfolio.storage import LocalArtifactStore, StoredFile
+from trialfolio.storage import ArtifactStore, LocalArtifactStore, StoredFile
 
 SCHEMA = Path(__file__).resolve().parents[2] / "schemas" / "json-summary-1.2.0.schema.json"
 
@@ -168,8 +163,8 @@ def summary_of(outcome: Outcome, command: str) -> dict[str, object]:
 
 
 def approved(cli: Cli, out: Path, *extra: str) -> Outcome:
-    path = config("formula.yaml")
-    return cli("run", path, "--out", out, "--approve", plan_hash_for(path), "--json", *extra)
+    path = screen_config("formula.yaml")
+    return cli.run_approved(path, out, "--json", *extra)
 
 
 # run
@@ -188,7 +183,7 @@ def test_a_run_that_succeeds(cli: Cli) -> None:
     ids = summary["ids"]
     assert isinstance(ids, dict)
     assert set(ids) == {"plan_hash", "case_id", "attempt_id"}  # pyright: ignore[reportUnknownArgumentType]
-    assert ids["plan_hash"] == plan_hash_for(config("formula.yaml"))
+    assert ids["plan_hash"] == plan_hash_for(screen_config("formula.yaml"))
     assert summary["outputs"] == {
         "manifest": "manifest.json",
         "report": "report.html",
@@ -208,19 +203,19 @@ def test_a_run_without_approval_gives_the_plan_hash_and_creates_nothing(cli: Cli
     cli.ready()
     out = cli.tmp / "out"
 
-    outcome = cli("run", config("formula.yaml"), "--out", out, "--json")
+    outcome = cli("run", screen_config("formula.yaml"), "--out", out, "--json")
     summary = summary_of(outcome, "run")
 
     assert outcome.exit_code == 2
-    assert summary["error"]["code"] == "plan.approval_required"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "plan.approval_required"
     ids = summary["ids"]
     assert isinstance(ids, dict)
     assert set(ids) == {"plan_hash", "case_id"}  # pyright: ignore[reportUnknownArgumentType]
-    assert ids["plan_hash"] == plan_hash_for(config("formula.yaml"))
+    assert ids["plan_hash"] == plan_hash_for(screen_config("formula.yaml"))
     assert str(ids["case_id"]).startswith("case-")
     assert summary["output_dir"] is None
-    assert summary["counts"]["attempts"] == 0  # pyright: ignore[reportIndexIssue]
-    assert summary["counts"]["provider_requests"] == 0  # pyright: ignore[reportIndexIssue]
+    assert outcome.counts["attempts"] == 0
+    assert outcome.counts["provider_requests"] == 0
     assert f"Plan hash: {ids['plan_hash']}" in outcome.stderr
     assert not out.exists()
     assert cli.server.requests() == []
@@ -230,11 +225,11 @@ def test_an_invalid_configuration(cli: Cli) -> None:
     cli.ready()
     out = cli.tmp / "out"
 
-    outcome = cli("run", config("invalid/misspelled-key.yaml"), "--out", out, "--json")
+    outcome = cli("run", screen_config("invalid/misspelled-key.yaml"), "--out", out, "--json")
     summary = summary_of(outcome, "run")
 
     assert outcome.exit_code == 3
-    assert summary["error"]["code"] == "config.invalid"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "config.invalid"
     assert summary["ids"] == {}
     assert summary["output_dir"] is None
     assert not out.exists()
@@ -250,7 +245,7 @@ def test_an_output_directory_that_isnt_empty(cli: Cli) -> None:
     summary = summary_of(outcome, "run")
 
     assert outcome.exit_code == 4
-    assert summary["error"]["code"] == "output.not_empty"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "output.not_empty"
     assert summary["output_dir"] is None
     assert summary["outputs"] == {}
     assert [p.name for p in out.iterdir()] == ["other.txt"]
@@ -264,7 +259,7 @@ def test_missing_credentials(cli: Cli) -> None:
     summary = summary_of(outcome, "run")
 
     assert outcome.exit_code == 5
-    assert summary["error"]["code"] == "provider.auth_failed"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "provider.auth_failed"
     ids = summary["ids"]
     assert isinstance(ids, dict)
     assert set(ids) == {"plan_hash", "case_id"}  # pyright: ignore[reportUnknownArgumentType]
@@ -282,7 +277,7 @@ def test_a_failed_authentication_names_its_attempt(cli: Cli) -> None:
     summary = summary_of(outcome, "run")
 
     assert outcome.exit_code == 5
-    assert summary["error"]["code"] == "provider.auth_failed"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "provider.auth_failed"
     ids = summary["ids"]
     assert isinstance(ids, dict)
     assert set(ids) == {"plan_hash", "case_id", "attempt_id"}  # pyright: ignore[reportUnknownArgumentType]
@@ -291,9 +286,9 @@ def test_a_failed_authentication_names_its_attempt(cli: Cli) -> None:
     assert isinstance(outputs, dict)
     assert "metrics" not in outputs
     assert "settings" not in outputs
-    assert summary["counts"]["attempts"] == 1  # pyright: ignore[reportIndexIssue]
-    assert summary["counts"]["provider_requests"] == 0  # pyright: ignore[reportIndexIssue]
-    assert summary["counts"]["cost"] is None  # pyright: ignore[reportIndexIssue]
+    assert outcome.counts["attempts"] == 1
+    assert outcome.counts["provider_requests"] == 0
+    assert outcome.counts["cost"] is None
 
 
 def test_a_rejected_request_is_possibly_charged(cli: Cli) -> None:
@@ -302,21 +297,21 @@ def test_a_rejected_request_is_possibly_charged(cli: Cli) -> None:
     cli.server.reply("/screen/backtest", Reply(400, b"Unsupported value"))
 
     outcome = approved(cli, cli.tmp / "out")
-    summary = summary_of(outcome, "run")
+    summary_of(outcome, "run")
 
     assert outcome.exit_code == 5
-    assert summary["error"]["code"] == "provider.unsupported_capability"  # pyright: ignore[reportIndexIssue]
-    assert summary["counts"]["provider_requests"] == 1  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "provider.unsupported_capability"
+    assert outcome.counts["provider_requests"] == 1
 
 
 def test_a_warning_is_counted_and_goes_to_stderr(cli: Cli, monkeypatch: pytest.MonkeyPatch) -> None:
     cli.ready()
     monkeypatch.setenv("SSLKEYLOGFILE", str(cli.tmp / "keys.log"))
 
-    outcome = cli("run", config("formula.yaml"), "--out", cli.tmp / "out", "--json")
-    summary = summary_of(outcome, "run")
+    outcome = cli("run", screen_config("formula.yaml"), "--out", cli.tmp / "out", "--json")
+    summary_of(outcome, "run")
 
-    assert summary["counts"]["warnings"] == 1  # pyright: ignore[reportIndexIssue]
+    assert outcome.counts["warnings"] == 1
     assert "Warning: SSLKEYLOGFILE" in outcome.stderr
     assert "SSLKEYLOGFILE" not in outcome.stdout
 
@@ -328,15 +323,16 @@ def test_demo(cli: Cli) -> None:
     cli.accept_license()
     out = cli.tmp / "demo"
 
-    summary = summary_of(cli("demo", "--out", out, "--json"), "demo")
+    outcome = cli("demo", "--out", out, "--json")
+    summary = summary_of(outcome, "demo")
 
     assert summary["outcome"] == "completed"
     assert summary["output_dir"] == str(out)
     ids = summary["ids"]
     assert isinstance(ids, dict)
     assert set(ids) == {"plan_hash", "case_id", "attempt_id"}  # pyright: ignore[reportUnknownArgumentType]
-    assert set(summary["outputs"]) == {"manifest", "report", "metrics", "settings"}  # pyright: ignore[reportArgumentType]
-    assert summary["counts"]["cost"] is None  # pyright: ignore[reportIndexIssue]
+    assert set(outcome.outputs) == {"manifest", "report", "metrics", "settings"}
+    assert outcome.counts["cost"] is None
     assert cli.server.requests() == []
 
 
@@ -363,7 +359,7 @@ def test_report_of_something_that_isnt_a_run(cli: Cli) -> None:
     summary = summary_of(outcome, "report")
 
     assert outcome.exit_code == 3
-    assert summary["error"]["code"] == "input.not_found"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "input.not_found"
     assert summary["output_dir"] is None
     assert summary["counts"] == {}
     assert not out.exists()
@@ -374,10 +370,10 @@ def test_report_of_an_empty_directory_isnt_a_run(cli: Cli) -> None:
     (cli.tmp / "empty").mkdir()
 
     outcome = cli("report", cli.tmp / "empty", "--out", cli.tmp / "report", "--json")
-    summary = summary_of(outcome, "report")
+    summary_of(outcome, "report")
 
     assert outcome.exit_code == 3
-    assert summary["error"]["code"] == "input.not_a_run"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "input.not_a_run"
 
 
 def test_init(cli: Cli) -> None:
@@ -399,7 +395,7 @@ def test_init_into_a_directory_that_isnt_empty(cli: Cli) -> None:
     outcome = cli("init", cli.tmp, "--json")
     summary = summary_of(outcome, "init")
 
-    assert summary["error"]["code"] == "output.not_empty"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "output.not_empty"
     assert summary["output_dir"] is None
     assert summary["outputs"] == {}
 
@@ -420,18 +416,18 @@ def test_license(cli: Cli, accept: bool) -> None:
 # review
 
 
-def review(cli: Cli, path: Path, out: Path, **options: object) -> dict[str, object]:
-    """The summary of `trialfolio review` of the configuration at `path` into `out`."""
+def review(
+    cli: Cli,
+    path: Path,
+    out: Path,
+    store_factory: Callable[[str], ArtifactStore] = LocalArtifactStore,
+) -> Outcome:
+    """`trialfolio review` of the configuration at `path` into `out`, whose summary is checked
+    as `summary_of` checks one."""
     cli.accept_license()
-    outcome = cli(
-        "review",
-        path,
-        "--out",
-        out,
-        "--json",
-        **options,  # pyright: ignore[reportArgumentType]
-    )
-    return summary_of(outcome, "review")
+    outcome = cli("review", path, "--out", out, "--json", store_factory=store_factory)
+    summary_of(outcome, "review")
+    return outcome
 
 
 def two_copies(cli: Cli, break_second: Callable[[Path], None] = lambda run: None) -> Path:
@@ -460,7 +456,8 @@ def newer_manifest(run: Path) -> None:
 def test_a_review_that_completes(cli: Cli, built: Callable[[str], Path]) -> None:
     out = cli.tmp / "review"
 
-    summary = review(cli, built("example.yaml"), out)
+    outcome = review(cli, built("example.yaml"), out)
+    summary = outcome.summary
 
     assert summary["outcome"] == "completed"
     assert summary["output_dir"] == str(out)
@@ -514,9 +511,10 @@ def test_a_review_that_fails_before_the_claim(
 ) -> None:
     out = cli.tmp / "review"
 
-    summary = review(cli, configure(cli), out)
+    outcome = review(cli, configure(cli), out)
+    summary = outcome.summary
 
-    assert summary["error"]["code"] == code  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == code
     assert summary["ids"] == {}
     assert summary["output_dir"] is None
     assert summary["counts"] == {
@@ -533,9 +531,10 @@ def test_a_review_into_an_output_directory_that_isnt_empty(
 ) -> None:
     out = occupied(cli, "results.txt")
 
-    summary = review(cli, built("example.yaml"), out)
+    outcome = review(cli, built("example.yaml"), out)
+    summary = outcome.summary
 
-    assert summary["error"]["code"] == "output.not_empty"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "output.not_empty"
     assert summary["ids"] == {}
     assert summary["output_dir"] is None
 
@@ -561,9 +560,10 @@ def test_a_review_that_fails_after_the_claim(
     fail(faults)
     out = cli.tmp / "review"
 
-    summary = review(cli, built("example.yaml"), out, store_factory=faults)
+    outcome = review(cli, built("example.yaml"), out, store_factory=faults)
+    summary = outcome.summary
 
-    assert summary["error"]["code"] == code  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == code
     assert summary["output_dir"] == str(out)
     ids = summary["ids"]
     assert isinstance(ids, dict)
@@ -579,9 +579,9 @@ def test_without_json_stdout_holds_only_the_result(cli: Cli) -> None:
     cli.ready()
     serve_success(cli.server)
     out = cli.tmp / "out"
-    path = config("formula.yaml")
+    path = screen_config("formula.yaml")
 
-    outcome = cli("run", path, "--out", out, "--approve", plan_hash_for(path))
+    outcome = cli.run_approved(path, out)
 
     assert outcome.exit_code == 0, outcome.stderr
     lines = outcome.stdout.splitlines()
@@ -595,7 +595,7 @@ def test_without_json_stdout_holds_only_the_result(cli: Cli) -> None:
 def test_without_json_a_failure_writes_nothing_to_stdout(cli: Cli) -> None:
     cli.ready()
 
-    outcome = cli("run", config("formula.yaml"), "--out", cli.tmp / "out")
+    outcome = cli("run", screen_config("formula.yaml"), "--out", cli.tmp / "out")
 
     assert outcome.exit_code == 2
     assert outcome.stdout == ""
@@ -627,7 +627,7 @@ def test_a_blank_output_directory_is_a_usage_error(
     monkeypatch.chdir(cli.tmp)
     before = sorted(p.name for p in cli.tmp.iterdir())
     inputs = {
-        "run": [str(config("formula.yaml"))],
+        "run": [str(screen_config("formula.yaml"))],
         "report": [str(cli.tmp)],
         "demo": [],
         "review": [str(REVIEW_CONFIGS / "example.yaml")],
@@ -657,7 +657,7 @@ def test_an_output_directory_that_isnt_utf8_text_is_a_usage_error(
     monkeypatch.chdir(cli.tmp)
     before = sorted(p.name for p in cli.tmp.iterdir())
     inputs = {
-        "run": [str(config("formula.yaml"))],
+        "run": [str(screen_config("formula.yaml"))],
         "report": [str(cli.tmp)],
         "demo": [],
         "review": [str(REVIEW_CONFIGS / "example.yaml")],
@@ -963,23 +963,22 @@ def test_an_experiment_without_approval_or_credentials(
 ) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
-    unapproved = experiment_summary_of(cli("run", EXAMPLE, "--out", out, "--json"))
+    unapproved = cli("run", EXAMPLE, "--out", out, "--json")
     monkeypatch.delenv(API_KEY_VARIABLE)
-    approved = experiment_summary_of(
-        cli("run", EXAMPLE, "--out", out, "--approve", plan_hash(EXAMPLE, out), "--json")
-    )
+    approved = cli("run", EXAMPLE, "--out", out, "--approve", plan_hash(EXAMPLE, out), "--json")
 
-    for summary, code in (
+    for ran, code in (
         (unapproved, "plan.approval_required"),
         (approved, "provider.auth_failed"),
     ):
-        assert cast("dict[str, str]", summary["error"])["code"] == code
+        summary = experiment_summary_of(ran)
+        assert ran.error_code == code
         assert set(cast("dict[str, str]", summary["ids"])) == {"experiment_id", "plan_hash"}
         assert summary["output_dir"] is None
         assert all(outcome == "not_yet_run" for _, outcome in case_outcomes(summary))
         # Every case of the plan the core builds, in its order, with its case_id.
         assert_recorded(summary, EXAMPLE, out)
-        counts = cast("dict[str, int]", summary["counts"])
+        counts = ran.counts
         assert (counts["cases_planned"], counts["cases_not_yet_run"], counts["attempts"]) == (
             5,
             5,
@@ -992,11 +991,10 @@ def test_an_invalid_experiment_configuration_gives_a_runs_counts(cli: Cli) -> No
     cli.ready()
     out = cli.tmp / "experiment"
 
-    summary = summary_of(
-        cli("run", experiment_config("invalid/misspelled-key.yaml"), "--out", out, "--json"), "run"
-    )
+    outcome = cli("run", experiment_config("invalid/misspelled-key.yaml"), "--out", out, "--json")
+    summary = summary_of(outcome, "run")
 
-    assert cast("dict[str, str]", summary["error"])["code"] == "config.invalid"
+    assert outcome.error_code == "config.invalid"
     assert summary["ids"] == {}
 
 
@@ -1024,9 +1022,10 @@ def test_a_resume_that_stops_before_its_session_gives_the_records_counts_and_rep
     repeat = cast("list[dict[str, str]]", repeated["cases"])[2]["repeat_attempt_id"]
     assert repeat != unknown["repeat_attempt_id"]
 
-    summary = experiment_summary_of(experiments.run(EXAMPLE, out, approve=False))
+    outcome = experiments.run(EXAMPLE, out, approve=False)
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == "plan.approval_required"
+    assert outcome.error_code == "plan.approval_required"
     assert summary["output_dir"] is None
     counts = cast("dict[str, int | None]", summary["counts"])
     recorded = ExperimentManifest.model_validate_json(
@@ -1078,9 +1077,10 @@ def test_an_experiment_whose_revision_isnt_approved_gives_the_revisions_cases(
     }[given]
     before = snapshot(out)
 
-    summary = experiment_summary_of(experiments.run(changed, out, *options, approve=False))
+    outcome = experiments.run(changed, out, *options, approve=False)
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == "plan.changed"
+    assert outcome.error_code == "plan.changed"
     assert cast("dict[str, str]", summary["ids"])["plan_hash"] == plan_hash(changed, out)
     assert summary["output_dir"] is None
     assert snapshot(out) == before
@@ -1102,9 +1102,10 @@ def test_another_experiment_in_the_output_directory_has_no_counts(
     assert experiments.run(EXAMPLE, out, sends=[returns()] * 5).exit_code == 0
     other = experiment_config(f"revisions/{name}")
 
-    summary = experiment_summary_of(experiments.run(other, out, approve=False))
+    outcome = experiments.run(other, out, approve=False)
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == "output.not_empty"
+    assert outcome.error_code == "output.not_empty"
     assert "cases" not in summary
     assert (summary["counts"], summary["output_dir"]) == ({}, None)
 
@@ -1122,12 +1123,13 @@ def test_an_experiment_whose_records_cant_be_read_has_no_counts(
     else:
         (out / "sessions/1/report.html").unlink()
     try:
-        summary = experiment_summary_of(experiments.run(EXAMPLE, out, approve=False))
+        outcome = experiments.run(EXAMPLE, out, approve=False)
+        summary = experiment_summary_of(outcome)
     finally:
         holder.close()
 
     code = "experiment.locked" if hold == "lock" else "input.not_a_run"
-    assert cast("dict[str, str]", summary["error"])["code"] == code
+    assert outcome.error_code == code
     assert summary["ids"] == {"experiment_id": "earnyield-sensitivity"}
     assert "cases" not in summary
     assert (summary["counts"], summary["output_dir"]) == ({}, None)
@@ -1158,11 +1160,10 @@ def test_an_experiment_that_stops_without_its_manifest(
     # At the first case's attempt record, once its request was sent: it reads as running.
     fail(faults)
 
-    summary = experiment_summary_of(
-        experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
-    )
+    outcome = experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == code
+    assert outcome.error_code == code
     assert summary["output_dir"] == str(out)
     assert cast("dict[str, int]", summary["ids"])["session"] == 1
     assert summary["outputs"] == {}
@@ -1197,16 +1198,15 @@ def test_a_metrics_table_written_without_its_settings_table_is_counted(
     out = cli.tmp / "experiment"
     fail(faults)
 
-    summary = experiment_summary_of(
-        experiments.run(
-            EXAMPLE,
-            out,
-            sends=[returns("missing-metrics.json"), *[returns()] * 4],
-            store_factory=faults,
-        )
+    outcome = experiments.run(
+        EXAMPLE,
+        out,
+        sends=[returns("missing-metrics.json"), *[returns()] * 4],
+        store_factory=faults,
     )
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == code
+    assert outcome.error_code == code
     assert list(out.glob("cases/*/normalized/settings.csv")) == []
     counts = cast("dict[str, int]", summary["counts"])
     assert counts["metrics_unavailable"] == unavailable_rows(out, summary) > 0
@@ -1228,11 +1228,10 @@ def test_an_attempt_record_published_before_its_write_failed_is_read_as_written(
     out = cli.tmp / "experiment"
     faults.fail_after("attempt.json", sync_failure())
 
-    summary = experiment_summary_of(
-        experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
-    )
+    outcome = experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == "storage.write_failed"
+    assert outcome.error_code == "storage.write_failed"
     (path,) = out.glob("cases/*/attempts/*/attempt.json")
     record = AttemptRecordV1_1.model_validate_json(path.read_bytes())
     assert record.outcome == "succeeded"
@@ -1273,9 +1272,10 @@ def test_an_attempt_record_a_resume_published_before_its_write_failed_is_counted
     resume = FaultyStores(monkeypatch)
     resume.fail_after("attempt.json", sync_failure())
 
-    summary = experiment_summary_of(experiments.run(EXAMPLE, out, store_factory=resume))
+    outcome = experiments.run(EXAMPLE, out, store_factory=resume)
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == "storage.write_failed"
+    assert outcome.error_code == "storage.write_failed"
     assert [path for path in resume.published if path.endswith("/attempt.json")] != []
     counts = cast("dict[str, int | None]", summary["counts"])
     assert counts["cost"] is not None
@@ -1311,13 +1311,12 @@ def test_a_new_experiment_whose_claim_finds_the_lock_held_gives_its_cases_withou
     cli.ready()
     out = cli.tmp / "experiment"
 
-    summary = experiment_summary_of(
-        experiments.run(
-            EXAMPLE, out, store_factory=lambda root: RefusingLock(root, "experiment.locked")
-        )
+    outcome = experiments.run(
+        EXAMPLE, out, store_factory=lambda root: RefusingLock(root, "experiment.locked")
     )
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == "experiment.locked"
+    assert outcome.error_code == "experiment.locked"
     assert all(outcome == "not_yet_run" for _, outcome in case_outcomes(summary))
     assert (summary["counts"], summary["output_dir"]) == ({}, None)
     assert cli.server.requests() == []
@@ -1331,16 +1330,15 @@ def test_a_resume_whose_lock_the_file_system_refuses_has_no_counts(
     assert experiments.run(EXAMPLE, out, sends=[returns()] * 5).exit_code == 0
     received = len(cli.server.received)
 
-    summary = experiment_summary_of(
-        experiments.run(
-            EXAMPLE,
-            out,
-            approve=False,
-            store_factory=lambda root: RefusingLock(root, "storage.write_failed"),
-        )
+    outcome = experiments.run(
+        EXAMPLE,
+        out,
+        approve=False,
+        store_factory=lambda root: RefusingLock(root, "storage.write_failed"),
     )
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == "storage.write_failed"
+    assert outcome.error_code == "storage.write_failed"
     assert summary["ids"] == {"experiment_id": "earnyield-sensitivity"}
     assert (summary["counts"], summary["output_dir"]) == ({}, None)
     assert len(cli.server.received) == received
@@ -1354,13 +1352,12 @@ def test_a_new_experiment_whose_claim_fails_gives_no_output_directory_and_its_co
     cli.ready()
     out = cli.tmp / "experiment"
 
-    summary = experiment_summary_of(
-        experiments.run(
-            EXAMPLE, out, store_factory=lambda root: RefusingLock(root, "storage.write_failed")
-        )
+    outcome = experiments.run(
+        EXAMPLE, out, store_factory=lambda root: RefusingLock(root, "storage.write_failed")
     )
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == "storage.write_failed"
+    assert outcome.error_code == "storage.write_failed"
     assert summary["output_dir"] is None
     assert_recorded(summary, EXAMPLE, out)
     counts = cast("dict[str, int | None]", summary["counts"])
@@ -1405,12 +1402,11 @@ def test_an_experiment_that_a_provider_failure_leaves_partial_or_stops(
     cli.ready()
     out = cli.tmp / "experiment"
 
-    summary = experiment_summary_of(
-        experiments.run(EXAMPLE, out, sends=sends, authenticates=authenticates)
-    )
+    outcome = experiments.run(EXAMPLE, out, sends=sends, authenticates=authenticates)
+    summary = experiment_summary_of(outcome)
 
     assert (summary["outcome"], summary["exit_code"]) == ("partial", 6)
-    assert cast("dict[str, str]", summary["error"])["code"] == "execution.partial"
+    assert outcome.error_code == "execution.partial"
     assert summary["output_dir"] == str(out)
     assert cast("dict[str, int]", summary["ids"])["session"] == 1
     assert [outcome for _, outcome in case_outcomes(summary)] == outcomes
@@ -1499,19 +1495,19 @@ def first_run(
 
 
 def assert_refused_before_the_session(
-    summary: dict[str, object], out: Path, before: dict[str, bytes | None]
+    outcome: Outcome, out: Path, before: dict[str, bytes | None]
 ) -> None:
     """`plan.approval_required`, with the current plan's hash and cases, and the records' counts,
     which are the first session's manifest's; nothing written."""
-    assert cast("dict[str, str]", summary["error"])["code"] == "plan.approval_required"
+    summary = experiment_summary_of(outcome)
+    assert outcome.error_code == "plan.approval_required"
     assert summary["output_dir"] is None
     assert set(cast("dict[str, object]", summary["ids"])) == {"experiment_id", "plan_hash"}
     assert_recorded(summary, EXAMPLE, out)
     recorded = ExperimentManifest.model_validate_json(
         (out / "sessions/1/manifest.json").read_bytes()
     )
-    counts = cast("dict[str, int | None]", summary["counts"])
-    assert without_warnings(counts) == recorded_counts(recorded, out, summary)
+    assert without_warnings(outcome.counts) == recorded_counts(recorded, out, summary)
     assert snapshot(out) == before
 
 
@@ -1526,9 +1522,9 @@ def test_a_resume_refused_before_its_session_gives_the_records_cases_and_counts(
     before = snapshot(out)
     received = len(cli.server.received)
 
-    summary = experiment_summary_of(experiments.run(EXAMPLE, out, *options(out, first)))
+    outcome = experiments.run(EXAMPLE, out, *options(out, first))
 
-    assert_refused_before_the_session(summary, out, before)
+    assert_refused_before_the_session(outcome, out, before)
     assert len(cli.server.received) == received
 
 
@@ -1552,9 +1548,9 @@ def test_another_answer_at_the_repeat_prompt_gives_the_records_cases_and_counts(
             stdin=terminal.stdin,
             stderr=terminal.stderr,
         )
-    summary = experiment_summary_of(Outcome(ran.exit_code, ran.stdout, terminal.shown()))
+    outcome = Outcome(ran.exit_code, ran.stdout, terminal.shown())
 
-    assert_refused_before_the_session(summary, out, before)
+    assert_refused_before_the_session(outcome, out, before)
 
 
 def test_a_repeat_with_a_new_experiment_or_a_screen_gives_its_summary(cli: Cli) -> None:
@@ -1562,29 +1558,28 @@ def test_a_repeat_with_a_new_experiment_or_a_screen_gives_its_summary(cli: Cli) 
     new = cli.tmp / "experiment"
     screen = cli.tmp / "run"
 
-    experiment = experiment_summary_of(
-        cli(
-            "run",
-            EXAMPLE,
-            "--out",
-            new,
-            "--approve",
-            plan_hash(EXAMPLE, new),
-            "--repeat",
-            "holdings-50",
-            "--json",
-        )
-    )
-    run = summary_of(
-        cli("run", config("formula.yaml"), "--out", screen, "--repeat", "holdings-50", "--json"),
+    experiment_run = cli(
         "run",
+        EXAMPLE,
+        "--out",
+        new,
+        "--approve",
+        plan_hash(EXAMPLE, new),
+        "--repeat",
+        "holdings-50",
+        "--json",
     )
+    screen_run = cli(
+        "run", screen_config("formula.yaml"), "--out", screen, "--repeat", "holdings-50", "--json"
+    )
+    experiment = experiment_summary_of(experiment_run)
+    run = summary_of(screen_run, "run")
 
-    for summary in (experiment, run):
-        assert cast("dict[str, str]", summary["error"])["code"] == "plan.approval_required"
+    for ran, summary in ((experiment_run, experiment), (screen_run, run)):
+        assert ran.error_code == "plan.approval_required"
         assert summary["output_dir"] is None
     assert_recorded(experiment, EXAMPLE, new)
-    assert cast("dict[str, int]", experiment["counts"])["attempts"] == 0
+    assert experiment_run.counts["attempts"] == 0
     assert set(cast("dict[str, str]", run["ids"])) == {"plan_hash", "case_id"}
     assert not new.exists()
     assert not screen.exists()
@@ -1655,7 +1650,7 @@ def test_a_repeat_interrupted_during_its_send_gives_its_own_attempt_to_confirm(
 
     summary = experiment_summary_of(interrupted)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == "command.interrupted"
+    assert interrupted.error_code == "command.interrupted"
     # From the resume's session record.
     assert summary["output_dir"] == str(out)
     assert cast("dict[str, int]", summary["ids"])["session"] == 2
@@ -1681,11 +1676,12 @@ def test_a_resume_while_another_process_holds_the_lock_has_no_cases_or_counts(
     # A resume waits at its approval prompt, in another process, holding the lock.
     with cli.on_terminal("run", EXAMPLE, "--out", out, "--json") as holder:
         holder.wait_for("Type approve")
-        summary = experiment_summary_of(experiments.run(EXAMPLE, out))
+        outcome = experiments.run(EXAMPLE, out)
+        summary = experiment_summary_of(outcome)
         holder.press("no\n")
         holder.wait()
 
-    assert cast("dict[str, str]", summary["error"])["code"] == "experiment.locked"
+    assert outcome.error_code == "experiment.locked"
     assert summary["ids"] == {"experiment_id": "earnyield-sensitivity"}
     assert "cases" not in summary
     assert (summary["counts"], summary["output_dir"]) == ({}, None)
@@ -1732,11 +1728,10 @@ def test_an_experiment_that_stops_gives_its_output_directory_once_it_writes_ther
         assert experiments.run(EXAMPLE, out, authenticates=[REFUSED]).exit_code == 6
     fail(faults, name)
 
-    summary = experiment_summary_of(
-        experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
-    )
+    outcome = experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == code
+    assert outcome.error_code == code
     outputs = cast("dict[str, str]", summary["outputs"])
     assert "manifest" not in outputs
     ids = cast("dict[str, int]", summary["ids"])
@@ -1776,11 +1771,10 @@ def test_a_session_record_published_before_its_write_failed_reserves_its_session
     session = 1 if kind == "new" else 2
     faults.fail_after(f"/sessions/{session}/session.json", failure())
 
-    summary = experiment_summary_of(
-        experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
-    )
+    outcome = experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == code
+    assert outcome.error_code == code
     assert (out / f"sessions/{session}/session.json").is_file()
     assert cast("dict[str, int]", summary["ids"])["session"] == session
     assert summary["output_dir"] == str(out)
@@ -1795,11 +1789,10 @@ def test_a_manifest_whose_write_fails_once_published_isnt_among_the_outputs(
     out = cli.tmp / "experiment"
     faults.fail_after("/sessions/1/manifest.json", sync_failure())
 
-    summary = experiment_summary_of(
-        experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
-    )
+    outcome = experiments.run(EXAMPLE, out, sends=[returns()] * 5, store_factory=faults)
+    summary = experiment_summary_of(outcome)
 
-    assert cast("dict[str, str]", summary["error"])["code"] == "storage.write_failed"
+    assert outcome.error_code == "storage.write_failed"
     assert summary["output_dir"] == str(out)
     assert cast("dict[str, int]", summary["ids"])["session"] == 1
     # The store discarded the manifest it had published, and the report stays.

@@ -28,7 +28,7 @@ from urllib.parse import unquote, urlsplit
 
 import pytest
 
-from tests.interface.conftest import Cli
+from tests.support.cli import Cli
 from tests.support.fake_portfolio123 import FakePortfolio123
 from tests.support.html_report import Document, Element, parse
 from trialfolio.configuration import read_review_configuration

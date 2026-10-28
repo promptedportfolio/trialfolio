@@ -20,41 +20,18 @@ from pathlib import Path
 
 import pytest
 
-from tests.interface.conftest import (
-    AUTHENTICATED,
-    Cli,
-    FaultyStores,
-    Outcome,
-    config,
-    plan_hash_for,
-    response,
-    serve_success,
-)
-from tests.support.fake_portfolio123 import Reply
-from trialfolio.contracts.attempt import AttemptRecord
+from tests.support.cli import Cli, plan_hash_for
+from tests.support.fake_portfolio123 import AUTHENTICATED, Reply, response, serve_success
+from tests.support.paths import screen_config
+from tests.support.saved_records import only_attempt_record
+from tests.support.storage_faults import FaultyStores
 from trialfolio.contracts.manifest import RunManifest
 
 AUTH = "POST /auth"
 BACKTEST = "POST /screen/backtest"
 
 
-def approved_run(cli: Cli, out: Path, *, timeout: int | None = None) -> Outcome:
-    """Runs `formula.yaml`, approved with its plan's full hash, with a JSON summary."""
-    path = config("formula.yaml")
-    return cli(
-        "run", path, "--out", out, "--approve", plan_hash_for(path), "--json", timeout=timeout
-    )
-
-
-def error_of(outcome: Outcome) -> dict[str, str]:
-    error = outcome.summary["error"]
-    assert isinstance(error, dict)
-    return error  # pyright: ignore[reportUnknownVariableType]
-
-
-def the_attempt(out: Path) -> AttemptRecord:
-    (attempt_dir,) = (out / "cases").glob("*/attempts/*")
-    return AttemptRecord.model_validate_json((attempt_dir / "attempt.json").read_bytes())
+FORMULA = screen_config("formula.yaml")
 
 
 def accounted_for(out: Path, code: str) -> RunManifest:
@@ -72,7 +49,7 @@ def accounted_for(out: Path, code: str) -> RunManifest:
 
 def test_a_p123api_that_cant_be_imported_fails_before_the_plan(cli: Cli) -> None:
     cli.ready()
-    path = config("formula.yaml")
+    path = screen_config("formula.yaml")
     out = cli.tmp / "out"
 
     outcome = cli.without_module(
@@ -80,7 +57,7 @@ def test_a_p123api_that_cant_be_imported_fails_before_the_plan(cli: Cli) -> None
     )
 
     assert outcome.exit_code == 3, outcome.stderr
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == "environment.unsupported"
     assert "p123api is installed, but it can't be imported" in error["message"]
     assert "Plan hash" not in outcome.stderr
@@ -91,10 +68,10 @@ def test_missing_credentials_fail_before_anything_is_written_or_sent(cli: Cli) -
     cli.accept_license()
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
     assert outcome.exit_code == 5
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == "provider.auth_failed"
     assert (
         "set TRIALFOLIO_P123_API_ID and TRIALFOLIO_P123_API_KEY to your API ID and API key."
@@ -125,10 +102,10 @@ def test_a_blank_credential_counts_as_missing(
     monkeypatch.setenv(blank, "   ")
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
     assert outcome.exit_code == 5
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == "provider.auth_failed"
     # It names only the missing one: before 2026-10-04, it asked for both by name.
     assert f"set {blank} to {named}" in error["message"]
@@ -159,22 +136,22 @@ def test_a_failed_authentication_gives_its_code_and_sends_no_request(
     cli.server.reply("/auth", Reply(status, b"Refused"))
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
     assert outcome.exit_code == 5
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == code
     assert advice in error["message"]
     assert "wasn't sent" in error["message"]
     assert cli.server.requests() == [AUTH]
-    record = the_attempt(out)
+    record = only_attempt_record(out)
     assert record.outcome == "failed"
     assert not record.possibly_charged
     assert [(e.request, e.status) for e in record.exchanges] == [(AUTH, status)]
     manifest = accounted_for(out, code)
     assert manifest.counts.provider_requests == 0
-    assert outcome.summary["counts"]["provider_requests"] == 0  # pyright: ignore[reportIndexIssue]
-    assert outcome.summary["ids"]["attempt_id"] == str(record.attempt_id)  # pyright: ignore[reportIndexIssue]
+    assert outcome.counts["provider_requests"] == 0
+    assert outcome.ids["attempt_id"] == str(record.attempt_id)
 
 
 def test_a_403_on_authentication_carries_portfolio123s_message(cli: Cli) -> None:
@@ -182,11 +159,9 @@ def test_a_403_on_authentication_carries_portfolio123s_message(cli: Cli) -> None
     cli.server.reply("/auth", Reply(403, b"API access not enabled"))
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
-    assert error_of(outcome)["message"].endswith(
-        'Portfolio123\'s message: "API access not enabled"'
-    )
+    assert outcome.error["message"].endswith('Portfolio123\'s message: "API access not enabled"')
     assert "API access not enabled" in outcome.stderr
 
 
@@ -230,17 +205,17 @@ def test_a_rejected_request_gives_its_code_and_is_possibly_charged(
     cli.server.reply("/screen/backtest", reply)
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
     assert outcome.exit_code == 5
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == code
     assert advice in error["message"]
     assert "may have been charged" in error["message"]
     # The command shows the error, so a screen run's terminal doesn't show the attempt's ending.
     assert "Attempt ended failed" not in outcome.stderr
     assert cli.server.requests() == [AUTH, BACKTEST]
-    record = the_attempt(out)
+    record = only_attempt_record(out)
     assert record.outcome == "failed"
     assert record.possibly_charged
     assert record.error is not None
@@ -257,9 +232,9 @@ def test_a_400s_message_includes_portfolio123s_sanitized_text(cli: Cli) -> None:
     cli.server.reply("/screen/backtest", Reply(400, b"Invalid\x1bparameter:\n\npitMethod"))
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
-    message = error_of(outcome)["message"]
+    message = outcome.error["message"]
     assert message.endswith('Portfolio123\'s message: "Invalid parameter: pitMethod"')
     assert "\x1b" not in outcome.stderr
     assert 'Portfolio123\'s message: "Invalid parameter: pitMethod"' in outcome.stderr
@@ -276,9 +251,9 @@ def test_where_the_runs_records_are_escapes_the_output_directory(cli: Cli) -> No
     cli.server.reply("/screen/backtest", Reply(400, b"Unsupported value"))
     out = cli.tmp / "out \x1b[2J"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
-    assert error_of(outcome)["code"] == "provider.unsupported_capability"
+    assert outcome.error["code"] == "provider.unsupported_capability"
     escaped = str(out).replace("\x1b", "\\u001b")
     assert f"The run's records are in {escaped}." in outcome.stderr
     assert "\x1b" not in outcome.stderr
@@ -291,13 +266,13 @@ def test_a_response_that_fails_validation_is_flagged_after_it_is_saved(cli: Cli)
     cli.server.reply("/screen/backtest", response("invalid-structure.json"))
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
     assert outcome.exit_code == 5
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == "provider.response_invalid"
     assert "stats" in error["message"]
-    record = the_attempt(out)
+    record = only_attempt_record(out)
     assert record.outcome == "succeeded"
     assert record.response is not None
     assert (out / record.response.path).exists()
@@ -320,9 +295,9 @@ def test_return_series_says_whether_the_saved_response_holds_series(
     cli.server.reply("/screen/backtest", reply)
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
-    assert error_of(outcome)["code"] == "provider.response_invalid"
+    assert outcome.error["code"] == "provider.response_invalid"
     manifest = accounted_for(out, "provider.response_invalid")
     assert manifest.capabilities.return_series == ("source_only" if series else "absent")
     report = (out / "report.html").read_text()
@@ -339,13 +314,13 @@ def test_a_read_timeout_records_an_unknown_attempt_sent_once(cli: Cli) -> None:
     cli.server.reply("/screen/backtest", Reply(200, b"{}", delay=3))
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out, timeout=1)
+    outcome = cli.run_approved(FORMULA, out, "--json", timeout=1)
 
     assert outcome.exit_code == 5
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == "provider.outcome_unknown"
     assert "never retries it automatically" in error["message"]
-    record = the_attempt(out)
+    record = only_attempt_record(out)
     assert record.outcome == "unknown"
     assert record.possibly_charged
     assert [(e.request, e.result) for e in record.exchanges] == [
@@ -377,22 +352,13 @@ def test_a_file_published_before_an_unexpected_failure_is_in_the_manifest(
     cli.ready()
     serve_success(cli.server)
     faults.fail_after(name, RuntimeError("its own message"))
-    path = config("formula.yaml")
+    path = screen_config("formula.yaml")
     out = cli.tmp / "out"
 
-    outcome = cli(
-        "run",
-        path,
-        "--out",
-        out,
-        "--approve",
-        plan_hash_for(path),
-        "--json",
-        store_factory=faults,
-    )
+    outcome = cli.run_approved(path, out, "--json", store_factory=faults)
 
-    assert error_of(outcome)["code"] == code
-    record = the_attempt(out)
+    assert outcome.error["code"] == code
+    record = only_attempt_record(out)
     assert record.outcome == ended
     # Only a write that completed is referenced: a 200 whose response.json was published before
     # the failure is unknown, as one whose save failed.
@@ -427,22 +393,13 @@ def test_an_unexpected_exception_after_the_attempt_says_the_request_succeeded(
     cli.ready()
     serve_success(cli.server)
     faults.fail_before("report.html", RuntimeError("its own message"))
-    path = config("formula.yaml")
+    path = screen_config("formula.yaml")
     out = cli.tmp / "out"
 
-    outcome = cli(
-        "run",
-        path,
-        "--out",
-        out,
-        "--approve",
-        plan_hash_for(path),
-        "--json",
-        store_factory=faults,
-    )
+    outcome = cli.run_approved(path, out, "--json", store_factory=faults)
 
     assert outcome.exit_code == 1
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == "internal.unexpected"
     message = error["message"]
     assert message.startswith("Trial Folio failed unexpectedly (RuntimeError).")
@@ -450,7 +407,7 @@ def test_an_unexpected_exception_after_the_attempt_says_the_request_succeeded(
     assert "The screen backtest request succeeded, and its response was saved." in message
     assert "The run has no manifest, so its output is incomplete." in message
     assert "its own message" not in message
-    assert the_attempt(out).outcome == "succeeded"
+    assert only_attempt_record(out).outcome == "succeeded"
     assert not (out / "manifest.json").exists()
     assert cli.server.requests() == [AUTH, BACKTEST]
 
@@ -466,25 +423,16 @@ def test_an_unexpected_failure_saving_the_configuration_leaves_no_manifest(
     cli.ready()
     serve_success(cli.server)
     faults.fail_before("configuration.yaml", RuntimeError("its own message"))
-    path = config("formula.yaml")
+    path = screen_config("formula.yaml")
     out = cli.tmp / "out"
 
-    outcome = cli(
-        "run",
-        path,
-        "--out",
-        out,
-        "--approve",
-        plan_hash_for(path),
-        "--json",
-        store_factory=faults,
-    )
+    outcome = cli.run_approved(path, out, "--json", store_factory=faults)
 
     assert outcome.exit_code == 1
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == "internal.unexpected"
     assert "The screen backtest request wasn't sent." in error["message"]
-    record = the_attempt(out)
+    record = only_attempt_record(out)
     assert record.outcome == "failed"
     assert record.possibly_charged is False
     assert not (out / "configuration.yaml").exists()

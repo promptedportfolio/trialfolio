@@ -23,8 +23,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome
+from tests.support.cli import Cli
 from tests.support.clock import FixedClock, no_wait
+from tests.support.environment import Outcome
 from tests.support.html_report import parse
 from tests.support.run_builder import SYNTHETIC_RUN
 from trialfolio.configuration import read_screen_configuration_v1_1
