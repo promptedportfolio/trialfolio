@@ -72,7 +72,7 @@ type Json = dict[str, Any]
 
 @pytest.fixture
 def lab(tmp_path: Path, server: FakePortfolio123, monkeypatch: pytest.MonkeyPatch) -> Lab:
-    return Lab(tmp_path, server, monkeypatch, reader=RELEASE_0_3_0)
+    return Lab(tmp_path, server, monkeypatch, reader=RELEASE_0_3_0, catch=True)
 
 
 EXAMPLE = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml")
@@ -493,7 +493,9 @@ def test_a_metrics_table_without_its_settings_table_is_completed(
     # The same experiment, uninterrupted, for the tables a resume must write.
     # Its response's coverage differs from the settings' dates, so settings.csv flags it.
     mismatch = Reply(200, (RESPONSES / "coverage-mismatch.json").read_bytes())
-    whole = Lab(tmp_path / "whole", FakePortfolio123(), monkeypatch, reader=RELEASE_0_3_0)
+    whole = Lab(
+        tmp_path / "whole", FakePortfolio123(), monkeypatch, reader=RELEASE_0_3_0, catch=True
+    )
     whole.server.reply("/auth", AUTHENTICATED)
     whole.server.reply("/screen/backtest", response("complete.json"), mismatch)
     try:

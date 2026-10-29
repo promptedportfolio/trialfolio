@@ -14,9 +14,14 @@ A run's store is the real one, wrapped in storage faults when the lab has a `mon
 test can arm before the run, and which records each file the store publishes. The real client,
 `requests`, and `urllib3` send to the fake server with the canary credentials, unless the run is
 synthetic. The clock is fixed. The ranking lock's file is in the test's directory, given exactly
-for a plan 1.3.0, and the pause is `no_wait()`, unless the test gives its own. A refusal before the
-session starts, such as when its records fail the check, is the run's error, as the session's own
-error is, and the run records that it was raised.
+for a plan 1.3.0, and the pause is `no_wait()`, unless the test gives its own.
+
+A `TrialFolioError` a run raises propagates, as it did from eight of the ten drivers, whether it's
+raised while the records are read, while the execution is built, or by the session, such as the
+claim's `output.not_empty`: so a test that expects one catches it, and a test fails when an error
+the session returns, such as `storage.write_failed`, is raised instead. A lab made with `catch`, as
+the resume modules' are, gives it as the run's error, as their `Lab`s did, so a test reads a
+refusal as it reads the session's own error, without telling the two apart.
 
 The readers of what it wrote take the model each record is read with, such as `AttemptRecordV1_1`
 or `AttemptRecordV1_3`, which pins its `schema_version`, as `saved_records.py`'s do.
@@ -201,6 +206,8 @@ class Ran(Records):
     planned: AnyPlan | None
     """The plan the session ran; None when the run was refused before its plan was read."""
     error: TrialFolioError | None
+    """The error the session returned, None when every planned case succeeded; or, in a lab made
+    with `catch`, the error the run raised."""
     execution: ExperimentExecution | None
     """None when the run was refused before its execution was built."""
     requests: tuple[Received, ...]
@@ -208,9 +215,6 @@ class Ran(Records):
     events: tuple[ProgressEvent, ...]
     published: tuple[str, ...]
     """Each file the run's store published, in order, when it had storage faults."""
-    raised: bool = False
-    """Whether the error was raised, as a refusal before the session starts is, rather than
-    returned, as the session's own error is."""
 
     @property
     def received(self) -> tuple[str, ...]:
@@ -248,7 +252,8 @@ class Ran(Records):
 
 class Lab(Records):
     """Runs one experiment into one output directory, `<tmp>/experiment`, new and then resumed,
-    through the core, over the fake server, as the module says."""
+    through the core, over the fake server, as the module says. With `catch`, a `TrialFolioError`
+    a run raises is its error, rather than propagating."""
 
     def __init__(
         self,
@@ -257,6 +262,7 @@ class Lab(Records):
         monkeypatch: pytest.MonkeyPatch | None = None,
         *,
         reader: Reader = RELEASE_0_4_0,
+        catch: bool = False,
     ) -> None:
         self.out = tmp / "experiment"
         self.lock = tmp / LOCK_FILE
@@ -264,6 +270,7 @@ class Lab(Records):
         self._server = server
         self.reader = reader
         self._monkeypatch = monkeypatch
+        self._catch = catch
 
     @property
     def server(self) -> FakePortfolio123:
@@ -451,7 +458,6 @@ class Lab(Records):
         client = self._client(synthetic, invented)
         plan: AnyPlan | None = None
         execution: ExperimentExecution | None = None
-        raised = False
         try:
             given, saved = planned(store)
             plan = given.plan
@@ -475,13 +481,15 @@ class Lab(Records):
                 given.content, definition=given.definition, snapshot=given.snapshot
             )
         except TrialFolioError as refused:
-            error, raised = refused, True
+            if not self._catch:
+                raise
+            error = refused
         finally:
             client.close()
             real.close()
         requests = () if self._server is None else self._server.received[before:]
         published = tuple(store.published) if isinstance(store, StorageFaults) else ()
-        return Ran(self.out, plan, error, execution, requests, tuple(events), published, raised)
+        return Ran(self.out, plan, error, execution, requests, tuple(events), published)
 
     def _client(self, synthetic: bool, invented: bytes | None) -> ScreenBacktestClient:
         if synthetic:

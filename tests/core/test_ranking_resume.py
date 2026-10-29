@@ -95,7 +95,7 @@ EXAMPLE = ranked_experiment(EXPERIMENT_CONFIGS / "ranking-example.yaml").plan
 
 @pytest.fixture
 def lab(tmp_path: Path, server: FakePortfolio123, monkeypatch: pytest.MonkeyPatch) -> Lab:
-    return Lab(tmp_path, server, monkeypatch, reader=RELEASE_0_4_0)
+    return Lab(tmp_path, server, monkeypatch, reader=RELEASE_0_4_0, catch=True)
 
 
 def script(

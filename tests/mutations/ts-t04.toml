@@ -3,10 +3,12 @@
 # setup and the fixtures' paths everywhere, and changes each test module that used them, so each
 # test module it changes has a mutation of its own, which runs only that module's tests: one of a
 # few changes of the code they reach, the one nearest what the module checks. A module TS-T03
-# changed keeps the mutation TS-T03 gave it. The mutation with caught_by is that of the check
+# changed keeps the mutation TS-T03 gave it. The mutations with caught_by are that of the check
 # TS-T04 strengthens: a refused resume's "nothing is written", which now sees a new empty
-# directory. The packaging tests' mutations are in ts-t04-packaging.toml, and the reference tests'
-# in ts-t04-reference.toml, which runs on the owner's machine.
+# directory; and detail 3's two: an error the session returns, raised instead, which the tests
+# whose lab lets a raised error propagate, as their drivers did, still catch. The packaging tests'
+# mutations are in ts-t04-packaging.toml, and the reference tests' in ts-t04-reference.toml, which
+# runs on the owner's machine.
 
 # Each test module TS-T04 changes, with a change a test there catches.
 
@@ -480,4 +482,40 @@ caught_by = [
     "tests/core/test_experiment_resume.py::test_records_that_are_broken_fail_the_check_and_nothing_is_written",
     "tests/core/test_ranking_resume.py::test_an_experiments_broken_records_fail_the_check_and_nothing_is_sent",
     "tests/core/test_ranking_resume.py::test_an_attempt_a_resume_recorded_from_its_started_json_needs_that_record",
+]
+
+# An error the session returns, raised instead (detail 3): the lab lets a raised error propagate,
+# as eight of the ten drivers did, so each test that caught it at the base, through one of them,
+# catches it on the branch. The resume modules' labs catch it, as theirs did.
+
+[[mutation]]
+name = '''an attempt that ends the session without its manifest raises its error'''
+file = "src/trialfolio/experiment_execution/execution.py"
+old = '''                return self._incomplete(ending)'''
+new = '''                raise self._incomplete(ending)'''
+tests = [
+    "tests/core/test_experiment_execution.py",
+    "tests/core/test_ranking_execution.py",
+    "tests/core/test_ranking_pause.py",
+    "tests/core/test_stale_backtests.py",
+]
+caught_by = [
+    "tests/core/test_experiment_execution.py::test_an_attempt_record_that_wasnt_written_ends_the_session_without_its_manifest",
+    "tests/core/test_experiment_execution.py::test_an_attempt_without_a_start_record_or_an_attempt_record_reads_as_its_records_do",
+    "tests/core/test_experiment_execution.py::test_a_start_record_published_before_a_failure_agrees_with_the_attempt_record[interrupt]",
+    "tests/core/test_ranking_execution.py::test_an_attempt_without_its_record_counts_as_its_records_read",
+    "tests/core/test_ranking_pause.py::test_an_interrupt_during_the_wait_sends_no_backtest_and_its_case_awaits_a_repeat",
+    "tests/core/test_stale_backtests.py::test_a_resume_reads_a_stale_backtest_as_the_session_flagged_it[after the flagged case's attempt record]",
+    "tests/core/test_stale_backtests.py::test_a_resume_compares_with_the_sessions_latest_attempt_that_saved_a_decoded_response",
+]
+
+[[mutation]]
+name = '''a failure before the cases raises its error'''
+file = "src/trialfolio/experiment_execution/execution.py"
+old = '''            return before_cases(ended.error, recorded=self._records.first_plan_recorded())'''
+new = '''            raise before_cases(ended.error, recorded=self._records.first_plan_recorded())'''
+tests = ["tests/core/test_experiment_execution.py"]
+caught_by = [
+    "tests/core/test_experiment_execution.py::test_a_storage_failure_before_the_plan_is_recorded_sends_nothing",
+    "tests/core/test_experiment_execution.py::test_an_interrupt_once_the_first_plan_is_published_leaves_it_to_resume",
 ]

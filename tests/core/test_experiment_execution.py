@@ -573,9 +573,10 @@ def test_a_directory_that_isnt_empty_is_refused_before_anything_is_sent(
     out.mkdir()
     (out / "notes.txt").write_bytes(b"kept\n")
 
-    ran = lab.new()
+    with pytest.raises(TrialFolioError) as raised:
+        lab.new()
 
-    assert ran.raised and ran.refused("output.not_empty")
+    assert raised.value.code == "output.not_empty"
     assert sorted(path.name for path in out.iterdir()) == ["notes.txt"]
     assert lab.server.received == ()
 
