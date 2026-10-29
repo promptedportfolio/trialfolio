@@ -3,12 +3,12 @@
 # setup and the fixtures' paths everywhere, and changes each test module that used them, so each
 # test module it changes has a mutation of its own, which runs only that module's tests: one of a
 # few changes of the code they reach, the one nearest what the module checks. A module TS-T03
-# changed keeps the mutation TS-T03 gave it. The mutations with caught_by are that of the check
-# TS-T04 strengthens: a refused resume's "nothing is written", which now sees a new empty
-# directory; and detail 3's two: an error the session returns, raised instead, which the tests
-# whose lab lets a raised error propagate, as their drivers did, still catch. The packaging tests'
-# mutations are in ts-t04-packaging.toml, and the reference tests' in ts-t04-reference.toml, which
-# runs on the owner's machine.
+# changed keeps the mutation TS-T03 gave it. The mutations with caught_by are the two of the check
+# TS-T04 strengthens, the "nothing is written" of a refused resume and of a refused read of a run,
+# which now sees a new empty directory; and detail 3's two: an error the session returns, raised
+# instead, which the tests whose lab lets a raised error propagate, as their drivers did, still
+# catch. The packaging tests' mutations are in ts-t04-packaging.toml, and the reference tests' in
+# ts-t04-reference.toml, which runs on the owner's machine.
 
 # Each test module TS-T04 changes, with a change a test there catches.
 
@@ -458,8 +458,10 @@ old = '''self._wrapper.rank_get(name=name), RANK_GET, decode_body=True'''
 new = '''self._wrapper.rank_get(name=name), RANK_GET, decode_body=False'''
 tests = ["tests/provider/test_ranking_client.py"]
 
-# The check TS-T04 strengthens (copies that check less, item 8): a refused resume writes nothing,
-# not even an empty directory, which the core resume modules' _files, listing files only, missed.
+# The check TS-T04 strengthens (copies that check less, item 8): a refused resume, or a refused
+# read of a run, writes nothing, not even an empty directory, which the core resume modules'
+# _files, listing files only, missed. The lock's reaches the four tests whose refused resume takes
+# it, and the read's the two that read a run with read_run, which takes no lock.
 
 [[mutation]]
 name = '''each resume's lock makes an empty directory, which a refused resume leaves'''
@@ -482,6 +484,23 @@ caught_by = [
     "tests/core/test_experiment_resume.py::test_records_that_are_broken_fail_the_check_and_nothing_is_written",
     "tests/core/test_ranking_resume.py::test_an_experiments_broken_records_fail_the_check_and_nothing_is_sent",
     "tests/core/test_ranking_resume.py::test_an_attempt_a_resume_recorded_from_its_started_json_needs_that_record",
+]
+
+[[mutation]]
+name = '''a refused read of a run makes an empty directory, which it leaves'''
+file = "src/trialfolio/runs.py"
+old = '''    except _Refused as refused:
+        raise refused.error(name) from None'''
+new = '''    except _Refused as refused:
+        (store.root / "stray").mkdir()
+        raise refused.error(name) from None'''
+tests = [
+    "tests/core/test_ranking_resume.py::test_a_runs_broken_records_are_refused_and_nothing_is_written",
+    "tests/core/test_ranking_resume.py::test_a_runs_attempt_without_its_record_lists_the_files_written_before_it",
+]
+caught_by = [
+    "tests/core/test_ranking_resume.py::test_a_runs_broken_records_are_refused_and_nothing_is_written",
+    "tests/core/test_ranking_resume.py::test_a_runs_attempt_without_its_record_lists_the_files_written_before_it",
 ]
 
 # An error the session returns, raised instead (detail 3): the lab lets a raised error propagate,
