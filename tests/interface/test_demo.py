@@ -19,8 +19,9 @@ from typing import Any
 
 import pytest
 
-from tests.interface.conftest import Cli, FaultyStores
+from tests.support.cli import Cli
 from tests.support.html_report import parse
+from tests.support.storage_faults import FaultyStores
 from trialfolio.contracts.attempt import AttemptRecord, StartRecord
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.runs import read_run
@@ -185,7 +186,7 @@ def test_demo_needs_the_license_acknowledgment_and_writes_nothing_without_it(cli
     outcome = cli("demo", "--out", out, "--json")
 
     assert outcome.exit_code == 2
-    assert outcome.summary["error"]["code"] == "license.not_acknowledged"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "license.not_acknowledged"
     assert not out.exists()
 
 
@@ -198,7 +199,7 @@ def test_demo_refuses_an_output_directory_that_isnt_empty(cli: Cli) -> None:
     outcome = cli("demo", "--out", out, "--json")
 
     assert outcome.exit_code == 4
-    assert outcome.summary["error"]["code"] == "output.not_empty"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "output.not_empty"
     assert sorted(path.name for path in out.iterdir()) == ["keep.txt"]
 
 

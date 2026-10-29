@@ -398,11 +398,9 @@ def test_a_runs_report_gives_its_definitions_source_a_file_by_its_hash(
 
 
 def test_a_runs_snapshot_source_gives_its_systems_name_id_and_when_it_was_read(
-    tmp_path: Path, server: FakePortfolio123, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, server: FakePortfolio123
 ) -> None:
-    snapshot = SnapshotBuilder(monkeypatch, tmp_path / "home").snapshot(
-        tmp_path / "ranking" / "value-momentum"
-    )
+    snapshot = SnapshotBuilder(tmp_path / "home").snapshot(tmp_path / "ranking" / "value-momentum")
     record = RankingSnapshotRecord.model_validate_json((snapshot / "snapshot.json").read_bytes())
     path = naming(SCREEN, snapshot, tmp_path / "screen-configs")
 
@@ -607,11 +605,9 @@ def test_an_experiments_source_gives_its_definitions_file_by_its_hash(
 
 
 def test_an_experiments_snapshot_source_gives_its_systems_name_id_and_when_it_was_read(
-    tmp_path: Path, server: FakePortfolio123, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, server: FakePortfolio123
 ) -> None:
-    snapshot = SnapshotBuilder(monkeypatch, tmp_path / "home").snapshot(
-        tmp_path / "ranking" / "value-momentum"
-    )
+    snapshot = SnapshotBuilder(tmp_path / "home").snapshot(tmp_path / "ranking" / "value-momentum")
     record = RankingSnapshotRecord.model_validate_json((snapshot / "snapshot.json").read_bytes())
     path = naming(CONFIGS / "ranking-example.yaml", snapshot, tmp_path / "experiment-configs")
 

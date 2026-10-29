@@ -31,11 +31,11 @@ the core.
 import json
 import sys
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, FaultyStores, Outcome
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     RANK_UPDATED,
@@ -46,6 +46,8 @@ from tests.support.experiment_builder import (
     returns_each,
 )
 from tests.support.fake_portfolio123 import FakePortfolio123
+from tests.support.saved_records import attempt_directories, attempt_records, session_manifest
+from tests.support.storage_faults import FaultyStores
 from tests.support.terminal import PseudoTerminal
 from trialfolio.contracts.attempt import AttemptRecordV1_3, StartRecordV1_3
 from trialfolio.contracts.experiment_manifest import ExperimentManifestV1_1
@@ -71,41 +73,12 @@ CASE_IDS = {
 type Builder = ExperimentBuilder[Outcome]
 
 
-def error_code(outcome: Outcome) -> str:
-    return cast("dict[str, str]", outcome.summary["error"])["code"]
-
-
-def cases_of(outcome: Outcome) -> dict[str, dict[str, object]]:
-    """The summary's cases, by key."""
-    cases = cast("list[dict[str, object]]", outcome.summary["cases"])
-    return {cast("str", case["case_key"]): case for case in cases}
-
-
 def plan_of(out: Path, number: int = 1) -> PlanV1_3:
     return PlanV1_3.model_validate_json((out / "plans" / str(number) / "plan.json").read_bytes())
 
 
-def attempt_directories(out: Path, case: str) -> list[Path]:
-    return sorted((out / "cases" / case / "attempts").iterdir())
-
-
 def names(directory: Path) -> set[str]:
     return {path.name for path in directory.iterdir()}
-
-
-def attempts_of(out: Path, case: str) -> list[AttemptRecordV1_3]:
-    """The case's attempt records, by session and then sequence."""
-    records = [
-        AttemptRecordV1_3.model_validate_json(path.read_bytes())
-        for path in (out / "cases" / case / "attempts").glob("*/attempt.json")
-    ]
-    return sorted(records, key=lambda record: (record.session, record.sequence))
-
-
-def manifest(out: Path, session: int) -> ExperimentManifestV1_1:
-    return ExperimentManifestV1_1.model_validate_json(
-        (out / f"sessions/{session}/manifest.json").read_bytes()
-    )
 
 
 def exchanges(record: AttemptRecordV1_3) -> list[tuple[str, str, int | None, str | None]]:
@@ -193,8 +166,8 @@ def test_a_rank_update_killed_mid_flight_is_recorded_unknown_and_awaits_a_repeat
     case_line = f"Case value-heavy ({value_heavy}):"
     assert shown.index(case_line) < shown.index(awaiting) < shown.index("Type approve")
     assert outcome.exit_code == 6, shown
-    assert error_code(outcome) == "execution.partial"
-    assert cases_of(outcome)["value-heavy"] == {
+    assert outcome.error_code == "execution.partial"
+    assert outcome.cases_by_key["value-heavy"] == {
         "case_key": "value-heavy",
         "case_id": value_heavy,
         "outcome": "unknown",
@@ -206,7 +179,7 @@ def test_a_rank_update_killed_mid_flight_is_recorded_unknown_and_awaits_a_repeat
     each_backtest_follows_its_cases_rank_update(cli.server, out)
     # Its attempt record, which the resume wrote, keeps what its update record holds: unknown
     # and possibly charged, since its rank_update may or may not have taken effect.
-    (record,) = attempts_of(out, value_heavy)
+    (record,) = attempt_records(out, value_heavy, AttemptRecordV1_3)
     assert (record.attempt_id, record.session, record.sequence) == (
         update.attempt_id,
         update.session,
@@ -219,8 +192,8 @@ def test_a_rank_update_killed_mid_flight_is_recorded_unknown_and_awaits_a_repeat
     assert record.ranking_update.request.path.endswith("/rank-update-request.json")
     assert (record.ranking_update.response, record.request, record.response) == (None, None, None)
     # It counts as one request: its rank_update. The three others count two each.
-    assert manifest(out, 2).counts.provider_requests == 1 + 2 * 3
-    assert cast("dict[str, object]", outcome.summary["counts"])["provider_requests"] == 7
+    assert session_manifest(out, 2, ExperimentManifestV1_1).counts.provider_requests == 1 + 2 * 3
+    assert outcome.counts["provider_requests"] == 7
 
 
 # An attempt stopped after its rank_update's response was saved
@@ -231,7 +204,7 @@ def interrupted_baseline(experiments: Builder, faults: FaultyStores, out: Path) 
     `request.json`, once its `rank_update`'s 200 was saved, so its backtest isn't sent."""
     interrupted = experiments.run(EXAMPLE, out, ranks=[RANK_UPDATED], store_factory=faults)
     assert interrupted.exit_code == 130, interrupted.stderr
-    assert error_code(interrupted) == "command.interrupted"
+    assert interrupted.error_code == "command.interrupted"
     return interrupted
 
 
@@ -246,7 +219,7 @@ def test_an_interrupt_at_the_backtests_request_leaves_the_attempt_failed_and_uns
     interrupted = interrupted_baseline(experiments, faults, out)
 
     assert cli.server.requests() == [AUTH, RANK]
-    message = cast("dict[str, str]", interrupted.summary["error"])["message"]
+    message = interrupted.error["message"]
     assert (
         "The rank_update request, which writes the case's ranking definition into"
         " ApiRankingSystem, reached Portfolio123, and may have been charged. The screen backtest"
@@ -262,7 +235,7 @@ def test_an_interrupt_at_the_backtests_request_leaves_the_attempt_failed_and_uns
     }
     # The attempt records itself: failed, since its backtest was never sent, and possibly
     # charged, since its rank_update reached Portfolio123.
-    (record,) = attempts_of(out, baseline)
+    (record,) = attempt_records(out, baseline, AttemptRecordV1_3)
     assert (record.outcome, record.possibly_charged) == ("failed", True)
     assert record.error is not None and record.error.code == "command.interrupted"
     assert exchanges(record) == [(AUTH, "response", 200, None), (RANK, "response", 200, None)]
@@ -274,14 +247,14 @@ def test_an_interrupt_at_the_backtests_request_leaves_the_attempt_failed_and_uns
     assert resumed.exit_code == 6, resumed.stderr
     assert cli.server.requests()[received:] == [AUTH, *(RANK, BACKTEST) * 3]
     each_backtest_follows_its_cases_rank_update(cli.server, out)
-    assert attempts_of(out, baseline) == [record]
-    assert cases_of(resumed)["baseline"] == {
+    assert attempt_records(out, baseline, AttemptRecordV1_3) == [record]
+    assert resumed.cases_by_key["baseline"] == {
         "case_key": "baseline",
         "case_id": baseline,
         "outcome": "failed",
         "repeat_attempt_id": str(record.attempt_id),
     }
-    assert manifest(out, 2).counts.provider_requests == 1 + 2 * 3
+    assert session_manifest(out, 2, ExperimentManifestV1_1).counts.provider_requests == 1 + 2 * 3
 
 
 def test_an_attempt_record_unwritten_after_the_rank_updates_response_is_recorded_from_it(
@@ -314,7 +287,7 @@ def test_an_attempt_record_unwritten_after_the_rank_updates_response_is_recorded
     each_backtest_follows_its_cases_rank_update(cli.server, out)
     # The resume writes its attempt record from its update record and its saved response: its
     # rank_update got a 200, completed from that response, and its backtest was never sent.
-    (record,) = attempts_of(out, baseline)
+    (record,) = attempt_records(out, baseline, AttemptRecordV1_3)
     assert (record.outcome, record.possibly_charged) == ("failed", True)
     assert record.error is not None and record.error.code == "command.interrupted"
     assert exchanges(record) == [
@@ -328,8 +301,8 @@ def test_an_attempt_record_unwritten_after_the_rank_updates_response_is_recorded
     )
     assert record.ranking_update.provider_metadata.cost == 1
     assert (record.request, record.response) == (None, None)
-    assert cases_of(resumed)["baseline"]["repeat_attempt_id"] == str(record.attempt_id)
-    assert manifest(out, 2).counts.provider_requests == 1 + 2 * 3
+    assert resumed.cases_by_key["baseline"]["repeat_attempt_id"] == str(record.attempt_id)
+    assert session_manifest(out, 2, ExperimentManifestV1_1).counts.provider_requests == 1 + 2 * 3
 
 
 # A confirmed repeat sends both again, once
@@ -352,13 +325,13 @@ def test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once(
         key = "baseline"
         faults.fail_before(f"{CASE_IDS[key]}/request.json", KeyboardInterrupt())
         interrupted_baseline(experiments, faults, out)
-        (record,) = attempts_of(out, CASE_IDS[key])
+        (record,) = attempt_records(out, CASE_IDS[key], AttemptRecordV1_3)
         attempt = str(record.attempt_id)
         sends = returns_each(3)
     resumed = experiments.run(EXAMPLE, out, ranks=[RANK_UPDATED] * len(sends), sends=sends)
     assert resumed.exit_code == 6, resumed.stderr
     # Seven of the budget's 8 requests are counted, so the repeat's two need the raised budget.
-    assert cast("dict[str, object]", resumed.summary["counts"])["provider_requests"] == 7
+    assert resumed.counts["provider_requests"] == 7
     option = f"{key}:{attempt}"
     received = len(cli.server.received)
 
@@ -376,7 +349,7 @@ def test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once(
     assert repeated.exit_code == 0, repeated.stderr
     assert cli.server.requests()[received:] == [AUTH, RANK, BACKTEST]
     each_backtest_follows_its_cases_rank_update(cli.server, out)
-    stopped_record, repeat = attempts_of(out, CASE_IDS[key])
+    stopped_record, repeat = attempt_records(out, CASE_IDS[key], AttemptRecordV1_3)
     assert str(stopped_record.attempt_id) == attempt
     assert (repeat.outcome, str(repeat.repeat_of), repeat.session) == ("succeeded", attempt, 3)
     assert exchanges(repeat) == [
@@ -384,9 +357,9 @@ def test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once(
         (RANK, "response", 200, None),
         (BACKTEST, "response", 200, None),
     ]
-    assert cases_of(repeated)[key]["outcome"] == "succeeded"
-    assert manifest(out, 3).counts.attempts.repeats == 1
-    assert manifest(out, 3).counts.provider_requests == 7 + 2
+    assert repeated.cases_by_key[key]["outcome"] == "succeeded"
+    assert session_manifest(out, 3, ExperimentManifestV1_1).counts.attempts.repeats == 1
+    assert session_manifest(out, 3, ExperimentManifestV1_1).counts.provider_requests == 7 + 2
 
     # The same command, run again, doesn't repeat it: its confirmation is used.
     received = len(cli.server.received)
@@ -398,5 +371,5 @@ def test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once(
         f"Case {key} isn't repeated: the repeat confirmed for its attempt {attempt} was made"
         " already"
     ) in again.stderr
-    assert len(attempts_of(out, CASE_IDS[key])) == 2
-    assert manifest(out, 4).counts.attempts.repeats == 1
+    assert len(attempt_records(out, CASE_IDS[key], AttemptRecordV1_3)) == 2
+    assert session_manifest(out, 4, ExperimentManifestV1_1).counts.attempts.repeats == 1

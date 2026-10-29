@@ -9,14 +9,14 @@ another version, or a fake `simplejson`. It fails before any request, so the tes
 needed. `tests/core/test_installed_versions.py` checks the same in the test process.
 """
 
-import json
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, config
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.package_versions import fake_distribution, fake_simplejson, run_installed
+from tests.support.paths import screen_config
 
 
 def fails_before_the_plan(cli: Cli, directory: Path) -> str:
@@ -26,19 +26,18 @@ def fails_before_the_plan(cli: Cli, directory: Path) -> str:
     out = cli.tmp / "out"
 
     result = run_installed(
-        directory, "run", config("formula.yaml"), "--out", out, "--json", cwd=cli.tmp
+        directory, "run", screen_config("formula.yaml"), "--out", out, "--json", cwd=cli.tmp
     )
 
-    assert result.returncode == 3, result.stderr
-    summary = cast("dict[str, object]", json.loads(result.stdout))
-    error = cast("dict[str, str]", summary["error"])
-    assert error["code"] == "environment.unsupported"
-    assert "Plan hash" not in result.stderr
-    assert "Earnings yield with a liquidity floor" not in result.stderr
-    assert summary["output_dir"] is None
+    outcome = Outcome.of(result)
+    assert outcome.exit_code == 3, outcome.stderr
+    assert outcome.error_code == "environment.unsupported"
+    assert "Plan hash" not in outcome.stderr
+    assert "Earnings yield with a liquidity floor" not in outcome.stderr
+    assert outcome.summary["output_dir"] is None
     assert not out.exists()
     assert not list(cli.home.rglob("*.log"))
-    return error["message"]
+    return outcome.error["message"]
 
 
 @pytest.mark.parametrize(

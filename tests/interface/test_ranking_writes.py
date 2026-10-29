@@ -30,7 +30,8 @@ from typing import cast
 
 import pytest
 
-from tests.interface.conftest import AUTHENTICATED, Cli, FaultyStores, Outcome, plan_hash_for
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     UNAVAILABLE,
     ExperimentBuilder,
@@ -38,8 +39,9 @@ from tests.support.experiment_builder import (
     returns,
     returns_each,
 )
-from tests.support.fake_portfolio123 import Received, Reply
+from tests.support.fake_portfolio123 import AUTHENTICATED, Received, Reply
 from tests.support.snapshot_builder import SnapshotBuilder, naming
+from tests.support.storage_faults import FaultyStores
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 DEFINITION = FIXTURES / "screen-configs" / "definition.yaml"
@@ -85,29 +87,25 @@ def writes_only_api_ranking_system(requests: Sequence[Received]) -> None:
         assert params["rankingMethod"] in (2, 4)
 
 
-def summary_cases(outcome: Outcome) -> list[dict[str, object]]:
-    return cast("list[dict[str, object]]", outcome.summary["cases"])
-
-
 # A screen run
 
 
 @pytest.mark.parametrize("ranking", ["definition", "snapshot"])
 def test_a_screen_run_sends_only_its_authentication_rank_update_and_backtest(
-    cli: Cli, monkeypatch: pytest.MonkeyPatch, ranking: str
+    cli: Cli, ranking: str
 ) -> None:
     """Ranked by a definition file, or by a snapshot of a system, whose definition it writes into
     `ApiRankingSystem`; the system the snapshot read isn't written (D-36)."""
     config = DEFINITION
     if ranking == "snapshot":
-        builder = SnapshotBuilder(monkeypatch, cli.tmp / "builder")
+        builder = SnapshotBuilder(cli.tmp / "builder")
         config = naming(DEFINITION, builder.snapshot(cli.tmp / "snapshot"), cli.tmp / "configs")
     cli.ready()
     cli.server.reply("/auth", AUTHENTICATED)
     cli.server.reply("/rank", RANK_UPDATED, method="POST")
     cli.server.reply("/screen/backtest", returns())
 
-    outcome = cli("run", config, "--out", cli.tmp / "run", "--approve", plan_hash_for(config))
+    outcome = cli.run_approved(config, cli.tmp / "run")
 
     assert outcome.exit_code == 0, outcome.stderr
     assert cli.server.requests() == [AUTH, RANK, BACKTEST]
@@ -150,7 +148,7 @@ def test_a_resume_sends_only_its_authentication_and_each_due_cases_two_requests(
     resumed = experiments.run(EXAMPLE, out, ranks=four(RANK_UPDATED), sends=returns_each(4))
 
     assert resumed.exit_code == 0, resumed.stderr
-    assert cast("dict[str, object]", resumed.summary["ids"])["session"] == 2
+    assert resumed.ids["session"] == 2
     assert len(sent(cli, before)) == 9
     writes_only_api_ranking_system(sent(cli, before))
     assert cli.server.problems() == []
@@ -167,7 +165,7 @@ def test_a_repeat_sends_only_its_authentication_and_the_cases_two_requests(
         BUDGET_RAISED, out, ranks=four(RANK_UPDATED), sends=(UNAVAILABLE, *returns_each(3))
     )
     assert first.exit_code == 6, first.stderr
-    (baseline,) = [case for case in summary_cases(first) if case["case_key"] == "baseline"]
+    (baseline,) = [case for case in first.cases if case["case_key"] == "baseline"]
     attempt = cast("str", baseline["repeat_attempt_id"])
     before = len(cli.server.received)
 

@@ -24,7 +24,7 @@ manifest itself, because the command that writes them is R02-T08's, as R01-T13's
 import logging
 import re
 import shutil
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -207,20 +207,19 @@ type Review = Callable[[str], Written]
 
 
 @pytest.fixture(scope="module")
-def built(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Callable[[str], Path]]:
+def built(tmp_path_factory: pytest.TempPathFactory) -> Callable[[str], Path]:
     """Builds the runs a review configuration names, once for the module, beside a copy of it,
     and gives the copy's path."""
     root = tmp_path_factory.mktemp("runs")
     paths: dict[str, Path] = {}
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        builder = RunBuilder(monkeypatch, root / "home")
+    builder = RunBuilder(root / "home")
 
-        def get(name: str) -> Path:
-            if name not in paths:
-                paths[name] = builder.review(name, root / name.removesuffix(".yaml"))
-            return paths[name]
+    def get(name: str) -> Path:
+        if name not in paths:
+            paths[name] = builder.review(name, root / name.removesuffix(".yaml"))
+        return paths[name]
 
-        yield get
+    return get
 
 
 @pytest.fixture(scope="module")
@@ -930,7 +929,7 @@ def test_no_shared_response_is_named_when_none_is_shared(review: Review) -> None
 
 
 def test_text_from_the_configuration_or_portfolio123_cant_add_markup_or_reorder_whats_shown(
-    built: Callable[[str], Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    built: Callable[[str], Path], tmp_path: Path
 ) -> None:
     """The configuration's text, and Portfolio123's own message in a run's error (decision 3 of
     R02-T07), are shown as text."""
@@ -940,7 +939,7 @@ def test_text_from_the_configuration_or_portfolio123_cant_add_markup_or_reorder_
     directory = tmp_path / "configuration"
     shutil.copytree(example.parent / "runs", directory / "runs")
     rejected = Reply(400, b"</dd><b>bold</b> <script>alert(2)</script>")
-    RunBuilder(monkeypatch, tmp_path / "home").run(
+    RunBuilder(tmp_path / "home").run(
         Run("formula.yaml", rejected), directory / "runs" / "rejected"
     )
     content = (

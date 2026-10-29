@@ -51,20 +51,12 @@ import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import (
-    AUTHENTICATED,
-    CONFIGS,
-    Cli,
-    FaultyStores,
-    Outcome,
-    plan_hash_for,
-    response,
-)
 from tests.support import canaries
+from tests.support.cli import Cli, plan_hash_for
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     RANK_UPDATED,
     UNAVAILABLE,
@@ -73,34 +65,23 @@ from tests.support.experiment_builder import (
     plan_hash,
     returns,
 )
-from tests.support.fake_portfolio123 import Reply, each_its_own
+from tests.support.fake_portfolio123 import AUTHENTICATED, Reply, each_its_own, response
+from tests.support.paths import SCREEN_CONFIGS
 from tests.support.snapshot_builder import rank_get, snapshot_plan_hash
+from tests.support.storage_faults import FaultyStores, Intruded
 from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3
 from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
 from trialfolio.ranking_lock import LOCK_FILE, RankingLock
-from trialfolio.storage import LocalArtifactStore, StoredFile
+from trialfolio.storage import ArtifactStore, LocalArtifactStore, StoredFile
 from trialfolio.userdirs import log_directory
 
-CANARY_CONFIGURATION = CONFIGS / "canaries.yaml"
+CANARY_CONFIGURATION = SCREEN_CONFIGS / "canaries.yaml"
 
 UNEXPECTED_CANARY = "canary-exception-message-4d8e2a71"
 """The message of an unexpected exception, which logs give only by its type."""
 
 FIELDS = {"timestamp", "level", "event", "message", "trialfolio_version", "component"}
 """The fields every log line holds; linked IDs are added when they apply."""
-
-
-def approved_run(cli: Cli, out: Path, **options: object) -> Outcome:
-    return cli(
-        "run",
-        CANARY_CONFIGURATION,
-        "--out",
-        out,
-        "--approve",
-        plan_hash_for(CANARY_CONFIGURATION),
-        "--json",
-        **options,  # pyright: ignore[reportArgumentType]
-    )
 
 
 def log_files(cli: Cli) -> list[Path]:
@@ -124,36 +105,10 @@ def debug(cli: Cli, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TRIALFOLIO_LOG_LEVEL", "DEBUG")
 
 
-class Interloper:
-    """The output directory's real store, with another process writing a file into the directory
-    just before the claim."""
-
-    def __init__(self, root: str) -> None:
-        self.root = Path(root)
-        self._store = LocalArtifactStore(root)
-
-    def check_empty(self) -> None:
-        self._store.check_empty()
-
-    def claim(self, path: str, data: bytes) -> StoredFile:
-        self.root.mkdir(parents=True, exist_ok=True)
-        (self.root / "other.txt").write_text("another process's file\n")
-        return self._store.claim(path, data)
-
-    def write(self, path: str, data: bytes) -> StoredFile:
-        return self._store.write(path, data)
-
-    def discard(self, path: str, data: bytes) -> None:
-        self._store.discard(path, data)
-
-    def read(self, path: str) -> bytes:
-        return self._store.read(path)
-
-
-class Defective(Interloper):
+class Defective(LocalArtifactStore):
     """The output directory's real store, whose claim fails unexpectedly, as a defect would."""
 
-    def claim(self, path: str, data: bytes) -> StoredFile:
+    def claim(self, path: str, data: bytes, *, lock: bool = False) -> StoredFile:
         raise RuntimeError(UNEXPECTED_CANARY)
 
 
@@ -163,7 +118,7 @@ def test_a_success_logs_only_under_the_output_directory_and_no_canary(cli: Cli) 
     cli.server.reply("/screen/backtest", response("canaries.json"))
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(CANARY_CONFIGURATION, out, "--json")
 
     assert outcome.exit_code == 0, outcome.stderr
     assert log_files(cli) == [out / "logs" / "trialfolio.log"]
@@ -182,7 +137,7 @@ def test_each_log_line_is_one_json_object_with_the_documented_fields(cli: Cli) -
     cli.server.reply("/screen/backtest", response("canaries.json"))
     out = cli.tmp / "out"
 
-    approved_run(cli, out)
+    cli.run_approved(CANARY_CONFIGURATION, out, "--json")
 
     events = lines(out / "logs" / "trialfolio.log")
     assert events
@@ -211,7 +166,7 @@ def test_an_authentication_failure_logs_no_canary(cli: Cli) -> None:
     cli.server.reply("/auth", Reply(401, b"Unauthorized"))
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(CANARY_CONFIGURATION, out, "--json")
 
     assert outcome.exit_code == 5
     assert log_files(cli) == [out / "logs" / "trialfolio.log"]
@@ -228,10 +183,10 @@ def test_a_claim_that_fails_writes_no_log_file_anywhere(cli: Cli) -> None:
     cli.ready()
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out, store_factory=Interloper)
+    outcome = cli.run_approved(CANARY_CONFIGURATION, out, "--json", store_factory=Intruded)
 
     assert outcome.exit_code == 4
-    assert outcome.summary["error"]["code"] == "output.not_empty"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "output.not_empty"
     assert sorted(p.name for p in out.iterdir()) == ["other.txt"]
     assert log_files(cli) == []
     assert not log_directory(os.environ).exists()
@@ -242,16 +197,15 @@ def test_an_internal_error_before_the_claim_logs_to_the_per_user_directory(cli: 
     cli.ready()
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out, store_factory=Defective)
+    outcome = cli.run_approved(CANARY_CONFIGURATION, out, "--json", store_factory=Defective)
 
     assert outcome.exit_code == 1
-    error = outcome.summary["error"]
-    assert isinstance(error, dict)
+    error = outcome.error
     assert error["code"] == "internal.unexpected"
     (logged,) = log_files(cli)
     assert logged.parent == log_directory(os.environ)
-    assert str(logged) in str(error["message"])  # pyright: ignore[reportUnknownArgumentType]
-    assert UNEXPECTED_CANARY not in str(error["message"])  # pyright: ignore[reportUnknownArgumentType]
+    assert str(logged) in error["message"]
+    assert UNEXPECTED_CANARY not in error["message"]
     assert logged_canaries(cli) == []
     assert not out.exists()
     events = [event["event"] for event in lines(logged)]
@@ -268,7 +222,7 @@ def test_an_unknown_log_level_is_ignored_with_a_warning(
     cli.server.reply("/screen/backtest", response("canaries.json"))
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(CANARY_CONFIGURATION, out, "--json")
 
     assert outcome.exit_code == 0
     assert "Warning: TRIALFOLIO_LOG_LEVEL" in outcome.stderr
@@ -277,7 +231,7 @@ def test_an_unknown_log_level_is_ignored_with_a_warning(
     assert "INFO" in levels
     assert "DEBUG" not in levels
     assert "cli.environment.ignored" in [event["event"] for event in events]
-    assert outcome.summary["counts"]["warnings"] == 1  # pyright: ignore[reportIndexIssue]
+    assert outcome.counts["warnings"] == 1
 
 
 def test_the_warning_level_leaves_info_out_of_the_log_file(
@@ -291,7 +245,7 @@ def test_the_warning_level_leaves_info_out_of_the_log_file(
     cli.server.reply("/screen/backtest", response("canaries.json"))
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(CANARY_CONFIGURATION, out, "--json")
 
     assert outcome.exit_code == 0
     events = lines(out / "logs" / "trialfolio.log")
@@ -308,16 +262,14 @@ REVIEW_RUNS = [f"runs/{name}" for name in canaries.REVIEW if name.startswith("ca
 """`review-configs/canaries.yaml`'s `run` paths, in its results' order."""
 
 
-def review(cli: Cli, path: Path, out: Path, **options: object) -> Outcome:
+def review(
+    cli: Cli,
+    path: Path,
+    out: Path,
+    store_factory: Callable[[str], ArtifactStore] = LocalArtifactStore,
+) -> Outcome:
     cli.accept_license()
-    return cli(
-        "review",
-        path,
-        "--out",
-        out,
-        "--json",
-        **options,  # pyright: ignore[reportArgumentType]
-    )
+    return cli("review", path, "--out", out, "--json", store_factory=store_factory)
 
 
 def test_a_review_logs_only_under_its_output_directory_and_no_canary(
@@ -362,7 +314,7 @@ def test_a_review_whose_input_isnt_a_complete_run_writes_no_log_file_anywhere(
     outcome = review(cli, directory / built_path.name, out)
 
     assert outcome.exit_code == 3
-    assert outcome.summary["error"]["code"] == "input.not_a_run"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "input.not_a_run"
     assert not out.exists()
     assert log_files(cli) == []
     assert not log_directory(os.environ).exists()
@@ -377,7 +329,7 @@ def test_a_review_that_fails_at_a_copy_logs_no_canary(
     outcome = review(cli, built("canaries.yaml"), out, store_factory=faults)
 
     assert outcome.exit_code == 4
-    assert outcome.summary["error"]["code"] == "storage.write_failed"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "storage.write_failed"
     # The first result's copied manifest, before its plan.
     assert faults.published[-1].endswith("/manifest.json")
     assert log_files(cli) == [out / "logs" / "trialfolio.log"]
@@ -556,7 +508,7 @@ def test_a_repeat_logs_no_canary(cli: Cli, experiments: Builder) -> None:
         sends=[answered(), answered(), UNAVAILABLE, answered(), answered()],
     )
     assert first.exit_code == 6, first.stderr
-    case = cast("list[dict[str, str]]", first.summary["cases"])[2]
+    case = first.cases[2]
     assert (case["case_key"], case["outcome"]) == (HOLDINGS_KEY, "unknown")
     option = f"{HOLDINGS_KEY}:{case['repeat_attempt_id']}"
 
@@ -590,7 +542,7 @@ def test_a_run_that_finds_the_experiment_locked_writes_no_log(
         holder.wait()
 
     assert locked.exit_code == 4, locked.stderr
-    assert cast("dict[str, str]", locked.summary["error"])["code"] == "experiment.locked"
+    assert locked.error_code == "experiment.locked"
     assert found == ([log], before, False)
     assert logged_canaries(cli) == []
 
@@ -602,7 +554,7 @@ RANKING_EXPERIMENT = experiment_config("ranking-canaries.yaml")
 composite's factors' weights; and the removal of that composite's second factor."""
 
 CANARY_DEFINITION = experiment_config("ranking/canaries.xml")
-SNAPSHOT_CANARIES = CONFIGS.parent / "ranking-snapshot-configs" / "canaries.yaml"
+SNAPSHOT_CANARIES = SCREEN_CONFIGS.parent / "ranking-snapshot-configs" / "canaries.yaml"
 
 TILT_KEY = "canary-key-0d3b7e19"
 """The variant of the first composite's factors' weights, whose key is a canary: the third
@@ -656,7 +608,7 @@ def test_a_screen_run_with_a_definition_logs_no_canary_and_names_its_rank_update
     cli.server.reply("/screen/backtest", answered())
     out = cli.tmp / "run"
 
-    outcome = cli("run", config, "--out", out, "--approve", plan_hash_for(config), "--json")
+    outcome = cli.run_approved(config, out, "--json")
 
     assert outcome.exit_code == 0, outcome.stderr
     assert_logged_only_under(cli, out)
@@ -667,10 +619,10 @@ def test_a_screen_run_with_a_definition_logs_no_canary_and_names_its_rank_update
     # The rank_update's event names the operation, the case, and the attempt.
     events = lines(experiment_log(out))
     (started,) = (event for event in events if event["event"] == RANK_UPDATE_STARTED)
-    summary = cast("dict[str, dict[str, str]]", outcome.summary)
-    assert started["case_id"] == summary["ids"]["case_id"]
-    assert started["attempt_id"] == summary["ids"]["attempt_id"]
-    assert started["plan_hash"] == summary["ids"]["plan_hash"]
+    ids = outcome.ids
+    assert started["case_id"] == ids["case_id"]
+    assert started["attempt_id"] == ids["attempt_id"]
+    assert started["plan_hash"] == ids["plan_hash"]
     assert "rank_update" in str(started["message"])
 
 
@@ -755,7 +707,7 @@ def test_a_repeat_with_a_definition_logs_no_canary(cli: Cli, experiments: Builde
         sends=each_its_own([answered(), answered(), UNAVAILABLE, answered()]),
     )
     assert first.exit_code == 6, first.stderr
-    case = cast("list[dict[str, str]]", first.summary["cases"])[2]
+    case = first.cases[2]
     assert (case["case_key"], case["outcome"]) == (TILT_KEY, "unknown")
     option = f"{TILT_KEY}:{case['repeat_attempt_id']}"
 
@@ -822,7 +774,7 @@ def test_a_snapshot_logs_no_canary_and_names_only_its_plan_and_attempt(cli: Cli)
     assert all(canary in records for canary in canaries.RANKING_DEFINITION)
     events = lines(experiment_log(out))
     (ended,) = (event for event in events if event["event"] == "snapshot.completed")
-    ids = cast("dict[str, str]", outcome.summary["ids"])
+    ids = outcome.ids
     assert (ended["plan_hash"], ended["attempt_id"]) == (approve, ids["attempt_id"])
     assert all("case_id" not in event for event in events)
 
@@ -836,7 +788,7 @@ def test_a_run_that_finds_the_ranking_lock_held_writes_no_log(cli: Cli) -> None:
         locked = cli("run", RANKING_EXPERIMENT, "--out", out, "--approve", approve, "--json")
 
     assert locked.exit_code == 4, locked.stderr
-    assert cast("dict[str, str]", locked.summary["error"])["code"] == "experiment.locked"
+    assert locked.error_code == "experiment.locked"
     assert not out.exists()
     assert log_files(cli) == []
     assert not log_directory(os.environ).exists()

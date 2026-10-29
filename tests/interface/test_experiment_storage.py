@@ -22,18 +22,20 @@ session discards it, as a run does (CLI behavior, what a run writes after its at
 import re
 import sys
 from pathlib import Path
-from typing import Final, cast
+from typing import Final
 
 import pytest
 
-from tests.interface.conftest import Cli, FaultyStores, Outcome, snapshot
+from tests.support.cli import Cli
+from tests.support.directories import snapshot
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     ExperimentBuilder,
     experiment_config,
     plan_hash,
     returns,
 )
-from tests.support.storage_faults import placeholder_identities
+from tests.support.storage_faults import FaultyStores, placeholder_identities
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase
@@ -141,7 +143,7 @@ def where(at: str) -> str:
 def failed(outcome: Outcome, code: str, exit_code: int) -> str:
     """The error's message, once the outcome is checked."""
     assert outcome.exit_code == exit_code, outcome.stderr
-    error = cast("dict[str, str]", outcome.summary["error"])
+    error = outcome.error
     assert error["code"] == code
     message = error["message"]
     assert f"Error ({code}): {message}" in outcome.stderr
@@ -201,7 +203,7 @@ def stops_and_runs_again(
     # the session repeated its request's sentence, after "Of the last attempt:".
     assert repeated(message) == []
     assert not (out / "sessions/1/manifest.json").exists()
-    assert "manifest" not in cast("dict[str, str]", stopped.summary["outputs"])
+    assert "manifest" not in stopped.outputs
     # Each file was written once, and nothing after the fault.
     published = faults.published
     assert len(published) == len(set(published))
@@ -234,7 +236,7 @@ def stops_and_runs_again(
         assert RUNNING in message
     sent, resumed_exit_code = RESUMED[at]
     assert again.exit_code == resumed_exit_code, again.stderr
-    assert cast("dict[str, int]", again.summary["ids"])["session"] == 2
+    assert again.ids["session"] == 2
     assert (out / "sessions/2/manifest.json").is_file()
     expected = ["POST /auth", *["POST /screen/backtest"] * len(sent)] if sent else []
     assert cli.server.requests()[received:] == expected
@@ -324,7 +326,7 @@ def test_a_fault_at_the_response_after_a_200_leaves_the_case_unknown_and_possibl
     assert [(e.request, e.result, e.status) for e in record.exchanges] == [
         ("POST /screen/backtest", "response", 200)
     ]
-    cases = cast("list[dict[str, str | None]]", stopped.summary["cases"])
+    cases = stopped.cases
     assert [(case["case_id"], case["outcome"]) for case in cases] == [
         (first.case_id, "succeeded"),
         (second.case_id, "unknown"),
@@ -341,7 +343,7 @@ def test_a_fault_at_the_response_after_a_200_leaves_the_case_unknown_and_possibl
     assert [path.name for path in (out / "cases" / second.case_id / "attempts").iterdir()] == [
         attempt.name
     ]
-    outcomes = cast("list[dict[str, str]]", resumed.summary["cases"])
+    outcomes = resumed.cases
     assert outcomes[1]["outcome"] == "unknown"
 
 

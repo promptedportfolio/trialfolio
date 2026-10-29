@@ -31,7 +31,8 @@ from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, FaultyStores, Outcome
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     RANK_UPDATED,
@@ -44,6 +45,7 @@ from tests.support.experiment_builder import (
 )
 from tests.support.fake_portfolio123 import Reply
 from tests.support.snapshot_builder import SnapshotBuilder, naming
+from tests.support.storage_faults import FaultyStores
 from tests.support.terminal import PseudoTerminal
 from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
 from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
@@ -72,20 +74,8 @@ def four(reply: Reply) -> tuple[Reply, ...]:
     return (reply,) * 4
 
 
-def error_code(outcome: Outcome) -> str:
-    return cast("dict[str, str]", outcome.summary["error"])["code"]
-
-
 def message(outcome: Outcome) -> str:
-    return cast("dict[str, str]", outcome.summary["error"])["message"]
-
-
-def counts(outcome: Outcome) -> dict[str, object]:
-    return cast("dict[str, object]", outcome.summary["counts"])
-
-
-def summary_cases(outcome: Outcome) -> list[dict[str, object]]:
-    return cast("list[dict[str, object]]", outcome.summary["cases"])
+    return outcome.error["message"]
 
 
 def read_plan(out: Path, number: int = 1) -> PlanV1_3:
@@ -189,13 +179,13 @@ def test_without_approval_the_plan_hash_and_the_cases_are_given_and_nothing_is_w
     outcome = cli("run", EXAMPLE, "--out", out, "--json")
 
     assert outcome.exit_code == 2
-    assert error_code(outcome) == "plan.approval_required"
+    assert outcome.error_code == "plan.approval_required"
     assert not out.exists()
     assert cli.server.requests() == []
-    assert cast("dict[str, str]", outcome.summary["ids"])["plan_hash"] == plan_hash(EXAMPLE, out)
-    assert [case["case_key"] for case in summary_cases(outcome)] == list(CASES)
-    assert {case["outcome"] for case in summary_cases(outcome)} == {"not_yet_run"}
-    assert counts(outcome)["cases_planned"] == 4
+    assert outcome.ids["plan_hash"] == plan_hash(EXAMPLE, out)
+    assert [case["case_key"] for case in outcome.cases] == list(CASES)
+    assert {case["outcome"] for case in outcome.cases} == {"not_yet_run"}
+    assert outcome.counts["cases_planned"] == 4
     lines = outcome.stderr.splitlines()
     assert lines[0] == f"Plan hash: {plan_hash(EXAMPLE, out)}"
     assert OVERWRITES in lines
@@ -215,7 +205,7 @@ def test_before_its_plan_the_summary_counts_the_ranking_variants_cases(cli: Cli)
 
     assert outcome.exit_code == 4, outcome.stderr
     assert "cases" not in outcome.summary
-    assert (counts(outcome)["cases_planned"], counts(outcome)["cases_not_yet_run"]) == (4, 4)
+    assert (outcome.counts["cases_planned"], outcome.counts["cases_not_yet_run"]) == (4, 4)
     assert cli.server.requests() == []
 
 
@@ -243,12 +233,12 @@ def test_an_approved_experiment_sends_each_cases_rank_update_then_its_backtest(
     assert (out / "plans" / "1" / "definition.xml").read_bytes() == (
         FIXTURES / "experiment-configs" / "ranking" / "value-momentum.xml"
     ).read_bytes()
-    assert {key: counts(outcome)[key] for key in ("attempts", "provider_requests", "cost")} == {
+    assert {key: outcome.counts[key] for key in ("attempts", "provider_requests", "cost")} == {
         "attempts": 4,
         "provider_requests": 8,
         "cost": 24,
     }
-    assert {case["outcome"] for case in summary_cases(outcome)} == {"succeeded"}
+    assert {case["outcome"] for case in outcome.cases} == {"succeeded"}
 
 
 def test_a_complete_experiment_resumes_without_credentials_and_sends_nothing(
@@ -269,7 +259,7 @@ def test_a_complete_experiment_resumes_without_credentials_and_sends_nothing(
     resumed = experiments.run(EXAMPLE, out)
 
     assert resumed.exit_code == 0, resumed.stderr
-    assert cast("dict[str, object]", resumed.summary["ids"])["session"] == 2
+    assert resumed.ids["session"] == 2
     assert cli.server.requests() == received
 
 
@@ -305,8 +295,8 @@ def test_a_revised_definition_sends_only_the_cases_it_adds(
         "POST /rank",
         "POST /screen/backtest",
     ]
-    assert counts(revised)["cases_retired"] == 2
-    assert counts(revised)["provider_requests"] == 12
+    assert revised.counts["cases_retired"] == 2
+    assert revised.counts["provider_requests"] == 12
     plan = read_plan(out, 2)
     assert plan.revises == read_plan(out).plan_hash
     # The same command again, with the reason the revision recorded in its experiment.json
@@ -330,8 +320,8 @@ def awaiting_baseline(cli: Cli, experiments: ExperimentBuilder[Outcome], out: Pa
         BUDGET_RAISED, out, ranks=four(RANK_UPDATED), sends=(UNAVAILABLE, *returns_each(3))
     )
     assert outcome.exit_code == 6, outcome.stderr
-    (baseline,) = [case for case in summary_cases(outcome) if case["case_key"] == "baseline"]
-    assert counts(outcome)["provider_requests"] == 8
+    (baseline,) = [case for case in outcome.cases if case["case_key"] == "baseline"]
+    assert outcome.counts["provider_requests"] == 8
     return cast("str", baseline["repeat_attempt_id"])
 
 
@@ -393,8 +383,8 @@ def refused_baseline(cli: Cli, experiments: ExperimentBuilder[Outcome], out: Pat
         sends=returns_each(3),
     )
     assert first.exit_code == 6, first.stderr
-    assert counts(first)["provider_requests"] == 7
-    (baseline,) = [case for case in summary_cases(first) if case["case_key"] == "baseline"]
+    assert first.counts["provider_requests"] == 7
+    (baseline,) = [case for case in first.cases if case["case_key"] == "baseline"]
     return cast("str", baseline["repeat_attempt_id"])
 
 
@@ -416,9 +406,9 @@ def test_a_remaining_budget_of_one_request_covers_no_case(
     outcome = experiments.run(EXAMPLE, out, "--repeat", f"baseline:{attempt}")
 
     assert outcome.exit_code == 6, outcome.stderr
-    assert error_code(outcome) == "execution.partial"
+    assert outcome.error_code == "execution.partial"
     assert cli.server.requests() == received
-    assert counts(outcome)["provider_requests"] == 7
+    assert outcome.counts["provider_requests"] == 7
     assert SENDS_NO_CASE in outcome.stderr.splitlines()
     assert OVERWRITES not in outcome.stderr
 
@@ -466,7 +456,7 @@ def test_without_a_terminal_a_resumes_line_on_api_ranking_system_follows_its_bud
     outcome = cli("run", EXAMPLE, "--out", out, "--json")
 
     assert outcome.exit_code == 2, outcome.stderr
-    assert error_code(outcome) == "plan.approval_required"
+    assert outcome.error_code == "plan.approval_required"
     lines = outcome.stderr.splitlines()
     end = lines.index("Run the command in a terminal to see the full plan.")
     assert lines[end - 2 : end] == [
@@ -489,7 +479,7 @@ def test_without_a_terminal_a_resumes_line_says_whether_it_sends_a_case(
     first = experiments.run(
         BUDGET_RAISED, out, ranks=(RANK_UPDATED,) * 4, sends=(UNAVAILABLE, *returns_each(3))
     )
-    (baseline,) = [case for case in summary_cases(first) if case["case_key"] == "baseline"]
+    (baseline,) = [case for case in first.cases if case["case_key"] == "baseline"]
     attempt = baseline["repeat_attempt_id"]
 
     sends_none = cli("run", BUDGET_RAISED, "--out", out, "--json")
@@ -527,9 +517,9 @@ def test_on_a_terminal_a_resume_that_sends_no_case_says_so(
 
 
 def test_an_experiment_naming_a_snapshot_plans_offline_with_the_definition_files_cases(
-    cli: Cli, monkeypatch: pytest.MonkeyPatch
+    cli: Cli,
 ) -> None:
-    snapshot = SnapshotBuilder(monkeypatch, cli.tmp / "builder").snapshot(cli.tmp / "snapshot")
+    snapshot = SnapshotBuilder(cli.tmp / "builder").snapshot(cli.tmp / "snapshot")
     config = naming(EXAMPLE, snapshot, cli.tmp / "configs")
     cli.accept_license()
     out = cli.tmp / "experiment"
@@ -540,12 +530,10 @@ def test_an_experiment_naming_a_snapshot_plans_offline_with_the_definition_files
     assert (by_snapshot.exit_code, by_file.exit_code) == (2, 2)
     assert cli.server.requests() == []
     assert not out.exists()
-    assert [case["case_id"] for case in summary_cases(by_snapshot)] == [
-        case["case_id"] for case in summary_cases(by_file)
+    assert [case["case_id"] for case in by_snapshot.cases] == [
+        case["case_id"] for case in by_file.cases
     ]
-    assert cast("dict[str, str]", by_snapshot.summary["ids"])["plan_hash"] != plan_hash(
-        EXAMPLE, out
-    )
+    assert by_snapshot.ids["plan_hash"] != plan_hash(EXAMPLE, out)
 
 
 def test_a_synthetic_snapshot_named_by_the_baseline_is_config_invalid(cli: Cli) -> None:
@@ -573,7 +561,7 @@ def test_a_synthetic_snapshot_named_by_the_baseline_is_config_invalid(cli: Cli) 
     outcome = cli("run", config, "--out", out, "--json")
 
     assert outcome.exit_code == 3
-    assert error_code(outcome) == "config.invalid"
+    assert outcome.error_code == "config.invalid"
     assert "`baseline.ranking.snapshot` names a snapshot that's synthetic" in message(outcome)
     assert not out.exists()
     assert cli.server.requests() == []
@@ -595,13 +583,13 @@ def test_an_experiment_1_1_0_ranked_by_a_formula_runs_and_resumes_as_a_plan_1_1_
     config.write_bytes(content.replace(b"schema_version: 1.0.0", b"schema_version: 1.1.0"))
     out = cli.tmp / "experiment"
     without = cli("run", config, "--out", out, "--json")
-    baseline = summary_cases(without)[0]["case_id"]
+    baseline = without.cases[0]["case_id"]
     faults.fail_os(f"{baseline}/settings.csv")
 
     stopped = experiments.run(config, out, sends=(returns(),), store_factory=faults)
 
     assert stopped.exit_code == 4, stopped.stderr
-    assert error_code(stopped) == "storage.write_failed"
+    assert stopped.error_code == "storage.write_failed"
     assert not list(out.glob("sessions/*/manifest.json"))
     plan = PlanV1_1.model_validate_json((out / "plans" / "1" / "plan.json").read_bytes())
     assert plan.schema_version == "1.1.0"

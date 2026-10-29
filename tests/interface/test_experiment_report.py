@@ -33,7 +33,8 @@ from urllib.parse import unquote, urlsplit
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     REJECTED,
     UNAVAILABLE,
@@ -130,7 +131,7 @@ type Scenario = Callable[[ExperimentBuilder[Outcome], Path], list[Session]]
 
 def option(outcome: Outcome, key: str) -> str:
     """The `--repeat` value the summary gives to confirm a repeat of the case `key`."""
-    cases = cast("list[dict[str, object]]", outcome.summary["cases"])
+    cases = outcome.cases
     (attempt,) = (case["repeat_attempt_id"] for case in cases if case["case_key"] == key)
     return f"{key}:{attempt}"
 

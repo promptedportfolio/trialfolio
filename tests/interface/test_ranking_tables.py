@@ -29,20 +29,15 @@ import json
 from pathlib import Path
 from typing import Final
 
-from tests.interface.conftest import (
-    AUTHENTICATED,
-    Cli,
-    Outcome,
-    plan_hash_for,
-    response,
-    serve_success,
-)
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     RANK_UPDATED,
     ExperimentBuilder,
     experiment_config,
     returns_each,
 )
+from tests.support.fake_portfolio123 import AUTHENTICATED, response, serve_success
 from trialfolio.contracts.experiment_manifest import ExperimentManifest, ExperimentManifestV1_1
 from trialfolio.contracts.manifest import RunManifest, RunManifestV1_1
 
@@ -246,7 +241,7 @@ def test_a_screen_runs_weight_rows_come_from_its_own_definition_xml(cli: Cli) ->
     config = SCREEN_CONFIGS / "definition.yaml"
     out = cli.tmp / "run"
 
-    outcome = cli("run", config, "--out", out, "--approve", plan_hash_for(config))
+    outcome = cli.run_approved(config, out)
 
     assert outcome.exit_code == 0, outcome.stderr
     manifest = RunManifestV1_1.model_validate_json((out / "manifest.json").read_bytes())
@@ -271,7 +266,7 @@ def test_a_run_without_a_definition_writes_settings_csv_1_0_0(cli: Cli) -> None:
     config = SCREEN_CONFIGS / "formula.yaml"
     out = cli.tmp / "run"
 
-    outcome = cli("run", config, "--out", out, "--approve", plan_hash_for(config))
+    outcome = cli.run_approved(config, out)
 
     assert outcome.exit_code == 0, outcome.stderr
     manifest = RunManifest.model_validate_json((out / "manifest.json").read_bytes())
@@ -294,7 +289,7 @@ def test_a_screen_configuration_1_1_0_ranked_by_a_formula_writes_settings_csv_1_
     config.write_text(text.replace("schema_version: 1.0.0", "schema_version: 1.1.0"))
     out = cli.tmp / "run"
 
-    outcome = cli("run", config, "--out", out, "--approve", plan_hash_for(config))
+    outcome = cli.run_approved(config, out)
 
     assert outcome.exit_code == 0, outcome.stderr
     header, rows = table(out / "normalized" / "settings.csv")

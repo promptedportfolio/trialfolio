@@ -9,30 +9,23 @@ the test process, where the other process's file appears just before the claim, 
 function's `store_factory`.
 """
 
-import json
 import os
 import subprocess
 import sys
-from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import (
-    Cli,
-    Outcome,
-    config,
-    metadata,
-    occupied,
-    plan_hash_for,
-    serve_success,
-)
-from trialfolio.storage import ArtifactStore, LocalArtifactStore, StoredFile
+from tests.support.cli import Cli, occupied
+from tests.support.directories import metadata
+from tests.support.environment import Outcome
+from tests.support.fake_portfolio123 import serve_success
+from tests.support.paths import screen_config
+from tests.support.storage_faults import Intruded
 
 
 def assert_not_empty(cli: Cli, outcome: Outcome) -> None:
     assert outcome.exit_code == 4
-    error = cast("dict[str, str]", outcome.summary["error"])
+    error = outcome.error
     assert error["code"] == "output.not_empty"
     assert outcome.summary["output_dir"] is None
     assert outcome.summary["outputs"] == {}
@@ -48,9 +41,8 @@ def test_run_refuses_a_directory_that_isnt_empty(cli: Cli, name: str) -> None:
     serve_success(cli.server)
     out = occupied(cli, name)
     before = metadata(out)
-    approve = plan_hash_for(config("formula.yaml"))
 
-    outcome = cli("run", config("formula.yaml"), "--out", out, "--approve", approve, "--json")
+    outcome = cli.run_approved(screen_config("formula.yaml"), out, "--json")
 
     assert_not_empty(cli, outcome)
     assert metadata(out) == before
@@ -84,61 +76,12 @@ def test_report_refuses_a_directory_that_isnt_empty(cli: Cli, name: str) -> None
     assert metadata(run) == run_before
 
 
-class Intruded:
-    """The real store, with another process's file written into the output directory just
-    before the claim: as when another process writes there while `run` waits for approval."""
-
-    def __init__(self, root: str) -> None:
-        self._store = LocalArtifactStore(root)
-        self._root = Path(root)
-
-    def check_empty(self) -> None:
-        self._store.check_empty()
-
-    def claim(self, path: str, data: bytes, *, lock: bool = False) -> StoredFile:
-        self._root.mkdir(parents=True, exist_ok=True)
-        (self._root / "other.txt").write_bytes(b"another process's file\n")
-        return self._store.claim(path, data, lock=lock)
-
-    def lock(self, path: str) -> None:
-        self._store.lock(path)
-
-    def close(self) -> None:
-        self._store.close()
-
-    def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
-        return self._store.write(path, data, logged_as=logged_as)
-
-    def discard(self, path: str, data: bytes) -> None:
-        self._store.discard(path, data)
-
-    def read(self, path: str) -> bytes:
-        return self._store.read(path)
-
-    def entries(self, path: str) -> tuple[str, ...]:
-        return self._store.entries(path)
-
-
-def intruded(root: str) -> ArtifactStore:
-    return Intruded(root)
-
-
 def test_a_file_written_before_the_claim_fails_it_and_is_left_alone(cli: Cli) -> None:
     cli.ready()
     serve_success(cli.server)
     out = cli.tmp / "out"
-    approve = plan_hash_for(config("formula.yaml"))
 
-    outcome = cli(
-        "run",
-        config("formula.yaml"),
-        "--out",
-        out,
-        "--approve",
-        approve,
-        "--json",
-        store_factory=intruded,
-    )
+    outcome = cli.run_approved(screen_config("formula.yaml"), out, "--json", store_factory=Intruded)
 
     assert_not_empty(cli, outcome)
     assert sorted(os.listdir(out)) == ["other.txt"]
@@ -163,16 +106,16 @@ def test_another_process_writing_while_run_waits_for_approval_fails_the_claim(cl
     serve_success(cli.server)
     out = cli.tmp / "out"
 
-    with cli.on_terminal("run", config("formula.yaml"), "--out", out, "--json") as terminal:
+    with cli.on_terminal("run", screen_config("formula.yaml"), "--out", out, "--json") as terminal:
         terminal.wait_for("Type approve")
         subprocess.run([sys.executable, "-c", ANOTHER_PROCESS, str(out)], check=True)
         terminal.press("approve\n")
         exit_code = terminal.wait()
+    outcome = Outcome(exit_code, terminal.stdout, terminal.shown())
 
-    assert exit_code == 4, terminal.shown()
-    summary = json.loads(terminal.stdout)
-    assert summary["error"]["code"] == "output.not_empty"
-    assert summary["output_dir"] is None
+    assert outcome.exit_code == 4, outcome.stderr
+    assert outcome.error_code == "output.not_empty"
+    assert outcome.summary["output_dir"] is None
     assert cli.server.received == ()
     assert sorted(os.listdir(out)) == ["other.txt"]
     assert (out / "other.txt").read_bytes() == b"another process's file\n"

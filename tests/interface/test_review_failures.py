@@ -23,8 +23,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome, metadata, occupied, snapshot
 from tests.support.broken_runs import BROKEN, UNKNOWN_SCHEMA_VERSIONS, Json, newer_schema
+from tests.support.cli import Cli, occupied
+from tests.support.directories import metadata, snapshot
+from tests.support.environment import Outcome
 from tests.support.run_builder import REVIEW_CONFIGS, SYNTHETIC_RUN
 
 type Built = Callable[[str], Path]
@@ -66,8 +68,7 @@ def failed(outcome: Outcome, code: str, exit_code: int) -> str:
     names no output directory and no review."""
     assert outcome.exit_code == exit_code, outcome.stderr
     summary = outcome.summary
-    error = summary["error"]
-    assert isinstance(error, dict)
+    error = outcome.error
     assert error["code"] == code
     assert summary["output_dir"] is None
     assert summary["outputs"] == {}

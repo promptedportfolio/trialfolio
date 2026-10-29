@@ -87,43 +87,26 @@ def held(path: Path) -> Iterator[None]:
         os.close(descriptor)
 
 
-class Watched:
+class Watched(LocalArtifactStore):
     """The real store, which checks, at each file the execution writes, whether the ranking lock
     is held, so a test sees it held from before the first write through the last."""
 
-    def __init__(self, store: LocalArtifactStore, lock: Path) -> None:
-        self._store = store
-        self._lock = lock
+    def __init__(self, root: Path, ranking_lock: Path) -> None:
+        super().__init__(root)
+        self._ranking_lock = ranking_lock
         self.writes: list[tuple[str, bool]] = []
 
     def _watch(self, path: str) -> None:
-        self.writes.append((path, self._lock.exists() and locked_elsewhere(self._lock)))
-
-    def check_empty(self) -> None:
-        self._store.check_empty()
+        held = self._ranking_lock.exists() and locked_elsewhere(self._ranking_lock)
+        self.writes.append((path, held))
 
     def claim(self, path: str, data: bytes, *, lock: bool = False) -> StoredFile:
         self._watch(path)
-        return self._store.claim(path, data, lock=lock)
-
-    def lock(self, path: str) -> None:
-        self._store.lock(path)
-
-    def close(self) -> None:
-        self._store.close()
+        return super().claim(path, data, lock=lock)
 
     def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
         self._watch(path)
-        return self._store.write(path, data, logged_as=logged_as)
-
-    def discard(self, path: str, data: bytes) -> None:
-        self._store.discard(path, data)
-
-    def read(self, path: str) -> bytes:
-        return self._store.read(path)
-
-    def entries(self, path: str) -> tuple[str, ...]:
-        return self._store.entries(path)
+        return super().write(path, data, logged_as=logged_as)
 
 
 @pytest.fixture(autouse=True)
@@ -398,8 +381,7 @@ def test_a_screen_run_holds_the_lock_from_before_its_first_write_until_it_ends(
     content, definition, plan = screen()
     lock = tmp_path / LOCK_FILE
     out = tmp_path / "out"
-    with LocalArtifactStore(out) as real:
-        store = Watched(real, lock)
+    with Watched(out, lock) as store:
         error = Execution(
             plan, plan.plan_hash, "not_required", store, None, clock=FixedClock(), ranking_lock=lock
         ).run(
@@ -419,8 +401,7 @@ def test_a_new_experiment_holds_the_lock_from_before_its_claim_until_it_ends(
 ) -> None:
     content, definition, plan = experiment()
     lock = tmp_path / LOCK_FILE
-    with LocalArtifactStore(tmp_path / "out") as real:
-        store = Watched(real, lock)
+    with Watched(tmp_path / "out", lock) as store:
         error = ExperimentExecution(
             plan,
             plan.plan_hash,

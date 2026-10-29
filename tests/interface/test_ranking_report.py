@@ -51,14 +51,15 @@ from urllib.parse import unquote, urlsplit
 
 import pytest
 
-from tests.interface.conftest import AUTHENTICATED, Cli, Outcome, plan_hash_for, response
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     RANK_UPDATED,
     RESPONSES,
     ExperimentBuilder,
     experiment_config,
 )
-from tests.support.fake_portfolio123 import FakePortfolio123, distinct
+from tests.support.fake_portfolio123 import AUTHENTICATED, FakePortfolio123, distinct, response
 from tests.support.html_report import AttemptShown, Document, Element, parse
 from tests.support.snapshot_builder import SnapshotBuilder, naming
 from tests.support.synthetic_experiment import (
@@ -225,7 +226,7 @@ def _run(config: Path, *, snapshot: bool = False) -> Scenario:
         cli.server.reply("/rank", RANK_UPDATED, method="POST")
         cli.server.reply("/screen/backtest", response("complete.json"))
         out = directory / "run"
-        outcome = cli("run", config_, "--out", out, "--approve", plan_hash_for(config_))
+        outcome = cli.run_approved(config_, out)
         assert outcome.exit_code == 0, outcome.stderr
         return [Shown(out, out / "report.html")]
 
@@ -260,10 +261,9 @@ def _experiment(config: Path, changed: str | None = None, *, snapshot: bool = Fa
 def _snapshot(directory: Path) -> Path:
     """A snapshot of `ranking-snapshot-configs/example.yaml`, which the snapshot builder takes,
     over a server of its own, answering its `GET /rank` with `rank-get.json`."""
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        return SnapshotBuilder(monkeypatch, directory / "snapshot-home").snapshot(
-            directory / "ranking" / "value-momentum"
-        )
+    return SnapshotBuilder(directory / "snapshot-home").snapshot(
+        directory / "ranking" / "value-momentum"
+    )
 
 
 def _rendered(cli: Cli, directory: Path) -> list[Shown]:

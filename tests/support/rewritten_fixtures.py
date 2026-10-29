@@ -49,7 +49,6 @@ RF-T01 wrote it. Its base had no copy, so it ran there from a copy of this file.
 """
 
 import contextlib
-import io
 import itertools
 import os
 import shutil
@@ -100,47 +99,18 @@ def fixed_ids() -> Iterator[None]:
         yield
 
 
-@contextlib.contextmanager
-def _environment(home: Path) -> Iterator[None]:
-    """The environment of the tests' CLI, with the license acknowledged."""
-    from tests.support.environment import VARIABLES
-    from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
-
-    saved = dict(os.environ)
-    try:
-        for name in VARIABLES:
-            os.environ.pop(name, None)
-        os.environ["HOME"] = str(home)
-        os.environ[ACCEPT_VARIABLE] = ACCEPT_VALUE
-        yield
-    finally:
-        os.environ.clear()
-        os.environ.update(saved)
-
-
 def _command(*argv: str | Path) -> None:
-    """Runs `trialfolio` with `argv`, a new fixed clock, and the fixed IDs, and raises
-    `AssertionError`, with what it wrote, unless it succeeds."""
-    from tests.support.clock import FixedClock
-    from trialfolio.cli import main
+    """Runs `trialfolio` with `argv`, a new fixed clock, and the fixed IDs, with the tests' CLI's
+    runner, and raises `AssertionError`, with what it wrote, unless it succeeds."""
+    from tests.support.environment import run_cli
 
-    out, err = io.StringIO(), io.StringIO()
-    with (
-        fixed_ids(),
-        mock.patch.object(sys, "stdin", io.StringIO()),
-        contextlib.redirect_stdout(out),
-        contextlib.redirect_stderr(err),
-    ):
-        code = main([str(arg) for arg in argv], clock=FixedClock())
-    if code != 0:
-        raise AssertionError(
-            f"trialfolio {' '.join(map(str, argv))} exited with {code}:\n"
-            f"{out.getvalue()}{err.getvalue()}"
-        )
+    with fixed_ids():
+        run_cli(*argv, check=True)
 
 
 def write(out: Path) -> None:
     """Writes the fixtures again into `out`, a new or empty directory, as the module says."""
+    from tests.support.environment import isolated
     from tests.support.synthetic_experiment import (
         write_synthetic_experiment,
         write_synthetic_ranking_experiment,
@@ -156,7 +126,8 @@ def write(out: Path) -> None:
     run = inputs / "runs" / "demo"
     shutil.copytree(RUN, run)
     shutil.copyfile(REVIEW_CONFIGURATION, configuration)
-    with tempfile.TemporaryDirectory() as home, _environment(Path(home)):
+    # The tests' CLI's environment, with the license acknowledged.
+    with tempfile.TemporaryDirectory() as home, isolated(Path(home), licensed=True):
         _command("demo", "--out", out / "run")
         _command("review", configuration, "--out", out / "review")
         _command("report", run, "--out", out / "report")

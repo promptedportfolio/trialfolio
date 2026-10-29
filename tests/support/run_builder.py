@@ -22,28 +22,19 @@ the review's weight rows, written through the core until R04-T12 made `trialfoli
 1.1.0 file; since then, they're written through the CLI.
 """
 
-import io
 import shutil
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-import pytest
-
-from tests.support import canaries
-from tests.support.clock import FixedClock, no_wait
-from tests.support.environment import VARIABLES
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
-from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
-from trialfolio.cli import API_ID_VARIABLE, API_KEY_VARIABLE, main
+from tests.support.cli import plan_hash_for
+from tests.support.clock import no_wait
+from tests.support.environment import isolated, run_cli
+from tests.support.fake_portfolio123 import AUTHENTICATED, FakePortfolio123, Reply
+from tests.support.paths import FIXTURES, RESPONSES, SCREEN_CONFIGS
 from trialfolio.configuration import read_screen_configuration_v1_1
-from trialfolio.planning import build_plan_v1_1, installed_versions
 from trialfolio.ranking_lock import LOCK_DIRECTORY_VARIABLE
 
-FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
-SCREEN_CONFIGS: Final = FIXTURES / "screen-configs"
-RESPONSES: Final = FIXTURES / "responses"
 REVIEW_CONFIGS: Final = FIXTURES / "review-configs"
 
 SYNTHETIC_RUN: Final = FIXTURES / "runs" / "synthetic-run-1.0.0"
@@ -163,10 +154,9 @@ gives them: a run to write, or the committed run to copy."""
 class RunBuilder:
     """Writes runs with `trialfolio run`, in the test process, with a temporary home and without
     the variables Trial Folio reads, apart from the license acknowledgment and the canary
-    credentials."""
+    credentials (`tests/support/environment.py`)."""
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
-        self._monkeypatch = monkeypatch
+    def __init__(self, home: Path) -> None:
         self._home = home
 
     def run(self, run: Run, out: Path) -> Path:
@@ -174,37 +164,30 @@ class RunBuilder:
         is a definition gets `rank-update.json`'s 200 to its `POST /rank` first."""
         path = SCREEN_CONFIGS / run.configuration
         read = read_screen_configuration_v1_1(path.read_bytes(), run.configuration, path)
-        plan_hash = build_plan_v1_1(read, installed_versions()).plan_hash
         server = FakePortfolio123()
-        stderr = io.StringIO()
         try:
-            server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+            server.reply("/auth", AUTHENTICATED)
             if read.definition is not None:
                 server.reply("/rank", RANK_UPDATED, method="POST")
             server.reply("/screen/backtest", run.reply)
-            with self._monkeypatch.context() as patch:
-                self._home.mkdir(parents=True, exist_ok=True)
-                patch.setenv("HOME", str(self._home))
-                for name in VARIABLES:
-                    patch.delenv(name, raising=False)
+            self._home.mkdir(parents=True, exist_ok=True)
+            with isolated(self._home, licensed=True, credentials=True) as patch:
                 # The ranking lock's file is in the builder's home, never the machine's.
                 patch.setenv(LOCK_DIRECTORY_VARIABLE, str(self._home))
-                patch.setenv(ACCEPT_VARIABLE, ACCEPT_VALUE)
-                patch.setenv(API_ID_VARIABLE, canaries.API_ID)
-                patch.setenv(API_KEY_VARIABLE, canaries.API_KEY)
-                patch.setattr(sys, "stdin", io.StringIO())
-                patch.setattr(sys, "stdout", io.StringIO())
-                patch.setattr(sys, "stderr", stderr)
-                main(
-                    ["run", str(path), "--out", str(out), "--approve", plan_hash],
+                outcome = run_cli(
+                    "run",
+                    path,
+                    "--out",
+                    out,
+                    "--approve",
+                    plan_hash_for(path),
                     endpoint=server.endpoint,
-                    clock=FixedClock(),
                     pause=no_wait(),
                 )
         finally:
             server.close()
         # A run that fails still writes its manifest, so it's complete, and can be reviewed.
-        assert (out / "manifest.json").is_file(), stderr.getvalue()
+        assert (out / "manifest.json").is_file(), outcome.stderr
         return out
 
     def review(self, name: str, directory: Path) -> Path:

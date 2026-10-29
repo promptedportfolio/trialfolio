@@ -1,0 +1,474 @@
+# TS-T03's list of the check of the tests (docs/test-refactoring.md), which it ran on its base and
+# on its branch. TS-T03 writes the interface's helpers once, under tests/support/, and changes each
+# test module that used them, so each test module it changes has a mutation of its own, which runs
+# only that module's tests: one of a few changes of the code they reach, the one nearest what the
+# module checks. The mutations with caught_by are those of the checks TS-T03 strengthens: the
+# summary's cases by key, which no two cases share; the summary a new process writes, read as
+# Outcome reads one; and the store doubles, each now the real store with one method changed. The
+# reference tests' mutations are in ts-t03-reference.toml, which runs on the owner's machine.
+
+# Each test module TS-T03 changes, with a change a test there catches.
+
+[[mutation]]
+name = '''no snapshot is read back, for contract/test_experiment_configuration'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/contract/test_experiment_configuration.py"]
+
+[[mutation]]
+name = '''no snapshot is read back, for contract/test_ranking_definitions'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/contract/test_ranking_definitions.py"]
+
+[[mutation]]
+name = '''no snapshot is read back, for contract/test_screen_configuration'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/contract/test_screen_configuration.py"]
+
+[[mutation]]
+name = '''results that share a response aren't flagged, for core/test_differences'''
+file = "src/trialfolio/differences.py"
+old = '''flags: set[FlagCode] = {"identical_source"} if identical else set()'''
+new = '''flags: set[FlagCode] = set()'''
+tests = ["tests/core/test_differences.py"]
+
+[[mutation]]
+name = '''an attempt stopped while it authenticated is recorded as possibly charged, for core/test_experiment_resume'''
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''        "possibly_charged": False,'''
+new = '''        "possibly_charged": True,'''
+tests = ["tests/core/test_experiment_resume.py"]
+
+[[mutation]]
+name = '''a run with a ranking definition doesn't hold the ranking lock, for core/test_ranking_lock'''
+file = "src/trialfolio/execution.py"
+old = '''        if self._lock is None:
+            return self._run_claimed(configuration, client, on_claimed)'''
+new = '''        if True:
+            return self._run_claimed(configuration, client, on_claimed)'''
+tests = ["tests/core/test_ranking_lock.py"]
+
+[[mutation]]
+name = '''no snapshot is read back, for core/test_ranking_report'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/core/test_ranking_report.py"]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for core/test_review_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = ["tests/core/test_review_report.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_demo'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_demo.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_environment'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_environment.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_budget'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_budget.py"]
+
+[[mutation]]
+name = '''a manifest counts the failed cases as succeeded, for interface/test_experiment_counts'''
+file = "src/trialfolio/case_state.py"
+old = '''succeeded=outcomes.count("succeeded"),'''
+new = '''succeeded=outcomes.count("failed"),'''
+tests = ["tests/interface/test_experiment_counts.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_failures'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_failures.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_lock'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_lock.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_records'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_records.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_repeat'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_repeat.py"]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for interface/test_experiment_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = ["tests/interface/test_experiment_report.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_resume'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_resume.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_revision'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_revision.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_run'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_run.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_storage'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_storage.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_tables'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_tables.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_init'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_init.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_interrupts'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_interrupts.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_json_summary'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_json_summary.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_license'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_license.py"]
+
+[[mutation]]
+name = '''a file another process wrote before the claim doesn't fail it, for interface/test_logs'''
+file = "src/trialfolio/storage.py"
+old = '''if any(not part_of_claim(name, claim.path.name) for name in names):'''
+new = '''if False:'''
+tests = ["tests/interface/test_logs.py"]
+
+[[mutation]]
+name = '''a file another process wrote before the claim doesn't fail it, for interface/test_output_directory'''
+file = "src/trialfolio/storage.py"
+old = '''if any(not part_of_claim(name, claim.path.name) for name in names):'''
+new = '''if False:'''
+tests = ["tests/interface/test_output_directory.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_plan_hash'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_plan_hash.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_budget'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_budget.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_experiment'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_experiment.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_lock'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_lock.py"]
+
+[[mutation]]
+name = '''the pause before a backtest is 9 seconds, for interface/test_ranking_pause'''
+file = "src/trialfolio/pause.py"
+old = '''UPDATE_PAUSE_SECONDS: Final = 10'''
+new = '''UPDATE_PAUSE_SECONDS: Final = 9'''
+tests = ["tests/interface/test_ranking_pause.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_records'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_records.py"]
+
+[[mutation]]
+name = '''no snapshot is read back, for interface/test_ranking_report'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/interface/test_ranking_report.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_resume'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_resume.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_run'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_run.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_sending'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_sending.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_snapshot'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_snapshot.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_storage'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_storage.py"]
+
+[[mutation]]
+name = '''a weight row loses its original, for interface/test_ranking_tables'''
+file = "src/trialfolio/normalization/rows.py"
+old = '''key, text = (None, None) if weight is None else (weight.key, weight.text)'''
+new = '''key, text = (None, None)'''
+tests = ["tests/interface/test_ranking_tables.py"]
+
+[[mutation]]
+name = '''a rank_update names another currency, for interface/test_ranking_writes'''
+file = "src/trialfolio/planning/cases.py"
+old = '''"currency": "USD",'''
+new = '''"currency": "usd",'''
+tests = ["tests/interface/test_ranking_writes.py"]
+
+[[mutation]]
+name = '''the wrapper's text keeps the credentials and the token, for interface/test_redaction'''
+file = "src/trialfolio/provider/failures.py"
+old = '''text = re.sub("|".join(re.escape(secret) for secret in longest_first), "[redacted]", text)'''
+new = '''text = text'''
+tests = ["tests/interface/test_redaction.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_report_command'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_report_command.py"]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for interface/test_report_content'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = ["tests/interface/test_report_content.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_review'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_review.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_review_failures'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_review_failures.py"]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for interface/test_review_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = ["tests/interface/test_review_report.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_review_storage'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_review_storage.py"]
+
+[[mutation]]
+name = '''a review finds each weight the same, for interface/test_review_weights'''
+file = "src/trialfolio/differences.py"
+old = '''    elif before.value == after.value:
+        # Each is a normalized decimal, or `absent`.'''
+new = '''    elif True:
+        # Each is a normalized decimal, or `absent`.'''
+tests = ["tests/interface/test_review_weights.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_run_approval'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_run_approval.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_run_capture'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_run_capture.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_run_failures'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_run_failures.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_run_validation'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_run_validation.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_stale_backtests'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_stale_backtests.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_storage_failures'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_storage_failures.py"]
+
+[[mutation]]
+name = '''the CLI's help for --json says it in other words, for manual/test_manual_reference'''
+file = "src/trialfolio/cli/arguments.py"
+old = '''help="write the result to stdout as one JSON summary"'''
+new = '''help="write the result to stdout as a JSON summary"'''
+tests = ["tests/manual/test_manual_reference.py"]
+
+# The checks TS-T03 strengthens.
+
+[[mutation]]
+name = '''a summary, once its model has checked it, gives its first case twice'''
+file = "src/trialfolio/cli/invocation.py"
+old = '''result = json.dumps(summary.model_dump(mode="json")) + "\n"'''
+new = '''result = json.dumps({**(dumped := summary.model_dump(mode="json")), **({"cases": [*dumped["cases"], dumped["cases"][0]]} if dumped.get("cases") else {})}) + "\n"'''
+tests = ["tests/interface/test_experiment_budget.py", "tests/interface/test_experiment_counts.py", "tests/interface/test_experiment_failures.py", "tests/interface/test_experiment_repeat.py", "tests/interface/test_experiment_resume.py", "tests/interface/test_ranking_budget.py", "tests/interface/test_ranking_resume.py", "tests/interface/test_stale_backtests.py"]
+caught_by = [
+    "tests/interface/test_experiment_repeat.py::test_the_attempt_id_confirms_a_repeat_without_asking_and_is_used_once",
+    "tests/interface/test_experiment_budget.py",
+    "tests/interface/test_ranking_resume.py",
+]
+
+[[mutation]]
+name = '''a summary isn't followed by a newline'''
+file = "src/trialfolio/cli/invocation.py"
+old = '''result = json.dumps(summary.model_dump(mode="json")) + "\n"'''
+new = '''result = json.dumps(summary.model_dump(mode="json"))'''
+tests = [
+    "tests/interface/test_plan_hash.py",
+    "tests/interface/test_environment.py",
+    "tests/interface/test_experiment_resume.py::test_run_json_gives_the_same_plan_hash_in_separate_processes_and_output_directories",
+    "tests/interface/test_experiment_lock.py::test_two_new_experiments_claiming_one_directory_at_once_give_at_most_one_success",
+    "tests/interface/test_interrupts.py::test_ctrl_c_at_the_approval_prompt_under_the_test_launcher_leaves_nothing",
+    "tests/interface/test_output_directory.py::test_another_process_writing_while_run_waits_for_approval_fails_the_claim",
+    "tests/interface/test_run_approval.py::test_typing_approve_under_the_test_launcher_runs_the_plan_shown",
+]
+caught_by = [
+    "tests/interface/test_plan_hash.py::test_the_same_settings_give_the_same_hash_in_separate_processes",
+    "tests/interface/test_environment.py::test_an_unverified_version_fails_before_the_plan",
+    "tests/interface/test_experiment_resume.py::test_run_json_gives_the_same_plan_hash_in_separate_processes_and_output_directories",
+    "tests/interface/test_experiment_lock.py::test_two_new_experiments_claiming_one_directory_at_once_give_at_most_one_success",
+    "tests/interface/test_interrupts.py::test_ctrl_c_at_the_approval_prompt_under_the_test_launcher_leaves_nothing",
+    "tests/interface/test_output_directory.py::test_another_process_writing_while_run_waits_for_approval_fails_the_claim",
+    "tests/interface/test_run_approval.py::test_typing_approve_under_the_test_launcher_runs_the_plan_shown",
+]
+
+[[mutation]]
+name = '''a file another process wrote before the claim doesn't fail it'''
+file = "src/trialfolio/storage.py"
+old = '''if any(not part_of_claim(name, claim.path.name) for name in names):'''
+new = '''if False:'''
+tests = ["tests/interface/test_logs.py", "tests/interface/test_output_directory.py"]
+caught_by = [
+    "tests/interface/test_logs.py::test_a_claim_that_fails_writes_no_log_file_anywhere",
+    "tests/interface/test_output_directory.py::test_a_file_written_before_the_claim_fails_it_and_is_left_alone",
+]
+
+[[mutation]]
+name = '''a run with a ranking definition doesn't hold the ranking lock'''
+file = "src/trialfolio/execution.py"
+old = '''        if self._lock is None:
+            return self._run_claimed(configuration, client, on_claimed)'''
+new = '''        if True:
+            return self._run_claimed(configuration, client, on_claimed)'''
+tests = ["tests/core/test_ranking_lock.py"]
+caught_by = [
+    "tests/core/test_ranking_lock.py::test_a_screen_run_holds_the_lock_from_before_its_first_write_until_it_ends",
+]

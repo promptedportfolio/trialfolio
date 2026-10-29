@@ -21,6 +21,10 @@ only `ApiRankingSystem`: a body with an `id` would write another system.
 
 It answers with HTTP/1.0, so each connection carries one exchange, and the client opens a new one
 for the next.
+
+Beside it are replies the tests share: `AUTHENTICATED`, `response`, a response fixture's 200, and
+`serve_success`, which scripts a run that succeeds. TS-T03 moved them here from the interface's
+conftest.
 """
 
 import json
@@ -34,6 +38,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import MappingProxyType
 from typing import Final, Literal, override
 from urllib.parse import urlsplit
+
+from tests.support import canaries
+from tests.support.paths import RESPONSES
 
 SENT: Final = frozenset({"POST /auth", "POST /screen/backtest", "POST /rank", "GET /rank"})
 """Every request Trial Folio sends, by its method and its path without the query."""
@@ -82,6 +89,15 @@ def each_its_own(replies: Sequence[Reply]) -> tuple[Reply, ...]:
             reply = replace(reply, body=body)
         numbered.append(reply)
     return tuple(numbered)
+
+
+AUTHENTICATED: Final = Reply(200, canaries.TOKEN.encode())
+"""Portfolio123's answer to a successful authentication: the token."""
+
+
+def response(name: str) -> Reply:
+    """A 200 whose body is the response fixture `name`, in `responses/`."""
+    return Reply(200, (RESPONSES / name).read_bytes())
 
 
 @dataclass(frozen=True)
@@ -195,6 +211,12 @@ class FakePortfolio123:
             self._received.append(request)
             replies = self._replies.get((request.method, path)) or self._replies.get((None, path))
             return replies.popleft() if replies else Reply(status=404)
+
+
+def serve_success(server: FakePortfolio123, body: str = "complete.json") -> None:
+    """Scripts a run that succeeds: authentication, then the backtest's 200 with `body`."""
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/screen/backtest", response(body))
 
 
 _POLL_SECONDS = 0.01

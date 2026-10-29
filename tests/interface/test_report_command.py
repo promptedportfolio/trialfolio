@@ -33,17 +33,12 @@ from urllib.request import url2pathname
 
 import pytest
 
-from tests.interface.conftest import (
-    AUTHENTICATED,
-    Cli,
-    config,
-    plan_hash_for,
-    response,
-    serve_success,
-    snapshot,
-)
 from tests.support import broken_runs
+from tests.support.cli import Cli, plan_hash_for
+from tests.support.directories import snapshot
+from tests.support.fake_portfolio123 import AUTHENTICATED, response, serve_success
 from tests.support.html_report import Document, parse
+from tests.support.paths import screen_config
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.tables import read_metrics_csv, read_settings_csv
 
@@ -74,8 +69,8 @@ def fake_server_run(cli: Cli, out: Path) -> Path:
     """A run as `trialfolio run` writes it, over the fake server, approved with `--approve`."""
     cli.ready()
     serve_success(cli.server)
-    path = config("formula.yaml")
-    outcome = cli("run", path, "--out", out, "--approve", plan_hash_for(path))
+    path = screen_config("formula.yaml")
+    outcome = cli.run_approved(path, out)
     assert outcome.exit_code == 0, outcome.stderr
     return out
 
@@ -233,7 +228,7 @@ def test_an_incomplete_run_fails_and_creates_no_output(
     outcome = cli("report", run, "--out", out, "--json")
 
     assert outcome.exit_code == 3
-    assert outcome.summary["error"]["code"] == "input.not_a_run"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "input.not_a_run"
     assert outcome.summary["output_dir"] is None
     assert outcome.summary["outputs"] == {}
     assert "Another title" not in outcome.stdout + outcome.stderr
@@ -251,7 +246,7 @@ def test_an_empty_directory_and_a_regular_file_arent_runs(cli: Cli) -> None:
     for given in (empty, regular):
         outcome = cli("report", given, "--out", out, "--json")
         assert outcome.exit_code == 3
-        assert outcome.summary["error"]["code"] == "input.not_a_run"  # pyright: ignore[reportIndexIssue]
+        assert outcome.error_code == "input.not_a_run"
         assert not out.exists()
 
 
@@ -262,7 +257,7 @@ def test_a_run_directory_that_doesnt_exist_is_not_found(cli: Cli) -> None:
     outcome = cli("report", cli.tmp / "missing", "--out", out, "--json")
 
     assert outcome.exit_code == 3
-    assert outcome.summary["error"]["code"] == "input.not_found"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "input.not_found"
     assert not out.exists()
 
 
@@ -279,8 +274,7 @@ def test_a_provider_package_that_cant_be_imported_is_an_unsupported_environment(
     outcome = cli.without_module("p123api", "report", given, "--out", out, "--json")
 
     assert outcome.exit_code == 3, outcome.stderr
-    error = outcome.summary["error"]
-    assert isinstance(error, dict)
+    error = outcome.error
     assert error["code"] == "environment.unsupported"
     assert "p123api can't be imported" in error["message"]
     assert "If you run it from a copy of its repository, run uv sync there" in error["message"]
@@ -298,7 +292,7 @@ def test_a_broken_copy_leaves_a_non_empty_output_directory_unchanged(cli: Cli) -
     outcome = cli("report", copy, "--out", out, "--json")
 
     # The run is read before the output directory is checked.
-    assert outcome.summary["error"]["code"] == "input.not_a_run"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "input.not_a_run"
     assert snapshot(out) == before
 
 
@@ -321,13 +315,12 @@ def refused(cli: Cli, run: Path, code: str) -> str:
     outcome = cli("report", run, "--out", out, "--json")
 
     assert outcome.exit_code == 3, outcome.stderr
-    error = outcome.summary["error"]
-    assert isinstance(error, dict)
+    error = outcome.error
     assert error["code"] == code
     assert outcome.summary["output_dir"] is None
     assert not out.exists()
     assert snapshot(run) == before
-    return str(error["message"])  # pyright: ignore[reportUnknownArgumentType]
+    return error["message"]
 
 
 def test_report_rerenders_a_copy_of_the_committed_run_with_a_definition(cli: Cli) -> None:
@@ -399,17 +392,17 @@ def test_report_reads_a_run_whose_definition_has_windows_line_endings_as_complet
     directory.mkdir()
     (directory / "value-momentum.xml").write_bytes(windows)
     path = directory / "definition.yaml"
-    text = config("definition.yaml").read_text(encoding="utf-8")
+    text = screen_config("definition.yaml").read_text(encoding="utf-8")
     path.write_text(
         text.replace("'../experiment-configs/ranking/value-momentum.xml'", "'value-momentum.xml'"),
         encoding="utf-8",
     )
-    assert plan_hash_for(path) == plan_hash_for(config("definition.yaml"))
+    assert plan_hash_for(path) == plan_hash_for(screen_config("definition.yaml"))
     cli.server.reply("/auth", AUTHENTICATED)
     cli.server.reply("/rank", response("rank-update.json"), method="POST")
     cli.server.reply("/screen/backtest", response("complete.json"))
     run = cli.tmp / "run"
-    assert cli("run", path, "--out", run, "--approve", plan_hash_for(path)).exit_code == 0
+    assert cli.run_approved(path, run).exit_code == 0
     assert (run / "definition.xml").read_bytes() == windows
     out = cli.tmp / "report"
 

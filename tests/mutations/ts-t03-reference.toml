@@ -1,0 +1,22 @@
+# TS-T03's list of the reference tests' mutations (docs/test-refactoring.md, the check of the tests,
+# and its question 13), which ran on the owner's machine, from TS-T03's worktree, with
+# TRIALFOLIO_REFERENCE_DIR naming the main checkout's reference/, on the base and on the branch.
+# TS-T03 changes only what the two reference modules below import: Cli and AUTHENTICATED, from
+# tests/support/ in place of the interface's conftest. Each has a mutation that a test there
+# catches.
+
+marker = "reference"
+
+[[mutation]]
+name = '''results that share a response aren't flagged, for reference/test_reference_review'''
+file = "src/trialfolio/differences.py"
+old = '''flags: set[FlagCode] = {"identical_source"} if identical else set()'''
+new = '''flags: set[FlagCode] = set()'''
+tests = ["tests/reference/test_reference_review.py"]
+
+[[mutation]]
+name = '''a decimal's places are counted one too many, for reference/test_reference_responses'''
+file = "src/trialfolio/normalization/rows.py"
+old = '''return len(value.text.partition(".")[2])'''
+new = '''return len(value.text.partition(".")[2]) + 1'''
+tests = ["tests/reference/test_reference_responses.py"]

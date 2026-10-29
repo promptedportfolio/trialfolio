@@ -26,8 +26,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome, config, snapshot
+from tests.support.cli import Cli
+from tests.support.directories import snapshot
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import ExperimentBuilder, experiment_config, returns
+from tests.support.paths import screen_config
 from tests.support.run_builder import REVIEW_CONFIGS
 from tests.support.terminal import PseudoTerminal
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
@@ -70,14 +73,6 @@ def write_record(**changes: str) -> None:
     record_path().write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 
 
-def error_code(stdout: str) -> object:
-    summary: object = json.loads(stdout)
-    assert isinstance(summary, dict)
-    error: object = summary["error"]  # pyright: ignore[reportUnknownVariableType]
-    assert isinstance(error, dict)
-    return error["code"]  # pyright: ignore[reportUnknownVariableType]
-
-
 # R01-AC20: without an acknowledgment
 
 
@@ -88,7 +83,7 @@ def test_without_an_acknowledgment_or_a_terminal_a_command_fails_and_writes_noth
     cli.credentials()
     out = cli.tmp / "out"
     first = {
-        "run": ("run", config("formula.yaml")),
+        "run": ("run", screen_config("formula.yaml")),
         "demo": ("demo",),
         "report": ("report", cli.tmp),
         "review": ("review", REVIEW_CONFIGS / "example.yaml"),
@@ -97,7 +92,7 @@ def test_without_an_acknowledgment_or_a_terminal_a_command_fails_and_writes_noth
     outcome = cli(*first, "--out", out, "--json")
 
     assert outcome.exit_code == 2
-    assert error_code(outcome.stdout) == "license.not_acknowledged"
+    assert outcome.error_code == "license.not_acknowledged"
     assert "license.not_acknowledged" in outcome.stderr
     assert "trialfolio license --accept" in outcome.stderr
     assert f"{ACCEPT_VARIABLE}={ACCEPT_VALUE}" in outcome.stderr
@@ -127,14 +122,14 @@ def test_without_an_acknowledgment_an_experiment_fails_and_writes_nothing(
     outcome = experiments.run(example, out, sends=[returns()] * 5)
 
     assert outcome.exit_code == 2
-    assert error_code(outcome.stdout) == "license.not_acknowledged"
+    assert outcome.error_code == "license.not_acknowledged"
     assert snapshot(cli.tmp) == before
     assert len(cli.server.received) == received
 
 
 @pytest.mark.parametrize(
     "path",
-    [config("definition.yaml"), experiment_config("ranking-example.yaml")],
+    [screen_config("definition.yaml"), experiment_config("ranking-example.yaml")],
     ids=["screen", "experiment"],
 )
 def test_without_an_acknowledgment_a_run_with_a_definition_fails_and_writes_nothing(
@@ -146,7 +141,7 @@ def test_without_an_acknowledgment_a_run_with_a_definition_fails_and_writes_noth
     outcome = cli("run", path, "--out", out, "--json")
 
     assert outcome.exit_code == 2
-    assert error_code(outcome.stdout) == "license.not_acknowledged"
+    assert outcome.error_code == "license.not_acknowledged"
     assert not out.exists()
     assert snapshot(cli.tmp) == {"home": None}
     assert not (cli.locks / LOCK_FILE).exists()
@@ -237,7 +232,7 @@ def test_a_record_of_another_license_or_notice_version_doesnt_acknowledge(
     outcome = cli("demo", "--out", out, "--json")
 
     assert outcome.exit_code == 2
-    assert error_code(outcome.stdout) == "license.not_acknowledged"
+    assert outcome.error_code == "license.not_acknowledged"
     assert not out.exists()
 
 
@@ -319,7 +314,7 @@ def test_any_other_answer_on_a_terminal_is_a_refusal_and_writes_nothing(
     shown = terminal.shown()
 
     assert outcome.exit_code == 2
-    assert error_code(outcome.stdout) == "license.not_acknowledged"
+    assert outcome.error_code == "license.not_acknowledged"
     assert "Type accept" in shown
     assert not record_path().exists()
     assert not out.exists()
@@ -334,7 +329,7 @@ def test_a_terminal_for_stderr_alone_isnt_asked(cli: Cli) -> None:
     shown = terminal.shown()
 
     assert outcome.exit_code == 2
-    assert error_code(outcome.stdout) == "license.not_acknowledged"
+    assert outcome.error_code == "license.not_acknowledged"
     assert "Type accept" not in shown
     assert not out.exists()
 
@@ -380,7 +375,7 @@ def test_any_other_value_is_rejected(cli: Cli, monkeypatch: pytest.MonkeyPatch, 
     outcome = cli("demo", "--out", out, "--json")
 
     assert outcome.exit_code == 2
-    assert error_code(outcome.stdout) == "license.not_acknowledged"
+    assert outcome.error_code == "license.not_acknowledged"
     assert ACCEPT_VALUE in outcome.stderr
     assert not out.exists()
     assert not record_path().exists()
@@ -396,7 +391,7 @@ def test_another_value_is_rejected_even_with_a_record(
     outcome = cli("demo", "--out", out, "--json")
 
     assert outcome.exit_code == 2
-    assert error_code(outcome.stdout) == "license.not_acknowledged"
+    assert outcome.error_code == "license.not_acknowledged"
     assert not out.exists()
 
 
@@ -446,6 +441,6 @@ def test_license_accept_that_cant_be_written_fails(
     outcome = cli("license", "--accept", "--json")
 
     assert outcome.exit_code == 4
-    assert error_code(outcome.stdout) == "storage.write_failed"
+    assert outcome.error_code == "storage.write_failed"
     assert "TRIALFOLIO_ACCEPT_LICENSE" in outcome.stderr
     assert blocker.read_text(encoding="utf-8") == ""

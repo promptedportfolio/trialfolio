@@ -35,8 +35,8 @@ from typing import Any, Final
 
 import pytest
 
-from tests.interface.conftest import Cli
 from tests.support import canaries
+from tests.support.cli import Cli
 from tests.support.clock import FixedClock
 from tests.support.experiment_builder import ExperimentBuilder
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply

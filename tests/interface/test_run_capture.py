@@ -11,49 +11,19 @@ import hashlib
 import io
 import json
 import os
-from collections.abc import Callable
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pytest
 
-from tests.interface.conftest import (
-    AUTHENTICATED,
-    RESPONSES,
-    Cli,
-    FaultyStores,
-    Outcome,
-    config,
-    plan_hash_for,
-    response,
-    serve_success,
-)
+from tests.support.cli import Cli, plan_hash_for
 from tests.support.clock import STARTED
-from tests.support.fake_portfolio123 import Received, Reply
+from tests.support.fake_portfolio123 import AUTHENTICATED, Received, Reply, response, serve_success
+from tests.support.paths import RESPONSES, screen_config
+from tests.support.storage_faults import FaultyStores
 from trialfolio.contracts.attempt import AttemptRecord
 from trialfolio.contracts.manifest import RunManifest
-from trialfolio.storage import ArtifactStore, LocalArtifactStore
 
-
-def approved_run(
-    cli: Cli,
-    out: Path,
-    *,
-    name: str = "formula.yaml",
-    store_factory: Callable[[str], ArtifactStore] = LocalArtifactStore,
-) -> Outcome:
-    """Runs `name`, approved with its plan's full hash."""
-    path = config(name)
-    return cli(
-        "run",
-        path,
-        "--out",
-        out,
-        "--approve",
-        plan_hash_for(path),
-        "--json",
-        store_factory=store_factory,
-    )
+FORMULA = screen_config("formula.yaml")
 
 
 def test_the_response_is_saved_whole_and_the_manifest_hashes_match(cli: Cli) -> None:
@@ -61,7 +31,7 @@ def test_the_response_is_saved_whole_and_the_manifest_hashes_match(cli: Cli) -> 
     serve_success(cli.server)
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
     assert outcome.exit_code == 0, outcome.stderr
     manifest = RunManifest.model_validate_json((out / "manifest.json").read_bytes())
@@ -85,17 +55,17 @@ def test_the_manifest_records_the_options_without_a_path(cli: Cli) -> None:
     serve_success(cli.server)
     out = cli.tmp / "out"
 
-    outcome = approved_run(cli, out)
+    outcome = cli.run_approved(FORMULA, out, "--json")
 
     assert outcome.exit_code == 0, outcome.stderr
     content = (out / "manifest.json").read_text()
     manifest = RunManifest.model_validate_json(content)
     assert manifest.command.options == {
-        "approve": plan_hash_for(config("formula.yaml")),
+        "approve": plan_hash_for(screen_config("formula.yaml")),
         "json": True,
     }
     assert str(cli.tmp) not in content
-    assert str(config("formula.yaml").parent) not in content
+    assert str(screen_config("formula.yaml").parent) not in content
 
 
 def test_the_manifest_gives_the_time_the_command_started(cli: Cli) -> None:
@@ -109,10 +79,8 @@ def test_the_manifest_gives_the_time_the_command_started(cli: Cli) -> None:
     def clock() -> datetime:
         return STARTED + timedelta(hours=1 if "Plan hash:" in shown.getvalue() else 0)
 
-    path = config("formula.yaml")
-    outcome = cli(
-        "run", path, "--out", out, "--approve", plan_hash_for(path), stderr=shown, clock=clock
-    )
+    path = screen_config("formula.yaml")
+    outcome = cli.run_approved(path, out, stderr=shown, clock=clock)
 
     assert outcome.exit_code == 0, shown.getvalue()
     manifest = RunManifest.model_validate_json((out / "manifest.json").read_bytes())
@@ -127,7 +95,7 @@ def test_one_attempt_lists_authentication_then_the_request(cli: Cli) -> None:
     cli.ready()
     serve_success(cli.server)
 
-    outcome = approved_run(cli, cli.tmp / "out")
+    outcome = cli.run_approved(FORMULA, cli.tmp / "out", "--json")
 
     (attempt_dir,) = (cli.tmp / "out" / "cases").glob("*/attempts/*")
     record = AttemptRecord.model_validate_json((attempt_dir / "attempt.json").read_bytes())
@@ -136,8 +104,8 @@ def test_one_attempt_lists_authentication_then_the_request(cli: Cli) -> None:
         ("POST /screen/backtest", 200),
     ]
     assert cli.server.requests() == ["POST /auth", "POST /screen/backtest"]
-    assert outcome.summary["counts"]["provider_requests"] == 1  # pyright: ignore[reportIndexIssue]
-    assert outcome.summary["counts"]["attempts"] == 1  # pyright: ignore[reportIndexIssue]
+    assert outcome.counts["provider_requests"] == 1
+    assert outcome.counts["attempts"] == 1
 
 
 def test_a_storage_failure_while_normalizing_leaves_the_saved_response(
@@ -147,7 +115,7 @@ def test_a_storage_failure_while_normalizing_leaves_the_saved_response(
     serve_success(cli.server)
     faults.fail_os("metrics.csv")
 
-    outcome = approved_run(cli, cli.tmp / "out", store_factory=faults)
+    outcome = cli.run_approved(FORMULA, cli.tmp / "out", "--json", store_factory=faults)
 
     assert outcome.exit_code == 4
     (attempt_dir,) = (cli.tmp / "out" / "cases").glob("*/attempts/*")
@@ -161,10 +129,10 @@ def test_a_response_that_fails_validation_is_saved_and_flagged(cli: Cli) -> None
     cli.server.reply("/auth", AUTHENTICATED)
     cli.server.reply("/screen/backtest", response("invalid-structure.json"))
 
-    outcome = approved_run(cli, cli.tmp / "out")
+    outcome = cli.run_approved(FORMULA, cli.tmp / "out", "--json")
 
     assert outcome.exit_code == 5
-    assert outcome.summary["error"]["code"] == "provider.response_invalid"  # pyright: ignore[reportIndexIssue]
+    assert outcome.error_code == "provider.response_invalid"
     (attempt_dir,) = (cli.tmp / "out" / "cases").glob("*/attempts/*")
     assert (attempt_dir / "response.json").exists()
     manifest = RunManifest.model_validate_json((cli.tmp / "out" / "manifest.json").read_bytes())
@@ -185,7 +153,7 @@ def test_sslkeylogfile_is_ignored_with_a_warning(cli: Cli, monkeypatch: pytest.M
 
     monkeypatch.setattr(cli.server, "_take", take)
 
-    outcome = approved_run(cli, cli.tmp / "out")
+    outcome = cli.run_approved(FORMULA, cli.tmp / "out", "--json")
 
     assert outcome.exit_code == 0
     assert "SSLKEYLOGFILE" in outcome.stderr

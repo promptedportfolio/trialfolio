@@ -1023,16 +1023,12 @@ def test_the_ranking_example_reads_as_documented() -> None:
     assert configuration.budget.provider_requests == 8
 
 
-def test_a_baseline_may_name_a_snapshot_instead(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_a_baseline_may_name_a_snapshot_instead(tmp_path: Path) -> None:
     """The example's second form: the snapshot's directory, and no `ranking_method`, which the
     snapshot records. Release 0.4.0's R04-T10 reads the snapshot, so the test takes one, over the
     fake server, beside the configuration, where R04-T05's test named a directory that didn't
     exist, which no reader read then."""
-    SnapshotBuilder(monkeypatch, tmp_path / "home").snapshot(
-        tmp_path / "ranking" / "value-momentum"
-    )
+    SnapshotBuilder(tmp_path / "home").snapshot(tmp_path / "ranking" / "value-momentum")
     content = ranking_line(
         "    definition: 'ranking/value-momentum.xml'\n    ranking_method: percentile_nas_negative",
         "    snapshot: 'ranking/value-momentum/'",

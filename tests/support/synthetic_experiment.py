@@ -40,17 +40,13 @@ stated reason, so the writer runs again only for one. The check of the reports,
 `tests/support/rewritten_fixtures.py`, writes each again too.
 """
 
-import contextlib
-import io
-import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Final
-from unittest import mock
 
 from tests.support.clock import FixedClock
 from trialfolio.configuration import (
@@ -285,49 +281,16 @@ def write_synthetic_ranking_review(out: Path, inputs: Path, run: Path) -> None:
     configuration; a copy of `run`, the synthetic run with a ranking definition, at
     `runs/synthetic`; and a synthetic run of `synthetic-heavy.yaml`, which this writes, at
     `runs/synthetic-heavy`. Each is written with a new `FixedClock`."""
+    from tests.support.environment import isolated, run_cli
+
     inputs.mkdir(parents=True, exist_ok=True)
     configuration = Path(shutil.copy(REVIEW_CONFIGURATION, inputs / REVIEW_CONFIGURATION.name))
     shutil.copytree(run, inputs / "runs" / "synthetic")
     write_synthetic_run(inputs / "runs" / "synthetic-heavy", HEAVY_CONFIGURATION)
-    with tempfile.TemporaryDirectory() as home, _environment(Path(home)):
-        _command("review", configuration, "--out", out)
-
-
-@contextlib.contextmanager
-def _environment(home: Path) -> Iterator[None]:
-    """The environment of the tests' CLI, with the license acknowledged, and `home` as `HOME`."""
-    from tests.support.environment import VARIABLES
-    from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
-
-    saved = dict(os.environ)
-    try:
-        for name in VARIABLES:
-            os.environ.pop(name, None)
-        os.environ["HOME"] = str(home)
-        os.environ[ACCEPT_VARIABLE] = ACCEPT_VALUE
-        yield
-    finally:
-        os.environ.clear()
-        os.environ.update(saved)
-
-
-def _command(*argv: str | Path) -> None:
-    """Runs `trialfolio` with `argv` and a new fixed clock, and raises `AssertionError`, with what
-    it wrote, unless it succeeds."""
-    from trialfolio.cli import main
-
-    out, err = io.StringIO(), io.StringIO()
-    with (
-        mock.patch.object(sys, "stdin", io.StringIO()),
-        contextlib.redirect_stdout(out),
-        contextlib.redirect_stderr(err),
-    ):
-        code = main([str(arg) for arg in argv], clock=FixedClock())
-    if code != 0:
-        raise AssertionError(
-            f"trialfolio {' '.join(map(str, argv))} exited with {code}:\n"
-            f"{out.getvalue()}{err.getvalue()}"
-        )
+    # The tests' CLI's environment and runner, with the license acknowledged, and a new fixed
+    # clock.
+    with tempfile.TemporaryDirectory() as home, isolated(Path(home), licensed=True):
+        run_cli("review", configuration, "--out", out, check=True)
 
 
 _USAGE: Final = (

@@ -25,15 +25,13 @@ from typing import Any
 
 import pytest
 
-from tests.support.clock import FixedClock
-from tests.support.environment import VARIABLES
+from tests.support.environment import isolated, run_cli
 from tests.support.synthetic_experiment import (
     write_synthetic_experiment,
     write_synthetic_ranking_experiment,
     write_synthetic_run,
     write_synthetic_snapshot,
 )
-from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
 from trialfolio.cli import main as trialfolio
 from trialfolio.contracts.schema_files import SCHEMA_FILES
 from trialfolio.errors import EXIT_CODES
@@ -841,22 +839,14 @@ UNSCHEMED = {
 }
 
 
-def _cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *argv: str | Path) -> None:
+def _cli(tmp_path: Path, *argv: str | Path) -> None:
     """Runs `trialfolio` in the test process, offline, acknowledged for this command only, with
-    its configuration and log directories in the test's own folder."""
-    with monkeypatch.context() as patch:
-        patch.setenv("HOME", str(tmp_path / "home"))
-        for name in VARIABLES:
-            patch.delenv(name, raising=False)
-        patch.setenv(ACCEPT_VARIABLE, ACCEPT_VALUE)
+    its configuration and log directories in the test's own folder, and fails unless it
+    succeeds."""
+    with isolated(tmp_path / "home", licensed=True) as patch:
         patch.setenv("TRIALFOLIO_CONFIG_DIR", str(tmp_path / "config"))
         patch.setenv("TRIALFOLIO_LOG_DIR", str(tmp_path / "logs"))
-        patch.setattr(sys, "stdin", io.StringIO())
-        patch.setattr(sys, "stdout", io.StringIO())
-        stderr = io.StringIO()
-        patch.setattr(sys, "stderr", stderr)
-        code = trialfolio([str(arg) for arg in argv], clock=FixedClock())
-    assert code == 0, stderr.getvalue()
+        run_cli(*argv, check=True)
 
 
 def _section_regions() -> dict[str, str]:
@@ -898,13 +888,11 @@ def _schema_versions(out: Path, files: Mapping[str, str]) -> dict[str, tuple[str
     return found
 
 
-def test_each_file_the_commands_write_is_at_its_pages_schema_version(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_each_file_the_commands_write_is_at_its_pages_schema_version(tmp_path: Path) -> None:
     # The demo writes a screen run; the core writes the synthetic experiment, as no command does;
     # and a review compares two demo runs. None sends anything.
-    _cli(monkeypatch, tmp_path, "demo", "--out", tmp_path / "demo")
-    _cli(monkeypatch, tmp_path, "demo", "--out", tmp_path / "demo-again")
+    _cli(tmp_path, "demo", "--out", tmp_path / "demo")
+    _cli(tmp_path, "demo", "--out", tmp_path / "demo-again")
     write_synthetic_experiment(tmp_path / "experiment")
     configuration = tmp_path / "review.yaml"
     configuration.write_text(
@@ -912,7 +900,7 @@ def test_each_file_the_commands_write_is_at_its_pages_schema_version(
         "results:\n  - label: demo\n    run: demo\n  - label: demo-again\n    run: demo-again\n",
         encoding="utf-8",
     )
-    _cli(monkeypatch, tmp_path, "review", configuration, "--out", tmp_path / "review")
+    _cli(tmp_path, "review", configuration, "--out", tmp_path / "review")
 
     run = _schema_versions(tmp_path / "demo", RUN_FILES)
     experiment = _schema_versions(tmp_path / "experiment", EXPERIMENT_FILES)

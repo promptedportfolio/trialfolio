@@ -15,12 +15,13 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, FaultyStores, snapshot
+from tests.support.cli import Cli
+from tests.support.directories import snapshot
 from tests.support.git import outside_any_repository
+from tests.support.storage_faults import FaultyStores
 from trialfolio.configuration import read_screen_configuration
 from trialfolio.planning import VERIFIED_VERSIONS, Versions, build_plan
 from trialfolio.starter import starter_files
@@ -29,11 +30,6 @@ from trialfolio.userdirs import config_directory, log_directory
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERSION = importlib.metadata.version("trialfolio")
 STARTER = dict(starter_files(VERSION))
-
-
-def error_of(outcome_stdout: str) -> dict[str, str]:
-    summary = json.loads(outcome_stdout)
-    return cast("dict[str, str]", summary["error"])
 
 
 def test_init_writes_the_starter_files_and_nothing_else(cli: Cli) -> None:
@@ -111,7 +107,7 @@ def test_a_log_directory_in_a_workspace_that_isnt_empty_leaves_it_unchanged(
     outcome = cli("init", workspace, "--json")
 
     assert outcome.exit_code == 4
-    assert error_of(outcome.stdout)["code"] == "output.not_empty"
+    assert outcome.error["code"] == "output.not_empty"
     assert snapshot(workspace) == before
 
 
@@ -149,7 +145,7 @@ def test_a_log_directory_in_another_spelling_of_an_occupied_workspace_leaves_it_
     outcome = cli("init", workspace, "--json")
 
     assert outcome.exit_code == 4
-    assert error_of(outcome.stdout)["code"] == "output.not_empty"
+    assert outcome.error["code"] == "output.not_empty"
     assert snapshot(workspace) == before
 
 
@@ -255,7 +251,7 @@ def test_from_the_workspace_run_shows_the_starter_plan_and_sends_nothing(
     outcome = cli("run", "screen.yaml", "--out", "runs/first/", "--json")
 
     assert outcome.exit_code == 2
-    assert error_of(outcome.stdout)["code"] == "plan.approval_required"
+    assert outcome.error["code"] == "plan.approval_required"
     assert not (workspace / "runs").exists()
     assert cli.server.requests() == []
 
@@ -304,7 +300,7 @@ def test_a_directory_that_isnt_empty_is_left_as_it_is(cli: Cli, contents: dict[s
     outcome = cli("init", workspace, "--json")
 
     assert outcome.exit_code == 4
-    assert error_of(outcome.stdout)["code"] == "output.not_empty"
+    assert outcome.error["code"] == "output.not_empty"
     assert outcome.summary["output_dir"] is None
     assert snapshot(workspace) == before
 
@@ -326,7 +322,7 @@ def test_a_failed_write_says_nothing_was_sent_and_what_is_left(
     outcome = cli("init", workspace, "--json", store_factory=faults)
 
     assert outcome.exit_code == 4
-    error = error_of(outcome.stdout)
+    error = outcome.error
     assert error["code"] == "storage.write_failed"
     assert error["message"].endswith(
         f" Nothing was sent. {workspace} holds some of the starter files: remove them, then run"
@@ -345,7 +341,7 @@ def test_an_interrupt_after_the_claim_says_nothing_was_sent_and_what_is_left(
     outcome = cli("init", workspace, "--json", store_factory=faults)
 
     assert outcome.exit_code == 130
-    error = error_of(outcome.stdout)
+    error = outcome.error
     assert error["code"] == "command.interrupted"
     assert error["message"].startswith("Trial Folio was interrupted. Nothing was sent.")
     assert "holds some of the starter files" in error["message"]

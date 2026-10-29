@@ -24,7 +24,8 @@ from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     REFUSED,
     UNAVAILABLE,
@@ -34,6 +35,7 @@ from tests.support.experiment_builder import (
     returns,
 )
 from tests.support.fake_portfolio123 import Reply
+from tests.support.saved_records import attempt_records, session_manifest
 from trialfolio.contracts.attempt import AttemptRecordV1_1, StartRecordV1_1
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
 
@@ -58,33 +60,8 @@ def revision(name: str) -> Path:
     return experiment_config(f"revisions/{name}")
 
 
-def cases_of(outcome: Outcome) -> dict[str, dict[str, object]]:
-    """The summary's cases, by key."""
-    cases = cast("list[dict[str, object]]", outcome.summary["cases"])
-    return {cast("str", case["case_key"]): case for case in cases}
-
-
-def error_of(outcome: Outcome) -> dict[str, str]:
-    return cast("dict[str, str]", outcome.summary["error"])
-
-
 def case_id(outcome: Outcome, key: str) -> str:
-    return cast("str", cases_of(outcome)[key]["case_id"])
-
-
-def attempts_of(out: Path, case: str) -> list[AttemptRecordV1_1]:
-    """The case's attempt records, by session and then sequence."""
-    records = [
-        AttemptRecordV1_1.model_validate_json(path.read_bytes())
-        for path in (out / "cases" / case / "attempts").glob("*/attempt.json")
-    ]
-    return sorted(records, key=lambda record: (record.session, record.sequence))
-
-
-def manifest(out: Path, session: int) -> ExperimentManifest:
-    return ExperimentManifest.model_validate_json(
-        (out / f"sessions/{session}/manifest.json").read_bytes()
-    )
+    return cast("str", outcome.cases_by_key[key]["case_id"])
 
 
 def sends(cli: Cli) -> int:
@@ -95,7 +72,7 @@ def sends(cli: Cli) -> int:
 def assert_within_budget(cli: Cli, out: Path, session: int) -> None:
     """The server received at most the budget's provider requests, and the session's manifest
     counts at most that many."""
-    counts = manifest(out, session).counts
+    counts = session_manifest(out, session, ExperimentManifest).counts
     assert sends(cli) <= counts.budget.provider_requests
     assert counts.provider_requests <= counts.budget.provider_requests
 
@@ -109,9 +86,9 @@ def test_a_repeat_the_spent_budget_cant_cover_waits_for_a_revision_that_raises_i
     first = experiments.run(DEFAULT_ONLY, out, sends=[UNAVAILABLE, returns()])
     assert first.exit_code == 6, first.stderr
     assert cli.server.requests() == [AUTH, SEND, SEND]
-    assert [case["outcome"] for case in cases_of(first).values()] == ["unknown", "succeeded"]
+    assert [case["outcome"] for case in first.cases_by_key.values()] == ["unknown", "succeeded"]
     baseline = case_id(first, "baseline")
-    (unknown,) = attempts_of(out, baseline)
+    (unknown,) = attempt_records(out, baseline, AttemptRecordV1_1)
     option = f"baseline:{unknown.attempt_id}"
     assert_within_budget(cli, out, 1)
 
@@ -120,14 +97,14 @@ def test_a_repeat_the_spent_budget_cant_cover_waits_for_a_revision_that_raises_i
 
     assert spent.exit_code == 6, spent.stderr
     assert len(cli.server.received) == 3
-    error = error_of(spent)
+    error = spent.error
     assert error["code"] == "execution.partial"
     assert BUDGET_SPENT in error["message"]
     # Its confirmation stays unused: the case still awaits a repeat of the same attempt.
     assert "isn't repeated" not in spent.stderr
-    assert attempts_of(out, baseline) == [unknown]
-    assert cases_of(spent)["baseline"]["repeat_attempt_id"] == str(unknown.attempt_id)
-    counts = manifest(out, 2).counts
+    assert attempt_records(out, baseline, AttemptRecordV1_1) == [unknown]
+    assert spent.cases_by_key["baseline"]["repeat_attempt_id"] == str(unknown.attempt_id)
+    counts = session_manifest(out, 2, ExperimentManifest).counts
     assert (counts.provider_requests, counts.budget.provider_requests) == (2, 2)
     assert counts.attempts.repeats == 0
     assert_within_budget(cli, out, 2)
@@ -145,9 +122,9 @@ def test_a_repeat_the_spent_budget_cant_cover_waits_for_a_revision_that_raises_i
 
     assert raised.exit_code == 0, raised.stderr
     assert cli.server.requests()[3:] == [AUTH, SEND]
-    repeat = attempts_of(out, baseline)[-1]
+    repeat = attempt_records(out, baseline, AttemptRecordV1_1)[-1]
     assert (repeat.outcome, repeat.repeat_of) == ("succeeded", unknown.attempt_id)
-    counts = manifest(out, 3).counts
+    counts = session_manifest(out, 3, ExperimentManifest).counts
     assert (counts.provider_requests, counts.budget.provider_requests) == (3, 3)
     assert counts.attempts.repeats == 1
     assert_within_budget(cli, out, 3)
@@ -162,15 +139,15 @@ def test_a_due_case_the_spent_budget_cant_cover_needs_no_credentials(
     first = experiments.run(DEFAULT_ONLY, out, sends=[QUOTA])
     assert first.exit_code == 6, first.stderr
     baseline, other = case_id(first, "baseline"), case_id(first, "rebalance-weeks-1")
-    (failed,) = attempts_of(out, baseline)
+    (failed,) = attempt_records(out, baseline, AttemptRecordV1_1)
     # The baseline's repeat takes the budget's second and last request, so the due case isn't
     # started.
     repeated = experiments.run(
         DEFAULT_ONLY, out, "--repeat", f"baseline:{failed.attempt_id}", sends=[returns()]
     )
     assert repeated.exit_code == 6, repeated.stderr
-    assert BUDGET_SPENT in error_of(repeated)["message"]
-    assert cases_of(repeated)["rebalance-weeks-1"]["outcome"] == "not_yet_run"
+    assert BUDGET_SPENT in repeated.error["message"]
+    assert repeated.cases_by_key["rebalance-weeks-1"]["outcome"] == "not_yet_run"
     monkeypatch.delenv("TRIALFOLIO_P123_API_ID")
     monkeypatch.delenv("TRIALFOLIO_P123_API_KEY")
     received = len(cli.server.received)
@@ -181,11 +158,11 @@ def test_a_due_case_the_spent_budget_cant_cover_needs_no_credentials(
     # it, so the run starts nothing, and needs no credentials (D-38).
     assert outcome.exit_code == 6, outcome.stderr
     assert len(cli.server.received) == received
-    error = error_of(outcome)
+    error = outcome.error
     assert error["code"] == "execution.partial"
     assert BUDGET_SPENT in error["message"]
-    assert attempts_of(out, other) == []
-    assert manifest(out, 3).outcome == "partial"
+    assert attempt_records(out, other, AttemptRecordV1_1) == []
+    assert session_manifest(out, 3, ExperimentManifest).outcome == "partial"
     assert_within_budget(cli, out, 3)
 
 
@@ -200,7 +177,7 @@ def test_once_the_authentication_calls_are_spent_no_case_starts(
         assert ran.exit_code == 6, ran.stderr
         assert_within_budget(cli, out, session)
     assert cli.server.requests() == [AUTH, AUTH]
-    counts = manifest(out, 2).counts
+    counts = session_manifest(out, 2, ExperimentManifest).counts
     assert (counts.authentication_calls, counts.provider_requests) == (2, 0)
     attempts = sorted((out / "cases").glob("*/attempts/*"))
     assert len(attempts) == 2
@@ -211,11 +188,11 @@ def test_once_the_authentication_calls_are_spent_no_case_starts(
     # No authentication call, and no case started.
     assert len(cli.server.received) == 2
     assert sorted((out / "cases").glob("*/attempts/*")) == attempts
-    counts = manifest(out, 3).counts
+    counts = session_manifest(out, 3, ExperimentManifest).counts
     assert (counts.authentication_calls, counts.provider_requests) == (2, 0)
     assert (counts.cases.failed, counts.cases.not_yet_run) == (1, 1)
     assert_within_budget(cli, out, 3)
-    error = error_of(third)
+    error = third.error
     assert error["code"] == "execution.partial"
     # The message says that the budget's authentication calls are spent, though 2 of its
     # provider requests remain.
@@ -247,20 +224,20 @@ def test_a_running_attempt_counts_as_one_request(cli: Cli, experiments: Builder)
     ) in resumed.stderr
     assert resumed.exit_code == 6, resumed.stderr
     assert cli.server.requests()[received:] == [AUTH, SEND]
-    cases = cases_of(resumed)
+    cases = resumed.cases_by_key
     assert (cases["baseline"]["outcome"], cases["rebalance-weeks-1"]["outcome"]) == (
         "succeeded",
         "not_yet_run",
     )
-    assert BUDGET_SPENT in error_of(resumed)["message"]
-    first, repeat = attempts_of(out, start.case_id)
+    assert BUDGET_SPENT in resumed.error["message"]
+    first, repeat = attempt_records(out, start.case_id, AttemptRecordV1_1)
     assert (first.attempt_id, first.outcome, first.possibly_charged) == (
         start.attempt_id,
         "unknown",
         True,
     )
     assert repeat.repeat_of == start.attempt_id
-    counts = manifest(out, 2).counts
+    counts = session_manifest(out, 2, ExperimentManifest).counts
     assert (counts.provider_requests, counts.budget.provider_requests) == (2, 2)
     assert_within_budget(cli, out, 2)
 
@@ -277,14 +254,14 @@ def test_a_revision_may_lower_the_budget_below_whats_counted_and_then_sends_noth
     )
     assert first.exit_code == 6, first.stderr
     holdings = case_id(first, "holdings-50")
-    (unknown,) = attempts_of(out, holdings)
+    (unknown,) = attempt_records(out, holdings, AttemptRecordV1_1)
     repeated = experiments.run(
         EXAMPLE, out, "--repeat", f"holdings-50:{unknown.attempt_id}", sends=[UNAVAILABLE]
     )
     assert repeated.exit_code == 6, repeated.stderr
-    repeat = attempts_of(out, holdings)[-1]
+    repeat = attempt_records(out, holdings, AttemptRecordV1_1)[-1]
     assert (repeat.outcome, repeat.repeat_of) == ("unknown", unknown.attempt_id)
-    assert manifest(out, 2).counts.provider_requests == 6
+    assert session_manifest(out, 2, ExperimentManifest).counts.provider_requests == 6
     received = len(cli.server.received)
 
     # The revision lowers the budget to 5, with the confirmation of another repeat too.
@@ -299,10 +276,10 @@ def test_a_revision_may_lower_the_budget_below_whats_counted_and_then_sends_noth
 
     assert lowered.exit_code == 6, lowered.stderr
     assert len(cli.server.received) == received
-    assert BUDGET_SPENT in error_of(lowered)["message"]
+    assert BUDGET_SPENT in lowered.error["message"]
     assert (out / "plans/2/experiment.json").is_file()
-    assert attempts_of(out, holdings)[-1] == repeat
-    session = manifest(out, 3)
+    assert attempt_records(out, holdings, AttemptRecordV1_1)[-1] == repeat
+    session = session_manifest(out, 3, ExperimentManifest)
     assert session.plan == 2
     counts = session.counts
     assert (counts.provider_requests, counts.budget.provider_requests) == (6, 5)

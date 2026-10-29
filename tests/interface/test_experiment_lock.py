@@ -16,7 +16,6 @@ which holds the claim that took the lock at its authentication call until the ot
 ended. Each test runs over the fake server.
 """
 
-import json
 import os
 import signal
 import subprocess
@@ -24,12 +23,12 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, Outcome
 from tests.support import canaries, launcher, terminal
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     REFUSED,
@@ -99,7 +98,7 @@ def test_a_run_while_a_resume_waits_at_its_prompt_is_locked_out_until_the_resume
 
     assert killed == -signal.SIGKILL
     assert locked.exit_code == 4
-    error = cast("dict[str, str]", locked.summary["error"])
+    error = locked.error
     assert error["code"] == "experiment.locked"
     assert "Nothing was sent, and nothing was written." in error["message"]
     # It wrote nothing, so it gives no output directory, and read nothing, so no counts.
@@ -123,14 +122,14 @@ def test_a_run_while_a_resume_waits_at_its_prompt_is_locked_out_until_the_resume
     assert (resumed_manifest.session, resumed_manifest.outcome) == (2, "completed")
 
 
-def claim_at_once(out: Path, cwd: Path) -> tuple[list[tuple[int, str, str]], list[str]]:
+def claim_at_once(out: Path, cwd: Path) -> tuple[list[Outcome], list[str]]:
     """Runs two new experiments of `example.yaml` into `out`, approved, in two processes started
-    at once under the test launcher, over a new fake server, and gives each one's exit code,
-    stdout, and stderr, and the requests the server received. The server holds each
-    authentication call's reply until one of the processes has ended, so the process that claimed
-    the directory holds the lock until the other has tried to claim it, however late that one
-    starts. It has replies for both, so that two claims that both succeeded could each complete,
-    once `RACE_SECONDS` have passed."""
+    at once under the test launcher, over a new fake server, and gives each one's outcome, and
+    the requests the server received. The server holds each authentication call's reply until
+    one of the processes has ended, so the process that claimed the directory holds the lock
+    until the other has tried to claim it, however late that one starts. It has replies for both,
+    so that two claims that both succeeded could each complete, once `RACE_SECONDS` have
+    passed."""
     release = threading.Event()
     authenticated = Reply(200, canaries.TOKEN.encode(), release=release)
     server = FakePortfolio123()
@@ -155,10 +154,10 @@ def claim_at_once(out: Path, cwd: Path) -> tuple[list[tuple[int, str, str]], lis
         while all(p.poll() is None for p in processes) and time.monotonic() < deadline:
             time.sleep(0.01)
         release.set()
-        ended: list[tuple[int, str, str]] = []
+        ended: list[Outcome] = []
         for process in processes:
             stdout, stderr = process.communicate(timeout=120)
-            ended.append((process.returncode, stdout, stderr))
+            ended.append(Outcome(process.returncode, stdout, stderr))
         return ended, server.requests()
     finally:
         server.close()
@@ -174,13 +173,12 @@ def test_two_new_experiments_claiming_one_directory_at_once_give_at_most_one_suc
 
         ended, requests = claim_at_once(out, cli.tmp)
 
-        succeeded = [code for code, _, _ in ended].count(0)
+        succeeded = [outcome.exit_code for outcome in ended].count(0)
         assert succeeded <= 1, ended
-        for code, stdout, stderr in ended:
-            if code != 0:
-                assert code == 4, stderr
-                summary = json.loads(stdout)
-                assert summary["error"]["code"] in ("output.not_empty", "experiment.locked")
+        for outcome in ended:
+            if outcome.exit_code != 0:
+                assert outcome.exit_code == 4, outcome.stderr
+                assert outcome.error_code in ("output.not_empty", "experiment.locked")
         if succeeded:
             successes += 1
             # The other left its files alone: they pass a resume's records check, the lock file

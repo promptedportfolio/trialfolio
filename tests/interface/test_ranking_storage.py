@@ -39,20 +39,13 @@ directory.
 
 import json
 from pathlib import Path
-from typing import Final, cast
+from typing import Final
 
 import pytest
 
-from tests.interface.conftest import (
-    AUTHENTICATED,
-    Cli,
-    FaultyStores,
-    Outcome,
-    config,
-    plan_hash_for,
-    response,
-    snapshot,
-)
+from tests.support.cli import Cli, plan_hash_for
+from tests.support.directories import snapshot
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     RANK_UPDATED,
     ExperimentBuilder,
@@ -60,6 +53,8 @@ from tests.support.experiment_builder import (
     plan_hash,
     returns_each,
 )
+from tests.support.fake_portfolio123 import AUTHENTICATED, response
+from tests.support.paths import screen_config
 from tests.support.snapshot_builder import (
     SNAPSHOT_CONFIGS,
     SnapshotBuilder,
@@ -67,13 +62,14 @@ from tests.support.snapshot_builder import (
     rank_get,
     snapshot_plan_hash,
 )
+from tests.support.storage_faults import FaultyStores
 from trialfolio.configuration import read_experiment_configuration_v1_1
 from trialfolio.contracts.attempt import AttemptRecordV1_2, AttemptRecordV1_3
 from trialfolio.planning import build_experiment_plan_v1_1, installed_versions
 
 type Builder = ExperimentBuilder[Outcome]
 
-DEFINITION = config("definition.yaml")
+DEFINITION = screen_config("definition.yaml")
 EXAMPLE = experiment_config("ranking-example.yaml")
 SNAPSHOT = SNAPSHOT_CONFIGS / "example.yaml"
 
@@ -111,10 +107,10 @@ def failed(outcome: Outcome, kind: str) -> str:
         ("storage.write_failed", 4) if kind == "storage" else ("command.interrupted", 130)
     )
     assert outcome.exit_code == exit_code, outcome.stderr
-    error = cast("dict[str, str]", outcome.summary["error"])
+    error = outcome.error
     assert error["code"] == code
     assert f"Error ({code}): {error['message']}" in outcome.stderr
-    assert "manifest" not in cast("dict[str, str]", outcome.summary["outputs"])
+    assert "manifest" not in outcome.outputs
     return error["message"]
 
 
@@ -139,17 +135,17 @@ def refused_again(cli: Cli, argv: list[str | Path], out: Path) -> str:
     again = cli(*argv)
 
     assert again.exit_code == 4, again.stderr
-    error = cast("dict[str, str]", again.summary["error"])
+    error = again.error
     assert error["code"] == "output.not_empty"
     assert len(cli.server.received) == received
     assert snapshot(out) == before
     return error["message"]
 
 
-def snapshot_named(cli: Cli, monkeypatch: pytest.MonkeyPatch, configuration: Path) -> Path:
+def snapshot_named(cli: Cli, configuration: Path) -> Path:
     """A copy of `configuration`, a screen's or an experiment's ranked by a definition, beside a
     snapshot the snapshot builder takes, with `ranking.snapshot` naming it."""
-    builder = SnapshotBuilder(monkeypatch, cli.tmp / "snapshot-home")
+    builder = SnapshotBuilder(cli.tmp / "snapshot-home")
     taken = builder.snapshot(cli.tmp / "configs" / "ranking" / "snapshot")
     return naming(configuration, taken, cli.tmp / "configs")
 
@@ -230,9 +226,9 @@ def test_a_fault_at_a_screen_runs_rank_update_response_sends_no_backtest(
 @pytest.mark.parametrize("kind", FAULTS)
 @pytest.mark.parametrize("name", ["definition.xml", "snapshot.json"])
 def test_a_fault_at_a_runs_copy_of_a_snapshot_sends_nothing_and_leaves_no_manifest(
-    cli: Cli, faults: FaultyStores, monkeypatch: pytest.MonkeyPatch, name: str, kind: str
+    cli: Cli, faults: FaultyStores, name: str, kind: str
 ) -> None:
-    named = snapshot_named(cli, monkeypatch, DEFINITION)
+    named = snapshot_named(cli, DEFINITION)
     arm(faults, kind, f"/{name}")
 
     argv, outcome = run_screen(cli, named, faults)
@@ -328,7 +324,7 @@ def test_a_fault_at_an_experiment_attempts_file_leaves_no_manifest_and_the_comma
     )
 
     assert again.exit_code == exit_code, again.stderr
-    assert cast("dict[str, int]", again.summary["ids"])["session"] == 2
+    assert again.ids["session"] == 2
     assert (out / "sessions/2/manifest.json").is_file()
     assert sent(cli, received) == resumed
     # No record was replaced: each file the stopped run left is as it was, and the resume wrote
@@ -361,7 +357,7 @@ def test_a_fault_at_an_experiments_rank_update_response_leaves_its_case_awaiting
     assert (record.outcome, record.possibly_charged) == ("failed", True)
     assert record.ranking_update is not None and record.ranking_update.response is None
     assert [(e.request, e.status) for e in record.exchanges] == [(AUTH, 200), (RANK, 200)]
-    cases = cast("list[dict[str, str | None]]", stopped.summary["cases"])
+    cases = stopped.cases
     assert (cases[0]["case_id"], cases[0]["outcome"]) == (baseline, "failed")
     assert cases[0]["repeat_attempt_id"] == attempt.name
     received = len(cli.server.received)
@@ -382,14 +378,11 @@ def test_a_fault_at_a_new_experiments_plan_files_sends_nothing_and_it_cant_be_re
     cli: Cli,
     experiments: Builder,
     faults: FaultyStores,
-    monkeypatch: pytest.MonkeyPatch,
     name: str,
     kind: str,
 ) -> None:
     # A plan's definition.xml comes before its experiment.json, so the first plan isn't recorded.
-    configuration = (
-        EXAMPLE if name == "definition.xml" else snapshot_named(cli, monkeypatch, EXAMPLE)
-    )
+    configuration = EXAMPLE if name == "definition.xml" else snapshot_named(cli, EXAMPLE)
     cli.ready()
     out = cli.tmp / "experiment"
     approve = ("--approve", plan_hash(configuration, out))
@@ -513,7 +506,7 @@ BOTH_SUCCEEDED: Final = (
 
 UNRECORDED_ATTEMPTS: Final = {
     "screen run": (
-        config("formula.yaml"),
+        screen_config("formula.yaml"),
         [AUTH, BACKTEST],
         "The screen backtest request succeeded, and its response was saved.",
         RUN_INCOMPLETE,

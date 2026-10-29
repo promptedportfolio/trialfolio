@@ -15,11 +15,13 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, config, plan_hash_for, serve_success
+from tests.support.cli import Cli, plan_hash_for
+from tests.support.environment import Outcome
+from tests.support.fake_portfolio123 import serve_success
+from tests.support.paths import screen_config
 
 
 def shown_hash(cli: Cli, path: Path, out: Path) -> str:
@@ -33,17 +35,18 @@ def shown_hash(cli: Cli, path: Path, out: Path) -> str:
         cwd=cli.tmp,
         env=dict(os.environ),
     )
-    assert result.returncode == 2, result.stderr
-    summary = cast("dict[str, object]", json.loads(result.stdout))
-    error = cast("dict[str, str]", summary["error"])
-    assert error["code"] == "plan.approval_required"
+    outcome = Outcome.of(result)
+    assert outcome.exit_code == 2, outcome.stderr
+    assert outcome.error_code == "plan.approval_required"
     assert not out.exists()
-    return cast("dict[str, str]", summary["ids"])["plan_hash"]
+    plan_hash = outcome.ids["plan_hash"]
+    assert isinstance(plan_hash, str)
+    return plan_hash
 
 
 def changed(cli: Cli, old: str, new: str) -> Path:
     """`formula.yaml` with `old` replaced by `new`."""
-    text = config("formula.yaml").read_text(encoding="utf-8")
+    text = screen_config("formula.yaml").read_text(encoding="utf-8")
     assert old in text
     path = cli.tmp / f"changed-{len(list(cli.tmp.glob('changed-*')))}.yaml"
     path.write_text(text.replace(old, new), encoding="utf-8")
@@ -54,15 +57,18 @@ def test_the_same_settings_give_the_same_hash_in_separate_processes(cli: Cli) ->
     cli.accept_license()
 
     hashes = {
-        name: shown_hash(cli, config(name), cli.tmp / f"out-{index}" / "nested")
+        name: shown_hash(cli, screen_config(name), cli.tmp / f"out-{index}" / "nested")
         for index, name in enumerate(
             ["formula.yaml", "written-differently.yaml", "vendor-factset.yaml"]
         )
     }
 
     assert len(set(hashes.values())) == 1
-    assert hashes["formula.yaml"] == plan_hash_for(config("formula.yaml"))
-    assert shown_hash(cli, config("formula.yaml"), cli.tmp / "elsewhere") == hashes["formula.yaml"]
+    assert hashes["formula.yaml"] == plan_hash_for(screen_config("formula.yaml"))
+    assert (
+        shown_hash(cli, screen_config("formula.yaml"), cli.tmp / "elsewhere")
+        == hashes["formula.yaml"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -86,7 +92,7 @@ def test_changing_a_setting_the_title_or_the_purpose_changes_the_hash(
 ) -> None:
     cli.accept_license()
 
-    original = shown_hash(cli, config("formula.yaml"), cli.tmp / "out-original")
+    original = shown_hash(cli, screen_config("formula.yaml"), cli.tmp / "out-original")
     other = shown_hash(cli, changed(cli, old, new), cli.tmp / "out-changed")
 
     assert other != original
@@ -107,9 +113,9 @@ def test_the_request_sends_slippage_with_the_text_params_hold(
     cli.ready()
     serve_success(cli.server)
     out = cli.tmp / "out"
-    path = config(name)
+    path = screen_config(name)
 
-    outcome = cli("run", path, "--out", out, "--approve", plan_hash_for(path), "--json")
+    outcome = cli.run_approved(path, out, "--json")
 
     assert outcome.exit_code == 0, outcome.stderr
     body = cli.server.received[-1].body.decode("utf-8")

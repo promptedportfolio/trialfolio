@@ -20,11 +20,11 @@ plan gives it.
 import functools
 import json
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from tests.interface.conftest import Cli, FaultyStores, Outcome
+from tests.support.cli import Cli
+from tests.support.environment import Outcome
 from tests.support.experiment_builder import (
     AUTHENTICATED,
     REFUSED,
@@ -35,7 +35,9 @@ from tests.support.experiment_builder import (
     returns,
 )
 from tests.support.fake_portfolio123 import Reply
+from tests.support.saved_records import attempt_directories, session_manifest
 from tests.support.socket_faults import SocketFaults
+from tests.support.storage_faults import FaultyStores
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1, StartRecordV1_1
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
@@ -80,30 +82,15 @@ def sent(cli: Cli, since: int = 0) -> list[str]:
     ]
 
 
-def cases_of(outcome: Outcome) -> dict[str, dict[str, object]]:
-    """The summary's cases, by key."""
-    cases = cast("list[dict[str, object]]", outcome.summary["cases"])
-    return {cast("str", case["case_key"]): case for case in cases}
-
-
-def error_of(outcome: Outcome) -> dict[str, str]:
-    return cast("dict[str, str]", outcome.summary["error"])
-
-
-def attempt_directories(out: Path, place: int) -> list[Path]:
-    return sorted((out / "cases" / plan().cases[place].case_id / "attempts").iterdir())
+def attempts_at(out: Path, place: int) -> list[Path]:
+    """The attempts' directories of the case at `place` in the plan."""
+    return attempt_directories(out, plan().cases[place].case_id)
 
 
 def only_record(out: Path, place: int) -> AttemptRecordV1_1:
     """The attempt record of the case at `place`, which has one attempt."""
-    (directory,) = attempt_directories(out, place)
+    (directory,) = attempts_at(out, place)
     return AttemptRecordV1_1.model_validate_json((directory / "attempt.json").read_bytes())
-
-
-def manifest(out: Path, session: int) -> ExperimentManifest:
-    return ExperimentManifest.model_validate_json(
-        (out / f"sessions/{session}/manifest.json").read_bytes()
-    )
 
 
 # A failed case is recorded, and the later cases still run
@@ -136,11 +123,11 @@ def test_a_failed_case_is_recorded_the_later_cases_still_run_and_the_command_exi
         "succeeded",
         "succeeded",
     ]
-    error = error_of(ran)
+    error = ran.error
     assert error["code"] == "execution.partial"
     assert f"`holdings-50`, {outcome} ({code})" in error["message"]
     assert f"--repeat holdings-50:{record.attempt_id}" in error["message"]
-    session = manifest(out, 1)
+    session = session_manifest(out, 1, ExperimentManifest)
     assert session.outcome == "partial"
     assert session.error is not None and session.error.code == "execution.partial"
 
@@ -165,13 +152,13 @@ def test_after_a_403_the_next_case_authenticates_again_and_its_request_is_sent(
     # The 403 dropped the token, so the next case's attempt authenticates before its send.
     assert cli.server.requests() == [AUTH, SEND, SEND, AUTH, SEND, SEND, SEND]
     assert sent(cli) == KEYS
-    (directory,) = attempt_directories(out, HOLDINGS)
+    (directory,) = attempts_at(out, HOLDINGS)
     assert (directory / "authenticating.json").is_file()
     start = StartRecordV1_1.model_validate_json((directory / "started.json").read_bytes())
     assert start.authenticated_by == start.attempt_id
     assert [(e.request, e.status) for e in start.exchanges] == [(AUTH, 200)]
     assert only_record(out, HOLDINGS).outcome == "succeeded"
-    assert manifest(out, 1).counts.authentication_calls == 2
+    assert session_manifest(out, 1, ExperimentManifest).counts.authentication_calls == 2
 
 
 # What a failed case shows: its ending, Portfolio123's message, and what to do (D-38)
@@ -225,7 +212,7 @@ def test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_r
         "Portfolio123 rejected a setting of `holdings-50`: a repeat sends the same request"
         " again, so change the setting instead, and revise the plan with --revision-reason."
     )
-    message = error_of(ran)["message"]
+    message = ran.error["message"]
     assert f'Portfolio123\'s message for `holdings-50`: "{text}".' in message
     assert (rejected in message) is revise
     assert message.endswith(
@@ -244,7 +231,7 @@ def test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_r
     resumed = experiments.run(EXAMPLE, out)
 
     assert resumed.exit_code == 6, resumed.stderr
-    message = error_of(resumed)["message"]
+    message = resumed.error["message"]
     assert f'Portfolio123\'s message for `holdings-50`: "{text}".' in message
     assert (rejected in message) is revise
     assert message.endswith(
@@ -339,7 +326,7 @@ def test_a_recorded_internal_error_shows_its_ending_and_the_session_goes_on(
     # The session goes on: each later case is sent, with the session's token.
     assert cli.server.requests() == [AUTH, *[SEND] * 4]
     assert sent(cli) == KEYS[1:]
-    error = error_of(ran)
+    error = ran.error
     assert error["code"] == "execution.partial"
     assert "`baseline`, failed (internal.unexpected)" in error["message"]
 
@@ -400,13 +387,13 @@ def test_after_a_failure_every_later_case_would_get_no_later_case_starts(
     # The server receives nothing more, and no later case has an attempt.
     assert cli.server.requests() == requests
     later = KEYS[stopped_at + 1 :]
-    cases = cases_of(ran)
+    cases = ran.cases_by_key
     assert [cases[key]["outcome"] for key in later] == ["not_yet_run"] * len(later)
     assert all(
         not (out / "cases" / case.case_id).exists() for case in plan().cases[stopped_at + 1 :]
     )
-    assert manifest(out, 1).counts.cases.not_yet_run == len(later)
-    error = error_of(ran)
+    assert session_manifest(out, 1, ExperimentManifest).counts.cases.not_yet_run == len(later)
+    error = ran.error
     assert error["code"] == "execution.partial"
     assert f"The error was {code}." in error["message"]
     assert "resumes the experiment, and runs the cases not started" in error["message"]
@@ -428,7 +415,7 @@ def test_a_resume_after_a_401_sends_each_case_not_started_the_one_refused_includ
     attempts = sorted(
         (
             AttemptRecordV1_1.model_validate_json((directory / "attempt.json").read_bytes())
-            for directory in attempt_directories(out, 0)
+            for directory in attempts_at(out, 0)
         ),
         key=lambda record: record.session,
     )
@@ -453,10 +440,10 @@ def test_a_resume_after_a_402_sends_each_case_not_started_but_the_one_that_got_i
     assert cli.server.requests()[received:] == [AUTH, SEND, SEND]
     assert sent(cli, received) == KEYS[HOLDINGS + 1 :]
     # The case that got the 402 may have been charged, so it awaits a repeat.
-    assert len(attempt_directories(out, HOLDINGS)) == 1
-    holdings = cases_of(resumed)["holdings-50"]
+    assert len(attempts_at(out, HOLDINGS)) == 1
+    holdings = resumed.cases_by_key["holdings-50"]
     assert (holdings["outcome"], holdings["repeat_attempt_id"]) == (
         "failed",
         str(quota.attempt_id),
     )
-    assert f"--repeat holdings-50:{quota.attempt_id}" in error_of(resumed)["message"]
+    assert f"--repeat holdings-50:{quota.attempt_id}" in resumed.error["message"]
