@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from tests.support.paths import REVIEW_CONFIGS, SCREEN_CONFIGS
 from trialfolio.configuration import read_review_configuration
 from trialfolio.contracts.common import WINDOWS_DEVICE_NAMES
 from trialfolio.contracts.review_configuration import (
@@ -28,8 +29,7 @@ from trialfolio.contracts.screen_settings import DECLARABLE_SETTINGS
 from trialfolio.errors import TrialFolioError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-FIXTURES = REPO_ROOT / "tests" / "fixtures" / "review-configs"
-INVALID = FIXTURES / "invalid"
+INVALID = REVIEW_CONFIGS / "invalid"
 SCHEMA = REPO_ROOT / "schemas" / "review-configuration-1.0.0.schema.json"
 
 DECLARABLE = (
@@ -133,7 +133,7 @@ def test_documented_example_is_valid() -> None:
     )
     assert configuration.results[0].intended_changes is None
     assert configuration.results[0].description is None
-    assert (FIXTURES / "example.yaml").read_text(encoding="utf-8") == documented_example()
+    assert (REVIEW_CONFIGS / "example.yaml").read_text(encoding="utf-8") == documented_example()
 
 
 def header(content: str, name: str) -> str:
@@ -324,7 +324,7 @@ def test_text_written_without_quotes_is_accepted() -> None:
 
 
 def test_a_screen_configuration_is_not_a_review() -> None:
-    path = REPO_ROOT / "tests" / "fixtures" / "screen-configs" / "formula.yaml"
+    path = SCREEN_CONFIGS / "formula.yaml"
 
     assert "`kind` must be review." in rejection(path.read_bytes(), path.name)
 

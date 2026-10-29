@@ -5,12 +5,9 @@ and says why. A test writes only in a temporary directory, never under the refer
 """
 
 import os
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-
-from tests.support.fake_portfolio123 import FakePortfolio123
 
 REFERENCE_DIR_VARIABLE = "TRIALFOLIO_REFERENCE_DIR"
 
@@ -27,10 +24,3 @@ def reference_dir() -> Path:
     if not directory.is_dir():
         pytest.skip(f"{REFERENCE_DIR_VARIABLE} names no directory: {given}")
     return directory
-
-
-@pytest.fixture
-def server() -> Iterator[FakePortfolio123]:
-    fake = FakePortfolio123()
-    yield fake
-    fake.close()

@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.paths import SCREEN_CONFIGS, SNAPSHOT_CONFIGS
 from trialfolio.configuration import read_ranking_snapshot_configuration, read_run_configuration
 from trialfolio.contracts.ranking_snapshot_configuration import RankingSnapshotConfiguration
 from trialfolio.errors import TrialFolioError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-FIXTURES = REPO_ROOT / "tests" / "fixtures" / "ranking-snapshot-configs"
-INVALID = FIXTURES / "invalid"
+INVALID = SNAPSHOT_CONFIGS / "invalid"
 
 
 def documented_example() -> str:
@@ -61,7 +61,7 @@ def test_the_documented_example_reads_as_documented() -> None:
 
 
 def test_the_example_fixture_is_the_documented_example() -> None:
-    assert (FIXTURES / "example.yaml").read_text(encoding="utf-8") == documented_example()
+    assert (SNAPSHOT_CONFIGS / "example.yaml").read_text(encoding="utf-8") == documented_example()
 
 
 @pytest.mark.parametrize(
@@ -69,7 +69,7 @@ def test_the_example_fixture_is_the_documented_example() -> None:
     [("api-ranking-system.yaml", "ApiRankingSystem"), ("canaries.yaml", "canary-system-4d7a2c19")],
 )
 def test_each_fixture_reads(name: str, system: str) -> None:
-    assert read((FIXTURES / name).read_bytes()).system == system
+    assert read((SNAPSHOT_CONFIGS / name).read_bytes()).system == system
 
 
 @pytest.mark.parametrize("path", sorted(INVALID.glob("*.yaml")), ids=lambda path: path.stem)
@@ -116,7 +116,7 @@ def test_a_missing_kind_names_the_snapshot_kind() -> None:
 
 
 def test_a_screen_configuration_is_not_a_snapshot() -> None:
-    content = (REPO_ROOT / "tests" / "fixtures" / "screen-configs" / "formula.yaml").read_bytes()
+    content = (SCREEN_CONFIGS / "formula.yaml").read_bytes()
 
     assert "`kind` must be ranking-snapshot." in rejection(content)
 

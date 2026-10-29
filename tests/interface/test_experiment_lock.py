@@ -37,7 +37,7 @@ from tests.support.experiment_builder import (
     plan_hash,
     returns,
 )
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.fake_portfolio123 import AUTH, BACKTEST, FakePortfolio123, Reply
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
 from trialfolio.experiment_records import read_experiment
 from trialfolio.storage import LOCK_LINE, LOCK_PATH, LocalArtifactStore
@@ -47,8 +47,6 @@ posix_only = pytest.mark.skipif(
 )
 
 EXAMPLE = experiment_config("example.yaml")
-AUTH = "POST /auth"
-SEND = "POST /screen/backtest"
 RACE_SECONDS = 60.0
 """How long the claim that took the lock is held for the other to end: far longer than a process
 takes to start and try its claim, so only two claims that both took the lock wait it out."""
@@ -115,7 +113,7 @@ def test_a_run_while_a_resume_waits_at_its_prompt_is_locked_out_until_the_resume
     resumed = cli(*argv)
 
     assert resumed.exit_code == 0, resumed.stderr
-    assert cli.server.requests()[received:] == [AUTH, *[SEND] * 5]
+    assert cli.server.requests()[received:] == [AUTH, *[BACKTEST] * 5]
     resumed_manifest = ExperimentManifest.model_validate_json(
         (out / "sessions/2/manifest.json").read_bytes()
     )
@@ -187,7 +185,7 @@ def test_two_new_experiments_claiming_one_directory_at_once_give_at_most_one_suc
                 saved = read_experiment(store)
             assert saved.manifest is not None and saved.manifest.outcome == "completed"
             assert (out / LOCK_PATH).read_bytes() == LOCK_LINE
-            assert requests == [AUTH, *[SEND] * 5]
+            assert requests == [AUTH, *[BACKTEST] * 5]
     # Neither succeeds only when one takes the lock in the moment between the other's creating
     # experiment.lock and locking it. If neither ever did, the other's files couldn't be shown to
     # be left alone: as when a claim that fails removes the file another claim created, so that

@@ -25,7 +25,7 @@ import pytest
 from tests.support.cli import Cli
 from tests.support.fake_portfolio123 import serve_success
 from tests.support.html_report import Document, parse
-from tests.support.paths import screen_config
+from tests.support.paths import FIXTURES, screen_config
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.notices import (
     CONCISE_NOTICE,
@@ -35,7 +35,7 @@ from trialfolio.notices import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-FIXTURE = ROOT / "tests" / "fixtures" / "runs" / "synthetic-run-1.0.0"
+FIXTURE = FIXTURES / "runs" / "synthetic-run-1.0.0"
 LICENSE_NAME = (ROOT / "LICENSE").read_text(encoding="utf-8").splitlines()[0]
 """The license's name, as LICENSE's first line gives it."""
 LICENSE_URL = (

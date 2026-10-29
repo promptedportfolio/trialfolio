@@ -49,6 +49,14 @@ from pathlib import Path
 from typing import Final
 
 from tests.support.clock import FixedClock
+from tests.support.paths import (
+    EXPERIMENT_CONFIGS,
+    FIXTURES,
+    RESPONSES,
+    REVIEW_CONFIGS,
+    SCREEN_CONFIGS,
+    SNAPSHOT_CONFIGS,
+)
 from trialfolio.configuration import (
     read_experiment_configuration,
     read_experiment_configuration_v1_1,
@@ -73,13 +81,6 @@ from trialfolio.planning import (
 from trialfolio.ranking_lock import LOCK_FILE
 from trialfolio.snapshot_execution import SnapshotExecution
 from trialfolio.storage import LocalArtifactStore
-
-FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
-EXPERIMENT_CONFIGS: Final = FIXTURES / "experiment-configs"
-SCREEN_CONFIGS: Final = FIXTURES / "screen-configs"
-SNAPSHOT_CONFIGS: Final = FIXTURES / "ranking-snapshot-configs"
-REVIEW_CONFIGS: Final = FIXTURES / "review-configs"
-RESPONSES: Final = FIXTURES / "responses"
 
 SYNTHETIC_EXPERIMENT: Final = FIXTURES / "experiments" / "synthetic-experiment-1.0.0"
 """The committed synthetic experiment, which this writer wrote."""

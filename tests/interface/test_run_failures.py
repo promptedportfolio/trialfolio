@@ -21,15 +21,18 @@ from pathlib import Path
 import pytest
 
 from tests.support.cli import Cli, plan_hash_for
-from tests.support.fake_portfolio123 import AUTHENTICATED, Reply, response, serve_success
+from tests.support.fake_portfolio123 import (
+    AUTH,
+    AUTHENTICATED,
+    BACKTEST,
+    Reply,
+    response,
+    serve_success,
+)
 from tests.support.paths import screen_config
 from tests.support.saved_records import only_attempt_record
 from tests.support.storage_faults import FaultyStores
 from trialfolio.contracts.manifest import RunManifest
-
-AUTH = "POST /auth"
-BACKTEST = "POST /screen/backtest"
-
 
 FORMULA = screen_config("formula.yaml")
 

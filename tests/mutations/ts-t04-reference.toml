@@ -1,0 +1,22 @@
+# TS-T04's list of the reference tests' mutations (docs/test-refactoring.md, the check of the tests,
+# and its question 13), which ran on the owner's machine, from TS-T04's worktree, with
+# TRIALFOLIO_REFERENCE_DIR naming the main checkout's reference/, on the base and on the branch.
+# TS-T04 moves the reference conftest's server fixture to tests/conftest.py, beside the other
+# directories' copies, so the two reference modules that use it keep TS-T03's mutation each, which
+# a test there catches.
+
+marker = "reference"
+
+[[mutation]]
+name = '''results that share a response aren't flagged, for reference/test_reference_review'''
+file = "src/trialfolio/differences.py"
+old = '''flags: set[FlagCode] = {"identical_source"} if identical else set()'''
+new = '''flags: set[FlagCode] = set()'''
+tests = ["tests/reference/test_reference_review.py"]
+
+[[mutation]]
+name = '''a decimal's places are counted one too many, for reference/test_reference_responses'''
+file = "src/trialfolio/normalization/rows.py"
+old = '''return len(value.text.partition(".")[2])'''
+new = '''return len(value.text.partition(".")[2]) + 1'''
+tests = ["tests/reference/test_reference_responses.py"]

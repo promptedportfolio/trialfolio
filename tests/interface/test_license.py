@@ -30,8 +30,7 @@ from tests.support.cli import Cli
 from tests.support.directories import snapshot
 from tests.support.environment import Outcome
 from tests.support.experiment_builder import ExperimentBuilder, experiment_config, returns
-from tests.support.paths import screen_config
-from tests.support.run_builder import REVIEW_CONFIGS
+from tests.support.paths import REVIEW_CONFIGS, screen_config
 from tests.support.terminal import PseudoTerminal
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
 from trialfolio.notices import CONCISE_NOTICE, FULL_NOTICE, LICENSE_ID, NOTICE_VERSION

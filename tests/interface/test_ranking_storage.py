@@ -53,7 +53,7 @@ from tests.support.experiment_builder import (
     plan_hash,
     returns_each,
 )
-from tests.support.fake_portfolio123 import AUTHENTICATED, response
+from tests.support.fake_portfolio123 import AUTH, AUTHENTICATED, BACKTEST, RANK, RANK_GET, response
 from tests.support.paths import screen_config
 from tests.support.snapshot_builder import (
     SNAPSHOT_CONFIGS,
@@ -62,7 +62,7 @@ from tests.support.snapshot_builder import (
     rank_get,
     snapshot_plan_hash,
 )
-from tests.support.storage_faults import FaultyStores
+from tests.support.storage_faults import Fault, FaultyStores
 from trialfolio.configuration import read_experiment_configuration_v1_1
 from trialfolio.contracts.attempt import AttemptRecordV1_2, AttemptRecordV1_3
 from trialfolio.planning import build_experiment_plan_v1_1, installed_versions
@@ -84,27 +84,18 @@ UNRECORDED: Final = (
     " and the directory can't be resumed: remove the directory, and run the command again."
 )
 
-AUTH, RANK, RANK_GET, BACKTEST = "POST /auth", "POST /rank", "GET /rank", "POST /screen/backtest"
 
-FAULTS: Final = ("storage", "interrupt")
+FAULTS: Final = (pytest.param("full disk", id="storage"), pytest.param("interrupt", id="interrupt"))
 """Each kind of fault: a write that fails inside the real store with `ENOSPC`, which gives
 `storage.write_failed`, or a `KeyboardInterrupt` before the write starts, which gives
-`command.interrupted`."""
+`command.interrupted`, as `StorageFaults.fail` sets it."""
 
 
-def arm(faults: FaultyStores, kind: str, name: str) -> None:
-    """Sets a fault of `kind` at the file `name`."""
-    if kind == "storage":
-        faults.fail_os(name)
-    else:
-        faults.fail_before(name, KeyboardInterrupt())
-
-
-def failed(outcome: Outcome, kind: str) -> str:
+def failed(outcome: Outcome, kind: Fault) -> str:
     """The error's message, once the outcome is checked against the fault's kind: its code, its
     exit code, stderr, and a summary without a manifest."""
     code, exit_code = (
-        ("storage.write_failed", 4) if kind == "storage" else ("command.interrupted", 130)
+        ("storage.write_failed", 4) if kind == "full disk" else ("command.interrupted", 130)
     )
     assert outcome.exit_code == exit_code, outcome.stderr
     error = outcome.error
@@ -188,10 +179,10 @@ response is saved."""
 @pytest.mark.parametrize("kind", FAULTS)
 @pytest.mark.parametrize("at", SCREEN_FAULTS)
 def test_a_fault_at_a_screen_runs_file_leaves_no_manifest_and_the_run_isnt_resumed(
-    cli: Cli, faults: FaultyStores, at: str, kind: str
+    cli: Cli, faults: FaultyStores, at: str, kind: Fault
 ) -> None:
     name, before, said = SCREEN_FAULTS[at]
-    arm(faults, kind, name)
+    faults.fail(name, kind)
 
     argv, outcome = run_screen(cli, DEFINITION, faults)
 
@@ -206,9 +197,9 @@ def test_a_fault_at_a_screen_runs_file_leaves_no_manifest_and_the_run_isnt_resum
 
 @pytest.mark.parametrize("kind", FAULTS)
 def test_a_fault_at_a_screen_runs_rank_update_response_sends_no_backtest(
-    cli: Cli, faults: FaultyStores, kind: str
+    cli: Cli, faults: FaultyStores, kind: Fault
 ) -> None:
-    arm(faults, kind, "rank-update-response.json")
+    faults.fail("rank-update-response.json", kind)
 
     _, outcome = run_screen(cli, DEFINITION, faults)
 
@@ -226,10 +217,10 @@ def test_a_fault_at_a_screen_runs_rank_update_response_sends_no_backtest(
 @pytest.mark.parametrize("kind", FAULTS)
 @pytest.mark.parametrize("name", ["definition.xml", "snapshot.json"])
 def test_a_fault_at_a_runs_copy_of_a_snapshot_sends_nothing_and_leaves_no_manifest(
-    cli: Cli, faults: FaultyStores, name: str, kind: str
+    cli: Cli, faults: FaultyStores, name: str, kind: Fault
 ) -> None:
     named = snapshot_named(cli, DEFINITION)
-    arm(faults, kind, f"/{name}")
+    faults.fail(f"/{name}", kind)
 
     argv, outcome = run_screen(cli, named, faults)
 
@@ -294,7 +285,7 @@ def test_a_fault_at_an_experiment_attempts_file_leaves_no_manifest_and_the_comma
     faults: FaultyStores,
     monkeypatch: pytest.MonkeyPatch,
     at: str,
-    kind: str,
+    kind: Fault,
 ) -> None:
     before, resumed, exit_code, said = EXPERIMENT_FAULTS[at]
     cli.ready()
@@ -302,7 +293,7 @@ def test_a_fault_at_an_experiment_attempts_file_leaves_no_manifest_and_the_comma
     # The same command, run twice: approved by the new experiment's plan hash.
     approve = ("--approve", plan_hash(EXAMPLE, out))
     ranks, sends = [RANK_UPDATED] * 4, returns_each(4)
-    arm(faults, kind, f"{case_id_of(EXAMPLE, 'baseline')}/{at}")
+    faults.fail(f"{case_id_of(EXAMPLE, 'baseline')}/{at}", kind)
 
     stopped = experiments.run(
         EXAMPLE, out, *approve, approve=False, store_factory=faults, ranks=ranks, sends=sends
@@ -337,12 +328,12 @@ def test_a_fault_at_an_experiment_attempts_file_leaves_no_manifest_and_the_comma
 
 @pytest.mark.parametrize("kind", FAULTS)
 def test_a_fault_at_an_experiments_rank_update_response_leaves_its_case_awaiting_a_repeat(
-    cli: Cli, experiments: Builder, faults: FaultyStores, kind: str
+    cli: Cli, experiments: Builder, faults: FaultyStores, kind: Fault
 ) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
     baseline = case_id_of(EXAMPLE, "baseline")
-    arm(faults, kind, f"{baseline}/rank-update-response.json")
+    faults.fail(f"{baseline}/rank-update-response.json", kind)
 
     stopped = experiments.run(
         EXAMPLE, out, ranks=[RANK_UPDATED] * 4, sends=returns_each(4), store_factory=faults
@@ -379,14 +370,14 @@ def test_a_fault_at_a_new_experiments_plan_files_sends_nothing_and_it_cant_be_re
     experiments: Builder,
     faults: FaultyStores,
     name: str,
-    kind: str,
+    kind: Fault,
 ) -> None:
     # A plan's definition.xml comes before its experiment.json, so the first plan isn't recorded.
     configuration = EXAMPLE if name == "definition.xml" else snapshot_named(cli, EXAMPLE)
     cli.ready()
     out = cli.tmp / "experiment"
     approve = ("--approve", plan_hash(configuration, out))
-    arm(faults, kind, f"/plans/1/{name}")
+    faults.fail(f"/plans/1/{name}", kind)
 
     stopped = experiments.run(
         configuration,
@@ -413,7 +404,7 @@ def test_a_fault_at_a_new_experiments_plan_files_sends_nothing_and_it_cant_be_re
 @pytest.mark.parametrize("kind", FAULTS)
 @pytest.mark.parametrize("name", ["definition.xml", "snapshot.json", "manifest.json"])
 def test_a_fault_at_a_snapshots_file_leaves_no_manifest_and_it_isnt_resumed(
-    cli: Cli, faults: FaultyStores, name: str, kind: str
+    cli: Cli, faults: FaultyStores, name: str, kind: Fault
 ) -> None:
     cli.ready()
     cli.server.reply("/auth", AUTHENTICATED)
@@ -428,7 +419,7 @@ def test_a_fault_at_a_snapshots_file_leaves_no_manifest_and_it_isnt_resumed(
         snapshot_plan_hash(),
         "--json",
     ]
-    arm(faults, kind, f"/{name}")
+    faults.fail(f"/{name}", kind)
 
     outcome = cli(*argv, store_factory=faults)
 
@@ -466,7 +457,7 @@ after the `rank_get`. The attempt record's own fault is below."""
 @pytest.mark.parametrize("kind", FAULTS)
 @pytest.mark.parametrize("at", SNAPSHOT_ATTEMPT_FAULTS)
 def test_a_fault_before_a_snapshots_attempt_record_says_it_has_no_manifest(
-    cli: Cli, faults: FaultyStores, at: str, kind: str
+    cli: Cli, faults: FaultyStores, at: str, kind: Fault
 ) -> None:
     name, before, said = SNAPSHOT_ATTEMPT_FAULTS[at]
     cli.ready()
@@ -482,7 +473,7 @@ def test_a_fault_before_a_snapshots_attempt_record_says_it_has_no_manifest(
         snapshot_plan_hash(),
         "--json",
     ]
-    arm(faults, kind, name)
+    faults.fail(name, kind)
 
     outcome = cli(*argv, store_factory=faults)
 
@@ -550,7 +541,7 @@ def test_a_storage_failure_at_the_attempt_record_gives_the_attempts_detail_then_
     # One detail of the requests, the attempt's own, between the storage failure's message and
     # the manifest's: not the start record's too, which reads as running, since neither a run
     # nor a snapshot is resumed.
-    message = failed(outcome, "storage")
+    message = failed(outcome, "full disk")
     assert message.endswith(f"{CHECK_SPACE} {attempt_said} {incomplete}")
     assert "reads as running" not in message
     assert sent(cli) == requests
@@ -572,7 +563,7 @@ def test_an_experiments_storage_failure_at_the_attempt_record_gives_its_start_re
     )
 
     # The resume reads the start record, so the session's message says what it says too.
-    message = failed(stopped, "storage")
+    message = failed(stopped, "full disk")
     assert message.endswith(
         f"{CHECK_SPACE} {BOTH_SUCCEEDED} The rank_update request of the last attempt, which"
         " writes the case's ranking definition into ApiRankingSystem, reached Portfolio123, and"
@@ -625,7 +616,7 @@ report and its manifest, and a snapshot's manifest."""
 @pytest.mark.parametrize("kind", FAULTS)
 @pytest.mark.parametrize("at", ENDINGS_AFTER_AN_INVALID_RESPONSE)
 def test_a_fault_at_the_ending_after_an_invalid_response_keeps_its_message_after_before_that(
-    cli: Cli, faults: FaultyStores, at: str, kind: str
+    cli: Cli, faults: FaultyStores, at: str, kind: Fault
 ) -> None:
     configuration, name, what, incomplete = ENDINGS_AFTER_AN_INVALID_RESPONSE[at]
     cli.ready()
@@ -635,7 +626,7 @@ def test_a_fault_at_the_ending_after_an_invalid_response_keeps_its_message_after
     cli.server.reply("/screen/backtest", response("invalid-structure.json"))
     out = cli.tmp / "out"
     approve = snapshot_plan_hash() if configuration == SNAPSHOT else plan_hash_for(configuration)
-    arm(faults, kind, name)
+    faults.fail(name, kind)
 
     outcome = cli(
         "run", configuration, "--out", out, "--approve", approve, "--json", store_factory=faults

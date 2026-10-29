@@ -17,34 +17,36 @@ from pathlib import Path
 
 import pytest
 
-from tests.support import canaries
 from tests.support.clock import FixedClock
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.experiment_lab import RELEASE_0_3_0, Lab
+from tests.support.fake_portfolio123 import (
+    AUTH,
+    AUTHENTICATED,
+    BACKTEST,
+    FakePortfolio123,
+    response,
+)
+from tests.support.paths import EXPERIMENT_CONFIGS, ROOT
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
 from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 from trialfolio.experiment_execution import (
     AttemptEnded,
     AttemptStarted,
-    Cancellation,
     ExperimentExecution,
     ProgressEvent,
     SessionEnded,
     SessionStarted,
 )
-from trialfolio.experiment_records import open_experiment
 from trialfolio.planning import (
     build_experiment_plan,
     check_approval,
     installed_versions,
-    plan_revision,
 )
-from trialfolio.provider import Credentials, P123ScreenBacktestClient
 from trialfolio.storage import LocalArtifactStore
 
-EXAMPLE = Path(__file__).resolve().parents[1] / "fixtures" / "experiment-configs" / "example.yaml"
+EXAMPLE = EXPERIMENT_CONFIGS / "example.yaml"
 DEFAULT_ONLY = EXAMPLE.with_name("default-only.yaml")
-REPO = Path(__file__).resolve().parents[2]
 
 
 class _NoInput:
@@ -59,33 +61,23 @@ class _NoInput:
         return False
 
 
-def test_the_core_plans_approves_executes_and_cancels_an_experiment_without_the_cli(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
-) -> None:
-    for name in [name for name in os.environ if name.startswith("TRIALFOLIO_")]:
-        monkeypatch.delenv(name)
-    monkeypatch.setattr(sys, "stdin", _NoInput())
-    server = FakePortfolio123()
-    complete = (
-        Path(__file__).resolve().parents[1] / "fixtures/responses/complete.json"
-    ).read_bytes()
-    server.reply("/auth", Reply(200, canaries.TOKEN.encode()), Reply(200, canaries.TOKEN.encode()))
-    server.reply("/screen/backtest", *(Reply(200, complete) for _ in range(5)))
-    events: list[ProgressEvent] = []
-    # What was on disk, and how many requests the server had received, at each event.
-    seen: list[tuple[object, ...]] = []
-    cancellation = Cancellation()
-    out = tmp_path / "experiment"
+class Recorder:
+    """What was on disk, and how many requests the server had received, at each event: the
+    session's start once its session record and its plan are recorded; each attempt's start
+    before it authenticates or sends anything, or writes a file; each attempt's end once its
+    attempt record and its case's tables are written; and the session's end once its report and
+    manifest are (docs/contracts.md, the executor)."""
 
-    def written(*paths: str) -> tuple[bool, ...]:
-        return tuple((out / path).is_file() for path in paths)
+    def __init__(self, out: Path, server: FakePortfolio123) -> None:
+        self._out = out
+        self._server = server
+        self.seen: list[tuple[object, ...]] = []
 
-    def progress(event: ProgressEvent) -> None:
-        events.append(event)
+    def __call__(self, event: ProgressEvent) -> None:
         match event:
             case SessionStarted():
-                seen.append(
-                    written(
+                self.seen.append(
+                    self._written(
                         "sessions/1/session.json",
                         "plans/1/configuration.yaml",
                         "plans/1/plan.json",
@@ -93,72 +85,57 @@ def test_the_core_plans_approves_executes_and_cancels_an_experiment_without_the_
                     )
                 )
             case AttemptStarted(case_id=case_id, attempt_id=attempt_id):
-                attempt = out / "cases" / case_id / "attempts" / str(attempt_id)
-                seen.append((len(server.received), attempt.exists()))
+                attempt = self._out / "cases" / case_id / "attempts" / str(attempt_id)
+                self.seen.append((len(self._server.received), attempt.exists()))
             case AttemptEnded(case_id=case_id, attempt_id=attempt_id):
-                seen.append(
-                    written(
+                self.seen.append(
+                    self._written(
                         f"cases/{case_id}/attempts/{attempt_id}/attempt.json",
                         f"cases/{case_id}/normalized/metrics.csv",
                         f"cases/{case_id}/normalized/settings.csv",
                     )
                 )
             case SessionEnded():
-                seen.append(written("sessions/1/report.html", "sessions/1/manifest.json"))
-        if (
-            isinstance(event, AttemptEnded)
-            and len([e for e in events if isinstance(e, AttemptEnded)]) == 2
-        ):
-            cancellation.cancel()
+                self.seen.append(
+                    self._written("sessions/1/report.html", "sessions/1/manifest.json")
+                )
+
+    def _written(self, *paths: str) -> tuple[bool, ...]:
+        return tuple((self._out / path).is_file() for path in paths)
+
+
+def test_the_core_plans_approves_executes_and_cancels_an_experiment_without_the_cli(
+    tmp_path: Path,
+    server: FakePortfolio123,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    for name in [name for name in os.environ if name.startswith("TRIALFOLIO_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setattr(sys, "stdin", _NoInput())
+    server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
+    server.reply("/screen/backtest", *(response("complete.json") for _ in range(5)))
+    lab = Lab(tmp_path, server, reader=RELEASE_0_3_0)
+    recorder = Recorder(lab.out, server)
 
     # Read from its text and a source name, as an uploaded file would be.
     configuration = read_experiment_configuration(EXAMPLE.read_bytes(), "uploaded study")
     plan = build_experiment_plan(configuration, installed_versions())
     approved = check_approval(plan, plan.plan_hash)
-    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-    try:
-        with (
-            P123ScreenBacktestClient(credentials, endpoint=server.endpoint) as client,
-            LocalArtifactStore(out) as store,
-        ):
-            execution = ExperimentExecution(
-                plan,
-                approved,
-                "interactive",
-                store,
-                client,
-                command=None,
-                clock=FixedClock(),
-                progress=progress,
-                cancellation=cancellation,
-            )
-            error = execution.run(EXAMPLE.read_bytes())
-        received = server.requests()
-        # The second execution resumes the experiment: its records are read under the lock, the
-        # configuration gives the same plan, and the same hash approves it.
-        resumed_events: list[ProgressEvent] = []
-        with (
-            P123ScreenBacktestClient(credentials, endpoint=server.endpoint) as client,
-            LocalArtifactStore(out) as store,
-        ):
-            saved = open_experiment(store)
-            again = read_experiment_configuration(EXAMPLE.read_bytes(), "uploaded study")
-            assert plan_revision(again, installed_versions(), saved.plan) is None
-            resumed = ExperimentExecution(
-                saved.plan,
-                approved,
-                "interactive",
-                store,
-                client,
-                command=None,
-                clock=FixedClock(),
-                progress=resumed_events.append,
-                experiment=saved,
-            )
-            resumed_error = resumed.run(EXAMPLE.read_bytes())
-        resumed_received = server.requests()[len(received) :]
-    finally:
-        server.close()
+    first = lab.new(
+        EXAMPLE,
+        plan=plan,
+        approve=approved,
+        approval="interactive",
+        cancel_after=2,
+        progress=recorder,
+    )
+    # The second execution resumes the experiment: its records are read under the lock, the
+    # configuration gives the same plan, and the same hash approves it.
+    resumed = lab.resume(EXAMPLE, source="uploaded study", approve=approved, approval="interactive")
+    events, error, received = first.events, first.error, first.received
+    resumed_events, resumed_error = resumed.events, resumed.error
+    assert resumed.plan == plan
 
     case_ids = tuple(case.case_id for case in plan.cases)
     started = [e for e in events if isinstance(e, AttemptStarted)]
@@ -172,11 +149,8 @@ def test_the_core_plans_approves_executes_and_cancels_an_experiment_without_the_
         SessionEnded,
     ]
     assert [e.case_id for e in started] == list(case_ids[:2])
-    # When each event comes (docs/contracts.md, the executor): the session's start once its
-    # session record and its plan are recorded; each attempt's start before it authenticates or
-    # sends anything, or writes a file; each attempt's end once its attempt record and its case's
-    # tables are written; and the session's end once its report and manifest are.
-    assert seen == [
+    # When each event comes, as the recorder says.
+    assert recorder.seen == [
         (True, True, True, True),
         (0, False),
         (True, True, True),
@@ -189,16 +163,14 @@ def test_the_core_plans_approves_executes_and_cancels_an_experiment_without_the_
         (s.case_id, s.attempt_id, "succeeded", True) for s in started
     ]
     # Cancelled between provider requests: no third request.
-    assert received == ["POST /auth", "POST /screen/backtest", "POST /screen/backtest"]
+    assert received == (AUTH, BACKTEST, BACKTEST)
     assert error is not None and error.code == "execution.partial"
     assert "The run was cancelled" in error.message
-    manifest = ExperimentManifest.model_validate_json(
-        (out / "sessions/1/manifest.json").read_bytes()
-    )
-    assert (out / "sessions/1/report.html").is_file()
+    manifest = lab.manifest(1, ExperimentManifest)
+    assert (lab.out / "sessions/1/report.html").is_file()
     assert manifest.outcome == "partial" and manifest.command is None
     assert manifest.approval == "interactive"
-    assert [outcome for _, outcome in execution.outcomes] == [
+    assert first.outcomes == [
         "succeeded",
         "succeeded",
         "not_yet_run",
@@ -211,7 +183,7 @@ def test_the_core_plans_approves_executes_and_cancels_an_experiment_without_the_
     assert manifest.counts.cases.not_yet_run == 3
     # The resume sends cases 3 to 5, after one authentication, and ends completed.
     assert resumed_error is None
-    assert resumed_received == ["POST /auth", *("POST /screen/backtest" for _ in range(3))]
+    assert resumed.received == (AUTH, *(BACKTEST for _ in range(3)))
     assert resumed_events[0] == SessionStarted(session=2, cases=case_ids[2:])
     assert [type(e) for e in resumed_events] == [
         SessionStarted,
@@ -221,14 +193,14 @@ def test_the_core_plans_approves_executes_and_cancels_an_experiment_without_the_
     assert [e.case_id for e in resumed_events if isinstance(e, AttemptStarted)] == list(
         case_ids[2:]
     )
-    second = ExperimentManifest.model_validate_json((out / "sessions/2/manifest.json").read_bytes())
+    second = lab.manifest(2, ExperimentManifest)
     assert (second.outcome, second.plan_hash, second.approval) == (
         "completed",
         plan.plan_hash,
         "interactive",
     )
     assert second.counts.cases.succeeded == 5
-    assert [outcome for _, outcome in resumed.outcomes] == ["succeeded"] * 5
+    assert resumed.outcomes == ["succeeded"] * 5
     # Nothing printed, nothing prompted.
     assert capfd.readouterr() == ("", "")
     # The events hold no text from the configuration: each names a case by its case_id.
@@ -336,7 +308,7 @@ assert error is not None and error.code == "execution.partial", error
 assert "trialfolio.cli" not in sys.modules, "trialfolio.cli was imported"
 """
     finished = subprocess.run(
-        [sys.executable, "-c", script], cwd=REPO, capture_output=True, text=True, check=False
+        [sys.executable, "-c", script], cwd=ROOT, capture_output=True, text=True, check=False
     )
 
     assert (finished.returncode, finished.stdout, finished.stderr) == (0, "", "")

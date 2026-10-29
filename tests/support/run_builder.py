@@ -31,11 +31,9 @@ from tests.support.cli import plan_hash_for
 from tests.support.clock import no_wait
 from tests.support.environment import isolated, run_cli
 from tests.support.fake_portfolio123 import AUTHENTICATED, FakePortfolio123, Reply
-from tests.support.paths import FIXTURES, RESPONSES, SCREEN_CONFIGS
+from tests.support.paths import FIXTURES, RESPONSES, REVIEW_CONFIGS, SCREEN_CONFIGS
 from trialfolio.configuration import read_screen_configuration_v1_1
 from trialfolio.ranking_lock import LOCK_DIRECTORY_VARIABLE
-
-REVIEW_CONFIGS: Final = FIXTURES / "review-configs"
 
 SYNTHETIC_RUN: Final = FIXTURES / "runs" / "synthetic-run-1.0.0"
 """The committed run `trialfolio demo` wrote, labeled synthetic. A review gets a copy of it at the

@@ -27,24 +27,23 @@ expected value is written here by hand.
 import logging
 import re
 import uuid
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import pytest
 
-from tests.support import canaries
-from tests.support.clock import STARTED, FixedClock
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.clock import STARTED
+from tests.support.experiment_lab import RELEASE_0_3_0, Lab, Ran
+from tests.support.fake_portfolio123 import AUTHENTICATED, FakePortfolio123, Reply, response
 from tests.support.html_report import Document, Element, parse
-from trialfolio.configuration import read_experiment_configuration
+from tests.support.paths import EXPERIMENT_CONFIGS, RESPONSES
 from trialfolio.contracts.experiment_manifest import ExperimentCommandRecord, ExperimentManifest
 from trialfolio.contracts.experiment_plan import PlanV1_1
-from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 from trialfolio.errors import TrialFolioError
-from trialfolio.experiment_execution import ExperimentExecution, Repeat
-from trialfolio.experiment_records import open_experiment
+from trialfolio.experiment_execution import ExperimentExecution, SessionStarted
+from trialfolio.experiment_repeats import Repeat
 from trialfolio.notices import (
     CONCISE_NOTICE,
     FULL_NOTICE,
@@ -56,16 +55,10 @@ from trialfolio.notices import (
     PORTFOLIO123_TERMS_URL,
     license_url,
 )
-from trialfolio.planning import build_experiment_plan, installed_versions, plan_revision
-from trialfolio.provider import Credentials, P123ScreenBacktestClient, ScreenBacktestClient
+from trialfolio.planning import installed_versions
 from trialfolio.report import FULL_NOTICE_ID, ExperimentEvidence, HtmlReportRenderer
-from trialfolio.storage import LocalArtifactStore
-
-CONFIGS = Path(__file__).resolve().parents[1] / "fixtures" / "experiment-configs"
-RESPONSES = Path(__file__).resolve().parents[1] / "fixtures" / "responses"
 
 VERSION = installed_versions().trialfolio
-AUTHENTICATED = Reply(200, canaries.TOKEN.encode())
 
 SECTIONS = [
     "objective",
@@ -93,11 +86,7 @@ LIQUIDITY_DESCRIPTION = "A stricter liquidity floor, 100 million dollars a day."
 SUCCEEDED = "succeeded: its response was saved and normalized."
 
 
-def response(name: str) -> Reply:
-    return Reply(200, (RESPONSES / name).read_bytes())
-
-
-EXAMPLE = (CONFIGS / "example.yaml").read_bytes()
+EXAMPLE = (EXPERIMENT_CONFIGS / "example.yaml").read_bytes()
 
 
 @dataclass(frozen=True)
@@ -132,107 +121,29 @@ class Session:
         return [attempt.attempt_id for attempt in view.attempts]
 
 
-class Experiment:
-    """One experiment, written into its own directory through the core, new and then resumed,
-    over its own fake server."""
-
-    def __init__(self, out: Path) -> None:
-        self.out = out
-        self.server = FakePortfolio123()
-        self._sessions = 0
-
-    def new(self, content: bytes, *, synthetic: bool = False) -> Session:
-        plan = build_experiment_plan(
-            read_experiment_configuration(content, "experiment.yaml"), installed_versions()
-        )
-
-        def execution(store: LocalArtifactStore, client: ScreenBacktestClient) -> Execution:
-            return plan, ExperimentExecution(
-                plan,
-                plan.plan_hash,
-                "not_required" if synthetic else "option",
-                store,
-                client,
-                command=None,
-                clock=FixedClock(),
-            )
-
-        return self._run(content, execution, synthetic=synthetic)
-
-    def resume(
-        self,
-        content: bytes,
-        *,
-        reason: str | None = None,
-        repeats: Sequence[Repeat] = (),
-        command: ExperimentCommandRecord | None = None,
-    ) -> Session:
-        configuration = read_experiment_configuration(content, "experiment.yaml")
-
-        def execution(store: LocalArtifactStore, client: ScreenBacktestClient) -> Execution:
-            saved = open_experiment(store)
-            revision = plan_revision(configuration, installed_versions(), saved.plan)
-            plan = saved.plan if revision is None else revision.plan
-            return plan, ExperimentExecution(
-                plan,
-                plan.plan_hash,
-                "option",
-                store,
-                client,
-                command=command,
-                clock=FixedClock(),
-                experiment=saved,
-                reason=reason,
-                repeats=repeats,
-            )
-
-        return self._run(content, execution, synthetic=False)
-
-    def _run(
-        self,
-        content: bytes,
-        build: Callable[[LocalArtifactStore, ScreenBacktestClient], "Execution"],
-        *,
-        synthetic: bool,
-    ) -> Session:
-        credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-        client: ScreenBacktestClient = (
-            SyntheticScreenBacktestClient(response_bytes())
-            if synthetic
-            else P123ScreenBacktestClient(credentials, endpoint=self.server.endpoint)
-        )
-        try:
-            with LocalArtifactStore(self.out) as store:
-                plan, execution = build(store, client)
-                error = execution.run(content)
-        finally:
-            client.close()
-        self._sessions += 1
-        number = self._sessions
-        session = self.out / "sessions" / str(number)
-        return Session(
-            number=number,
-            plan=plan,
-            error=error,
-            execution=execution,
-            html=(session / "report.html").read_text(encoding="utf-8"),
-            manifest=ExperimentManifest.model_validate_json(
-                (session / "manifest.json").read_bytes()
-            ),
-            out=self.out,
-        )
+def session_of(ran: Ran) -> Session:
+    """The session `ran` ran, with the report and the manifest it wrote."""
+    (number,) = (event.session for event in ran.events if isinstance(event, SessionStarted))
+    session = ran.out / "sessions" / str(number)
+    assert isinstance(ran.plan, PlanV1_1)
+    return Session(
+        number=number,
+        plan=ran.plan,
+        error=ran.error,
+        execution=ran.executed,
+        html=(session / "report.html").read_text(encoding="utf-8"),
+        manifest=ran.manifest(number, ExperimentManifest),
+        out=ran.out,
+    )
 
 
-type Execution = tuple[PlanV1_1, ExperimentExecution]
-
-
-def _completed(experiment: Experiment, *, swapped: bool = False) -> list[Session]:
+def _completed(lab: Lab, *, swapped: bool = False) -> list[Session]:
     """`example.yaml`, every case succeeded: `liquidity-100m` with `changed-metrics.json`, or
     `slippage-050` when swapped, `holdings-50` with metrics missing, and `rebalance-weeks-1`
     with coverage that differs from the requested dates."""
     changed, unchanged = response("changed-metrics.json"), response("complete.json")
-    experiment.server.reply("/auth", AUTHENTICATED)
-    experiment.server.reply(
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply(
         "/screen/backtest",
         response("complete.json"),
         unchanged if swapped else changed,
@@ -240,15 +151,15 @@ def _completed(experiment: Experiment, *, swapped: bool = False) -> list[Session
         response("coverage-mismatch.json"),
         changed if swapped else unchanged,
     )
-    return [experiment.new(EXAMPLE)]
+    return [session_of(lab.new("example.yaml"))]
 
 
-def _troubled(experiment: Experiment, tmp: Path) -> list[Session]:
+def _troubled(lab: Lab, tmp: Path) -> list[Session]:
     """`example.yaml`, with an `unknown` baseline (a 503), a rejected `holdings-50` (a 400),
     and a `liquidity-100m` whose response lacks the layout's structure; then a revision to
     `holdings-40`, with a budget of 8, that repeats the baseline."""
-    experiment.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
-    experiment.server.reply(
+    lab.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
+    lab.server.reply(
         "/screen/backtest",
         Reply(503),
         response("invalid-structure.json"),
@@ -256,44 +167,45 @@ def _troubled(experiment: Experiment, tmp: Path) -> list[Session]:
         response("complete.json"),
         response("complete.json"),
     )
-    first = experiment.new(EXAMPLE)
+    first = session_of(lab.new("example.yaml"))
     (unknown,) = first.attempt_ids(BASELINE)
-    experiment.server.reply(
-        "/screen/backtest", response("complete.json"), response("complete.json")
-    )
-    revised = (CONFIGS / "revisions" / "holdings-40.yaml").read_bytes()
+    lab.server.reply("/screen/backtest", response("complete.json"), response("complete.json"))
+    revised = (EXPERIMENT_CONFIGS / "revisions" / "holdings-40.yaml").read_bytes()
     revised = revised.replace(b"provider_requests: 6", b"provider_requests: 8")
-    second = experiment.resume(
-        revised,
-        reason="Holdings of 40, between the two.",
-        repeats=[Repeat(BASELINE, unknown)],
+    second = session_of(
+        lab.resume(
+            "revisions/holdings-40.yaml",
+            content=revised,
+            reason="Holdings of 40, between the two.",
+            repeats=[Repeat(BASELINE, unknown)],
+        )
     )
     return [first, second]
 
 
-def _stopped(experiment: Experiment) -> list[Session]:
+def _stopped(lab: Lab) -> list[Session]:
     """`default-only.yaml`, whose authentication call gets a 401, so the baseline fails before
     its request is sent, and the default variant isn't started (D-32)."""
-    experiment.server.reply("/auth", Reply(401))
-    return [experiment.new((CONFIGS / "default-only.yaml").read_bytes())]
+    lab.server.reply("/auth", Reply(401))
+    return [session_of(lab.new("default-only.yaml"))]
 
 
-def _repeated(experiment: Experiment) -> list[Session]:
+def _repeated(lab: Lab) -> list[Session]:
     """`default-only.yaml`, with a budget of 4: an `unknown` baseline (a 503), and a default
     variant whose response has no periods, so its coverage can't be established; then a repeat
     of the baseline whose authentication call gets a 401, so it sends nothing; then, by a
     `trialfolio run` command, a repeat of the baseline that gets a 400."""
-    content = (CONFIGS / "default-only.yaml").read_bytes()
+    content = (EXPERIMENT_CONFIGS / "default-only.yaml").read_bytes()
     content = content.replace(b"provider_requests: 2", b"provider_requests: 4")
-    experiment.server.reply("/auth", AUTHENTICATED)
-    experiment.server.reply("/screen/backtest", Reply(503), response("no-periods.json"))
-    first = experiment.new(content)
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", Reply(503), response("no-periods.json"))
+    first = session_of(lab.new("default-only.yaml", content=content))
     (unknown,) = first.attempt_ids(BASELINE)
     repeat = Repeat(BASELINE, unknown)
-    experiment.server.reply("/auth", Reply(401))
-    refused = experiment.resume(content, repeats=[repeat])
-    experiment.server.reply("/auth", AUTHENTICATED)
-    experiment.server.reply("/screen/backtest", Reply(400))
+    lab.server.reply("/auth", Reply(401))
+    refused = session_of(lab.resume("default-only.yaml", content=content, repeats=[repeat]))
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", Reply(400))
     command = ExperimentCommandRecord(
         name="run",
         options={
@@ -304,32 +216,33 @@ def _repeated(experiment: Experiment) -> list[Session]:
         },
         started_at=STARTED,
     )
-    return [first, refused, experiment.resume(content, repeats=[repeat], command=command)]
+    third = lab.resume("default-only.yaml", content=content, repeats=[repeat], command=command)
+    return [first, refused, session_of(third)]
 
 
-def _one_missing(experiment: Experiment) -> list[Session]:
+def _one_missing(lab: Lab) -> list[Session]:
     """`default-only.yaml`, both cases succeeded: the baseline with `complete.json`, and the
     default variant with `complete.json` whose `stats.beta` is `null`, its one missing metric."""
     complete = (RESPONSES / "complete.json").read_bytes()
     assert b'"beta": 1.04,' in complete
-    experiment.server.reply("/auth", AUTHENTICATED)
-    experiment.server.reply(
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply(
         "/screen/backtest",
         Reply(200, complete),
         Reply(200, complete.replace(b'"beta": 1.04,', b'"beta": null,')),
     )
-    return [experiment.new((CONFIGS / "default-only.yaml").read_bytes())]
+    return [session_of(lab.new("default-only.yaml"))]
 
 
-def _synthetic(experiment: Experiment) -> list[Session]:
-    return [experiment.new((CONFIGS / "default-only.yaml").read_bytes(), synthetic=True)]
+def _synthetic(lab: Lab) -> list[Session]:
+    return [session_of(lab.new("default-only.yaml", synthetic=True))]
 
 
 HOSTILE = f"<script>alert(1)</script> & {chr(0x202E)}evil"
 SHOWN = "<script>alert(1)</script> & \\u202eevil"
 
 
-def _hostile(experiment: Experiment) -> list[Session]:
+def _hostile(lab: Lab) -> list[Session]:
     """`example.yaml` with markup and a bidirectional override in its title, purpose, prior
     research, and a variant's description, and then a revision whose reason holds them too."""
     quoted = f"'{HOSTILE}'".encode()
@@ -349,22 +262,23 @@ def _hostile(experiment: Experiment) -> list[Session]:
         key, _, _ = line.partition(b": ")
         assert line in content
         content = content.replace(line, key + b": " + quoted)
-    experiment.server.reply("/auth", AUTHENTICATED)
-    experiment.server.reply("/screen/backtest", *(response("complete.json") for _ in range(5)))
-    first = experiment.new(content)
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", *(response("complete.json") for _ in range(5)))
+    first = session_of(lab.new("example.yaml", content=content))
     raised = content.replace(b"provider_requests: 6", b"provider_requests: 7")
-    return [first, experiment.resume(raised, reason=f"</td><b>bold</b>{HOSTILE}")]
+    second = lab.resume("example.yaml", content=raised, reason=f"</td><b>bold</b>{HOSTILE}")
+    return [first, session_of(second)]
 
 
-SCENARIOS: dict[str, Callable[[Experiment, Path], list[Session]]] = {
-    "completed": lambda experiment, _: _completed(experiment),
-    "swapped": lambda experiment, _: _completed(experiment, swapped=True),
+SCENARIOS: dict[str, Callable[[Lab, Path], list[Session]]] = {
+    "completed": lambda lab, _: _completed(lab),
+    "swapped": lambda lab, _: _completed(lab, swapped=True),
     "troubled": _troubled,
-    "stopped": lambda experiment, _: _stopped(experiment),
-    "repeated": lambda experiment, _: _repeated(experiment),
-    "one-missing": lambda experiment, _: _one_missing(experiment),
-    "synthetic": lambda experiment, _: _synthetic(experiment),
-    "hostile": lambda experiment, _: _hostile(experiment),
+    "stopped": lambda lab, _: _stopped(lab),
+    "repeated": lambda lab, _: _repeated(lab),
+    "one-missing": lambda lab, _: _one_missing(lab),
+    "synthetic": lambda lab, _: _synthetic(lab),
+    "hostile": lambda lab, _: _hostile(lab),
 }
 
 type Sessions = Callable[[str], list[Session]]
@@ -379,9 +293,9 @@ def sessions(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Sessions]:
 
     def get(name: str) -> list[Session]:
         if name not in written:
-            experiment = Experiment(root / name)
-            servers.append(experiment.server)
-            written[name] = SCENARIOS[name](experiment, root)
+            lab = Lab(root / name, FakePortfolio123(), reader=RELEASE_0_3_0)
+            servers.append(lab.server)
+            written[name] = SCENARIOS[name](lab, root)
         return written[name]
 
     yield get
@@ -1601,14 +1515,11 @@ def test_rendering_is_deterministic_and_names_its_version(sessions: Sessions) ->
 
 
 def test_the_report_is_written_into_its_session_and_logs_no_content(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, server: FakePortfolio123, caplog: pytest.LogCaptureFixture
 ) -> None:
-    experiment = Experiment(tmp_path / "experiment")
-    try:
-        with caplog.at_level(logging.DEBUG, logger="trialfolio.report"):
-            (session,) = _synthetic(experiment)
-    finally:
-        experiment.server.close()
+    lab = Lab(tmp_path, server, reader=RELEASE_0_3_0)
+    with caplog.at_level(logging.DEBUG, logger="trialfolio.report"):
+        (session,) = _synthetic(lab)
     report = session.execution.report
     (record,) = (r for r in caplog.records if r.name == "trialfolio.report")
 

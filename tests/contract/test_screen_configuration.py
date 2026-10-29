@@ -27,6 +27,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from tests.support.paths import SCREEN_CONFIGS
 from tests.support.snapshot_builder import SnapshotBuilder
 from trialfolio.configuration import (
     read_run_configuration,
@@ -49,8 +50,7 @@ from trialfolio.errors import TrialFolioError
 from trialfolio.planning import VERIFIED_VERSIONS, Versions, build_plan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-FIXTURES = REPO_ROOT / "tests" / "fixtures" / "screen-configs"
-INVALID = FIXTURES / "invalid"
+INVALID = SCREEN_CONFIGS / "invalid"
 
 
 def documented_example() -> str:
@@ -66,12 +66,12 @@ def read_v1_1(
     """Reads with the reader of both versions, as if the file were in the fixtures' directory,
     from which a definition's path is read."""
     return read_screen_configuration_v1_1(
-        content, source_name, FIXTURES / source_name
+        content, source_name, SCREEN_CONFIGS / source_name
     ).configuration
 
 
 def read_fixture(name: str) -> ScreenConfiguration:
-    path = FIXTURES / name
+    path = SCREEN_CONFIGS / name
     return read_screen_configuration(path.read_bytes(), path.name)
 
 
@@ -119,7 +119,7 @@ def test_documented_example_reads_as_documented() -> None:
 
 
 def test_formula_fixture_is_the_documented_example() -> None:
-    assert (FIXTURES / "formula.yaml").read_text(encoding="utf-8") == documented_example()
+    assert (SCREEN_CONFIGS / "formula.yaml").read_text(encoding="utf-8") == documented_example()
 
 
 def test_documented_example_resolves_to_reference_request() -> None:
@@ -708,7 +708,7 @@ def test_the_reader_of_both_versions_reads_1_0_0_as_before() -> None:
 
 def run_reader(content: bytes, source_name: str) -> object:
     """`trialfolio run`'s reader, as if the file were in the fixtures' directory."""
-    return read_run_configuration(content, source_name, FIXTURES / source_name)
+    return read_run_configuration(content, source_name, SCREEN_CONFIGS / source_name)
 
 
 def test_the_readers_name_the_versions_they_read() -> None:
@@ -760,7 +760,7 @@ def test_run_s_reader_says_a_later_form_in_1_0_0_needs_1_1_0(form: str) -> None:
 def test_the_1_0_0_reader_names_a_key_under_variants_as_0_3_0_did() -> None:
     """0.3.0's reader has no node paths, so it names a key under a ranking variant's `set` by its
     key, as 0.3.0 did."""
-    path = FIXTURES / "formula.yaml"
+    path = SCREEN_CONFIGS / "formula.yaml"
     content = (
         path.read_bytes() + b"variants:\n  ranking:\n    - set:\n        'A': 1\n        'A': 2\n"
     )
@@ -776,7 +776,7 @@ def test_the_1_0_0_reader_names_a_key_under_variants_as_0_3_0_did() -> None:
 def test_run_s_reader_names_a_key_under_variants_by_its_place() -> None:
     """Since R04-T12, `trialfolio run` reads with node paths, as 0.4.0's readers do, so it names
     a key under a ranking variant's `set` by its place, never by its path."""
-    path = FIXTURES / "formula.yaml"
+    path = SCREEN_CONFIGS / "formula.yaml"
     content = (
         path.read_bytes() + b"variants:\n  ranking:\n    - set:\n        'A': 1\n        'A': 2\n"
     )
@@ -829,7 +829,7 @@ def test_without_files_the_reader_reads_no_file_a_ranking_names(ranking: str, ki
 
     with pytest.raises(ValueError, match="names a file"):
         read_screen_configuration_v1_1(
-            content, "screen.yaml", FIXTURES / "screen.yaml", files=False
+            content, "screen.yaml", SCREEN_CONFIGS / "screen.yaml", files=False
         )
 
 

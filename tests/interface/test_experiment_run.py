@@ -37,15 +37,14 @@ from tests.support.experiment_builder import (
 )
 from tests.support.fake_portfolio123 import Reply
 from tests.support.package_versions import fake_distribution
+from tests.support.plans import experiment_plan
 from tests.support.terminal import PseudoTerminal
 from trialfolio.cli import API_ID_VARIABLE, API_KEY_VARIABLE
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
-from trialfolio.contracts.experiment_plan import PlanV1_1
 from trialfolio.contracts.experiment_record import ExperimentRecord
 from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 from trialfolio.experiment_execution import ExperimentExecution
-from trialfolio.planning import build_experiment_plan, installed_versions
 from trialfolio.storage import LocalArtifactStore
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows has no pseudo-terminals")
@@ -56,12 +55,6 @@ RECORD_SCHEMA = (
 )
 
 type Builder = ExperimentBuilder[Outcome]
-
-
-def plan_of(path: Path) -> PlanV1_1:
-    """The plan of a new experiment of the configuration at `path`, with the installed versions."""
-    configuration = read_experiment_configuration(path.read_bytes(), str(path))
-    return build_experiment_plan(configuration, installed_versions())
 
 
 def complete() -> list[Reply]:
@@ -84,7 +77,7 @@ def test_under_a_terminal_every_case_is_shown_before_the_prompt_and_nothing_is_s
     cli.server.reply("/auth", AUTHENTICATED)
     cli.server.reply("/screen/backtest", *complete())
     out = cli.tmp / "experiment"
-    plan = plan_of(EXAMPLE)
+    plan = experiment_plan(EXAMPLE)
 
     with cli.on_terminal("run", EXAMPLE, "--out", out, "--json") as terminal:
         terminal.wait_for("Type approve")
@@ -127,7 +120,7 @@ def test_without_a_terminal_only_the_hash_and_the_budget_are_shown(cli: Cli) -> 
 
     assert outcome.exit_code == 2
     assert outcome.error_code == "plan.approval_required"
-    assert f"Plan hash: {plan_of(path).plan_hash}" in outcome.stderr
+    assert f"Plan hash: {experiment_plan(path).plan_hash}" in outcome.stderr
     assert "Budget: at most 6 provider requests" in outcome.stderr
     assert "Run the command in a terminal to see the full plan." in outcome.stderr
     for canary in canaries.EXPERIMENT:
@@ -139,7 +132,7 @@ def test_without_a_terminal_only_the_hash_and_the_budget_are_shown(cli: Cli) -> 
 def test_without_approval_the_summary_gives_the_plan_hash_and_every_case(cli: Cli) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
-    plan = plan_of(EXAMPLE)
+    plan = experiment_plan(EXAMPLE)
 
     outcome = cli("run", EXAMPLE, "--out", out, "--json")
 
@@ -194,7 +187,7 @@ def test_typing_approve_runs_the_plan_shown_and_is_recorded_as_interactive(cli: 
         (out / "sessions/1/manifest.json").read_bytes()
     )
     assert manifest.approval == "interactive"
-    assert manifest.plan_hash == plan_of(EXAMPLE).plan_hash
+    assert manifest.plan_hash == experiment_plan(EXAMPLE).plan_hash
     record = ExperimentRecord.model_validate_json((out / "plans/1/experiment.json").read_bytes())
     assert record.plans[0].approval == "interactive"
 
@@ -207,7 +200,7 @@ def test_the_first_plan_records_the_research_context_and_every_planned_case(
 ) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
-    plan = plan_of(EXAMPLE)
+    plan = experiment_plan(EXAMPLE)
 
     outcome = experiments.run(EXAMPLE, out, sends=complete())
 
@@ -255,7 +248,7 @@ def test_a_completed_experiment_prints_where_its_report_is(cli: Cli) -> None:
     cli.server.reply("/auth", AUTHENTICATED)
     cli.server.reply("/screen/backtest", *complete())
     out = cli.tmp / "experiment"
-    plan = plan_of(EXAMPLE)
+    plan = experiment_plan(EXAMPLE)
 
     outcome = cli("run", EXAMPLE, "--out", out, "--approve", plan.plan_hash)
 
@@ -275,7 +268,7 @@ def test_a_partial_experiment_prints_nothing_on_stdout_and_says_where_its_record
     cli.ready()
     out = cli.tmp / "experiment"
     replies = [returns(), returns(), UNAVAILABLE, returns(), returns()]
-    plan = plan_of(EXAMPLE)
+    plan = experiment_plan(EXAMPLE)
     experiments.server.reply("/auth", AUTHENTICATED)
     experiments.server.reply("/screen/backtest", *replies)
 
@@ -314,7 +307,9 @@ def test_a_directory_that_isnt_an_experiments_is_refused_as_for_a_screen(cli: Cl
     out = occupied(cli, "notes.txt")
     before = snapshot(out)
 
-    outcome = cli("run", EXAMPLE, "--out", out, "--approve", plan_of(EXAMPLE).plan_hash, "--json")
+    outcome = cli(
+        "run", EXAMPLE, "--out", out, "--approve", experiment_plan(EXAMPLE).plan_hash, "--json"
+    )
 
     assert outcome.exit_code == 4
     assert outcome.error_code == "output.not_empty"
@@ -332,7 +327,9 @@ def test_an_output_path_that_is_a_file_is_refused(cli: Cli) -> None:
     out = cli.tmp / "experiment"
     out.write_bytes(b"a file\n")
 
-    outcome = cli("run", EXAMPLE, "--out", out, "--approve", plan_of(EXAMPLE).plan_hash, "--json")
+    outcome = cli(
+        "run", EXAMPLE, "--out", out, "--approve", experiment_plan(EXAMPLE).plan_hash, "--json"
+    )
 
     assert outcome.exit_code == 4
     assert outcome.error_code == "output.not_empty"
@@ -413,7 +410,7 @@ def test_run_doesnt_resume_a_synthetic_experiment(cli: Cli, experiments: Builder
     # The core writes a synthetic experiment with the demo's client; no command does.
     cli.ready()
     out = cli.tmp / "experiment"
-    plan = plan_of(EXAMPLE)
+    plan = experiment_plan(EXAMPLE)
     with LocalArtifactStore(out) as store:
         execution = ExperimentExecution(
             plan,

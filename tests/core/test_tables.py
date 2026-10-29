@@ -15,14 +15,15 @@ from typing import get_args
 
 import pytest
 
-from tests.core.conftest import CONFIGS, RESPONSES, Execute
+from tests.support.paths import RESPONSES, SCREEN_CONFIGS
+from tests.support.screen_runs import Execute
 from trialfolio.contracts.common import FlagCode, UnavailableReason
 from trialfolio.contracts.tables import METRICS_COLUMNS, SETTINGS_COLUMNS
 from trialfolio.errors import TrialFolioError
 from trialfolio.normalization import NormalizedTables
 from trialfolio.tables import read_metrics_csv, read_settings_csv
 
-FORMULA = (CONFIGS / "formula.yaml").read_bytes()
+FORMULA = (SCREEN_CONFIGS / "formula.yaml").read_bytes()
 
 RESPONSE_FIXTURES = ("complete.json", "missing-metrics.json", "coverage-mismatch.json")
 

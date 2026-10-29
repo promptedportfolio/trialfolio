@@ -23,214 +23,69 @@ earlier session's attempts.
 """
 
 import hashlib
-import json
 import uuid
-from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
 from typing import override
 
 import pytest
 
-from tests.support import canaries
 from tests.support.clock import STARTED, BackwardClock, FixedClock
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.experiment_lab import RELEASE_0_3_0, Lab
+from tests.support.fake_portfolio123 import (
+    AUTH,
+    AUTHENTICATED,
+    BACKTEST,
+    CREDENTIALS,
+    FakePortfolio123,
+    Reply,
+    response,
+)
+from tests.support.paths import EXPERIMENT_CONFIGS, RESPONSES
+from tests.support.plans import case_ids, experiment_plan
 from tests.support.storage_faults import StorageFaults
-from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1, AuthenticationRecord, StartRecordV1_1
 from trialfolio.contracts.experiment_manifest import ExperimentCommandRecord, ExperimentManifest
 from trialfolio.contracts.experiment_plan import PlanV1_1
 from trialfolio.contracts.experiment_record import ExperimentRecord, SessionRecord
 from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 from trialfolio.errors import TrialFolioError
-from trialfolio.experiment_execution import (
-    LOCK_PATH,
-    AttemptStarted,
-    ExperimentExecution,
-    ProgressEvent,
-    Repeat,
-)
-from trialfolio.experiment_records import open_experiment
-from trialfolio.planning import build_experiment_plan, installed_versions
-from trialfolio.provider import Credentials, P123ScreenBacktestClient
-from trialfolio.storage import ArtifactStore, LocalArtifactStore, StoredFile
+from trialfolio.experiment_execution import AttemptStarted, ExperimentExecution, ProgressEvent
+from trialfolio.experiment_repeats import Repeat
+from trialfolio.provider import P123ScreenBacktestClient
+from trialfolio.storage import LOCK_PATH, LocalArtifactStore, StoredFile
 from trialfolio.tables import read_metrics_csv, read_settings_csv
-
-CONFIGS = Path(__file__).resolve().parents[1] / "fixtures" / "experiment-configs"
-RESPONSES = Path(__file__).resolve().parents[1] / "fixtures" / "responses"
-
-AUTH = "POST /auth"
-SEND = "POST /screen/backtest"
-AUTHENTICATED = Reply(200, canaries.TOKEN.encode())
-
-
-def complete() -> Reply:
-    return Reply(200, (RESPONSES / "complete.json").read_bytes())
-
-
-def plan_of(name: str) -> tuple[bytes, PlanV1_1]:
-    content = (CONFIGS / name).read_bytes()
-    configuration = read_experiment_configuration(content, name)
-    return content, build_experiment_plan(configuration, installed_versions())
-
-
-@dataclass(frozen=True)
-class Executed:
-    """An experiment the executor wrote, and what it saw."""
-
-    out: Path
-    plan: PlanV1_1
-    error: TrialFolioError | None
-    execution: ExperimentExecution
-    received: tuple[str, ...]
-    bodies: tuple[dict[str, object], ...]
-    """The body of each request the fake server received for a case, in order."""
-    events: tuple[ProgressEvent, ...]
-
-    def json(self, path: str) -> dict[str, object]:
-        return json.loads((self.out / path).read_bytes())
-
-    @property
-    def manifest(self) -> ExperimentManifest:
-        return self.manifest_of(1)
-
-    def manifest_of(self, session: int) -> ExperimentManifest:
-        return ExperimentManifest.model_validate_json(
-            (self.out / f"sessions/{session}/manifest.json").read_bytes()
-        )
-
-    def attempts(self, case_id: str) -> list[Path]:
-        return sorted((self.out / "cases" / case_id / "attempts").iterdir())
-
-    def record(self, case_id: str) -> AttemptRecordV1_1:
-        (attempt,) = self.attempts(case_id)
-        return AttemptRecordV1_1.model_validate_json((attempt / "attempt.json").read_bytes())
-
-
-type Faulted = Callable[[LocalArtifactStore], ArtifactStore]
-"""Wraps the output directory's real store, such as in storage faults."""
-
-
-class Experiments:
-    """Runs experiments into new output directories, over one fake server."""
-
-    def __init__(self, tmp: Path) -> None:
-        self.tmp = tmp
-        self.server = FakePortfolio123()
-        self._outputs = 0
-
-    def run(
-        self,
-        name: str = "example.yaml",
-        *,
-        faults: Faulted | None = None,
-        progress: list[ProgressEvent] | None = None,
-    ) -> Executed:
-        content, plan = plan_of(name)
-        self._outputs += 1
-        out = self.tmp / f"out-{self._outputs}"
-        real = LocalArtifactStore(out)
-        store: ArtifactStore = real if faults is None else faults(real)
-        events: list[ProgressEvent] = [] if progress is None else progress
-        before = len(self.server.received)
-        credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-        with P123ScreenBacktestClient(credentials, endpoint=self.server.endpoint) as client:
-            execution = ExperimentExecution(
-                plan,
-                plan.plan_hash,
-                "option",
-                store,
-                client,
-                command=None,
-                clock=FixedClock(),
-                progress=events.append,
-            )
-            try:
-                error = execution.run(content)
-            finally:
-                real.close()
-        received = self.server.received[before:]
-        return Executed(
-            out=out,
-            plan=plan,
-            error=error,
-            execution=execution,
-            received=tuple(f"{r.method} {r.path}" for r in received),
-            bodies=tuple(json.loads(r.body) for r in received if r.path == "/screen/backtest"),
-            events=tuple(events),
-        )
-
-    def resume(
-        self, executed: Executed, name: str = "example.yaml", *, repeats: Sequence[Repeat] = ()
-    ) -> Executed:
-        """Resumes the experiment `executed` wrote, approved by its plan's hash, through the
-        core: its records are read under the lock, and the session runs what's due."""
-        content = (CONFIGS / name).read_bytes()
-        before = len(self.server.received)
-        credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-        with (
-            P123ScreenBacktestClient(credentials, endpoint=self.server.endpoint) as client,
-            LocalArtifactStore(executed.out) as store,
-        ):
-            saved = open_experiment(store)
-            execution = ExperimentExecution(
-                saved.plan,
-                saved.plan.plan_hash,
-                "option",
-                store,
-                client,
-                command=None,
-                clock=FixedClock(),
-                experiment=saved,
-                repeats=repeats,
-            )
-            error = execution.run(content)
-        received = self.server.received[before:]
-        return Executed(
-            out=executed.out,
-            plan=saved.plan,
-            error=error,
-            execution=execution,
-            received=tuple(f"{r.method} {r.path}" for r in received),
-            bodies=tuple(json.loads(r.body) for r in received if r.path == "/screen/backtest"),
-            events=(),
-        )
 
 
 @pytest.fixture
-def experiments(tmp_path: Path) -> Iterator[Experiments]:
-    runner = Experiments(tmp_path)
-    yield runner
-    runner.server.close()
+def lab(tmp_path: Path, server: FakePortfolio123) -> Lab:
+    return Lab(tmp_path, server, reader=RELEASE_0_3_0)
 
 
-def ids(plan: PlanV1_1) -> list[str]:
-    return [case.case_id for case in plan.cases]
-
-
-def outcomes(executed: Executed) -> list[str]:
-    return [outcome for _, outcome in executed.execution.outcomes]
+def plan_of(name: str) -> tuple[bytes, PlanV1_1]:
+    path = EXPERIMENT_CONFIGS / name
+    return path.read_bytes(), experiment_plan(path)
 
 
 # A new experiment
 
 
 def test_every_case_is_sent_once_in_the_plans_order_after_one_authentication(
-    experiments: Experiments,
+    lab: Lab,
 ) -> None:
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", *(complete() for _ in range(5)))
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", *(response("complete.json") for _ in range(5)))
 
-    executed = experiments.run()
+    executed = lab.new()
 
     assert executed.error is None
-    assert executed.received == (AUTH, SEND, SEND, SEND, SEND, SEND)
+    assert executed.received == (AUTH, BACKTEST, BACKTEST, BACKTEST, BACKTEST, BACKTEST)
     plan = executed.plan
     assert list(executed.bodies) == [
         case.requests[0].params.model_dump(mode="json") for case in plan.cases
     ]
-    assert outcomes(executed) == ["succeeded"] * 5
-    records = [executed.record(case_id) for case_id in ids(plan)]
+    assert executed.outcomes == ["succeeded"] * 5
+    records = [executed.record(case_id, AttemptRecordV1_1) for case_id in case_ids(plan)]
     first = records[0].attempt_id
     assert [(r.session, r.sequence) for r in records] == [(1, n) for n in range(1, 6)]
     assert all(r.authenticated_by == first for r in records)
@@ -242,14 +97,16 @@ def test_every_case_is_sent_once_in_the_plans_order_after_one_authentication(
 
 
 def test_only_the_attempt_that_authenticates_has_an_authentication_record(
-    experiments: Experiments,
+    lab: Lab,
 ) -> None:
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", complete(), complete())
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", response("complete.json"), response("complete.json"))
 
-    executed = experiments.run("default-only.yaml")
+    executed = lab.new("default-only.yaml")
 
-    first, second = (executed.attempts(case_id)[0] for case_id in ids(executed.plan))
+    first, second = (
+        executed.attempt_directories(case_id)[0] for case_id in case_ids(executed.plan)
+    )
     authentication = AuthenticationRecord.model_validate_json(
         (first / "authenticating.json").read_bytes()
     )
@@ -267,10 +124,10 @@ def test_only_the_attempt_that_authenticates_has_an_authentication_record(
 
 
 def test_the_records_are_written_in_order_and_none_twice(
-    experiments: Experiments, monkeypatch: pytest.MonkeyPatch
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", complete(), complete())
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", response("complete.json"), response("complete.json"))
     wrapped: list[StorageFaults] = []
     received: dict[str, int] = {}
     """How many requests the server had received when each file was published."""
@@ -279,18 +136,18 @@ def test_the_records_are_written_in_order_and_none_twice(
         @override
         def write(self, path: str, data: bytes, *, logged_as: str | None = None) -> StoredFile:
             stored = super().write(path, data, logged_as=logged_as)
-            received[path] = len(experiments.server.received)
+            received[path] = len(lab.server.received)
             return stored
 
     def faults(store: LocalArtifactStore) -> StorageFaults:
         wrapped.append(Observed(store, monkeypatch))
         return wrapped[0]
 
-    executed = experiments.run("default-only.yaml", faults=faults)
+    executed = lab.new("default-only.yaml", wrap=faults)
 
-    baseline, default = (f"cases/{case_id}" for case_id in ids(executed.plan))
-    first = executed.attempts(ids(executed.plan)[0])[0].name
-    second = executed.attempts(ids(executed.plan)[1])[0].name
+    baseline, default = (f"cases/{case_id}" for case_id in case_ids(executed.plan))
+    first = executed.attempt_directories(case_ids(executed.plan)[0])[0].name
+    second = executed.attempt_directories(case_ids(executed.plan)[1])[0].name
     assert wrapped[0].published == [
         LOCK_PATH,
         "sessions/1/session.json",
@@ -325,28 +182,28 @@ def test_the_records_are_written_in_order_and_none_twice(
 
 
 def test_the_session_and_plan_records_and_the_manifest_account_for_every_file(
-    experiments: Experiments,
+    lab: Lab,
 ) -> None:
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", *(complete() for _ in range(5)))
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", *(response("complete.json") for _ in range(5)))
 
-    executed = experiments.run()
+    executed = lab.new()
 
     plan = executed.plan
     assert (executed.out / "plans/1/configuration.yaml").read_bytes() == (
-        CONFIGS / "example.yaml"
+        EXPERIMENT_CONFIGS / "example.yaml"
     ).read_bytes()
     assert PlanV1_1.model_validate_json((executed.out / "plans/1/plan.json").read_bytes()) == plan
     record = ExperimentRecord.model_validate_json(
         (executed.out / "plans/1/experiment.json").read_bytes()
     )
-    assert [case.case_id for case in record.planned_cases] == ids(plan)
+    assert [case.case_id for case in record.planned_cases] == case_ids(plan)
     assert record.plans[0].approval == "option" and record.plans[0].revises is None
     session = SessionRecord.model_validate_json(
         (executed.out / "sessions/1/session.json").read_bytes()
     )
     assert session.session == 1
-    manifest = executed.manifest
+    manifest = executed.manifest(1, ExperimentManifest)
     assert (manifest.outcome, manifest.error, manifest.synthetic, manifest.command) == (
         "completed",
         None,
@@ -388,19 +245,24 @@ def test_the_session_and_plan_records_and_the_manifest_account_for_every_file(
     ],
 )
 def test_a_failed_case_is_recorded_and_the_later_cases_still_run(
-    experiments: Experiments, reply: Reply, outcome: str, code: str
+    lab: Lab, reply: Reply, outcome: str, code: str
 ) -> None:
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply(
-        "/screen/backtest", complete(), complete(), reply, complete(), complete()
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply(
+        "/screen/backtest",
+        response("complete.json"),
+        response("complete.json"),
+        reply,
+        response("complete.json"),
+        response("complete.json"),
     )
 
-    executed = experiments.run()
+    executed = lab.new()
 
-    assert executed.received == (AUTH, SEND, SEND, SEND, SEND, SEND)
-    assert outcomes(executed) == ["succeeded", "succeeded", outcome, "succeeded", "succeeded"]
+    assert executed.received == (AUTH, BACKTEST, BACKTEST, BACKTEST, BACKTEST, BACKTEST)
+    assert executed.outcomes == ["succeeded", "succeeded", outcome, "succeeded", "succeeded"]
     holdings = executed.plan.cases[2]
-    record = executed.record(holdings.case_id)
+    record = executed.record(holdings.case_id, AttemptRecordV1_1)
     assert (record.outcome, record.possibly_charged) == (outcome, True)
     assert record.error is not None and record.error.code == code
     error = executed.error
@@ -409,28 +271,33 @@ def test_a_failed_case_is_recorded_and_the_later_cases_still_run(
     assert "a confirmed repeat sends it" in error.message
     assert holdings.case_key not in error.log_message
     assert holdings.case_id in error.log_message
-    manifest = executed.manifest
+    manifest = executed.manifest(1, ExperimentManifest)
     assert manifest.outcome == "partial"
     assert manifest.error is not None and manifest.error.code == "execution.partial"
     assert not (executed.out / "cases" / holdings.case_id / "normalized").exists()
 
 
-def test_after_a_403_the_next_case_authenticates_again(experiments: Experiments) -> None:
-    experiments.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
-    experiments.server.reply(
-        "/screen/backtest", complete(), Reply(403), complete(), complete(), complete()
+def test_after_a_403_the_next_case_authenticates_again(lab: Lab) -> None:
+    lab.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
+    lab.server.reply(
+        "/screen/backtest",
+        response("complete.json"),
+        Reply(403),
+        response("complete.json"),
+        response("complete.json"),
+        response("complete.json"),
     )
 
-    executed = experiments.run()
+    executed = lab.new()
 
-    assert executed.received == (AUTH, SEND, SEND, AUTH, SEND, SEND, SEND)
-    records = [executed.record(case_id) for case_id in ids(executed.plan)]
+    assert executed.received == (AUTH, BACKTEST, BACKTEST, AUTH, BACKTEST, BACKTEST, BACKTEST)
+    records = [executed.record(case_id, AttemptRecordV1_1) for case_id in case_ids(executed.plan)]
     assert records[1].error is not None and records[1].error.code == "provider.auth_failed"
     third = records[2]
     assert third.authenticated_by == third.attempt_id
-    assert [e.request for e in third.exchanges] == [AUTH, SEND]
+    assert [e.request for e in third.exchanges] == [AUTH, BACKTEST]
     assert records[3].authenticated_by == records[4].authenticated_by == third.attempt_id
-    assert executed.manifest.counts.authentication_calls == 2
+    assert executed.manifest(1, ExperimentManifest).counts.authentication_calls == 2
 
 
 @pytest.mark.parametrize(
@@ -440,22 +307,22 @@ def test_after_a_403_the_next_case_authenticates_again(experiments: Experiments)
         ([Reply(503)], [], (AUTH,), 0, "provider.unavailable"),
         (
             [AUTHENTICATED],
-            [complete(), Reply(402)],
-            (AUTH, SEND, SEND),
+            [response("complete.json"), Reply(402)],
+            (AUTH, BACKTEST, BACKTEST),
             1,
             "provider.quota_exceeded",
         ),
         (
             [AUTHENTICATED, Reply(401)],
-            [complete(), Reply(403)],
-            (AUTH, SEND, SEND, AUTH),
+            [response("complete.json"), Reply(403)],
+            (AUTH, BACKTEST, BACKTEST, AUTH),
             2,
             "provider.auth_failed",
         ),
         (
             [AUTHENTICATED, Reply(503)],
-            [complete(), Reply(403)],
-            (AUTH, SEND, SEND, AUTH),
+            [response("complete.json"), Reply(403)],
+            (AUTH, BACKTEST, BACKTEST, AUTH),
             2,
             "provider.unavailable",
         ),
@@ -469,23 +336,23 @@ def test_after_a_403_the_next_case_authenticates_again(experiments: Experiments)
     ],
 )
 def test_after_a_failure_every_later_case_would_get_no_later_case_starts(
-    experiments: Experiments,
+    lab: Lab,
     authentication: Sequence[Reply],
     backtest: Sequence[Reply],
     sent: tuple[str, ...],
     stopped_at: int,
     code: str,
 ) -> None:
-    experiments.server.reply("/auth", *authentication)
-    experiments.server.reply("/screen/backtest", *backtest)
+    lab.server.reply("/auth", *authentication)
+    lab.server.reply("/screen/backtest", *backtest)
 
-    executed = experiments.run()
+    executed = lab.new()
 
     assert executed.received == sent
     plan = executed.plan
-    stopped = executed.record(plan.cases[stopped_at].case_id)
+    stopped = executed.record(plan.cases[stopped_at].case_id, AttemptRecordV1_1)
     assert stopped.error is not None and stopped.error.code == code
-    later = outcomes(executed)[stopped_at + 1 :]
+    later = executed.outcomes[stopped_at + 1 :]
     assert later == ["not_yet_run"] * len(later)
     assert all(
         not (executed.out / "cases" / case.case_id).exists()
@@ -495,65 +362,65 @@ def test_after_a_failure_every_later_case_would_get_no_later_case_starts(
     assert error is not None and error.code == "execution.partial"
     assert f"The error was {code}." in error.message
     assert "resumes the experiment, and runs the cases not started" in error.message
-    assert executed.manifest.counts.cases.not_yet_run == len(later)
+    assert executed.manifest(1, ExperimentManifest).counts.cases.not_yet_run == len(later)
 
 
-def test_a_failed_authentication_is_counted_and_sends_nothing(experiments: Experiments) -> None:
-    experiments.server.reply("/auth", Reply(401))
+def test_a_failed_authentication_is_counted_and_sends_nothing(lab: Lab) -> None:
+    lab.server.reply("/auth", Reply(401))
 
-    executed = experiments.run("default-only.yaml")
+    executed = lab.new("default-only.yaml")
 
     baseline = executed.plan.cases[0]
-    (attempt,) = executed.attempts(baseline.case_id)
+    (attempt,) = executed.attempt_directories(baseline.case_id)
     assert (attempt / "authenticating.json").exists()
     assert not (attempt / "started.json").exists()
-    record = executed.record(baseline.case_id)
+    record = executed.record(baseline.case_id, AttemptRecordV1_1)
     assert (record.outcome, record.possibly_charged, record.authenticated_by) == (
         "failed",
         False,
         None,
     )
-    assert outcomes(executed) == ["failed", "not_yet_run"]
-    counts = executed.manifest.counts
+    assert executed.outcomes == ["failed", "not_yet_run"]
+    counts = executed.manifest(1, ExperimentManifest).counts
     assert (counts.provider_requests, counts.authentication_calls) == (0, 1)
 
 
 def test_a_response_that_fails_validation_leaves_its_case_failed_without_tables(
-    experiments: Experiments,
+    lab: Lab,
 ) -> None:
     # From D-45, such a case awaits a repeat, which names its succeeded attempt: 0.3.0 had read
     # it as complete, so this test said `execution.partial` gave no repeat for it.
-    experiments.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/auth", AUTHENTICATED)
     invalid = Reply(200, (RESPONSES / "invalid-structure.json").read_bytes())
-    experiments.server.reply("/screen/backtest", complete(), invalid)
+    lab.server.reply("/screen/backtest", response("complete.json"), invalid)
 
-    executed = experiments.run("default-only.yaml")
+    executed = lab.new("default-only.yaml")
 
     _, default = executed.plan.cases
-    record = executed.record(default.case_id)
+    record = executed.record(default.case_id, AttemptRecordV1_1)
     assert record.outcome == "succeeded"
-    assert outcomes(executed) == ["succeeded", "failed"]
+    assert executed.outcomes == ["succeeded", "failed"]
     assert not (executed.out / "cases" / default.case_id / "normalized").exists()
     error = executed.error
     assert error is not None
     assert f"`{default.case_key}`, failed (provider.response_invalid)" in error.message
     assert "a confirmed repeat sends it" in error.message
-    assert executed.manifest.counts.attempts.succeeded == 2
-    assert executed.execution.repeat_attempts == {default.case_id: record.attempt_id}
+    assert executed.manifest(1, ExperimentManifest).counts.attempts.succeeded == 2
+    assert executed.executed.repeat_attempts == {default.case_id: record.attempt_id}
 
 
 # Each case's tables
 
 
 def test_each_succeeded_case_has_its_tables_with_its_plans_original_values(
-    experiments: Experiments,
+    lab: Lab,
 ) -> None:
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", *(complete() for _ in range(5)))
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", *(response("complete.json") for _ in range(5)))
 
-    executed = experiments.run()
+    executed = lab.new()
 
-    manifest = executed.manifest
+    manifest = executed.manifest(1, ExperimentManifest)
     by_path = {artifact.path: artifact.artifact_id for artifact in manifest.artifacts}
     configuration = by_path["plans/1/configuration.yaml"]
     expected = {
@@ -572,12 +439,12 @@ def test_each_succeeded_case_has_its_tables_with_its_plans_original_values(
         holdings = rows["max_holdings"]
         assert (holdings.original_key, holdings.original_value) == expected[case.case_key]
         assert {row.source_artifact for row in settings} == {configuration}
-        (response,) = (
+        (saved,) = (
             path
             for path in by_path
             if path.startswith(f"cases/{case.case_id}/") and path.endswith("response.json")
         )
-        assert {row.source_artifact for row in metrics} == {by_path[response]}
+        assert {row.source_artifact for row in metrics} == {by_path[saved]}
     default = executed.plan.cases[3]
     rows = read_settings_csv(
         (executed.out / f"cases/{default.case_id}/normalized/settings.csv").read_bytes(), "s"
@@ -610,7 +477,7 @@ def test_the_demos_client_writes_a_synthetic_experiment_that_sends_nothing(
         ).run(content)
 
     assert error is None
-    assert [e.request for e in client.exchanges] == [AUTH, SEND, SEND]
+    assert [e.request for e in client.exchanges] == [AUTH, BACKTEST, BACKTEST]
     manifest = ExperimentManifest.model_validate_json(
         (out / "sessions/1/manifest.json").read_bytes()
     )
@@ -629,7 +496,7 @@ def test_the_demos_client_needs_no_approval_and_nothing_else_does(tmp_path: Path
     store = LocalArtifactStore(tmp_path / "out")
     with pytest.raises(ValueError, match="needs no approval"):
         ExperimentExecution(plan, plan.plan_hash, "option", store, synthetic, command=None)
-    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
+    credentials = CREDENTIALS
     with (
         P123ScreenBacktestClient(credentials, endpoint="http://127.0.0.1:9") as real,
         pytest.raises(ValueError, match="needs no approval"),
@@ -668,7 +535,7 @@ def test_a_clock_that_moves_backward_during_an_attempt_still_ends_it_with_its_re
         ).run(content)
 
     assert error is None
-    for case_id in ids(plan):
+    for case_id in case_ids(plan):
         (attempt,) = (out / "cases" / case_id / "attempts").iterdir()
         record = AttemptRecordV1_1.model_validate_json((attempt / "attempt.json").read_bytes())
         assert record.outcome == "succeeded"
@@ -680,13 +547,13 @@ def test_a_clock_that_moves_backward_during_an_attempt_still_ends_it_with_its_re
 
 
 def test_execution_needs_the_plans_own_hash_and_writes_nothing_without_it(
-    experiments: Experiments,
+    lab: Lab,
 ) -> None:
     content, plan = plan_of("example.yaml")
     other_content, other = plan_of("default-only.yaml")
-    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-    store = LocalArtifactStore(experiments.tmp / "out")
-    with P123ScreenBacktestClient(credentials, endpoint=experiments.server.endpoint) as client:
+    credentials = CREDENTIALS
+    store = LocalArtifactStore(lab.out)
+    with P123ScreenBacktestClient(credentials, endpoint=lab.server.endpoint) as client:
         with pytest.raises(TrialFolioError) as raised:
             ExperimentExecution(plan, other.plan_hash, "option", store, client, command=None)
         assert raised.value.code == "plan.approval_required"
@@ -694,39 +561,38 @@ def test_execution_needs_the_plans_own_hash_and_writes_nothing_without_it(
         with pytest.raises(ValueError, match="doesn't give the plan"):
             execution.run(other_content)
 
-    assert not (experiments.tmp / "out").exists()
-    assert experiments.server.received == ()
+    assert not (lab.out).exists()
+    assert lab.server.received == ()
     assert content != other_content
 
 
 def test_a_directory_that_isnt_empty_is_refused_before_anything_is_sent(
-    experiments: Experiments,
+    lab: Lab,
 ) -> None:
-    out = experiments.tmp / "out-1"
+    out = lab.out
     out.mkdir()
     (out / "notes.txt").write_bytes(b"kept\n")
 
-    with pytest.raises(TrialFolioError) as raised:
-        experiments.run()
+    ran = lab.new()
 
-    assert raised.value.code == "output.not_empty"
+    assert ran.raised and ran.refused("output.not_empty")
     assert sorted(path.name for path in out.iterdir()) == ["notes.txt"]
-    assert experiments.server.received == ()
+    assert lab.server.received == ()
 
 
 # The lock
 
 
-def test_the_lock_is_held_while_the_experiment_runs(experiments: Experiments) -> None:
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", complete(), complete())
+def test_the_lock_is_held_while_the_experiment_runs(lab: Lab) -> None:
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", response("complete.json"), response("complete.json"))
     found: list[str] = []
 
     class Watching(list[ProgressEvent]):
         def append(self, event: ProgressEvent) -> None:
             super().append(event)
             if isinstance(event, AttemptStarted):
-                other = LocalArtifactStore(experiments.tmp / "out-1")
+                other = LocalArtifactStore(lab.out)
                 try:
                     other.lock(LOCK_PATH)
                     found.append("acquired")
@@ -734,7 +600,7 @@ def test_the_lock_is_held_while_the_experiment_runs(experiments: Experiments) ->
                 except TrialFolioError as error:
                     found.append(error.code)
 
-    executed = experiments.run("default-only.yaml", progress=Watching())
+    executed = lab.new("default-only.yaml", progress=Watching().append)
 
     assert executed.error is None
     assert found == ["experiment.locked", "experiment.locked"]
@@ -747,10 +613,10 @@ def test_the_lock_is_held_while_the_experiment_runs(experiments: Experiments) ->
 
 
 def test_an_interrupt_ends_the_session_without_its_manifest_and_keeps_its_records(
-    experiments: Experiments, monkeypatch: pytest.MonkeyPatch
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", *(complete() for _ in range(5)))
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", *(response("complete.json") for _ in range(5)))
     wrapped: list[StorageFaults] = []
 
     def faults(store: LocalArtifactStore) -> StorageFaults:
@@ -762,108 +628,108 @@ def test_an_interrupt_ends_the_session_without_its_manifest_and_keeps_its_record
         )
         return wrapped[0]
 
-    executed = experiments.run(faults=faults)
+    executed = lab.new(wrap=faults)
 
     error = executed.error
     assert error is not None and error.code == "command.interrupted"
     assert "The session has no manifest" in error.message
-    assert executed.received == (AUTH, SEND, SEND)
+    assert executed.received == (AUTH, BACKTEST, BACKTEST)
     assert not (executed.out / "sessions/1/manifest.json").exists()
     assert not (executed.out / "sessions/1/report.html").exists()
     published = wrapped[0].published
     assert len(published) == len(set(published))
     second = executed.plan.cases[1].case_id
-    assert executed.record(second).outcome == "succeeded"
+    assert executed.record(second, AttemptRecordV1_1).outcome == "succeeded"
     assert (executed.out / "cases" / second / "normalized/metrics.csv").exists()
     assert not (executed.out / "cases" / second / "normalized/settings.csv").exists()
 
 
 @pytest.mark.parametrize("name", ["/sessions/1/session.json", "/plans/1/experiment.json"])
 def test_a_storage_failure_before_the_plan_is_recorded_sends_nothing(
-    experiments: Experiments, monkeypatch: pytest.MonkeyPatch, name: str
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
     def faults(store: LocalArtifactStore) -> StorageFaults:
         faulted = StorageFaults(store, monkeypatch)
         faulted.fail_os(name)
         return faulted
 
-    executed = experiments.run(faults=faults)
+    executed = lab.new(wrap=faults)
 
     error = executed.error
     assert error is not None and error.code == "storage.write_failed"
     assert "Nothing was sent" in error.message
     assert "remove the directory, and run the command again" in error.message
     assert executed.received == ()
-    assert executed.execution.manifest is None
+    assert executed.executed.manifest is None
 
 
 def test_a_storage_failure_after_a_200_leaves_the_case_unknown_without_a_manifest(
-    experiments: Experiments, monkeypatch: pytest.MonkeyPatch
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", complete(), complete())
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", response("complete.json"), response("complete.json"))
 
     def faults(store: LocalArtifactStore) -> StorageFaults:
         faulted = StorageFaults(store, monkeypatch)
         faulted.fail_os("response.json")
         return faulted
 
-    executed = experiments.run("default-only.yaml", faults=faults)
+    executed = lab.new("default-only.yaml", wrap=faults)
 
     error = executed.error
     assert error is not None and error.code == "storage.write_failed"
-    assert executed.received == (AUTH, SEND)
-    record = executed.record(executed.plan.cases[0].case_id)
+    assert executed.received == (AUTH, BACKTEST)
+    record = executed.record(executed.plan.cases[0].case_id, AttemptRecordV1_1)
     assert (record.outcome, record.possibly_charged) == ("unknown", True)
     assert "may have been charged" in error.message
     assert not (executed.out / "sessions/1/manifest.json").exists()
 
 
 def test_an_attempt_record_that_wasnt_written_ends_the_session_without_its_manifest(
-    experiments: Experiments, monkeypatch: pytest.MonkeyPatch
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A defect found by PR #66's review: the session went on, and wrote a manifest that counted
     # the attempt as succeeded, without its attempt record or its case's tables.
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", complete(), complete())
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", response("complete.json"), response("complete.json"))
 
     def faults(store: LocalArtifactStore) -> StorageFaults:
         faulted = StorageFaults(store, monkeypatch)
         faulted.fail_before("attempt.json", RuntimeError())
         return faulted
 
-    executed = experiments.run("default-only.yaml", faults=faults)
+    executed = lab.new("default-only.yaml", wrap=faults)
 
     error = executed.error
     assert error is not None and error.code == "internal.unexpected"
-    assert executed.received == (AUTH, SEND)
-    first, second = ids(executed.plan)
-    (attempt,) = executed.attempts(first)
+    assert executed.received == (AUTH, BACKTEST)
+    first, second = case_ids(executed.plan)
+    (attempt,) = executed.attempt_directories(first)
     assert (attempt / "started.json").is_file()
     assert not (attempt / "attempt.json").exists()
     assert not (executed.out / "cases" / first / "normalized").exists()
     assert not (executed.out / "cases" / second).exists()
     assert "its start record reads as running" in error.message
     assert "The session has no manifest" in error.message
-    assert executed.execution.manifest is None
+    assert executed.executed.manifest is None
     assert not (executed.out / "sessions/1/manifest.json").exists()
     assert not (executed.out / "sessions/1/report.html").exists()
     # A running start record counts as unknown. A defect found by PR #66's review: the outcomes
     # read the attempt record that wasn't written, and gave the case as succeeded.
-    assert outcomes(executed) == ["unknown", "not_yet_run"]
+    assert executed.outcomes == ["unknown", "not_yet_run"]
 
 
 @pytest.mark.parametrize("records", ["authentication-record", "no-record"])
 def test_an_attempt_without_a_start_record_or_an_attempt_record_reads_as_its_records_do(
-    experiments: Experiments, monkeypatch: pytest.MonkeyPatch, records: str
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, records: str
 ) -> None:
     # As a resume will count it (the cases that are due): with only its authentication record,
     # failed and not possibly charged, and with no record, as no attempt. A defect found by PR
     # #66's review: the outcomes read the attempt record that wasn't written.
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", complete(), complete())
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", response("complete.json"), response("complete.json"))
     _, plan = plan_of("default-only.yaml")
-    first, second = ids(plan)
+    first, second = case_ids(plan)
     wrapped: list[StorageFaults] = []
 
     def faults(store: LocalArtifactStore) -> StorageFaults:
@@ -884,23 +750,23 @@ def test_an_attempt_without_a_start_record_or_an_attempt_record_reads_as_its_rec
                 wrapped[0].fail_before("request.json", RuntimeError())
                 wrapped[0].fail_before("attempt.json", RuntimeError())
 
-    executed = experiments.run("default-only.yaml", faults=faults, progress=Arming())
+    executed = lab.new("default-only.yaml", wrap=faults, progress=Arming().append)
 
     error = executed.error
     assert error is not None and error.code == "internal.unexpected"
-    assert executed.execution.manifest is None
+    assert executed.executed.manifest is None
     if records == "authentication-record":
         assert executed.received == (AUTH,)
-        (attempt,) = executed.attempts(first)
+        (attempt,) = executed.attempt_directories(first)
         assert sorted(path.name for path in attempt.iterdir()) == [
             "authenticating.json",
             "request.json",
         ]
-        assert outcomes(executed) == ["failed", "not_yet_run"]
+        assert executed.outcomes == ["failed", "not_yet_run"]
     else:
-        assert executed.received == (AUTH, SEND)
+        assert executed.received == (AUTH, BACKTEST)
         assert not (executed.out / "cases" / second).exists()
-        assert outcomes(executed) == ["succeeded", "not_yet_run"]
+        assert executed.outcomes == ["succeeded", "not_yet_run"]
 
 
 @pytest.mark.parametrize(
@@ -912,36 +778,38 @@ def test_an_attempt_without_a_start_record_or_an_attempt_record_reads_as_its_rec
     ],
 )
 def test_a_file_published_before_an_unexpected_failure_is_in_the_manifest(
-    experiments: Experiments, monkeypatch: pytest.MonkeyPatch, name: str, role: str, code: str
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, name: str, role: str, code: str
 ) -> None:
     # The attempt is recorded, and the session goes on to its manifest, which lists every file of
     # the experiment's records. A defect found by PR #66's review: it left out the file.
-    experiments.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", complete(), complete())
+    lab.server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
+    lab.server.reply("/screen/backtest", response("complete.json"), response("complete.json"))
 
     def faults(store: LocalArtifactStore) -> StorageFaults:
         faulted = StorageFaults(store, monkeypatch)
         faulted.fail_after(name, RuntimeError())
         return faulted
 
-    executed = experiments.run("default-only.yaml", faults=faults)
+    executed = lab.new("default-only.yaml", wrap=faults)
 
     error = executed.error
     assert error is not None and error.code == "execution.partial"
-    first, _ = ids(executed.plan)
-    record = executed.record(first)
+    first, _ = case_ids(executed.plan)
+    record = executed.record(first, AttemptRecordV1_1)
     assert record.error is not None and record.error.code == code
     # Only a write that completed is referenced: a 200 whose response.json was published before
     # the failure is unknown, as one whose save failed.
     assert record.response is None
     assert (record.request is None) == (name != "response.json")
-    assert outcomes(executed) == [
+    assert executed.outcomes == [
         "unknown" if name == "response.json" else "failed",
         "succeeded",
     ]
-    (attempt,) = executed.attempts(first)
+    (attempt,) = executed.attempt_directories(first)
     content = (attempt / name).read_bytes()
-    listed = {artifact.path: artifact for artifact in executed.manifest.artifacts}
+    listed = {
+        artifact.path: artifact for artifact in executed.manifest(1, ExperimentManifest).artifacts
+    }
     path = (attempt / name).relative_to(executed.out).as_posix()
     assert (listed[path].role, listed[path].artifact_id, listed[path].size) == (
         role,
@@ -974,41 +842,41 @@ def test_a_file_published_before_an_unexpected_failure_is_in_the_manifest(
     ids=["interrupt", "storage-failure"],
 )
 def test_a_start_record_published_before_a_failure_agrees_with_the_attempt_record(
-    experiments: Experiments, monkeypatch: pytest.MonkeyPatch, failure: BaseException, code: str
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, failure: BaseException, code: str
 ) -> None:
-    experiments.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/auth", AUTHENTICATED)
 
     def faults(store: LocalArtifactStore) -> StorageFaults:
         faulted = StorageFaults(store, monkeypatch)
         faulted.fail_after("started.json", failure)
         return faulted
 
-    executed = experiments.run("default-only.yaml", faults=faults)
+    executed = lab.new("default-only.yaml", wrap=faults)
 
     error = executed.error
     assert error is not None and error.code == code
     assert executed.received == (AUTH,)
-    (attempt,) = executed.attempts(ids(executed.plan)[0])
+    (attempt,) = executed.attempt_directories(case_ids(executed.plan)[0])
     start = StartRecordV1_1.model_validate_json((attempt / "started.json").read_bytes())
     record = AttemptRecordV1_1.model_validate_json((attempt / "attempt.json").read_bytes())
     # An attempt record has authenticated_by exactly when it has a start record, and the same.
     assert record.authenticated_by == start.authenticated_by == start.attempt_id
     assert (record.outcome, record.possibly_charged) == ("failed", False)
-    (result,) = executed.execution.attempts
+    (result,) = executed.executed.attempts
     assert result.start == start
     assert [file.role for file in result.files].count("start_record") == 1
     assert not (executed.out / "sessions/1/manifest.json").exists()
 
 
 def test_an_interrupt_once_the_first_plan_is_published_leaves_it_to_resume(
-    experiments: Experiments, monkeypatch: pytest.MonkeyPatch
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def faults(store: LocalArtifactStore) -> StorageFaults:
         faulted = StorageFaults(store, monkeypatch)
         faulted.fail_after("/plans/1/experiment.json", KeyboardInterrupt())
         return faulted
 
-    executed = experiments.run(faults=faults)
+    executed = lab.new(wrap=faults)
 
     error = executed.error
     assert error is not None and error.code == "command.interrupted"
@@ -1020,29 +888,29 @@ def test_an_interrupt_once_the_first_plan_is_published_leaves_it_to_resume(
 
 
 def test_a_failed_authentication_at_the_last_case_stops_nothing_else(
-    experiments: Experiments,
+    lab: Lab,
 ) -> None:
     # The baseline's 403 drops the token, so the default case, the last, authenticates again,
     # and gets a 401. D-32's stop applies only when a later case remains.
-    experiments.server.reply("/auth", AUTHENTICATED, Reply(401))
-    experiments.server.reply("/screen/backtest", Reply(403))
+    lab.server.reply("/auth", AUTHENTICATED, Reply(401))
+    lab.server.reply("/screen/backtest", Reply(403))
 
-    executed = experiments.run("default-only.yaml")
+    executed = lab.new("default-only.yaml")
 
-    assert executed.received == (AUTH, SEND, AUTH)
-    assert outcomes(executed) == ["failed", "failed"]
+    assert executed.received == (AUTH, BACKTEST, AUTH)
+    assert executed.outcomes == ["failed", "failed"]
     error = executed.error
     assert error is not None and error.code == "execution.partial"
     assert "no later case started" not in error.message
 
 
-def test_a_quota_refusal_of_the_last_case_stops_nothing_else(experiments: Experiments) -> None:
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", complete(), Reply(402))
+def test_a_quota_refusal_of_the_last_case_stops_nothing_else(lab: Lab) -> None:
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", response("complete.json"), Reply(402))
 
-    executed = experiments.run("default-only.yaml")
+    executed = lab.new("default-only.yaml")
 
-    assert outcomes(executed) == ["succeeded", "failed"]
+    assert executed.outcomes == ["succeeded", "failed"]
     error = executed.error
     assert error is not None and error.code == "execution.partial"
     assert "provider.quota_exceeded" in error.message
@@ -1053,41 +921,39 @@ def test_a_quota_refusal_of_the_last_case_stops_nothing_else(experiments: Experi
 
 
 def test_before_each_send_the_budget_counts_every_earlier_sessions_requests(
-    experiments: Experiments,
+    lab: Lab,
 ) -> None:
     # default-only.yaml's budget is its 2 requests. A 503 leaves the baseline unknown, and the
     # other case's request spends the rest, so a confirmed repeat of the baseline isn't started.
-    experiments.server.reply("/auth", AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", Reply(503), complete())
-    first = experiments.run("default-only.yaml")
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", Reply(503), response("complete.json"))
+    first = lab.new("default-only.yaml")
     baseline = first.plan.cases[0].case_id
-    unknown = first.record(baseline)
+    unknown = first.record(baseline, AttemptRecordV1_1)
 
-    resumed = experiments.resume(
-        first, "default-only.yaml", repeats=[Repeat(baseline, unknown.attempt_id)]
-    )
+    resumed = lab.resume("default-only.yaml", repeats=[Repeat(baseline, unknown.attempt_id)])
 
     error = resumed.error
     assert error is not None and error.code == "execution.partial"
     assert "budget couldn't cover the next case" in error.message
     assert resumed.received == ()
-    counts = resumed.manifest_of(2).counts
+    counts = resumed.manifest(2, ExperimentManifest).counts
     assert (counts.provider_requests, counts.authentication_calls) == (2, 1)
     assert counts.budget.provider_requests == 2
 
 
 def test_before_each_authentication_call_the_budget_counts_every_earlier_sessions_calls(
-    experiments: Experiments,
+    lab: Lab,
 ) -> None:
     # With each run's authentication refused, two runs count two authentication calls and no
     # request, which spends default-only.yaml's budget of 2, so a third makes no call.
-    experiments.server.reply("/auth", Reply(401), Reply(401), AUTHENTICATED)
-    experiments.server.reply("/screen/backtest", complete(), complete())
-    first = experiments.run("default-only.yaml")
-    second = experiments.resume(first, "default-only.yaml")
+    lab.server.reply("/auth", Reply(401), Reply(401), AUTHENTICATED)
+    lab.server.reply("/screen/backtest", response("complete.json"), response("complete.json"))
+    first = lab.new("default-only.yaml")
+    second = lab.resume("default-only.yaml")
     assert first.received == second.received == (AUTH,)
 
-    third = experiments.resume(first, "default-only.yaml")
+    third = lab.resume("default-only.yaml")
 
     error = third.error
     assert error is not None and error.code == "execution.partial"
@@ -1095,6 +961,6 @@ def test_before_each_authentication_call_the_budget_counts_every_earlier_session
     assert "The experiment's budget of authentication calls is spent" in error.message
     assert "budget couldn't cover the next case" not in error.message
     assert third.received == ()
-    counts = third.manifest_of(3).counts
+    counts = third.manifest(3, ExperimentManifest).counts
     assert (counts.provider_requests, counts.authentication_calls) == (0, 2)
     assert (counts.cases.failed, counts.cases.not_yet_run) == (1, 1)

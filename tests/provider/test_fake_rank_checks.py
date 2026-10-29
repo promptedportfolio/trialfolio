@@ -6,8 +6,9 @@ that uses it, that no `rank_update` carries an `id`, or any parameter but `type`
 `rankingMethod`, and `currency`, in that order, with a method of 2 or 4, and that no request goes
 to a path Trial Folio doesn't send. Each break is sent to the server directly, in a test of its
 own, as its exact text, so a check that compared parsed objects, ignoring the keys' order, would
-let one through; and a nested run shows that a provider test using the `server` fixture fails at
-its end, so a check that weren't run there would let them all through.
+let one through; and a nested run shows that a test using the `server` fixture, which
+`tests/conftest.py` gives every directory, fails at its end, so a check that weren't run there
+would let them all through.
 """
 
 import json
@@ -18,11 +19,9 @@ from pathlib import Path
 import pytest
 import requests
 
-from tests.support import canaries
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
-from trialfolio.provider import Credentials, P123ScreenBacktestClient
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from tests.support.fake_portfolio123 import AUTHENTICATED, CREDENTIALS, FakePortfolio123, Reply
+from tests.support.paths import ROOT
+from trialfolio.provider import P123ScreenBacktestClient
 
 GOOD: dict[str, object] = {
     "type": "stock",
@@ -84,10 +83,9 @@ def test_the_end_of_test_check_fails_on_each_break(name: str) -> None:
 def test_a_body_as_rank_update_sends_it_passes() -> None:
     server = FakePortfolio123()
     try:
-        server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+        server.reply("/auth", AUTHENTICATED)
         server.reply("/rank", Reply(200, b"{}"), method="POST")
-        credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-        with P123ScreenBacktestClient(credentials, endpoint=server.endpoint) as client:
+        with P123ScreenBacktestClient(CREDENTIALS, endpoint=server.endpoint) as client:
             client.authenticate()
             client.rank_update(GOOD)
     finally:
@@ -113,7 +111,7 @@ def test_get_rank_with_a_query_is_a_request_trial_folio_sends() -> None:
 PROBE = """\
 import requests
 
-from tests.provider.conftest import server  # noqa: F401 - the provider tests' own fixture
+from tests.conftest import server  # noqa: F401 - the tests' own fixture
 
 
 def test_probe(server):
@@ -139,12 +137,12 @@ def test_a_test_using_the_server_fails_at_its_end(tmp_path: Path, body: str, fai
             "-p",
             "no:cacheprovider",
             "-c",
-            str(REPO_ROOT / "pyproject.toml"),
+            str(ROOT / "pyproject.toml"),
             "--rootdir",
-            str(REPO_ROOT),
+            str(ROOT),
             str(probe),
         ],
-        cwd=REPO_ROOT,
+        cwd=ROOT,
         capture_output=True,
         text=True,
         timeout=120,

@@ -20,10 +20,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.core.conftest import snapshot
+from tests.support.directories import snapshot
 from trialfolio.errors import TrialFolioError
-from trialfolio.experiment_execution import LOCK_LINE, LOCK_PATH
-from trialfolio.storage import LocalArtifactStore
+from trialfolio.storage import LOCK_LINE, LOCK_PATH, LocalArtifactStore
 
 
 def held_elsewhere(root: Path) -> str:

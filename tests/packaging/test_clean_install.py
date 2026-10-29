@@ -33,8 +33,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.packaging.conftest import ROOT, run_uv
 from tests.support.html_report import parse
+from tests.support.paths import EXPERIMENT_CONFIGS, ROOT
+from tests.support.uv import run_uv
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
 from trialfolio.configuration import (
     read_experiment_configuration,
@@ -200,7 +201,7 @@ def test_the_installed_review_compares_two_demo_runs_offline(
     assert not (tmp_path / "logs").exists()
 
 
-EXAMPLE = ROOT / "tests" / "fixtures" / "experiment-configs" / "example.yaml"
+EXAMPLE = EXPERIMENT_CONFIGS / "example.yaml"
 
 
 def test_the_installed_run_of_an_experiment_without_approval_gives_its_plan_and_sends_nothing(
@@ -244,7 +245,7 @@ def test_the_installed_run_of_an_experiment_without_approval_gives_its_plan_and_
     assert "Budget: at most 6 provider requests" in result.stderr
 
 
-RANKING_EXAMPLE = ROOT / "tests" / "fixtures" / "experiment-configs" / "ranking-example.yaml"
+RANKING_EXAMPLE = EXPERIMENT_CONFIGS / "ranking-example.yaml"
 
 
 def test_the_installed_run_of_a_ranking_experiment_without_approval_gives_its_plan(

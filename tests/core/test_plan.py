@@ -18,9 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.core.conftest import execute_run
-from tests.support import canaries
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.fake_portfolio123 import AUTHENTICATED, CREDENTIALS, FakePortfolio123, Reply
+from tests.support.paths import RESPONSES, ROOT, SCREEN_CONFIGS, screen_config
+from tests.support.plans import screen_plan, verified_versions
+from tests.support.screen_runs import execute_run
 from trialfolio.canonical import canonical_json, sha256_hex
 from trialfolio.configuration import read_screen_configuration
 from trialfolio.contracts.attempt import AttemptRecord, StartRecord
@@ -29,34 +30,24 @@ from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.screen_configuration import ScreenConfiguration
 from trialfolio.errors import TrialFolioError
 from trialfolio.planning import (
-    VERIFIED_VERSIONS,
     Versions,
     build_plan,
     case_id,
     check_approval,
     plan_hash,
 )
-from trialfolio.provider import Credentials, DecodedResponse, P123ScreenBacktestClient
+from trialfolio.provider import DecodedResponse, P123ScreenBacktestClient
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-FIXTURES = REPO_ROOT / "tests" / "fixtures" / "screen-configs"
-RESPONSES = REPO_ROOT / "tests" / "fixtures" / "responses"
-
-VERIFIED = Versions(
-    trialfolio="0.1.0",
-    p123api=VERIFIED_VERSIONS["p123api"][0],
-    requests=VERIFIED_VERSIONS["requests"][0],
-    urllib3=VERIFIED_VERSIONS["urllib3"][0],
-)
+VERIFIED = verified_versions("0.1.0")
 
 
 def read_fixture(name: str) -> ScreenConfiguration:
-    path = FIXTURES / name
+    path = screen_config(name)
     return read_screen_configuration(path.read_bytes(), path.name)
 
 
 def plan_for(name: str) -> Plan:
-    return build_plan(read_fixture(name), VERIFIED)
+    return screen_plan(screen_config(name), VERIFIED)
 
 
 def plan_from_text(text: str) -> Plan:
@@ -220,7 +211,7 @@ def test_the_plan_hash_is_the_hash_of_the_canonical_plan_without_it() -> None:
 
 
 def example_text() -> str:
-    return (FIXTURES / "formula.yaml").read_text(encoding="utf-8")
+    return (SCREEN_CONFIGS / "formula.yaml").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -256,7 +247,9 @@ def test_a_version_change_changes_the_hash() -> None:
 def test_the_plan_hash_is_the_same_in_another_process() -> None:
     # Two hash seeds, so an order taken from a set would show.
     script = (
-        "from tests.core.test_plan import plan_for\nprint(plan_for('formula.yaml').plan_hash)\n"
+        "from tests.support.paths import screen_config\n"
+        "from tests.support.plans import screen_plan, verified_versions\n"
+        "print(screen_plan(screen_config('formula.yaml'), verified_versions('0.1.0')).plan_hash)\n"
     )
     hashes = {
         subprocess.run(
@@ -264,7 +257,7 @@ def test_the_plan_hash_is_the_same_in_another_process() -> None:
             capture_output=True,
             text=True,
             check=True,
-            cwd=REPO_ROOT,
+            cwd=ROOT,
             env=os.environ | {"PYTHONHASHSEED": seed},
         ).stdout.strip()
         for seed in ("1", "2")
@@ -288,7 +281,7 @@ def test_a_run_saves_a_plan_that_recomputes_to_its_hash_and_its_records_name_it(
 ) -> None:
     out = tmp_path / "out"
     plan = execute_run(
-        (FIXTURES / fixture).read_bytes(), out, (RESPONSES / "complete.json").read_bytes()
+        (SCREEN_CONFIGS / fixture).read_bytes(), out, (RESPONSES / "complete.json").read_bytes()
     )
 
     saved = Plan.model_validate_json((out / "plan.json").read_bytes())
@@ -336,12 +329,10 @@ def test_the_request_body_writes_slippage_as_params_does(fixture: str, text: byt
     params = params_of(plan_for(fixture))
     assert b'"slippage": ' + text in json.dumps(params).encode()
     server = FakePortfolio123()
-    server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+    server.reply("/auth", AUTHENTICATED)
     server.reply("/screen/backtest", Reply(200, b"{}"))
     try:
-        with P123ScreenBacktestClient(
-            Credentials(canaries.API_ID, canaries.API_KEY), endpoint=server.endpoint
-        ) as client:
+        with P123ScreenBacktestClient(CREDENTIALS, endpoint=server.endpoint) as client:
             client.authenticate()
             assert isinstance(client.screen_backtest(params), DecodedResponse)
     finally:

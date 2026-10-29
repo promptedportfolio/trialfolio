@@ -26,28 +26,16 @@ from pathlib import Path
 
 import pytest
 
-from tests.support import canaries
 from tests.support.clock import FixedClock, no_wait
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
-from trialfolio.configuration import (
-    read_experiment_configuration_v1_1,
-    read_screen_configuration,
-    read_screen_configuration_v1_1,
-)
-from trialfolio.contracts.experiment_plan import PlanV1_3
+from tests.support.fake_portfolio123 import CREDENTIALS, FakePortfolio123, serve_success
+from tests.support.paths import EXPERIMENT_CONFIGS, screen_config
+from tests.support.plans import ranked_experiment, ranked_screen, screen_plan
 from trialfolio.contracts.manifest import CommandRecord
-from trialfolio.contracts.plan import PlanV1_2
 from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 from trialfolio.errors import TrialFolioError
 from trialfolio.execution import Execution
 from trialfolio.experiment_execution import ExperimentExecution
-from trialfolio.planning import (
-    build_experiment_plan_v1_1,
-    build_plan,
-    build_plan_v1_1,
-    installed_versions,
-)
-from trialfolio.provider import Credentials, P123ScreenBacktestClient, ScreenBacktestClient
+from trialfolio.provider import P123ScreenBacktestClient, ScreenBacktestClient
 from trialfolio.ranking_lock import LOCK_FILE, RankingLock, ranking_lock_path
 from trialfolio.storage import LocalArtifactStore, StoredFile
 
@@ -56,9 +44,7 @@ if sys.platform != "win32":
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="flock is Linux's and macOS's")
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-SCREEN = FIXTURES / "screen-configs" / "definition.yaml"
-EXPERIMENT = FIXTURES / "experiment-configs" / "ranking-example.yaml"
+EXPERIMENT = EXPERIMENT_CONFIGS / "ranking-example.yaml"
 COMMAND = CommandRecord(name="run", options={}, started_at=FixedClock()())
 
 
@@ -114,22 +100,6 @@ def without_trial_folio_variables(monkeypatch: pytest.MonkeyPatch) -> None:
     # The core reads no environment variable: its caller gives it the lock's file.
     for name in [name for name in os.environ if name.startswith("TRIALFOLIO_")]:
         monkeypatch.delenv(name)
-
-
-def screen() -> tuple[bytes, bytes, PlanV1_2]:
-    content = SCREEN.read_bytes()
-    read = read_screen_configuration_v1_1(content, SCREEN.name, SCREEN)
-    plan = build_plan_v1_1(read, installed_versions())
-    assert isinstance(plan, PlanV1_2) and read.definition is not None
-    return content, read.definition.content, plan
-
-
-def experiment() -> tuple[bytes, bytes, PlanV1_3]:
-    content = EXPERIMENT.read_bytes()
-    read = read_experiment_configuration_v1_1(content, EXPERIMENT.name, EXPERIMENT)
-    plan = build_experiment_plan_v1_1(read, installed_versions())
-    assert isinstance(plan, PlanV1_3) and read.definition is not None
-    return content, read.definition.content, plan
 
 
 @posix_only
@@ -378,7 +348,8 @@ def test_the_default_directories_are_checked_as_paths(
 def test_a_screen_run_holds_the_lock_from_before_its_first_write_until_it_ends(
     tmp_path: Path,
 ) -> None:
-    content, definition, plan = screen()
+    planned = ranked_screen()
+    content, definition, plan = planned.content, planned.definition, planned.plan
     lock = tmp_path / LOCK_FILE
     out = tmp_path / "out"
     with Watched(out, lock) as store:
@@ -399,7 +370,8 @@ def test_a_screen_run_holds_the_lock_from_before_its_first_write_until_it_ends(
 def test_a_new_experiment_holds_the_lock_from_before_its_claim_until_it_ends(
     tmp_path: Path,
 ) -> None:
-    content, definition, plan = experiment()
+    planned = ranked_experiment(EXPERIMENT)
+    content, definition, plan = planned.content, planned.definition, planned.plan
     lock = tmp_path / LOCK_FILE
     with Watched(tmp_path / "out", lock) as store:
         error = ExperimentExecution(
@@ -425,7 +397,8 @@ def test_a_new_experiment_holds_the_lock_from_before_its_claim_until_it_ends(
 def test_a_held_lock_fails_a_screen_run_before_anything_is_sent_or_written(
     tmp_path: Path,
 ) -> None:
-    content, definition, plan = screen()
+    planned = ranked_screen()
+    content, definition, plan = planned.content, planned.definition, planned.plan
     lock = tmp_path / LOCK_FILE
     out = tmp_path / "out"
     made: list[object] = []
@@ -448,25 +421,21 @@ def test_a_held_lock_fails_a_screen_run_before_anything_is_sent_or_written(
 
 @posix_only
 def test_a_held_lock_fails_a_new_experiment_before_anything_is_sent_or_written(
-    tmp_path: Path,
+    tmp_path: Path, server: FakePortfolio123
 ) -> None:
-    content, definition, plan = experiment()
+    planned = ranked_experiment(EXPERIMENT)
+    content, definition, plan = planned.content, planned.definition, planned.plan
     lock = tmp_path / LOCK_FILE
     out = tmp_path / "out"
-    server = FakePortfolio123()
-    try:
-        credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-        with (
-            P123ScreenBacktestClient(credentials, endpoint=server.endpoint) as client,
-            LocalArtifactStore(out) as store,
-        ):
-            execution = ExperimentExecution(
-                plan, plan.plan_hash, "option", store, client, command=None, ranking_lock=lock
-            )
-            with held(lock), pytest.raises(TrialFolioError) as raised:
-                execution.run(content, definition=definition)
-    finally:
-        server.close()
+    with (
+        P123ScreenBacktestClient(CREDENTIALS, endpoint=server.endpoint) as client,
+        LocalArtifactStore(out) as store,
+    ):
+        execution = ExperimentExecution(
+            plan, plan.plan_hash, "option", store, client, command=None, ranking_lock=lock
+        )
+        with held(lock), pytest.raises(TrialFolioError) as raised:
+            execution.run(content, definition=definition)
 
     assert raised.value.code == "experiment.locked"
     assert not execution.claimed
@@ -475,24 +444,16 @@ def test_a_held_lock_fails_a_new_experiment_before_anything_is_sent_or_written(
 
 
 @posix_only
-def test_a_run_without_a_definition_takes_no_lock(tmp_path: Path) -> None:
-    formula = FIXTURES / "screen-configs" / "formula.yaml"
+def test_a_run_without_a_definition_takes_no_lock(tmp_path: Path, server: FakePortfolio123) -> None:
+    formula = screen_config("formula.yaml")
     content = formula.read_bytes()
-    plan = build_plan(read_screen_configuration(content, formula.name), installed_versions())
+    plan = screen_plan(formula)
     lock = tmp_path / LOCK_FILE
-    server = FakePortfolio123()
-    server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
-    server.reply(
-        "/screen/backtest", Reply(200, (FIXTURES / "responses" / "complete.json").read_bytes())
-    )
-    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-    try:
-        with held(lock), LocalArtifactStore(tmp_path / "out") as store:
-            error = Execution(plan, plan.plan_hash, "option", store, COMMAND).run(
-                content, lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint)
-            )
-    finally:
-        server.close()
+    serve_success(server)
+    with held(lock), LocalArtifactStore(tmp_path / "out") as store:
+        error = Execution(plan, plan.plan_hash, "option", store, COMMAND).run(
+            content, lambda: P123ScreenBacktestClient(CREDENTIALS, endpoint=server.endpoint)
+        )
 
     assert error is None
     with pytest.raises(ValueError, match="ranking lock"):

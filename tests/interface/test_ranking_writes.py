@@ -25,7 +25,6 @@ ranking lock in the test's own directory. Every expected value is written by han
 
 import json
 from collections.abc import Sequence
-from pathlib import Path
 from typing import cast
 
 import pytest
@@ -39,18 +38,16 @@ from tests.support.experiment_builder import (
     returns,
     returns_each,
 )
-from tests.support.fake_portfolio123 import AUTHENTICATED, Received, Reply
+from tests.support.fake_portfolio123 import AUTH, AUTHENTICATED, BACKTEST, RANK, Received, Reply
+from tests.support.paths import RESPONSES, SCREEN_CONFIGS
 from tests.support.snapshot_builder import SnapshotBuilder, naming
 from tests.support.storage_faults import FaultyStores
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-DEFINITION = FIXTURES / "screen-configs" / "definition.yaml"
+DEFINITION = SCREEN_CONFIGS / "definition.yaml"
 EXAMPLE = experiment_config("ranking-example.yaml")
 BUDGET_RAISED = experiment_config("revisions/ranking-budget-raised.yaml")
 DEFINITION_CHANGED = experiment_config("revisions/ranking-definition-changed.yaml")
-RESPONSES = FIXTURES / "responses"
 
-AUTH, RANK, BACKTEST = "POST /auth", "POST /rank", "POST /screen/backtest"
 RANK_UPDATED = Reply(200, (RESPONSES / "rank-update.json").read_bytes())
 
 RANK_UPDATE_KEYS = ["type", "nodes", "rankingMethod", "currency"]

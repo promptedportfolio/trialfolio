@@ -33,6 +33,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.paths import FIXTURES, SCREEN_CONFIGS
 from tests.support.snapshot_builder import naming
 from trialfolio.configuration import (
     read_experiment_configuration,
@@ -78,7 +79,6 @@ from trialfolio.tables import (
     read_settings_csv_v1_1,
 )
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 FIXTURE = FIXTURES / "runs" / "synthetic-run-1.0.0"
 REVIEW_FIXTURE = FIXTURES / "reviews" / "synthetic-review-1.0.0"
 EXPERIMENT_FIXTURE = FIXTURES / "experiments" / "synthetic-experiment-1.0.0"
@@ -622,7 +622,7 @@ def test_the_synthetic_snapshot_is_complete_and_cant_be_named_as_a_ranking(
     with pytest.raises(NotARanking) as refused:
         read_snapshot(LocalArtifactStore(snapshot), SnapshotName(shown="it", logged="it"))
     assert refused.value.problems == (SYNTHETIC_PROBLEM,)
-    named = naming(FIXTURES / "screen-configs" / "definition.yaml", snapshot, tmp_path / "configs")
+    named = naming(SCREEN_CONFIGS / "definition.yaml", snapshot, tmp_path / "configs")
     with pytest.raises(TrialFolioError) as invalid:
         read_screen_configuration_v1_1(named.read_bytes(), named.name, named)
     assert invalid.value.code == "config.invalid"

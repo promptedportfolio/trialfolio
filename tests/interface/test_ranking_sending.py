@@ -47,7 +47,8 @@ from tests.support.experiment_builder import (
     returns,
     returns_each,
 )
-from tests.support.fake_portfolio123 import AUTHENTICATED, Received, Reply
+from tests.support.fake_portfolio123 import AUTH, AUTHENTICATED, BACKTEST, RANK, Received, Reply
+from tests.support.paths import RANKING_DEFINITIONS, RESPONSES, SCREEN_CONFIGS
 from tests.support.saved_records import attempt_directories
 from tests.support.storage_faults import FaultyStores
 from trialfolio.contracts.attempt import (
@@ -60,15 +61,12 @@ from trialfolio.contracts.attempt import (
 from trialfolio.contracts.experiment_plan import PlanV1_3
 from trialfolio.contracts.plan import PlanV1_2
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-DEFINITION = FIXTURES / "screen-configs" / "definition.yaml"
-VALUE_MOMENTUM = FIXTURES / "experiment-configs" / "ranking" / "value-momentum.xml"
+DEFINITION = SCREEN_CONFIGS / "definition.yaml"
+VALUE_MOMENTUM = RANKING_DEFINITIONS / "value-momentum.xml"
 EXAMPLE = experiment_config("ranking-example.yaml")
 MIXED = experiment_config("ranking-mixed.yaml")
-RESPONSES = FIXTURES / "responses"
 SCHEMAS = Path(__file__).resolve().parents[2] / "schemas"
 
-AUTH, RANK, BACKTEST = "POST /auth", "POST /rank", "POST /screen/backtest"
 RANK_UPDATED = Reply(200, (RESPONSES / "rank-update.json").read_bytes())
 """`rank-update.json`'s 200, whose `cost` is 1."""
 
@@ -341,7 +339,7 @@ def test_every_case_but_a_ranking_variant_sends_the_baselines_definition(
     sent = [nodes(rank).encode("utf-8") for rank in received(cli, RANK)]
     baseline = VALUE_MOMENTUM.read_bytes()
     assert [definition == baseline for definition in sent] == [True, False, True, True]
-    assert sent[1] == (FIXTURES / "experiment-configs" / "ranking" / "value-heavy.xml").read_bytes()
+    assert sent[1] == (RANKING_DEFINITIONS / "value-heavy.xml").read_bytes()
 
 
 def test_each_attempt_of_an_experiment_writes_its_files_in_order(

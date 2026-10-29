@@ -17,12 +17,12 @@ the fake server, whose end-of-test check reads every `POST /rank` body, and ever
 """
 
 import json
-from pathlib import Path
 
 import pytest
 
-from tests.provider.conftest import ClientFactory, authenticate
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.clients import ClientFactory, authenticate
+from tests.support.fake_portfolio123 import FakePortfolio123, Reply, exchange
+from tests.support.paths import RANKING_DEFINITIONS, RESPONSES
 from trialfolio.contracts.attempt import Exchange
 from trialfolio.provider import (
     DecodedResponse,
@@ -31,10 +31,7 @@ from trialfolio.provider import (
     UndecodedResponse,
 )
 
-RESPONSES = Path(__file__).resolve().parents[1] / "fixtures" / "responses"
-DEFINITION = (
-    Path(__file__).resolve().parents[1] / "fixtures" / "experiment-configs" / "ranking"
-).joinpath("value-momentum.xml")
+DEFINITION = RANKING_DEFINITIONS / "value-momentum.xml"
 
 PARAMS: dict[str, object] = {
     "type": "stock",
@@ -45,10 +42,6 @@ PARAMS: dict[str, object] = {
 """A `rank_update`'s params, as a plan gives them: the definition holds `…`, which isn't ASCII."""
 
 BACKTEST_NOT_SENT = "so the case's screen backtest wasn't sent"
-
-
-def response(request: str, status: int) -> Exchange:
-    return Exchange(request=request, result="response", status=status, note=None)
 
 
 def test_rank_update_sends_its_params_exactly_as_given_with_no_id(
@@ -67,7 +60,7 @@ def test_rank_update_sends_its_params_exactly_as_given_with_no_id(
     assert received.body == json.dumps(PARAMS).encode()
     assert list(json.loads(received.body)) == ["type", "nodes", "rankingMethod", "currency"]
     assert "id" not in json.loads(received.body)
-    assert client.exchanges == (response("POST /auth", 200), response("POST /rank", 200))
+    assert client.exchanges == (exchange("POST /auth", 200), exchange("POST /rank", 200))
     assert server.problems() == []
 
 
@@ -88,7 +81,7 @@ def test_a_200_the_wrapper_cant_decode_is_kept_undecoded(
     server.reply("/rank", Reply(200, b"<html>not JSON</html>"), method="POST")
 
     assert client.rank_update(PARAMS) == UndecodedResponse(b"<html>not JSON</html>")
-    assert client.exchanges[-1] == response("POST /rank", 200)
+    assert client.exchanges[-1] == exchange("POST /rank", 200)
 
 
 @pytest.mark.parametrize(
@@ -117,7 +110,7 @@ def test_a_rank_updates_failure_is_classified_as_a_requests_is(
     assert BACKTEST_NOT_SENT in raised.value.message
     # Sent once: a 401 or 403's re-authentication and resend were refused.
     assert server.requests()[1:] == ["POST /rank"]
-    assert client.exchanges[1] == response("POST /rank", status)
+    assert client.exchanges[1] == exchange("POST /rank", status)
     assert client.authenticated == (status not in (401, 403))
 
 
@@ -194,7 +187,7 @@ def test_rank_get_decodes_the_body_its_adapter_holds(
     # p123api sends the name as the query of GET /rank, and no ID.
     assert (received.method, received.path) == ("GET", "/rank?name=Value+and+momentum")
     assert received.body == b""
-    assert client.exchanges == (response("POST /auth", 200), response("GET /rank", 200))
+    assert client.exchanges == (exchange("POST /auth", 200), exchange("GET /rank", 200))
 
 
 def test_a_rank_get_needs_trial_folios_own_authentication_first(
@@ -217,7 +210,7 @@ def test_a_ranking_method_the_wrapper_doesnt_know_keeps_the_body_undecoded(
     server.reply("/rank", Reply(200, body), method="GET")
 
     assert client.rank_get("Value and momentum") == UndecodedResponse(body)
-    assert client.exchanges[-1] == response("GET /rank", 200)
+    assert client.exchanges[-1] == exchange("GET /rank", 200)
 
 
 def test_a_body_only_the_wrapper_could_decode_is_kept_undecoded(
@@ -260,7 +253,7 @@ def test_a_rank_gets_failure_is_classified_as_a_requests_is(
     assert "rank_get request" in raised.value.message
     assert SNAPSHOT_NOT_SAVED in raised.value.message
     assert [received.request for received in server.received[1:]] == ["GET /rank"]
-    assert client.exchanges[1] == response("GET /rank", status)
+    assert client.exchanges[1] == exchange("GET /rank", status)
 
 
 def test_a_snapshots_failed_authentication_says_its_rank_get_wasnt_sent(

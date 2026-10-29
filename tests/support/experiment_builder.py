@@ -26,20 +26,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Final, Protocol
 
-from tests.support import canaries, launcher
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply, distinct
+from tests.support import launcher
+from tests.support.fake_portfolio123 import AUTHENTICATED, FakePortfolio123, Reply, distinct
+from tests.support.paths import EXPERIMENT_CONFIGS, RESPONSES
 from trialfolio.configuration import read_experiment_configuration_v1_1
 from trialfolio.experiment_records import read_experiment
 from trialfolio.planning import build_experiment_plan_v1_1, installed_versions, plan_revision_v1_1
 from trialfolio.provider import REQUEST_TIMEOUT_SECONDS
 from trialfolio.storage import ArtifactStore, LocalArtifactStore
-
-FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
-EXPERIMENT_CONFIGS: Final = FIXTURES / "experiment-configs"
-RESPONSES: Final = FIXTURES / "responses"
-
-AUTHENTICATED: Final = Reply(200, canaries.TOKEN.encode())
-"""Portfolio123's answer to a successful authentication: the token."""
 
 UNAVAILABLE: Final = Reply(503, b"")
 """A 5xx to a case's request, which leaves the case `unknown`, possibly charged."""

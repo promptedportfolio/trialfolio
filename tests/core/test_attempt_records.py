@@ -24,7 +24,7 @@ import subprocess
 import sys
 import time
 import uuid
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -32,7 +32,18 @@ import pytest
 
 from tests.support import canaries, launcher
 from tests.support.clock import BackwardClock
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.fake_portfolio123 import (
+    AUTH,
+    AUTHENTICATED,
+    BACKTEST,
+    CREDENTIALS,
+    BeforeTheBacktest,
+    FakePortfolio123,
+    Reply,
+    exchange,
+)
+from tests.support.paths import RESPONSES, screen_config
+from tests.support.plans import screen_plan, verified_versions
 from tests.support.socket_faults import SocketFaults
 from tests.support.storage_faults import StorageFaults
 from trialfolio.acknowledgment import ACCEPT_VALUE, ACCEPT_VARIABLE
@@ -45,27 +56,22 @@ from trialfolio.attempts import (
 )
 from trialfolio.cli import API_ID_VARIABLE, API_KEY_VARIABLE
 from trialfolio.configuration import read_screen_configuration
-from trialfolio.contracts.attempt import AttemptRecord, Exchange, StartRecord
+from trialfolio.contracts.attempt import AttemptRecord, StartRecord
 from trialfolio.contracts.plan import Plan
 from trialfolio.errors import TrialFolioError
-from trialfolio.planning import VERIFIED_VERSIONS, Versions, build_plan, installed_versions
+from trialfolio.planning import build_plan, installed_versions
 from trialfolio.provider import (
     REQUEST_TIMEOUT_SECONDS,
-    Credentials,
     DecodedResponse,
     P123ScreenBacktestClient,
-    ScreenBacktestResponse,
     UndecodedResponse,
 )
 from trialfolio.storage import LocalArtifactStore
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "screen-configs"
-NOT_JSON = (FIXTURES.parent / "responses" / "not-json.txt").read_bytes()
+NOT_JSON = (RESPONSES / "not-json.txt").read_bytes()
 """The response fixture whose body isn't JSON."""
 
-AUTH = "POST /auth"
-BACKTEST = "POST /screen/backtest"
-AUTHENTICATED = Exchange(request=AUTH, result="response", status=200, note=None)
+AUTHENTICATED_EXCHANGE = exchange(AUTH, 200)
 
 STARTED_AT = datetime(2026, 10, 3, 12, 0, 0, tzinfo=UTC)
 ENDED_AT = datetime(2026, 10, 3, 12, 0, 7, tzinfo=UTC)
@@ -82,72 +88,15 @@ PROVIDER_TEXT = "Invalid screen rule near canary-rule-text"
 """Portfolio123's own message for a 400, which logs must leave out."""
 
 
-def response(request: str, status: int) -> Exchange:
-    return Exchange(request=request, result="response", status=status, note=None)
-
-
-def ended(request: str, result: str) -> Exchange:
-    return Exchange.model_validate(
-        {"request": request, "result": result, "status": None, "note": None}
-    )
-
-
 def clock() -> Callable[[], datetime]:
     """The start time for the first call, and the end time for every later one."""
     times = iter([STARTED_AT])
     return lambda: next(times, ENDED_AT)
 
 
-class Interposed:
-    """The real client, with an action just before the request's call: the provider client is a
-    boundary the tests may stand in at (AGENTS.md, verification expectations)."""
-
-    def __init__(self, client: P123ScreenBacktestClient, action: Callable[[], object]) -> None:
-        self._client = client
-        self._action = action
-
-    @property
-    def authenticated(self) -> bool:
-        return self._client.authenticated
-
-    @property
-    def exchanges(self) -> tuple[Exchange, ...]:
-        return self._client.exchanges
-
-    def authenticate(self) -> None:
-        self._client.authenticate()
-
-    def screen_backtest(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
-        self._action()
-        return self._client.screen_backtest(params)
-
-    def rank_update(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
-        return self._client.rank_update(params)
-
-    def rank_get(self, name: str) -> ScreenBacktestResponse:
-        return self._client.rank_get(name)
-
-    def close(self) -> None:
-        self._client.close()
-
-
 @pytest.fixture
 def plan() -> Plan:
-    path = FIXTURES / "formula.yaml"
-    versions = Versions(
-        trialfolio="0.1.0",
-        p123api=VERIFIED_VERSIONS["p123api"][0],
-        requests=VERIFIED_VERSIONS["requests"][0],
-        urllib3=VERIFIED_VERSIONS["urllib3"][0],
-    )
-    return build_plan(read_screen_configuration(path.read_bytes(), path.name), versions)
-
-
-@pytest.fixture
-def server() -> Iterator[FakePortfolio123]:
-    fake = FakePortfolio123()
-    yield fake
-    fake.close()
+    return screen_plan(screen_config("formula.yaml"), verified_versions("0.1.0"))
 
 
 @pytest.fixture
@@ -156,7 +105,7 @@ def make_client(server: FakePortfolio123) -> Iterator[Callable[..., P123ScreenBa
 
     def make(timeout: int = REQUEST_TIMEOUT_SECONDS) -> P123ScreenBacktestClient:
         client = P123ScreenBacktestClient(
-            Credentials(canaries.API_ID, canaries.API_KEY),
+            CREDENTIALS,
             endpoint=server.endpoint,
             timeout=timeout,
         )
@@ -192,7 +141,7 @@ def attempt(plan: Plan, store: StorageFaults) -> Attempt:
 
 
 def authenticates(server: FakePortfolio123) -> None:
-    server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+    server.reply("/auth", AUTHENTICATED)
 
 
 def answers(server: FakePortfolio123, reply: Reply) -> None:
@@ -244,7 +193,9 @@ def test_a_success_writes_the_start_record_before_sending_and_the_attempt_record
     started_when_sent: list[bool] = []
 
     result = attempt.run(
-        Interposed(client, lambda: started_when_sent.append((directory / "started.json").exists()))
+        BeforeTheBacktest(
+            client, lambda: started_when_sent.append((directory / "started.json").exists())
+        )
     )
 
     # The start record was durable before the request was sent, and nothing was written twice.
@@ -262,7 +213,7 @@ def test_a_success_writes_the_start_record_before_sending_and_the_attempt_record
         "attempt_record",
     ]
     start = StartRecord.model_validate_json((directory / "started.json").read_bytes())
-    assert start.exchanges == (AUTHENTICATED,)
+    assert start.exchanges == (AUTHENTICATED_EXCHANGE,)
     assert start.plan_hash == plan.plan_hash
     assert start.case_id == plan.cases[0].case_id
     assert start.started_at == STARTED_AT
@@ -273,7 +224,7 @@ def test_a_success_writes_the_start_record_before_sending_and_the_attempt_record
     assert record.outcome == "succeeded"
     assert record.error is None
     assert result.error is None
-    assert record.exchanges == (AUTHENTICATED, response(BACKTEST, 200))
+    assert record.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, 200))
     assert record.possibly_charged
     assert record.ended_at == ENDED_AT
     # Everything the start record holds, the attempt record holds too.
@@ -334,7 +285,7 @@ def test_failed_authentication_leaves_only_a_failed_attempt_record(
 
     record = check_recorded(out, attempt, result)
     assert files(out, attempt) == {"attempt.json"}
-    assert record.exchanges == (response(AUTH, 401),)
+    assert record.exchanges == (exchange(AUTH, 401),)
     assert record.outcome == "failed"
     assert not record.possibly_charged
     assert record.error is not None
@@ -398,7 +349,7 @@ def test_a_read_timeout_is_unknown_and_sent_once(
     result = attempt.run(make_client(timeout=1))
 
     record = check_recorded(out, attempt, result)
-    assert record.exchanges == (AUTHENTICATED, ended(BACKTEST, "interrupted"))
+    assert record.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, None, "interrupted"))
     assert record.outcome == "unknown"
     assert record.possibly_charged
     assert record.error is not None
@@ -411,10 +362,10 @@ def test_a_request_that_never_connected_is_failed_and_not_charged(
 ) -> None:
     authenticates(server)
 
-    result = attempt.run(Interposed(client, server.close))
+    result = attempt.run(BeforeTheBacktest(client, server.close))
 
     record = check_recorded(out, attempt, result)
-    assert record.exchanges == (AUTHENTICATED, ended(BACKTEST, "not_connected"))
+    assert record.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, None, "not_connected"))
     assert record.outcome == "failed"
     assert not record.possibly_charged
     assert record.error is not None
@@ -502,10 +453,10 @@ def test_an_attempt_record_published_before_a_storage_failure_counts_as_written(
 def test_a_run_killed_while_the_response_is_awaited_leaves_a_start_record_read_as_running(
     server: FakePortfolio123, tmp_path: Path
 ) -> None:
-    path = FIXTURES / "formula.yaml"
+    path = screen_config("formula.yaml")
     configuration = read_screen_configuration(path.read_bytes(), path.name)
     plan_hash = build_plan(configuration, installed_versions()).plan_hash
-    server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+    server.reply("/auth", AUTHENTICATED)
     # Held until the server closes, long after the kill.
     server.reply("/screen/backtest", Reply(200, json.dumps(PAYLOAD).encode(), delay=600))
     out = tmp_path / "out"
@@ -564,7 +515,7 @@ def test_a_storage_failure_at_the_start_record_sends_nothing(
     result = attempt.run(client)
 
     record = check_recorded(out, attempt, result)
-    assert record.exchanges == (AUTHENTICATED,)
+    assert record.exchanges == (AUTHENTICATED_EXCHANGE,)
     assert record.outcome == "failed"
     assert not record.possibly_charged
     assert record.error is not None
@@ -604,7 +555,7 @@ def test_ctrl_c_during_authentication_records_a_failed_attempt(
     result = attempt.run(client)
 
     record = check_recorded(out, attempt, result)
-    assert record.exchanges == (ended(AUTH, "interrupted"),)
+    assert record.exchanges == (exchange(AUTH, None, "interrupted"),)
     assert record.outcome == "failed"
     assert not record.possibly_charged
     assert record.error is not None
@@ -643,10 +594,10 @@ def test_ctrl_c_during_the_request_is_unknown_and_possibly_charged(
     answers(server, Reply(200, json.dumps(PAYLOAD).encode()))
     faults = SocketFaults(monkeypatch)
 
-    result = attempt.run(Interposed(client, faults.interrupt_send))
+    result = attempt.run(BeforeTheBacktest(client, faults.interrupt_send))
 
     record = check_recorded(out, attempt, result)
-    assert record.exchanges == (AUTHENTICATED, ended(BACKTEST, "interrupted"))
+    assert record.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, None, "interrupted"))
     assert record.outcome == "unknown"
     assert record.possibly_charged
     assert record.error is not None
@@ -667,7 +618,7 @@ def test_an_interrupt_while_the_response_is_saved_is_unknown(
     result = attempt.run(client)
 
     record = check_recorded(out, attempt, result)
-    assert record.exchanges == (AUTHENTICATED, response(BACKTEST, 200))
+    assert record.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, 200))
     assert record.outcome == "unknown"
     assert record.possibly_charged
     assert record.error is not None

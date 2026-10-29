@@ -27,6 +27,7 @@ from tests.support.cli import Cli
 from tests.support.clock import FixedClock, no_wait
 from tests.support.environment import Outcome
 from tests.support.html_report import parse
+from tests.support.paths import SCREEN_CONFIGS
 from tests.support.run_builder import SYNTHETIC_RUN
 from trialfolio.configuration import read_screen_configuration_v1_1
 from trialfolio.contracts.plan import PlanV1_2
@@ -40,7 +41,6 @@ from trialfolio.tables import read_differences_csv, read_differences_csv_v1_1
 
 type Built = Callable[[str], Path]
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 NODES = (
     "Value",
@@ -167,7 +167,7 @@ def test_a_review_without_weight_rows_writes_1_0_0_and_version_1(cli: Cli, built
 def synthetic_run(tmp_path: Path, out: Path) -> Path:
     """Writes `definition.yaml`'s run through the core with the demo's client: a synthetic run
     with a definition, which no command writes."""
-    path = FIXTURES / "screen-configs" / "definition.yaml"
+    path = SCREEN_CONFIGS / "definition.yaml"
     content = path.read_bytes()
     read = read_screen_configuration_v1_1(content, path.name, path)
     plan = build_plan_v1_1(read, installed_versions())

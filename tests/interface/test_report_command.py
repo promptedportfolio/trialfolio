@@ -38,11 +38,10 @@ from tests.support.cli import Cli, plan_hash_for
 from tests.support.directories import snapshot
 from tests.support.fake_portfolio123 import AUTHENTICATED, response, serve_success
 from tests.support.html_report import Document, parse
-from tests.support.paths import screen_config
+from tests.support.paths import FIXTURES, RANKING_DEFINITIONS, screen_config
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.tables import read_metrics_csv, read_settings_csv
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 FIXTURE = FIXTURES / "runs" / "synthetic-run-1.0.0"
 """The committed historical run, which `trialfolio demo` wrote with the 1.0.0 schemas."""
 RANKING_FIXTURE = FIXTURES / "runs" / "synthetic-run-1.1.0"
@@ -386,7 +385,7 @@ def test_report_reads_a_run_whose_definition_has_windows_line_endings_as_complet
     # bytes, while the definition's hash reads each line end as a line feed, so the plan is
     # `definition.yaml`'s.
     cli.ready()
-    definitions = FIXTURES / "experiment-configs" / "ranking"
+    definitions = RANKING_DEFINITIONS
     windows = (definitions / "value-momentum.xml").read_bytes().replace(b"\n", b"\r\n")
     directory = cli.tmp / "configs"
     directory.mkdir()

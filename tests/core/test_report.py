@@ -21,9 +21,10 @@ from urllib.parse import unquote, urlsplit
 
 import pytest
 
-from tests.core.conftest import CONFIGS, RESPONSES, WriteRun, Written
 from tests.support.fake_portfolio123 import Reply
 from tests.support.html_report import Document, parse
+from tests.support.paths import RESPONSES, SCREEN_CONFIGS
+from tests.support.screen_runs import WriteRun, Written
 from trialfolio.notices import (
     CONCISE_NOTICE,
     FULL_NOTICE,
@@ -37,8 +38,8 @@ from trialfolio.notices import (
 )
 from trialfolio.report import FULL_NOTICE_ID, HtmlReportRenderer
 
-FORMULA = (CONFIGS / "formula.yaml").read_bytes()
-RANKING_NAME = (CONFIGS / "ranking-name.yaml").read_bytes()
+FORMULA = (SCREEN_CONFIGS / "formula.yaml").read_bytes()
+RANKING_NAME = (SCREEN_CONFIGS / "ranking-name.yaml").read_bytes()
 
 
 def response(name: str) -> Reply:

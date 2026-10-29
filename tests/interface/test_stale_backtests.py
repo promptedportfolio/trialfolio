@@ -30,12 +30,11 @@ from tests.support.experiment_builder import (
     returns_each,
 )
 from tests.support.fake_portfolio123 import AUTHENTICATED, Reply
+from tests.support.paths import RESPONSES
 from tests.support.terminal import PseudoTerminal
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows has no pseudo-terminals")
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-RESPONSES = FIXTURES / "responses"
 EXAMPLE = experiment_config("ranking-example.yaml")
 BUDGET_RAISED = experiment_config("revisions/ranking-budget-raised.yaml")
 DEFAULT_ONLY = experiment_config("default-only.yaml")

@@ -71,8 +71,8 @@ from tests.support.experiment_builder import (
     returns,
 )
 from tests.support.fake_portfolio123 import Reply, serve_success
-from tests.support.paths import screen_config
-from tests.support.run_builder import REVIEW_CONFIGS, SYNTHETIC_RUN
+from tests.support.paths import REVIEW_CONFIGS, screen_config
+from tests.support.run_builder import SYNTHETIC_RUN
 from tests.support.socket_faults import SocketFaults
 from tests.support.storage_faults import FaultyStores
 from tests.support.terminal import PseudoTerminal
