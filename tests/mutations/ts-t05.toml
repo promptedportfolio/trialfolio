@@ -1,0 +1,148 @@
+# TS-T05's list of the check of the tests (docs/test-refactoring.md), which it ran on its base and
+# on its branch. TS-T05 writes the editors of saved records once, in tests/support/broken_runs.py,
+# and writes the core's write_run fixture's run through Execution, so each test module it changes,
+# or whose fixture or editors it changes, has a mutation of its own, which runs only that module's
+# tests: the one TS-T04 gave it, or, for a module TS-T04 didn't change, the change nearest what it
+# checks. The mutations with caught_by are those of the checks the moved editors' breaks reach,
+# each of which a test made with them must still catch; and two of what write_run's runs now
+# take from Execution, the reproducibility and the counts their manifests record, which the report
+# tests read, and which no test of write_run's runs reached at the base, whose manifest the fixture
+# built itself.
+
+# Each test module TS-T05 changes, or whose fixture or editors it changes, with a change a test
+# there catches: TS-T04's, for each module TS-T04 changed.
+
+[[mutation]]
+name = '''an attempt stopped while it authenticated is recorded as possibly charged, for core/test_experiment_resume'''
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''        "possibly_charged": False,'''
+new = '''        "possibly_charged": True,'''
+tests = ["tests/core/test_experiment_resume.py"]
+
+[[mutation]]
+name = '''the record of an attempt stopped after its update record says it stopped elsewhere, for core/test_ranking_resume'''
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''f" written, before the rank_update's response was saved. {detail}"'''
+new = '''f" written, before the rank_update's request was saved. {detail}"'''
+tests = ["tests/core/test_ranking_resume.py"]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for core/test_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = ["tests/core/test_report.py"]
+
+[[mutation]]
+name = '''a refused result's message doesn't name its label, for core/test_review_inputs'''
+file = "src/trialfolio/review_inputs.py"
+old = '''shown=f"result `{result.label}`'s run directory (`{visible(result.run)}`)",'''
+new = '''shown=f"the run directory (`{visible(result.run)}`)",'''
+tests = ["tests/core/test_review_inputs.py"]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for core/test_review_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = ["tests/core/test_review_report.py"]
+
+[[mutation]]
+name = '''a saved run's records aren't checked, for core/test_saved_runs'''
+file = "src/trialfolio/runs.py"
+old = '''    checks = _CHECKS
+'''
+new = '''    checks = ()
+'''
+tests = ["tests/core/test_saved_runs.py"]
+
+[[mutation]]
+name = '''an attempt's records needn't be the version their plan's attempts write, for interface/test_ranking_records'''
+file = "src/trialfolio/experiment_records.py"
+old = '''    if any(record is not None and record.schema_version != expected for record in records):'''
+new = '''    if False:'''
+tests = ["tests/interface/test_ranking_records.py"]
+caught_by = [
+    "tests/interface/test_ranking_records.py::test_a_broken_copy_of_the_synthetic_experiment_fails_the_records_check[an attempt record 1.1.0 under a plan 1.3.0]",
+]
+
+# The checks the moved editors' breaks reach, each of which a test made with them still catches.
+
+[[mutation]]
+name = '''an experiment's plan isn't checked to recompute to its hash'''
+file = "src/trialfolio/experiment_records.py"
+old = '''    plan = _plan_record(reader, content, path)
+    reader.checks.check_plan_hash(plan, named(path))
+'''
+new = '''    plan = _plan_record(reader, content, path)
+'''
+tests = ["tests/core/test_experiment_resume.py"]
+caught_by = [
+    "tests/core/test_experiment_resume.py::test_records_that_are_broken_fail_the_check_and_nothing_is_written[a plan that doesn't recompute]",
+]
+
+[[mutation]]
+name = '''an experiment attempt's records needn't be the version their plan's attempts write'''
+file = "src/trialfolio/experiment_records.py"
+old = '''    if any(record is not None and record.schema_version != expected for record in records):'''
+new = '''    if False:'''
+tests = ["tests/core/test_ranking_resume.py"]
+caught_by = [
+    "tests/core/test_ranking_resume.py::test_an_experiments_broken_records_fail_the_check_and_nothing_is_sent[an attempt record 1.1.0 under a plan 1.3.0]",
+]
+
+[[mutation]]
+name = '''a run attempt's records needn't be the version their plan's attempts write'''
+file = "src/trialfolio/runs.py"
+old = '''    expected = "1.2.0" if isinstance(plan, PlanV1_2) else "1.0.0"
+    if version != expected:'''
+new = '''    expected = "1.2.0" if isinstance(plan, PlanV1_2) else "1.0.0"
+    if False:'''
+tests = ["tests/core/test_ranking_resume.py"]
+caught_by = [
+    "tests/core/test_ranking_resume.py::test_a_runs_broken_records_are_refused_and_nothing_is_written[an attempt record 1.0.0 under a plan 1.2.0]",
+]
+
+[[mutation]]
+name = '''an attempt's records may be anywhere the run's manifest lists them'''
+file = "src/trialfolio/runs.py"
+old = '''        if place is None or place["case_id"] != case.case_id or name != expected:'''
+new = '''        if place is None:'''
+tests = ["tests/core/test_saved_runs.py"]
+caught_by = [
+    "tests/core/test_saved_runs.py::test_an_attempts_records_must_be_named_as_records_in_the_plans_case",
+]
+
+[[mutation]]
+name = '''a run's manifest may list its configuration twice'''
+file = "src/trialfolio/runs.py"
+old = '''    if len(listed) != 1 or listed[0].path != path:'''
+new = '''    if not listed or listed[0].path != path:'''
+tests = ["tests/core/test_saved_runs.py"]
+caught_by = [
+    "tests/core/test_saved_runs.py::test_a_manifest_must_list_the_configuration_and_both_tables_or_neither",
+]
+
+# What write_run's runs now take from Execution, which the report tests read.
+
+[[mutation]]
+name = '''a run's manifest records its reproducibility as complete'''
+file = "src/trialfolio/execution.py"
+old = '''            reproducibility=reproducibility(self._plan.cases),'''
+new = '''            reproducibility=reproducibility(()),'''
+tests = ["tests/core/test_report.py"]
+caught_by = [
+    "tests/core/test_report.py::test_a_ranking_by_name_labels_reproducibility_incomplete",
+]
+
+[[mutation]]
+name = '''a run's manifest counts a request its attempt didn't send'''
+file = "src/trialfolio/execution.py"
+old = '''            results=0 if self._tables is None else 1, cases=1, **single_counts(record)'''
+new = '''            results=0 if self._tables is None else 1,
+            cases=1,
+            **(single_counts(record) | {"provider_requests": 1}),'''
+tests = ["tests/core/test_report.py"]
+caught_by = [
+    "tests/core/test_report.py::test_a_failed_authentication_shows_nothing_was_charged",
+]

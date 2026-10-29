@@ -21,7 +21,10 @@ fixed.
 Each experiment is built during the test, through the core, and stopped where the test needs it:
 by a cancellation, by storage faults, or by an interrupt, as a stopped process leaves it. One, for
 the demo's client given an experiment that isn't synthetic, is `trialfolio run`'s, written by the
-experiment builder through the CLI's entry function (R03-AC17's pairing).
+experiment builder through the CLI's entry function (R03-AC17's pairing). The records check's
+breaks are made with the editors of `tests/support/broken_runs.py`, which TS-T05 moved there from
+this module: each edit updates the latest manifest's entry, and, for a plan's file, the
+`artifact_id` each `experiment.json` records, so only the check under test can tell.
 """
 
 import json
@@ -34,6 +37,13 @@ from typing import Any, Final
 
 import pytest
 
+from tests.support.broken_runs import (
+    copy_attempt,
+    edit_attempt,
+    edit_record,
+    rewrite_record,
+    unlist_record,
+)
 from tests.support.cli import Cli
 from tests.support.clock import FixedClock
 from tests.support.directories import snapshot
@@ -136,7 +146,7 @@ def test_a_resume_lists_every_file_of_the_experiment_and_keeps_the_earlier_entri
             if artifact["source"] is not None:
                 artifact["source"]["acquired_at"] = "2026-10-01T00:00:00Z"
 
-    _edit(lab.out, "sessions/1/manifest.json", acquired_earlier)
+    edit_record(lab.out, "sessions/1/manifest.json", acquired_earlier)
     earlier = {
         artifact.path: artifact for artifact in lab.manifest(1, ExperimentManifest).artifacts
     }
@@ -684,7 +694,7 @@ def test_the_manifest_names_the_parser_that_wrote_each_table(lab: Lab, left: str
         manifest["artifacts"] = artifacts
         manifest["parsers"][0]["parser_version"] = 2
 
-    _edit(lab.out, "sessions/1/manifest.json", written_by_parser_2)
+    edit_record(lab.out, "sessions/1/manifest.json", written_by_parser_2)
     if left == "none":
         shutil.rmtree(normalized)
     elif left == "metrics":
@@ -696,7 +706,7 @@ def test_the_manifest_names_the_parser_that_wrote_each_table(lab: Lab, left: str
         else row
         for row in rows
     ]
-    _rewrite(lab.out, listed, metrics_csv(other))
+    rewrite_record(lab.out, listed, metrics_csv(other))
     parser_2 = (lab.out / listed).read_bytes()
 
     resumed = lab.resume("default-only.yaml")
@@ -1175,60 +1185,10 @@ def test_opening_an_experiment_takes_its_lock(lab: Lab, tmp_path: Path) -> None:
 # The records check (R03-AC17)
 
 
-def _rewrite(out: Path, path: str, data: bytes) -> None:
-    """Replaces a file of the experiment, and the latest manifest's entry for it, so only the
-    check under test can catch the break."""
-    (out / path).write_bytes(data)
-    latest = _latest(out)
-    manifest = json.loads(latest.read_bytes())
-    for artifact in manifest["artifacts"]:
-        if artifact["path"] == path:
-            artifact.update(artifact_id="sha256:" + sha256_hex(data), size=len(data))
-    latest.write_bytes((json.dumps(manifest, indent=2) + "\n").encode())
-
-
-def _edit(out: Path, path: str, change: Callable[[Json], object]) -> None:
-    """Changes a JSON file of the experiment with `change`, as `_rewrite` replaces one."""
-    content = json.loads((out / path).read_bytes())
-    change(content)
-    _rewrite(out, path, (json.dumps(content, indent=2) + "\n").encode())
-
-
 def _attempt_of(out: Path, case: int) -> str:
     """The directory of the one attempt of `EXAMPLE`'s case at that place."""
     (directory,) = sorted((out / "cases" / EXAMPLE.cases[case].case_id / "attempts").iterdir())
     return directory.relative_to(out).as_posix()
-
-
-def _records(out: Path, case: int, change: Callable[[Json], object]) -> None:
-    """Changes each record of the case's attempt the same way, so they still agree."""
-    directory = _attempt_of(out, case)
-    for name in ("authenticating.json", "started.json", "attempt.json"):
-        if (out / directory / name).exists():
-            _edit(out, f"{directory}/{name}", change)
-
-
-def _copied(out: Path, case: int, to_case: str | None = None, **fields: object) -> None:
-    """Copies the case's attempt as a new attempt, which no manifest lists, so only the check
-    under test reads it: into the case `to_case`, and with `fields` changed in each record."""
-    source = out / _attempt_of(out, case)
-    case_id = to_case or EXAMPLE.cases[case].case_id
-    attempt_id = str(uuid.uuid4())
-    directory = f"cases/{case_id}/attempts/{attempt_id}"
-    shutil.copytree(source, out / directory)
-    for name in ("authenticating.json", "started.json", "attempt.json"):
-        path = out / directory / name
-        if not path.exists():
-            continue
-        record = json.loads(path.read_bytes())
-        if record.get("authenticated_by") == record["attempt_id"]:
-            record["authenticated_by"] = attempt_id
-        record.update(case_id=case_id, attempt_id=attempt_id, **fields)
-        for reference in ("request", "response"):
-            if record.get(reference):
-                name_ = record[reference]["path"].rsplit("/", 1)[-1]
-                record[reference]["path"] = f"{directory}/{name_}"
-        path.write_bytes((json.dumps(record, indent=2) + "\n").encode())
 
 
 def _completed(lab: Lab) -> None:
@@ -1247,20 +1207,6 @@ def _stray(out: Path, path: str) -> None:
     (out / path).write_bytes(b"stray\n")
 
 
-def _latest(out: Path) -> Path:
-    manifests = sorted(out.glob("sessions/*/manifest.json"), key=lambda p: int(p.parent.name))
-    return manifests[-1]
-
-
-def _unlisted(out: Path, path: str) -> None:
-    """Removes a file of the experiment, and the latest manifest's entry for it."""
-    (out / path).unlink()
-    latest = _latest(out)
-    manifest = json.loads(latest.read_bytes())
-    manifest["artifacts"] = [a for a in manifest["artifacts"] if a["path"] != path]
-    latest.write_bytes((json.dumps(manifest, indent=2) + "\n").encode())
-
-
 def _revision_changed(out: Path, **fields: object) -> None:
     """Changes the revision's plan, with its hash recomputed, and its `experiment.json` and the
     latest manifest's entries to match, so only the check under test can tell: the revision
@@ -1269,7 +1215,7 @@ def _revision_changed(out: Path, **fields: object) -> None:
     draft = plan.model_copy(update=fields)
     other = draft.model_copy(update={"plan_hash": plan_hash(draft)})
     data = (other.model_dump_json(indent=2) + "\n").encode()
-    _rewrite(out, "plans/2/plan.json", data)
+    rewrite_record(out, "plans/2/plan.json", data)
 
     def record(content: Json) -> None:
         if "experiment_id" in fields:
@@ -1278,7 +1224,7 @@ def _revision_changed(out: Path, **fields: object) -> None:
             plan_hash=other.plan_hash, plan_artifact_id="sha256:" + sha256_hex(data)
         )
 
-    _edit(out, "plans/2/experiment.json", record)
+    edit_record(out, "plans/2/experiment.json", record)
 
 
 def _table(out: Path, case: int, name: str, change: dict[str, str]) -> None:
@@ -1290,7 +1236,7 @@ def _table(out: Path, case: int, name: str, change: dict[str, str]) -> None:
     else:
         settings = read_settings_csv((out / path).read_bytes(), name)
         data = settings_csv([row.model_copy(update=change) for row in settings])
-    _rewrite(out, path, data)
+    rewrite_record(out, path, data)
 
 
 def _without_last_row(out: Path, case: int, name: str) -> None:
@@ -1300,7 +1246,7 @@ def _without_last_row(out: Path, case: int, name: str) -> None:
         data = metrics_csv(read_metrics_csv((out / path).read_bytes(), name)[:-1])
     else:
         data = settings_csv(read_settings_csv((out / path).read_bytes(), name)[:-1])
-    _rewrite(out, path, data)
+    rewrite_record(out, path, data)
 
 
 def _manifest_of_session_2(out: Path) -> None:
@@ -1315,7 +1261,7 @@ def _manifest_of_session_2(out: Path) -> None:
                 data = (out / path).read_bytes()
                 artifact.update(path=path, artifact_id="sha256:" + sha256_hex(data), size=len(data))
 
-    _edit(out, "sessions/3/manifest.json", change)
+    edit_record(out, "sessions/3/manifest.json", change)
 
 
 def _attempt_id(out: Path, case: int) -> str:
@@ -1343,15 +1289,19 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         "doesn't match its artifact_id in the latest manifest",
     ),
     "a plan that doesn't recompute": (
-        lambda out: _edit(out, "plans/1/plan.json", lambda d: d.update(title="Another title")),
+        lambda out: edit_record(
+            out, "plans/1/plan.json", lambda d: d.update(title="Another title")
+        ),
         "doesn't recompute to its plan_hash",
     ),
     "experiment.json's last entry, by number": (
-        lambda out: _edit(out, "plans/2/experiment.json", lambda d: d["plans"][-1].update(plan=3)),
+        lambda out: edit_record(
+            out, "plans/2/experiment.json", lambda d: d["plans"][-1].update(plan=3)
+        ),
         "last entry isn't its directory's plan: it gives another number",
     ),
     "experiment.json's last entry, by hash": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out,
             "plans/2/experiment.json",
             lambda d: d["plans"][-1].update(plan_hash="sha256:" + "0" * 64),
@@ -1359,7 +1309,7 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         "it gives another plan_hash than its plan.json",
     ),
     "experiment.json's last entry, by artifact_id": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out,
             "plans/2/experiment.json",
             lambda d: d["plans"][-1].update(configuration_artifact_id="sha256:" + "0" * 64),
@@ -1367,7 +1317,7 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         "has another artifact_id than it records",
     ),
     "experiment.json's last entry, by plan.json's artifact_id": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out,
             "plans/2/experiment.json",
             lambda d: d["plans"][-1].update(plan_artifact_id="sha256:" + "0" * 64),
@@ -1375,13 +1325,13 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         "has another artifact_id than it records",
     ),
     "experiment.json's earlier entries": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out, "plans/2/experiment.json", lambda d: d["plans"][0].update(approval="interactive")
         ),
         "earlier entries aren't those of the previous plan's",
     ),
     "a manifest that disagrees with the plans' approval": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out,
             "sessions/3/manifest.json",
             lambda d: d.update(synthetic=True, approval="not_required"),
@@ -1389,40 +1339,54 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         "is synthetic, though the experiment's plans don't record",
     ),
     "an attempt naming a case its plan doesn't have": (
-        lambda out: _copied(out, 3, to_case="case-0123456789abcdef", sequence=9),
+        lambda out: copy_attempt(
+            out, _attempt_of(out, 3), case_id="case-0123456789abcdef", sequence=9
+        ),
         "name a case their plan doesn't have",
     ),
     "an attempt naming a plan the experiment doesn't have": (
-        lambda out: _records(out, 3, lambda d: d.update(plan_hash="sha256:" + "1" * 64)),
+        lambda out: edit_attempt(
+            out, _attempt_of(out, 3), lambda d: d.update(plan_hash="sha256:" + "1" * 64)
+        ),
         "name a plan the experiment doesn't have",
     ),
     "records that name another attempt than their directory's": (
-        lambda out: _records(out, 3, lambda d: d.update(attempt_id=_ANOTHER_ATTEMPT)),
+        lambda out: edit_attempt(
+            out, _attempt_of(out, 3), lambda d: d.update(attempt_id=_ANOTHER_ATTEMPT)
+        ),
         "name another attempt",
     ),
     "an attempt naming a session the experiment doesn't have": (
-        lambda out: _records(out, 3, lambda d: d.update(session=9)),
+        lambda out: edit_attempt(out, _attempt_of(out, 3), lambda d: d.update(session=9)),
         "name a session the experiment doesn't have",
     ),
     "two attempts of a session with one sequence": (
-        lambda out: _records(out, 3, lambda d: d.update(sequence=1)),
+        lambda out: edit_attempt(out, _attempt_of(out, 3), lambda d: d.update(sequence=1)),
         "have the same sequence",
     ),
     "a request sent with another session's token": (
-        lambda out: _records(out, 3, lambda d: d.update(authenticated_by=_first_attempt_id(out))),
+        lambda out: edit_attempt(
+            out, _attempt_of(out, 3), lambda d: d.update(authenticated_by=_first_attempt_id(out))
+        ),
         "was sent with a token no attempt of its session obtained",
     ),
     # The fifth case's request, sent with the token of the fourth, which sent with the third's.
     "a request sent with the token of an attempt that didn't authenticate": (
-        lambda out: _records(out, 4, lambda d: d.update(authenticated_by=_attempt_id(out, 3))),
+        lambda out: edit_attempt(
+            out, _attempt_of(out, 4), lambda d: d.update(authenticated_by=_attempt_id(out, 3))
+        ),
         "was sent with a token no attempt of its session obtained",
     ),
     "a repeat_of that names no charged attempt": (
-        lambda out: _records(out, 3, lambda d: d.update(repeat_of=_ANOTHER_ATTEMPT)),
+        lambda out: edit_attempt(
+            out, _attempt_of(out, 3), lambda d: d.update(repeat_of=_ANOTHER_ATTEMPT)
+        ),
         "names in repeat_of an attempt",
     ),
     "an attempt after its case's succeeded attempt": (
-        lambda out: _copied(out, 3, sequence=9, repeat_of=_first_attempt_id(out)),
+        lambda out: copy_attempt(
+            out, _attempt_of(out, 3), sequence=9, repeat_of=_first_attempt_id(out)
+        ),
         "follows its case's succeeded attempt",
     ),
     "a table in a case without a succeeded attempt": (
@@ -1434,7 +1398,7 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
     ),
     # Tables are written after the attempt record, so a running attempt's case has none.
     "tables beside an attempt without its attempt record": (
-        lambda out: _unlisted(out, f"{_attempt_of(out, 1)}/attempt.json"),
+        lambda out: unlist_record(out, f"{_attempt_of(out, 1)}/attempt.json"),
         "has normalized tables, but no succeeded attempt",
     ),
     "settings.csv without its metrics.csv": (
@@ -1476,12 +1440,12 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         "holds a file no session has",
     ),
     "a session record that names another session": (
-        lambda out: _edit(out, "sessions/1/session.json", lambda d: d.update(session=2)),
+        lambda out: edit_record(out, "sessions/1/session.json", lambda d: d.update(session=2)),
         "`sessions/1/session.json` names another session than its directory's",
     ),
     # Not an experiment's, whatever its version: the type is checked before the version.
     "a manifest that isn't an experiment's": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out,
             "sessions/3/manifest.json",
             lambda d: d.update(artifact_type="run", schema_version="9.9.9"),
@@ -1493,7 +1457,7 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         "`sessions/3/manifest.json` names another session than its directory's",
     ),
     "an attempt record that doesn't hold its start record's": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out,
             f"{_attempt_of(out, 1)}/attempt.json",
             lambda d: d["transport"].update(urllib3="2.8.1"),
@@ -1501,7 +1465,7 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         "the attempt record doesn't hold its start record's",
     ),
     "records that give an attempt two starts": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out,
             f"{_attempt_of(out, 1)}/attempt.json",
             lambda d: d.update(started_at="2026-10-03T13:00:00Z", ended_at="2026-10-03T13:00:01Z"),
@@ -1509,21 +1473,23 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         "they give it another plan, place, or start",
     ),
     "an attempt that authenticated without its authentication record": (
-        lambda out: _unlisted(out, f"{_attempt_of(out, 0)}/authenticating.json"),
+        lambda out: unlist_record(out, f"{_attempt_of(out, 0)}/authenticating.json"),
         "exactly when it has its authentication record",
     ),
     "a file an attempt record references, changed": (
-        lambda out: _rewrite(
+        lambda out: rewrite_record(
             out, f"{_attempt_of(out, 1)}/request.json", b'{"another": "request"}\n'
         ),
         "doesn't match the artifact_id its attempt record gives it",
     ),
     "an experiment.json that doesn't record its plan's declaration": (
-        lambda out: _edit(out, "plans/2/experiment.json", lambda d: d.update(title="Another")),
+        lambda out: edit_record(
+            out, "plans/2/experiment.json", lambda d: d.update(title="Another")
+        ),
         "doesn't record the experiment and its planned cases as its plan declares them",
     ),
     "an experiment.json that doesn't record its plan's cases": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out,
             "plans/2/experiment.json",
             lambda d: d["planned_cases"][1].update(description="Another description."),
@@ -1539,23 +1505,23 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         "doesn't revise the previous plan",
     ),
     "a manifest of another experiment": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out, "sessions/3/manifest.json", lambda d: d.update(experiment_id="another-one")
         ),
         "is another experiment's manifest",
     ),
     "a manifest that names a plan the experiment doesn't have": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out, "sessions/3/manifest.json", lambda d: d.update(plan_hash="sha256:" + "0" * 64)
         ),
         "names a plan the experiment doesn't have",
     ),
     "an attempt record that names a token without its start record": (
-        lambda out: _unlisted(out, f"{_attempt_of(out, 1)}/started.json"),
+        lambda out: unlist_record(out, f"{_attempt_of(out, 1)}/started.json"),
         "the attempt record names a token, without a start record",
     ),
     "an attempt record that references a file outside its directory": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out,
             f"{_attempt_of(out, 1)}/attempt.json",
             lambda d: d["request"].update(path=f"{_attempt_of(out, 2)}/request.json"),
@@ -1627,7 +1593,7 @@ def test_a_schema_version_without_a_reader_fails_the_check(
     _completed(lab)
     path = path.format(attempt=_attempt_of(lab.out, 0))
     if listed:
-        _edit(
+        edit_record(
             lab.out,
             "sessions/3/manifest.json",
             lambda d: next(a for a in d["artifacts"] if a["path"] == path).update(
@@ -1635,7 +1601,7 @@ def test_a_schema_version_without_a_reader_fails_the_check(
             ),
         )
     else:
-        _edit(lab.out, path, lambda d: d.update(schema_version="9.9.9"))
+        edit_record(lab.out, path, lambda d: d.update(schema_version="9.9.9"))
 
     ran = lab.resume("revisions/key-renamed.yaml")
 
@@ -1688,7 +1654,9 @@ def test_a_request_sent_with_a_token_a_401_or_403_dropped_fails_the_check(
         response("complete.json"),
     )
     assert lab.new().refused("execution.partial")
-    _copied(lab.out, 4, sequence=9, authenticated_by=_first_attempt_id(lab.out))
+    copy_attempt(
+        lab.out, _attempt_of(lab.out, 4), sequence=9, authenticated_by=_first_attempt_id(lab.out)
+    )
 
     ran = lab.resume()
 
@@ -1711,7 +1679,9 @@ def test_a_request_sent_with_a_later_attempts_token_fails_the_check(lab: Lab) ->
     )
     assert lab.new().refused("execution.partial")
     later = json.loads((lab.out / _attempt_of(lab.out, 2) / "attempt.json").read_bytes())
-    _records(lab.out, 1, lambda d: d.update(authenticated_by=later["attempt_id"]))
+    edit_attempt(
+        lab.out, _attempt_of(lab.out, 1), lambda d: d.update(authenticated_by=later["attempt_id"])
+    )
 
     ran = lab.resume()
 
@@ -1740,7 +1710,7 @@ def test_an_attempt_sent_again_without_a_confirmed_repeat_fails_the_check(lab: L
         key=lambda p: json.loads((p / "attempt.json").read_bytes())["session"],
     )
     for name in ("authenticating.json", "started.json", "attempt.json"):
-        _edit(
+        edit_record(
             lab.out,
             f"{repeated.relative_to(lab.out).as_posix()}/{name}",
             lambda d: d.update(repeat_of=None),
@@ -1760,7 +1730,7 @@ def test_an_attempt_record_with_an_authentication_but_no_record_of_it_fails_the_
     lab.server.reply("/auth", Reply(401))
     assert lab.new("default-only.yaml").refused("execution.partial")
     (directory,) = lab.attempt_directories(DEFAULT_ONLY.cases[0].case_id)
-    _unlisted(lab.out, f"{directory.relative_to(lab.out).as_posix()}/authenticating.json")
+    unlist_record(lab.out, f"{directory.relative_to(lab.out).as_posix()}/authenticating.json")
 
     ran = lab.resume("default-only.yaml")
 
@@ -1770,7 +1740,7 @@ def test_an_attempt_record_with_an_authentication_but_no_record_of_it_fails_the_
 
 def test_a_synthetic_experiments_manifest_that_isnt_synthetic_fails_the_check(lab: Lab) -> None:
     assert lab.new("default-only.yaml", synthetic=True).error is None
-    _edit(
+    edit_record(
         lab.out, "sessions/1/manifest.json", lambda d: d.update(synthetic=False, approval="option")
     )
 

@@ -25,7 +25,9 @@ store; the clock is fixed; and the ranking lock's file is in the test's temporar
 
 Each experiment and run is built during the test, through the core, and stopped where the test
 needs it: by a cancellation, by storage faults, or by an interrupt, as a stopped process leaves
-it.
+it. The records check's breaks are made with the editors of `tests/support/broken_runs.py`, which
+TS-T05 moved there from this module: an experiment's with `rewrite_record`, `edit_record`, and
+`unlist_record`, and a run's with `rewrite`, `edit_json`, and `unlist`.
 """
 
 import json
@@ -38,6 +40,15 @@ from typing import Any, Final
 
 import pytest
 
+from tests.support.broken_runs import (
+    edit_json,
+    edit_record,
+    record_1_1_0,
+    rewrite,
+    rewrite_record,
+    unlist,
+    unlist_record,
+)
 from tests.support.clock import FixedClock, no_wait
 from tests.support.directories import snapshot
 from tests.support.experiment_lab import RELEASE_0_4_0, Arm, Lab
@@ -60,7 +71,7 @@ from trialfolio.canonical import sha256_hex
 from trialfolio.configuration import (
     read_screen_configuration_v1_1,
 )
-from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3
+from trialfolio.contracts.attempt import AttemptRecordV1_3
 from trialfolio.contracts.experiment_manifest import ExperimentManifest, ExperimentManifestV1_1
 from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
 from trialfolio.contracts.experiment_record import ExperimentRecord, ExperimentRecordV1_1
@@ -845,7 +856,7 @@ def test_a_revision_from_a_formula_sends_two_requests_a_case(lab: Lab) -> None:
             if artifact["source"] is not None:
                 artifact["source"]["acquired_at"] = "2026-10-01T00:00:00Z"
 
-    _edit(lab.out, "sessions/1/manifest.json", acquired_earlier)
+    edit_record(lab.out, "sessions/1/manifest.json", acquired_earlier)
     earlier = ExperimentManifest.model_validate_json(
         (lab.out / "sessions/1/manifest.json").read_bytes()
     )
@@ -1003,43 +1014,6 @@ def test_a_resume_that_sends_nothing_doesnt_take_the_ranking_lock(lab: Lab) -> N
 # The records check of an experiment with a definition (R04-AC12)
 
 
-def _latest(out: Path) -> Path:
-    manifests = sorted(out.glob("sessions/*/manifest.json"), key=lambda p: int(p.parent.name))
-    return manifests[-1]
-
-
-def _rewrite(out: Path, path: str, data: bytes, manifest: Path | None = None) -> None:
-    """Replaces a file, and the manifest's entry for it, so only the check under test can catch
-    the break: the experiment's latest manifest, or `manifest`."""
-    (out / path).write_bytes(data)
-    listing = manifest or _latest(out)
-    content = json.loads(listing.read_bytes())
-    for artifact in content["artifacts"]:
-        if artifact["path"] == path:
-            artifact.update(artifact_id="sha256:" + sha256_hex(data), size=len(data))
-    listing.write_bytes((json.dumps(content, indent=2) + "\n").encode())
-
-
-def _edit(out: Path, path: str, change: Callable[[Json], object], manifest: Path | None = None):
-    """Changes a JSON file with `change`, as `_rewrite` replaces one."""
-    content = json.loads((out / path).read_bytes())
-    change(content)
-    data = (json.dumps(content, indent=2) + "\n").encode()
-    if (out / path) == (manifest or _latest(out)):
-        (out / path).write_bytes(data)
-    else:
-        _rewrite(out, path, data, manifest)
-
-
-def _unlisted(out: Path, path: str, manifest: Path | None = None) -> None:
-    """Removes a file, and the manifest's entry for it."""
-    (out / path).unlink()
-    listing = manifest or _latest(out)
-    content = json.loads(listing.read_bytes())
-    content["artifacts"] = [a for a in content["artifacts"] if a["path"] != path]
-    listing.write_bytes((json.dumps(content, indent=2) + "\n").encode())
-
-
 def _attempt_of(out: Path, case: int) -> str:
     """The directory of the one attempt of `EXAMPLE`'s case at that place."""
     (directory,) = sorted((out / "cases" / EXAMPLE.cases[case].case_id / "attempts").iterdir())
@@ -1066,7 +1040,7 @@ def _weight_row_changed(out: Path) -> None:
         row.model_copy(update={"value": "45"}) if row.node == "Value/Earnings Yield" else row
         for row in rows
     ]
-    _rewrite(out, path, settings_csv_v1_1(changed))
+    rewrite_record(out, path, settings_csv_v1_1(changed))
 
 
 def _weight_row_source(out: Path) -> None:
@@ -1076,7 +1050,7 @@ def _weight_row_source(out: Path) -> None:
     changed = [
         row.model_copy(update={"source_artifact": other}) if row.node else row for row in rows
     ]
-    _rewrite(out, path, settings_csv_v1_1(changed))
+    rewrite_record(out, path, settings_csv_v1_1(changed))
 
 
 def _weight_row_drawn_from(case: int, node: str, file: str) -> Callable[[Path], None]:
@@ -1092,7 +1066,7 @@ def _weight_row_drawn_from(case: int, node: str, file: str) -> Callable[[Path], 
             row.model_copy(update={"source_artifact": source}) if row.node == node else row
             for row in rows
         ]
-        _rewrite(out, path, settings_csv_v1_1(changed))
+        rewrite_record(out, path, settings_csv_v1_1(changed))
 
     return change
 
@@ -1102,51 +1076,19 @@ def _start_record_as_update_record(out: Path) -> None:
     session's token, so its update record holds no exchange, and both records then name the
     rank_update."""
     directory = _attempt_of(out, 1)
-    _rewrite(out, f"{directory}/started.json", (out / directory / "updating.json").read_bytes())
+    rewrite_record(
+        out, f"{directory}/started.json", (out / directory / "updating.json").read_bytes()
+    )
 
 
 def _update_record_as_start_record(out: Path) -> None:
     """The second case's `updating.json`, replaced by its `started.json`, which is gone: both
     records then name the backtest, and the update record holds the rank_update's 200."""
     directory = _attempt_of(out, 1)
-    _rewrite(out, f"{directory}/updating.json", (out / directory / "started.json").read_bytes())
-    _unlisted(out, f"{directory}/started.json")
-
-
-def _record_1_1_0(out: Path) -> None:
-    """An attempt record 1.1.0, valid, of an attempt that ended before it authenticated, under the
-    plan 1.3.0, in a new attempt's directory, which no manifest lists."""
-    record = json.loads((out / _attempt_of(out, 0) / "attempt.json").read_bytes())
-    attempt_id = str(uuid.uuid4())
-    old = AttemptRecordV1_1.model_validate_json(
-        json.dumps(
-            {
-                "schema_version": "1.1.0",
-                "trialfolio_version": record["trialfolio_version"],
-                "attempt_id": attempt_id,
-                "case_id": record["case_id"],
-                "plan_hash": record["plan_hash"],
-                "session": 2,
-                "sequence": 9,
-                "authenticated_by": None,
-                "repeat_of": None,
-                "started_at": record["started_at"],
-                "provider_wrapper": record["provider_wrapper"],
-                "transport": record["transport"],
-                "ended_at": record["started_at"],
-                "outcome": "failed",
-                "error": {"code": "command.interrupted", "message": "Interrupted."},
-                "exchanges": [],
-                "possibly_charged": False,
-                "request": None,
-                "response": None,
-                "provider_metadata": {"cost": None, "quota_remaining": None},
-            }
-        )
+    rewrite_record(
+        out, f"{directory}/updating.json", (out / directory / "started.json").read_bytes()
     )
-    directory = out / "cases" / record["case_id"] / "attempts" / attempt_id
-    directory.mkdir()
-    (directory / "attempt.json").write_bytes(old.model_dump_json(indent=2).encode())
+    unlist_record(out, f"{directory}/started.json")
 
 
 def _transport_changed(content: Json) -> None:
@@ -1163,11 +1105,11 @@ def _rank_update_status(status: int) -> Callable[[Json], None]:
 
 EXPERIMENT_BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
     "an attempt with started.json and no updating.json": (
-        lambda out: _unlisted(out, f"{_attempt_of(out, 0)}/updating.json"),
+        lambda out: unlist_record(out, f"{_attempt_of(out, 0)}/updating.json"),
         "without the update record written before it",
     ),
     "an update record that disagrees with its start record": (
-        lambda out: _edit(out, f"{_attempt_of(out, 1)}/updating.json", _transport_changed),
+        lambda out: edit_record(out, f"{_attempt_of(out, 1)}/updating.json", _transport_changed),
         "the start record doesn't hold the update record's values",
     ),
     "a started.json that names the rank_update, as its updating.json does": (
@@ -1179,31 +1121,35 @@ EXPERIMENT_BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         "a start record doesn't name the request it comes before",
     ),
     "an attempt record that sent its backtest, without its started.json": (
-        lambda out: _unlisted(out, f"{_attempt_of(out, 1)}/started.json"),
+        lambda out: unlist_record(out, f"{_attempt_of(out, 1)}/started.json"),
         "its backtest was sent, or may have been, without the start record written before it",
     ),
     "a started.json whose exchanges don't end with the rank_update's 200": (
-        lambda out: _edit(out, f"{_attempt_of(out, 1)}/started.json", _rank_update_status(500)),
+        lambda out: edit_record(
+            out, f"{_attempt_of(out, 1)}/started.json", _rank_update_status(500)
+        ),
         "isn't a valid start record",
     ),
     "a rank-update-request.json whose bytes aren't what the attempt record records": (
-        lambda out: _rewrite(out, f"{_attempt_of(out, 2)}/rank-update-request.json", b"{}\n"),
+        lambda out: rewrite_record(out, f"{_attempt_of(out, 2)}/rank-update-request.json", b"{}\n"),
         "doesn't match the artifact_id its attempt record gives it",
     ),
     "an attempt record 1.1.0 under a plan 1.3.0": (
-        _record_1_1_0,
+        lambda out: record_1_1_0(out, _attempt_of(out, 0)),
         "aren't the version an attempt under their plan writes",
     ),
     "a backtest's exchange after a rank_update that didn't get a 200": (
-        lambda out: _edit(out, f"{_attempt_of(out, 3)}/attempt.json", _rank_update_status(500)),
+        lambda out: edit_record(
+            out, f"{_attempt_of(out, 3)}/attempt.json", _rank_update_status(500)
+        ),
         "isn't a valid attempt record",
     ),
     "a plan whose definition.xml is missing": (
-        lambda out: _unlisted(out, "plans/1/definition.xml"),
+        lambda out: unlist_record(out, "plans/1/definition.xml"),
         "`plans/1/definition.xml` is missing",
     ),
     "a plan whose definition.xml isn't its ranking_source's": (
-        lambda out: _rewrite(
+        lambda out: rewrite_record(
             out, "plans/1/definition.xml", (RANKING_DEFINITIONS / "value-heavy.xml").read_bytes()
         ),
         "isn't its plan's ranking definition",
@@ -1225,7 +1171,7 @@ EXPERIMENT_BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
         "weight rows aren't its case's definition's",
     ),
     "a settings.csv listed as 1.0.0 under a plan 1.3.0": (
-        lambda out: _edit(
+        lambda out: edit_record(
             out,
             "sessions/2/manifest.json",
             lambda d: next(a for a in d["artifacts"] if a["path"].endswith("settings.csv")).update(
@@ -1271,7 +1217,7 @@ def test_an_attempt_a_resume_recorded_from_its_started_json_needs_that_record(la
         "unknown",
         (exchange(AUTH, 200), exchange(RANK, 200)),
     )
-    _unlisted(lab.out, f"{_attempt_of(lab.out, 0)}/started.json")
+    unlist_record(lab.out, f"{_attempt_of(lab.out, 0)}/started.json")
     before = snapshot(lab.out)
 
     ran = lab.resume()
@@ -1342,7 +1288,7 @@ def test_a_record_0_4_0_adds_without_a_reader_fails_the_check(
     settings = f"cases/{EXAMPLE.cases[0].case_id}/normalized/settings.csv"
     path = path.format(attempt=_attempt_of(lab.out, 1), settings=settings)
     if listed:
-        _edit(
+        edit_record(
             lab.out,
             "sessions/2/manifest.json",
             lambda d: next(a for a in d["artifacts"] if a["path"] == path).update(
@@ -1350,7 +1296,7 @@ def test_a_record_0_4_0_adds_without_a_reader_fails_the_check(
             ),
         )
     else:
-        _edit(lab.out, path, lambda d: d.update(schema_version="9.9.9"))
+        edit_record(lab.out, path, lambda d: d.update(schema_version="9.9.9"))
 
     ran = lab.resume()
 
@@ -1398,7 +1344,7 @@ def test_a_record_1_1_0_of_an_experiment_without_a_definition_fails_the_check(
     # with a plan 1.3.0 writes it.
     script(lab.server, backtests=[response("complete.json")] * 5)
     assert lab.new("example.yaml").error is None
-    _edit(lab.out, path, change)
+    edit_record(lab.out, path, change)
 
     ran = lab.resume("example.yaml")
 
@@ -1435,10 +1381,6 @@ class Screen:
         case_id = self.plan.cases[0].case_id
         (directory,) = sorted((self.out / "cases" / case_id / "attempts").iterdir())
         return directory.relative_to(self.out).as_posix()
-
-    @property
-    def manifest(self) -> Path:
-        return self.out / "manifest.json"
 
 
 def write_screen(tmp: Path, server: FakePortfolio123, definition: bytes | None = None) -> Screen:
@@ -1522,39 +1464,32 @@ def _run_weight_row_changed(run: Screen) -> None:
     changed = [
         row.model_copy(update={"value": "45"}) if row.node == "Value" else row for row in rows
     ]
-    _rewrite(run.out, "normalized/settings.csv", settings_csv_v1_1(changed), run.manifest)
+    rewrite(run.out, "normalized/settings.csv", settings_csv_v1_1(changed))
 
 
 def _run_record_1_0_0(run: Screen) -> None:
-    _edit(
+    edit_json(
         run.out,
         f"{run.attempt}/attempt.json",
         lambda d: d.update(schema_version="1.0.0"),
-        run.manifest,
     )
 
 
 RUN_BREAKS: dict[str, tuple[Callable[[Screen], object], str]] = {
     "an attempt with started.json and no updating.json": (
-        lambda run: _unlisted(run.out, f"{run.attempt}/updating.json", run.manifest),
+        lambda run: unlist(run.out, f"{run.attempt}/updating.json"),
         "wrote its update record first",
     ),
     "an update record that disagrees with its start record": (
-        lambda run: _edit(
-            run.out, f"{run.attempt}/updating.json", _transport_changed, run.manifest
-        ),
+        lambda run: edit_json(run.out, f"{run.attempt}/updating.json", _transport_changed),
         "doesn't hold the update record's values and exchanges",
     ),
     "a started.json whose exchanges don't end with the rank_update's 200": (
-        lambda run: _edit(
-            run.out, f"{run.attempt}/started.json", _rank_update_status(500), run.manifest
-        ),
+        lambda run: edit_json(run.out, f"{run.attempt}/started.json", _rank_update_status(500)),
         "isn't a valid start record",
     ),
     "a rank-update-request.json whose bytes aren't what the attempt record records": (
-        lambda run: _rewrite(
-            run.out, f"{run.attempt}/rank-update-request.json", b"{}\n", run.manifest
-        ),
+        lambda run: rewrite(run.out, f"{run.attempt}/rank-update-request.json", b"{}\n"),
         "which its manifest doesn't list as that file",
     ),
     "an attempt record 1.0.0 under a plan 1.2.0": (
@@ -1562,21 +1497,18 @@ RUN_BREAKS: dict[str, tuple[Callable[[Screen], object], str]] = {
         "isn't the version an attempt under its plan writes",
     ),
     "a backtest's exchange after a rank_update that didn't get a 200": (
-        lambda run: _edit(
-            run.out, f"{run.attempt}/attempt.json", _rank_update_status(500), run.manifest
-        ),
+        lambda run: edit_json(run.out, f"{run.attempt}/attempt.json", _rank_update_status(500)),
         "isn't a valid attempt record",
     ),
     "a run whose definition.xml is missing": (
-        lambda run: _unlisted(run.out, "definition.xml", run.manifest),
+        lambda run: unlist(run.out, "definition.xml"),
         "doesn't list definition.xml as the run's one ranking_definition",
     ),
     "a run whose definition.xml isn't its ranking_source's": (
-        lambda run: _rewrite(
+        lambda run: rewrite(
             run.out,
             "definition.xml",
             (RANKING_DEFINITIONS / "value-heavy.xml").read_bytes(),
-            run.manifest,
         ),
         "isn't its plan's ranking definition",
     ),
@@ -1618,7 +1550,7 @@ def test_a_runs_attempt_with_only_its_update_record_reads_as_running(
             if a["path"] in ("plan.json", "configuration.yaml", "definition.xml", *kept)
         ]
 
-    _edit(run.out, "manifest.json", update_only, run.manifest)
+    edit_json(run.out, "manifest.json", update_only)
 
     saved = read_run(LocalArtifactStore(run.out))
 
@@ -1645,7 +1577,7 @@ def _listing_only(run: Screen, *names: str) -> None:
             or a["path"] in kept
         ]
 
-    _edit(run.out, "manifest.json", only, run.manifest)
+    edit_json(run.out, "manifest.json", only)
 
 
 def _undecoded_rank_update_response_listed(run: Screen) -> None:
@@ -1666,7 +1598,7 @@ def _undecoded_rank_update_response_listed(run: Screen) -> None:
         raw["source"]["format"] = "p123api-rank-update-response_undecoded"
         content["artifacts"].append(raw)
 
-    _edit(run.out, "manifest.json", listed, run.manifest)
+    edit_json(run.out, "manifest.json", listed)
 
 
 def _rank_update_request_listed_as(role: str) -> Callable[[Screen], None]:
@@ -1676,7 +1608,7 @@ def _rank_update_request_listed_as(role: str) -> Callable[[Screen], None]:
         (entry,) = [a for a in content["artifacts"] if a["role"] == "rank_update_request"]
         entry["role"] = role
 
-    return lambda run: _edit(run.out, "manifest.json", change, run.manifest)
+    return lambda run: edit_json(run.out, "manifest.json", change)
 
 
 @pytest.mark.parametrize(
@@ -1800,7 +1732,7 @@ def test_a_run_without_a_definition_refuses_versions_only_a_definition_gives(
             is None
         )
     assert read_run(LocalArtifactStore(out)).plan == plan
-    _edit(out, "manifest.json", change, out / "manifest.json")
+    edit_json(out, "manifest.json", change)
 
     with pytest.raises(TrialFolioError) as caught:
         read_run(LocalArtifactStore(out))
@@ -1826,16 +1758,15 @@ def test_a_runs_record_0_4_0_adds_without_a_reader_is_unknown(
     run = write_screen(tmp_path, server)
     path = path.format(attempt=run.attempt)
     if listed:
-        _edit(
+        edit_json(
             run.out,
             "manifest.json",
             lambda d: next(a for a in d["artifacts"] if a["path"] == path).update(
                 schema_version="9.9.9"
             ),
-            run.manifest,
         )
     else:
-        _edit(run.out, path, lambda d: d.update(schema_version="9.9.9"), run.manifest)
+        edit_json(run.out, path, lambda d: d.update(schema_version="9.9.9"))
 
     with pytest.raises(TrialFolioError) as caught:
         read_run(LocalArtifactStore(run.out))

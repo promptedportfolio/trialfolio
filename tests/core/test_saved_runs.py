@@ -8,26 +8,36 @@ R01-AC23 (an incomplete or non-run directory is `input.not_a_run`, and creates n
 docs/contracts.md, plan hashing (a saved plan recomputes to its hash), artifact compatibility (an
 unknown schema version is `artifact.unknown_schema_version`), and CLI behavior (validation first;
 an output directory that isn't empty is refused). The network guard blocks any connection a
-re-render would make. R01-T16 checks the same through the CLI.
+re-render would make. R01-T16 checks the same through the CLI. Each break is made with the
+editors of `tests/support/broken_runs.py`, which TS-T05 moved there from this file.
 """
 
-import json
 import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path, PurePath
-from typing import Any, cast
+from typing import Any
 from urllib.parse import unquote, urlsplit
 
 import pytest
 
+from tests.support.broken_runs import (
+    Json,
+    attempt_directory,
+    change_bytes,
+    edit_json,
+    edit_manifest,
+    move,
+    newer,
+    newer_entry,
+    remove,
+    rewrite,
+)
 from tests.support.directories import snapshot
 from tests.support.fake_portfolio123 import Reply
 from tests.support.html_report import parse
 from tests.support.paths import RESPONSES, SCREEN_CONFIGS
-from tests.support.screen_runs import WriteRun, Written, manifest_json
-from trialfolio.canonical import sha256_hex
-from trialfolio.contracts.manifest import ManifestArtifact, RunManifest
+from tests.support.screen_runs import WriteRun, Written
 from trialfolio.errors import TrialFolioError
 from trialfolio.report import HtmlReportRenderer, rerender_report
 from trialfolio.runs import read_run
@@ -56,56 +66,6 @@ def rerender(run: Path, out: Path, run_path: str | None = "") -> str:
         run_path = relative(run, out)
     rerender_report(LocalArtifactStore(run), LocalArtifactStore(out), RENDERER, run_path=run_path)
     return (out / "report.html").read_text(encoding="utf-8")
-
-
-def rewrite(out: Path, path: str, data: bytes) -> None:
-    """Replaces a file of a saved run, and its manifest entry to match, so only the checks
-    beyond the hashes can tell."""
-    (out / path).write_bytes(data)
-    manifest = RunManifest.model_validate_json((out / "manifest.json").read_bytes())
-    artifacts = tuple(
-        artifact.model_copy(update={"artifact_id": "sha256:" + sha256_hex(data), "size": len(data)})
-        if artifact.path == path
-        else artifact
-        for artifact in manifest.artifacts
-    )
-    (out / "manifest.json").write_bytes(
-        manifest_json(manifest.model_copy(update={"artifacts": artifacts}))
-    )
-
-
-def edit_json(out: Path, path: str, change: Callable[[dict[str, Any]], None]) -> None:
-    content = json.loads((out / path).read_bytes())
-    change(content)
-    data = (json.dumps(content, indent=2) + "\n").encode()
-    if path == "manifest.json":
-        (out / path).write_bytes(data)
-    else:
-        rewrite(out, path, data)
-
-
-def edit_manifest(
-    run: Path, change: Callable[[list[ManifestArtifact]], list[ManifestArtifact]]
-) -> None:
-    """Changes the entries of a saved run's manifest."""
-    manifest = RunManifest.model_validate_json((run / "manifest.json").read_bytes())
-    artifacts = tuple(change(list(manifest.artifacts)))
-    (run / "manifest.json").write_bytes(
-        manifest_json(manifest.model_copy(update={"artifacts": artifacts}))
-    )
-
-
-def move(run: Path, path: str, to: str) -> None:
-    """Moves a file of a saved run, and its manifest entry with it."""
-    (run / to).parent.mkdir(parents=True, exist_ok=True)
-    (run / path).rename(run / to)
-    edit_manifest(
-        run,
-        lambda artifacts: [
-            artifact.model_copy(update={"path": to}) if artifact.path == path else artifact
-            for artifact in artifacts
-        ],
-    )
 
 
 def refused(run: Path, out: Path) -> TrialFolioError:
@@ -208,15 +168,6 @@ def test_a_run_that_didnt_complete_is_read_without_tables(
 # What isn't a complete run (R01-AC23)
 
 
-def remove(run: Path, path: str) -> None:
-    (run / path).unlink()
-
-
-def change_bytes(run: Path, path: str) -> None:
-    """Changes a file without updating its manifest entry."""
-    (run / path).write_bytes((run / path).read_bytes().replace(b"SPY", b"QQQ"))
-
-
 BROKEN: dict[str, Callable[[Path], None]] = {
     "no manifest": lambda run: remove(run, "manifest.json"),
     "a listed file missing": lambda run: remove(run, "normalized/settings.csv"),
@@ -277,25 +228,6 @@ def test_an_empty_directory_and_a_regular_file_arent_runs(tmp_path: Path) -> Non
         error = refused(given, tmp_path / "report")
         assert error.code == "input.not_a_run"
     assert "it isn't a directory." in refused(regular, tmp_path / "report").message
-
-
-type Json = dict[str, object]
-
-
-def newer(content: Json) -> None:
-    # Not 1.1.0, which release 0.4.0's R04-T09 gave run manifests a reader for.
-    content["schema_version"] = "9.9.9"
-
-
-def newer_entry(role: str) -> Callable[[Json], None]:
-    """Gives the manifest's entry for the file of `role` a newer schema version."""
-
-    def change(manifest: Json) -> None:
-        artifacts = cast("list[Json]", manifest["artifacts"])
-        (entry,) = (artifact for artifact in artifacts if artifact["role"] == role)
-        newer(entry)
-
-    return change
 
 
 @pytest.mark.parametrize(
@@ -391,11 +323,6 @@ SAME_CASE = FORMULA.replace(
 """`formula.yaml` with another title: the same `case_id`, another `plan_hash`."""
 
 
-def attempt_directory(written: Written) -> str:
-    record = next(a.path for a in written.manifest.artifacts if a.role == "attempt_record")
-    return record.rpartition("/")[0]
-
-
 def test_files_from_a_run_of_the_same_case_are_refused_even_with_matching_hashes(
     write_run: WriteRun, tmp_path: Path
 ) -> None:
@@ -403,7 +330,7 @@ def test_files_from_a_run_of_the_same_case_are_refused_even_with_matching_hashes
     other = write_run(SAME_CASE, Reply(200, (RESPONSES / "missing-metrics.json").read_bytes()))
     assert other.saved.plan.cases[0].case_id == run.saved.plan.cases[0].case_id
     assert other.saved.plan.plan_hash != run.saved.plan.plan_hash
-    ours, theirs = attempt_directory(run), attempt_directory(other)
+    ours, theirs = attempt_directory(run.out), attempt_directory(other.out)
 
     def take_table(path: str) -> Callable[[Path], None]:
         return lambda copy: rewrite(copy, path, (other.out / path).read_bytes())
@@ -520,7 +447,7 @@ def test_an_attempt_record_must_be_its_directorys_and_reference_listed_files(
 def test_an_attempts_records_must_be_named_as_records_in_the_plans_case(
     complete: Written, tmp_path: Path
 ) -> None:
-    directory = attempt_directory(complete)
+    directory = attempt_directory(complete.out)
     attempt = directory.rpartition("/")[2]
     elsewhere = f"cases/case-{'0' * 16}/attempts/{attempt}"
     moves = (
