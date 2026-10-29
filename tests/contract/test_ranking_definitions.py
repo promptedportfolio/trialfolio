@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import canaries
+from tests.support.paths import EXPERIMENT_CONFIGS, RANKING_DEFINITIONS, SCREEN_CONFIGS
 from tests.support.snapshot_builder import SnapshotBuilder
 from trialfolio.canonical import sha256_hex
 from trialfolio.configuration import (
@@ -47,14 +48,10 @@ from trialfolio.ranking_definitions import (
     read_definition,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-FIXTURES = REPO_ROOT / "tests" / "fixtures"
-EXPERIMENTS = FIXTURES / "experiment-configs"
-RANKING = EXPERIMENTS / "ranking"
-INVALID_DEFINITIONS = RANKING / "invalid"
-INVALID_CONFIGURATIONS = EXPERIMENTS / "invalid"
-SCREEN = FIXTURES / "screen-configs" / "definition.yaml"
-EXAMPLE = EXPERIMENTS / "ranking-example.yaml"
+INVALID_DEFINITIONS = RANKING_DEFINITIONS / "invalid"
+INVALID_CONFIGURATIONS = EXPERIMENT_CONFIGS / "invalid"
+SCREEN = SCREEN_CONFIGS / "definition.yaml"
+EXAMPLE = EXPERIMENT_CONFIGS / "ranking-example.yaml"
 
 
 def read_screen(path: Path) -> ScreenConfigurationRead:
@@ -66,7 +63,7 @@ def read_experiment(path: Path) -> ExperimentConfigurationRead:
 
 
 def definition(name: str) -> RankingDefinition:
-    return read_definition((RANKING / name).read_bytes())
+    return read_definition((RANKING_DEFINITIONS / name).read_bytes())
 
 
 def rejection(path: Path, code: str = "config.invalid") -> TrialFolioError:
@@ -231,7 +228,7 @@ def test_a_definition_that_can_t_be_read_is_not_found(
     """As a configuration file that can't be read is: the error says why. So does a file in a
     folder the user may not search, which may exist, rather than saying it doesn't (review of
     R04-T06's pull request)."""
-    screen, _ = laid_out(tmp_path, (RANKING / "value-momentum.xml").read_bytes())
+    screen, _ = laid_out(tmp_path, (RANKING_DEFINITIONS / "value-momentum.xml").read_bytes())
     path = tmp_path / "experiment-configs" / blocked
     restored = path.stat().st_mode
     path.chmod(mode)
@@ -252,7 +249,7 @@ def test_a_definition_that_can_t_be_read_is_not_found(
 def test_an_absolute_definition_path_is_read_where_it_leads(tmp_path: Path) -> None:
     content = SCREEN.read_text(encoding="utf-8").replace(
         "'../experiment-configs/ranking/value-momentum.xml'",
-        f"'{(RANKING / 'value-momentum.xml').as_posix()}'",
+        f"'{(RANKING_DEFINITIONS / 'value-momentum.xml').as_posix()}'",
     )
     path = tmp_path / "screen.yaml"
     path.write_text(content, encoding="utf-8")
@@ -267,12 +264,14 @@ def test_a_definition_is_read_where_the_file_system_resolves_its_path(tmp_path: 
     """A `..` after a symbolic link leads to the parent of the link's target, as opening the path
     does, and as a review finds its runs."""
     real = tmp_path / "real" / "screen-configs"
-    screen, _ = laid_out(tmp_path / "real", (RANKING / "value-momentum.xml").read_bytes())
+    screen, _ = laid_out(
+        tmp_path / "real", (RANKING_DEFINITIONS / "value-momentum.xml").read_bytes()
+    )
     os.symlink(real, tmp_path / "link")
     # Where `..` would lead if it removed the link's name, there's another definition.
     other = tmp_path / "experiment-configs" / "ranking" / "value-momentum.xml"
     other.parent.mkdir(parents=True)
-    other.write_bytes((RANKING / "value-heavy.xml").read_bytes())
+    other.write_bytes((RANKING_DEFINITIONS / "value-heavy.xml").read_bytes())
 
     read = read_screen(tmp_path / "link" / screen.name)
 
@@ -283,11 +282,11 @@ def test_the_definition_s_bytes_are_kept_for_its_copy(tmp_path: Path) -> None:
     """The copy, `definition.xml`, is written from the bytes read in step 2, never by reading the
     file again (ranking definitions, its copy): a file changed after it was read doesn't change
     what the read holds."""
-    content = (RANKING / "value-momentum.xml").read_bytes()
+    content = (RANKING_DEFINITIONS / "value-momentum.xml").read_bytes()
     screen, _ = laid_out(tmp_path, content)
 
     read = read_screen(screen)
-    changed = (RANKING / "value-heavy.xml").read_bytes()
+    changed = (RANKING_DEFINITIONS / "value-heavy.xml").read_bytes()
     (tmp_path / "experiment-configs" / "ranking" / "value-momentum.xml").write_bytes(changed)
 
     assert read.definition is not None
@@ -301,7 +300,7 @@ def test_the_definition_s_bytes_are_kept_for_its_copy(tmp_path: Path) -> None:
 
 def test_the_example_s_definition_reads_as_its_nodes() -> None:
     read = definition("value-momentum.xml")
-    content = (RANKING / "value-momentum.xml").read_bytes()
+    content = (RANKING_DEFINITIONS / "value-momentum.xml").read_bytes()
 
     assert read.content == content
     assert read.text == content.decode("utf-8")
@@ -331,7 +330,7 @@ def test_a_file_saved_as_utf_16_without_a_byte_order_mark_is_invalid(
     """Its bytes are UTF-8 text, NULs included, but XML 1.0 allows no NUL character, and expat
     would read the file as UTF-16, whatever encoding it's told (review of R04-T06's pull
     request)."""
-    text = (RANKING / "value-momentum.xml").read_text(encoding="utf-8")
+    text = (RANKING_DEFINITIONS / "value-momentum.xml").read_text(encoding="utf-8")
     screen, experiment = laid_out(tmp_path, text.encode(encoding))
 
     for path, key in ((screen, "ranking.definition"), (experiment, "baseline.ranking.definition")):
@@ -348,7 +347,12 @@ def test_a_file_saved_as_utf_16_without_a_byte_order_mark_is_invalid(
     ("content", "line"),
     [
         ("<RankingSystem/>".encode("utf-16-le"), 1),
-        ((RANKING / "value-momentum.xml").read_bytes().replace(b"\t\t\t<Formula>", b"\0", 1), 4),
+        (
+            (RANKING_DEFINITIONS / "value-momentum.xml")
+            .read_bytes()
+            .replace(b"\t\t\t<Formula>", b"\0", 1),
+            4,
+        ),
     ],
     ids=["utf-16-element", "nul-in-a-formula"],
 )
@@ -410,7 +414,7 @@ def test_a_declaration_over_several_lines_fails_at_the_line_where_it_starts(
 def test_text_after_the_last_node_is_text_between_nodes(before: str, line: int) -> None:
     """After a composite's last node, or the RankingSystem's, as before its first and between
     two (review of R04-T06's pull request)."""
-    text = (RANKING / "value-momentum.xml").read_text(encoding="utf-8")
+    text = (RANKING_DEFINITIONS / "value-momentum.xml").read_text(encoding="utf-8")
     content = text.replace(before, f"\t\tStray.\n{before}", 1).encode()
 
     with pytest.raises(DefinitionProblem, match="it holds text between nodes") as caught:
@@ -459,7 +463,7 @@ def test_composites_nested_past_python_s_recursion_limit_are_read() -> None:
 def test_each_line_end_is_read_as_a_line_feed(tmp_path: Path, line_end: bytes) -> None:
     """So a definition sent never holds a carriage return, and a file checked out with Windows
     line endings gives the same definition, and the same cases, as one checked out without."""
-    content = (RANKING / "value-momentum.xml").read_bytes()
+    content = (RANKING_DEFINITIONS / "value-momentum.xml").read_bytes()
     _, experiment = laid_out(tmp_path, content.replace(b"\n", line_end))
 
     read = read_experiment(experiment)
@@ -735,7 +739,9 @@ def test_the_example_s_variants_give_the_definitions_it_describes() -> None:
 
     assert read.definition == baseline
     heavy, tilt, no_sales = read.ranking_cases
-    assert heavy.definition.text == (RANKING / "value-heavy.xml").read_text(encoding="utf-8")
+    assert heavy.definition.text == (RANKING_DEFINITIONS / "value-heavy.xml").read_text(
+        encoding="utf-8"
+    )
     assert tilt.definition.text == text.replace(
         'Name="Earnings Yield" Weight="50"', 'Name="Earnings Yield" Weight="70"'
     ).replace('Name="Sales Yield" Weight="50"', 'Name="Sales Yield" Weight="30"')
@@ -783,7 +789,7 @@ def test_written_differently_gives_the_example_s_cases() -> None:
     """By position, in another order, `60.0`, and in double quotes: the same definitions, and
     each entry the same node and weight, in the definition's order."""
     example = read_experiment(EXAMPLE)
-    written = read_experiment(EXPERIMENTS / "ranking-written-differently.yaml")
+    written = read_experiment(EXPERIMENT_CONFIGS / "ranking-written-differently.yaml")
 
     def cases(read: ExperimentConfigurationRead) -> list[object]:
         return [
@@ -806,7 +812,7 @@ def test_written_differently_gives_the_example_s_cases() -> None:
 
 
 def test_ranking_positions_names_nodes_by_position_and_by_escaped_names() -> None:
-    read = read_experiment(EXPERIMENTS / "ranking-positions.yaml")
+    read = read_experiment(EXPERIMENT_CONFIGS / "ranking-positions.yaml")
 
     heavy, no_first = read.ranking_cases
     assert [(entry.node.path, str(entry.weight)) for entry in heavy.set] == [
@@ -842,7 +848,7 @@ def test_a_weight_variant_rewrites_only_the_weights_that_differ() -> None:
     """In their normalized form, between their quotes; a weight given unchanged keeps its text,
     even one written `30.0`."""
     baseline = read_definition(
-        (RANKING / "value-momentum.xml")
+        (RANKING_DEFINITIONS / "value-momentum.xml")
         .read_bytes()
         .replace(b'Name="Momentum" Weight="30"', b'Name="Momentum" Weight="30.0"')
     )
@@ -901,7 +907,9 @@ def test_the_revised_definition_keeps_two_of_the_example_s_cases(tmp_path: Path)
     """`value-momentum-revised.xml` changes only the Value composite's factors, which
     `tilt-earnings-yield` and `no-sales-yield` set: their definitions don't change, so a revision
     keeps them, and `value-heavy`'s does."""
-    _, experiment = laid_out(tmp_path, (RANKING / "value-momentum-revised.xml").read_bytes())
+    _, experiment = laid_out(
+        tmp_path, (RANKING_DEFINITIONS / "value-momentum-revised.xml").read_bytes()
+    )
 
     revised = read_experiment(experiment)
     example = read_experiment(EXAMPLE)
@@ -919,7 +927,9 @@ def test_synthetic_heavy_is_synthetic_with_its_top_level_weights_moved() -> None
         definition("synthetic.xml"), variant({"Value": 60, "Momentum": 20, "Quality": 20}), "v"
     )
 
-    assert case.definition.text == (RANKING / "synthetic-heavy.xml").read_text(encoding="utf-8")
+    assert case.definition.text == (RANKING_DEFINITIONS / "synthetic-heavy.xml").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_the_live_check_s_definition_has_the_form_r04_t01_sent() -> None:
@@ -1033,7 +1043,7 @@ def ranking_variants(tmp_path: Path, variants: str, base: Path = EXAMPLE) -> lis
     """The problems of `base` with its ranking variants replaced by `variants`, from a copy in
     `tmp_path` whose definition's path is absolute, so it leads where it did."""
     text = base.read_text(encoding="utf-8").replace(
-        "    definition: 'ranking/", f"    definition: '{RANKING.as_posix()}/"
+        "    definition: 'ranking/", f"    definition: '{RANKING_DEFINITIONS.as_posix()}/"
     )
     start = text.index("  ranking:\n    - key:")
     end = text.index("  rebalance_weeks: []")
@@ -1095,7 +1105,7 @@ def test_a_removal_s_set_leaving_out_a_node_names_it_by_its_position(tmp_path: P
     problem = ranking_variants(
         tmp_path,
         "  ranking:\n    - key: removed\n      remove: '#3'\n      set: {'#1': 70}\n",
-        EXPERIMENTS / "ranking-positions.yaml",
+        EXPERIMENT_CONFIGS / "ranking-positions.yaml",
     )
 
     assert problem == [
@@ -1176,8 +1186,8 @@ def test_a_snapshot_baseline_s_variants_give_the_file_s_cases(tmp_path: Path) ->
 
 
 def test_a_ranking_by_another_form_reads_no_definition() -> None:
-    screen = read_screen(FIXTURES / "screen-configs" / "formula.yaml")
-    experiment = read_experiment(EXPERIMENTS / "example.yaml")
+    screen = read_screen(SCREEN_CONFIGS / "formula.yaml")
+    experiment = read_experiment(EXPERIMENT_CONFIGS / "example.yaml")
 
     assert screen.definition is None
     assert (experiment.definition, experiment.ranking_cases) == (None, ())

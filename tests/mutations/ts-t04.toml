@@ -1,0 +1,540 @@
+# TS-T04's list of the check of the tests (docs/test-refactoring.md), which it ran on its base and
+# on its branch. TS-T04 writes the core's helpers once, under tests/support/, and the fake server's
+# setup and the fixtures' paths everywhere, and changes each test module that used them, so each
+# test module it changes has a mutation of its own, which runs only that module's tests: one of a
+# few changes of the code they reach, the one nearest what the module checks. A module TS-T03
+# changed keeps the mutation TS-T03 gave it. The mutations with caught_by are the two of the check
+# TS-T04 strengthens, the "nothing is written" of a refused resume and of a refused read of a run,
+# which now sees a new empty directory; and detail 3's two: an error the session returns, raised
+# instead, which the tests whose lab lets a raised error propagate, as their drivers did, still
+# catch. The packaging tests' mutations are in ts-t04-packaging.toml, and the reference tests' in
+# ts-t04-reference.toml, which runs on the owner's machine.
+
+# Each test module TS-T04 changes, with a change a test there catches.
+
+[[mutation]]
+name = '''no snapshot is read back, for contract/test_experiment_configuration'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/contract/test_experiment_configuration.py"]
+
+[[mutation]]
+name = '''no snapshot is read back, for contract/test_historical_artifacts'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/contract/test_historical_artifacts.py"]
+
+[[mutation]]
+name = '''no snapshot is read back, for contract/test_ranking_definitions'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/contract/test_ranking_definitions.py"]
+
+[[mutation]]
+name = '''a snapshot configuration's system needn't be quoted, for contract/test_ranking_snapshot_configuration'''
+file = "src/trialfolio/configuration.py"
+old = '''        lambda path: path == ("system",),'''
+new = '''        lambda path: False,'''
+tests = ["tests/contract/test_ranking_snapshot_configuration.py"]
+
+[[mutation]]
+name = '''no review configuration's version has a reader, for contract/test_review_configuration'''
+file = "src/trialfolio/contracts/review_configuration.py"
+old = '''REVIEW_SCHEMA_VERSIONS: Final = get_args(ReviewSchemaVersion)'''
+new = '''REVIEW_SCHEMA_VERSIONS: Final = ()'''
+tests = ["tests/contract/test_review_configuration.py"]
+
+[[mutation]]
+name = '''no snapshot is read back, for contract/test_screen_configuration'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/contract/test_screen_configuration.py"]
+
+[[mutation]]
+name = '''the hash given with --approve is refused in other words, for core/test_approval'''
+file = "src/trialfolio/approval.py"
+old = '''"The hash given with --approve isn't this plan's hash. Approval takes the full hash, exactly"'''
+new = '''"The hash given with --approve is another plan's hash. Approval takes the full hash, exactly"'''
+tests = ["tests/core/test_approval.py"]
+
+[[mutation]]
+name = '''a published file replaces the file it's named over, for core/test_artifact_store'''
+file = "src/trialfolio/filesystem.py"
+old = '''            os.link(temporary, final)'''
+new = '''            os.replace(temporary, final)'''
+tests = ["tests/core/test_artifact_store.py"]
+
+[[mutation]]
+name = '''an attempt whose request was sent isn't possibly charged, for core/test_attempt_records'''
+file = "src/trialfolio/attempts/endings.py"
+old = '''    charged = outcome == "unknown" or any(e.result != "not_connected" for e in sends)
+    return Ending(outcome, charged, request_detail(outcome, possibly_charged=charged, name=name))'''
+new = '''    charged = outcome == "unknown"
+    return Ending(outcome, charged, request_detail(outcome, possibly_charged=charged, name=name))'''
+tests = ["tests/core/test_attempt_records.py"]
+
+[[mutation]]
+name = '''a session's start names none of its cases, for core/test_experiment_core'''
+file = "src/trialfolio/experiment_execution/execution.py"
+old = '''SessionStarted(context.session, tuple(c.case_id for c, _ in sends))'''
+new = '''SessionStarted(context.session, ())'''
+tests = ["tests/core/test_experiment_core.py"]
+
+[[mutation]]
+name = '''a manifest counts the failed cases as succeeded, for core/test_experiment_execution'''
+file = "src/trialfolio/case_state.py"
+old = '''succeeded=outcomes.count("succeeded"),'''
+new = '''succeeded=outcomes.count("failed"),'''
+tests = ["tests/core/test_experiment_execution.py"]
+
+[[mutation]]
+name = '''the experiment lock is a shared lock, for core/test_experiment_lock'''
+file = "src/trialfolio/filesystem.py"
+old = '''fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)'''
+new = '''fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)'''
+tests = ["tests/core/test_experiment_lock.py"]
+
+[[mutation]]
+name = '''a case's ID is one digit shorter, for core/test_experiment_plan'''
+file = "src/trialfolio/planning/cases.py"
+old = '''return "case-" + sha256_hex(canonical_json(rows))[:16]'''
+new = '''return "case-" + sha256_hex(canonical_json(rows))[:15]'''
+tests = ["tests/core/test_experiment_plan.py"]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for core/test_experiment_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = ["tests/core/test_experiment_report.py"]
+
+[[mutation]]
+name = '''an attempt stopped while it authenticated is recorded as possibly charged, for core/test_experiment_resume'''
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''        "possibly_charged": False,'''
+new = '''        "possibly_charged": True,'''
+tests = ["tests/core/test_experiment_resume.py"]
+
+[[mutation]]
+name = '''a decimal's places are counted one too many, for core/test_normalize'''
+file = "src/trialfolio/normalization/rows.py"
+old = '''return len(value.text.partition(".")[2])'''
+new = '''return len(value.text.partition(".")[2]) + 1'''
+tests = ["tests/core/test_normalize.py"]
+
+[[mutation]]
+name = '''a file another process wrote before the claim doesn't fail it, for core/test_output_claim'''
+file = "src/trialfolio/storage.py"
+old = '''if any(not part_of_claim(name, claim.path.name) for name in names):'''
+new = '''if False:'''
+tests = ["tests/core/test_output_claim.py"]
+
+[[mutation]]
+name = '''a plan's hash leaves out the version of Trial Folio, for core/test_plan'''
+file = "src/trialfolio/planning/hashing.py"
+old = '''content = plan.model_dump(mode="json", exclude={"plan_hash"})'''
+new = '''content = plan.model_dump(mode="json", exclude={"plan_hash", "trialfolio_version"})'''
+tests = ["tests/core/test_plan.py"]
+
+[[mutation]]
+name = '''a run with a ranking definition doesn't hold the ranking lock, for core/test_ranking_execution'''
+file = "src/trialfolio/execution.py"
+old = '''        if self._lock is None:
+            return self._run_claimed(configuration, client, on_claimed)'''
+new = '''        if True:
+            return self._run_claimed(configuration, client, on_claimed)'''
+tests = ["tests/core/test_ranking_execution.py"]
+
+[[mutation]]
+name = '''a run with a ranking definition doesn't hold the ranking lock, for core/test_ranking_lock'''
+file = "src/trialfolio/execution.py"
+old = '''        if self._lock is None:
+            return self._run_claimed(configuration, client, on_claimed)'''
+new = '''        if True:
+            return self._run_claimed(configuration, client, on_claimed)'''
+tests = ["tests/core/test_ranking_lock.py"]
+
+[[mutation]]
+name = '''the pause before a backtest is 9 seconds, for core/test_ranking_pause'''
+file = "src/trialfolio/pause.py"
+old = '''UPDATE_PAUSE_SECONDS: Final = 10'''
+new = '''UPDATE_PAUSE_SECONDS: Final = 9'''
+tests = ["tests/core/test_ranking_pause.py"]
+
+[[mutation]]
+name = '''a rank_update names another currency, for core/test_ranking_plan'''
+file = "src/trialfolio/planning/cases.py"
+old = '''"currency": "USD",'''
+new = '''"currency": "usd",'''
+tests = ["tests/core/test_ranking_plan.py"]
+
+[[mutation]]
+name = '''no snapshot is read back, for core/test_ranking_report'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/core/test_ranking_report.py"]
+
+[[mutation]]
+name = '''the record of an attempt stopped after its update record says it stopped elsewhere, for core/test_ranking_resume'''
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''f" written, before the rank_update's response was saved. {detail}"'''
+new = '''f" written, before the rank_update's request was saved. {detail}"'''
+tests = ["tests/core/test_ranking_resume.py"]
+
+[[mutation]]
+name = '''no snapshot is read back, for core/test_ranking_snapshot'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/core/test_ranking_snapshot.py"]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for core/test_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = ["tests/core/test_report.py"]
+
+[[mutation]]
+name = '''a refused result's message doesn't name its label, for core/test_review_inputs'''
+file = "src/trialfolio/review_inputs.py"
+old = '''shown=f"result `{result.label}`'s run directory (`{visible(result.run)}`)",'''
+new = '''shown=f"the run directory (`{visible(result.run)}`)",'''
+tests = ["tests/core/test_review_inputs.py"]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for core/test_review_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = ["tests/core/test_review_report.py"]
+
+[[mutation]]
+name = '''a saved run's records aren't checked, for core/test_saved_runs'''
+file = "src/trialfolio/runs.py"
+old = '''    checks = _CHECKS
+'''
+new = '''    checks = ()
+'''
+tests = ["tests/core/test_saved_runs.py"]
+
+[[mutation]]
+name = '''no backtest is stale, for core/test_stale_backtests'''
+file = "src/trialfolio/stale_backtests.py"
+old = '''    if previous is None or previous.session != backtest.session:
+        return False'''
+new = '''    if True:
+        return False'''
+tests = ["tests/core/test_stale_backtests.py"]
+
+[[mutation]]
+name = '''a table's lines end with a carriage return too, for core/test_tables'''
+file = "src/trialfolio/tables.py"
+old = '''writer = csv.writer(text, lineterminator="\n")'''
+new = '''writer = csv.writer(text, lineterminator="\r\n")'''
+tests = ["tests/core/test_tables.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_budget'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_budget.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_failures'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_failures.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_lock'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_lock.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_resume'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_resume.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_run'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_run.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_json_summary'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_json_summary.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_license'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_license.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_budget'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_budget.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_experiment'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_experiment.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_lock'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_lock.py"]
+
+[[mutation]]
+name = '''the pause before a backtest is 9 seconds, for interface/test_ranking_pause'''
+file = "src/trialfolio/pause.py"
+old = '''UPDATE_PAUSE_SECONDS: Final = 10'''
+new = '''UPDATE_PAUSE_SECONDS: Final = 9'''
+tests = ["tests/interface/test_ranking_pause.py"]
+
+[[mutation]]
+name = '''no snapshot is read back, for interface/test_ranking_report'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/interface/test_ranking_report.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_resume'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_resume.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_run'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_run.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_sending'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_sending.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_snapshot'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_snapshot.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_storage'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_storage.py"]
+
+[[mutation]]
+name = '''a weight row loses its original, for interface/test_ranking_tables'''
+file = "src/trialfolio/normalization/rows.py"
+old = '''key, text = (None, None) if weight is None else (weight.key, weight.text)'''
+new = '''key, text = (None, None)'''
+tests = ["tests/interface/test_ranking_tables.py"]
+
+[[mutation]]
+name = '''a rank_update names another currency, for interface/test_ranking_writes'''
+file = "src/trialfolio/planning/cases.py"
+old = '''"currency": "USD",'''
+new = '''"currency": "usd",'''
+tests = ["tests/interface/test_ranking_writes.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_report_command'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_report_command.py"]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for interface/test_report_content'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = ["tests/interface/test_report_content.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_review_failures'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_review_failures.py"]
+
+[[mutation]]
+name = '''a review finds each weight the same, for interface/test_review_weights'''
+file = "src/trialfolio/differences.py"
+old = '''    elif before.value == after.value:
+        # Each is a normalized decimal, or `absent`.'''
+new = '''    elif True:
+        # Each is a normalized decimal, or `absent`.'''
+tests = ["tests/interface/test_review_weights.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_review'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_review.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_run_failures'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_run_failures.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_stale_backtests'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_stale_backtests.py"]
+
+[[mutation]]
+name = '''the wrapper's text keeps the credentials and the token, for provider/test_client'''
+file = "src/trialfolio/provider/failures.py"
+old = '''text = re.sub("|".join(re.escape(secret) for secret in longest_first), "[redacted]", text)'''
+new = '''text = text'''
+tests = ["tests/provider/test_client.py"]
+
+[[mutation]]
+name = '''the client reads the environment's settings, for provider/test_environment_isolation'''
+file = "src/trialfolio/provider/client.py"
+old = '''self._session.trust_env = False'''
+new = '''self._session.trust_env = True'''
+tests = ["tests/provider/test_environment_isolation.py"]
+
+[[mutation]]
+name = '''a rank_update's params are sent in another order, for provider/test_fake_rank_checks'''
+file = "src/trialfolio/provider/client.py"
+old = '''self._wrapper.rank_update(dict(params))'''
+new = '''self._wrapper.rank_update(dict(sorted(params.items())))'''
+tests = ["tests/provider/test_fake_rank_checks.py"]
+
+[[mutation]]
+name = '''an exchange that never connected reads as interrupted, for provider/test_http_exchanges'''
+file = "src/trialfolio/provider/adapter.py"
+old = '''recorded.end("not_connected" if _not_connected(error) else "interrupted")'''
+new = '''recorded.end("interrupted")'''
+tests = ["tests/provider/test_http_exchanges.py"]
+
+[[mutation]]
+name = '''a rank_get's response is decoded as the wrapper returned it, for provider/test_ranking_client'''
+file = "src/trialfolio/provider/client.py"
+old = '''self._wrapper.rank_get(name=name), RANK_GET, decode_body=True'''
+new = '''self._wrapper.rank_get(name=name), RANK_GET, decode_body=False'''
+tests = ["tests/provider/test_ranking_client.py"]
+
+# The check TS-T04 strengthens (copies that check less, item 8): a refused resume, or a refused
+# read of a run, writes nothing, not even an empty directory, which the core resume modules'
+# _files, listing files only, missed. The lock's reaches the four tests whose refused resume takes
+# it, and the read's the two that read a run with read_run, which takes no lock.
+
+[[mutation]]
+name = '''each resume's lock makes an empty directory, which a refused resume leaves'''
+file = "src/trialfolio/storage.py"
+old = '''            raise RuntimeError("this store already owns its directory")
+        try:
+            descriptor = os.open(self._root / path, os.O_WRONLY | BINARY)'''
+new = '''            raise RuntimeError("this store already owns its directory")
+        (self._root / f"stray-{os.urandom(4).hex()}").mkdir()
+        try:
+            descriptor = os.open(self._root / path, os.O_WRONLY | BINARY)'''
+tests = [
+    "tests/core/test_experiment_resume.py::test_the_demos_client_cant_resume_an_experiment_the_builder_wrote",
+    "tests/core/test_experiment_resume.py::test_records_that_are_broken_fail_the_check_and_nothing_is_written",
+    "tests/core/test_ranking_resume.py::test_an_experiments_broken_records_fail_the_check_and_nothing_is_sent",
+    "tests/core/test_ranking_resume.py::test_an_attempt_a_resume_recorded_from_its_started_json_needs_that_record",
+]
+caught_by = [
+    "tests/core/test_experiment_resume.py::test_the_demos_client_cant_resume_an_experiment_the_builder_wrote",
+    "tests/core/test_experiment_resume.py::test_records_that_are_broken_fail_the_check_and_nothing_is_written",
+    "tests/core/test_ranking_resume.py::test_an_experiments_broken_records_fail_the_check_and_nothing_is_sent",
+    "tests/core/test_ranking_resume.py::test_an_attempt_a_resume_recorded_from_its_started_json_needs_that_record",
+]
+
+[[mutation]]
+name = '''a refused read of a run makes an empty directory, which it leaves'''
+file = "src/trialfolio/runs.py"
+old = '''    except _Refused as refused:
+        raise refused.error(name) from None'''
+new = '''    except _Refused as refused:
+        (store.root / "stray").mkdir()
+        raise refused.error(name) from None'''
+tests = [
+    "tests/core/test_ranking_resume.py::test_a_runs_broken_records_are_refused_and_nothing_is_written",
+    "tests/core/test_ranking_resume.py::test_a_runs_attempt_without_its_record_lists_the_files_written_before_it",
+]
+caught_by = [
+    "tests/core/test_ranking_resume.py::test_a_runs_broken_records_are_refused_and_nothing_is_written",
+    "tests/core/test_ranking_resume.py::test_a_runs_attempt_without_its_record_lists_the_files_written_before_it",
+]
+
+# An error the session returns, raised instead (detail 3): the lab lets a raised error propagate,
+# as eight of the ten drivers did, so each test that caught it at the base, through one of them,
+# catches it on the branch. The resume modules' labs catch it, as theirs did.
+
+[[mutation]]
+name = '''an attempt that ends the session without its manifest raises its error'''
+file = "src/trialfolio/experiment_execution/execution.py"
+old = '''                return self._incomplete(ending)'''
+new = '''                raise self._incomplete(ending)'''
+tests = [
+    "tests/core/test_experiment_execution.py",
+    "tests/core/test_ranking_execution.py",
+    "tests/core/test_ranking_pause.py",
+    "tests/core/test_stale_backtests.py",
+]
+caught_by = [
+    "tests/core/test_experiment_execution.py::test_an_attempt_record_that_wasnt_written_ends_the_session_without_its_manifest",
+    "tests/core/test_experiment_execution.py::test_an_attempt_without_a_start_record_or_an_attempt_record_reads_as_its_records_do",
+    "tests/core/test_experiment_execution.py::test_a_start_record_published_before_a_failure_agrees_with_the_attempt_record[interrupt]",
+    "tests/core/test_ranking_execution.py::test_an_attempt_without_its_record_counts_as_its_records_read",
+    "tests/core/test_ranking_pause.py::test_an_interrupt_during_the_wait_sends_no_backtest_and_its_case_awaits_a_repeat",
+    "tests/core/test_stale_backtests.py::test_a_resume_reads_a_stale_backtest_as_the_session_flagged_it[after the flagged case's attempt record]",
+    "tests/core/test_stale_backtests.py::test_a_resume_compares_with_the_sessions_latest_attempt_that_saved_a_decoded_response",
+]
+
+[[mutation]]
+name = '''a failure before the cases raises its error'''
+file = "src/trialfolio/experiment_execution/execution.py"
+old = '''            return before_cases(ended.error, recorded=self._records.first_plan_recorded())'''
+new = '''            raise before_cases(ended.error, recorded=self._records.first_plan_recorded())'''
+tests = ["tests/core/test_experiment_execution.py"]
+caught_by = [
+    "tests/core/test_experiment_execution.py::test_a_storage_failure_before_the_plan_is_recorded_sends_nothing",
+    "tests/core/test_experiment_execution.py::test_an_interrupt_once_the_first_plan_is_published_leaves_it_to_resume",
+]

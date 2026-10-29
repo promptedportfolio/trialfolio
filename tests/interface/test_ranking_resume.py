@@ -45,8 +45,13 @@ from tests.support.experiment_builder import (
     returns,
     returns_each,
 )
-from tests.support.fake_portfolio123 import FakePortfolio123
-from tests.support.saved_records import attempt_directories, attempt_records, session_manifest
+from tests.support.fake_portfolio123 import AUTH, BACKTEST, RANK, FakePortfolio123
+from tests.support.saved_records import (
+    attempt_directories,
+    attempt_records,
+    saved_plan,
+    session_manifest,
+)
 from tests.support.storage_faults import FaultyStores
 from tests.support.terminal import PseudoTerminal
 from trialfolio.contracts.attempt import AttemptRecordV1_3, StartRecordV1_3
@@ -60,7 +65,6 @@ posix_only = pytest.mark.skipif(
 EXAMPLE = experiment_config("ranking-example.yaml")
 BUDGET_RAISED = experiment_config("revisions/ranking-budget-raised.yaml")
 RAISED = "A raised budget, for the repeat."
-AUTH, RANK, BACKTEST = "POST /auth", "POST /rank", "POST /screen/backtest"
 
 CASE_IDS = {
     "baseline": "case-a8c9e5f0cbee31ad",
@@ -71,10 +75,6 @@ CASE_IDS = {
 """`ranking-example.yaml`'s cases, by key, as release 0.4.0 gives them, written by hand."""
 
 type Builder = ExperimentBuilder[Outcome]
-
-
-def plan_of(out: Path, number: int = 1) -> PlanV1_3:
-    return PlanV1_3.model_validate_json((out / "plans" / str(number) / "plan.json").read_bytes())
 
 
 def names(directory: Path) -> set[str]:
@@ -95,7 +95,7 @@ def each_backtest_follows_its_cases_rank_update(server: FakePortfolio123, out: P
             json.dumps(case.requests[1].params.model_dump(mode="json"), sort_keys=True),
         )
         for plan in sorted((out / "plans").iterdir())
-        for case in plan_of(out, int(plan.name)).cases
+        for case in saved_plan(out, int(plan.name), PlanV1_3).cases
     }
     received = server.received
     backtests = 0

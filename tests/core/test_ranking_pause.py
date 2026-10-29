@@ -14,104 +14,57 @@ execution takes the ranking lock on a file in the test's temporary directory.
 """
 
 import logging
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from tests.core.conftest import Faults, once
-from tests.support import canaries
 from tests.support.clock import FakePause, FixedClock, Slept
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply, distinct
-from tests.support.storage_faults import StorageFaults
-from trialfolio.configuration import (
-    read_experiment_configuration_v1_1,
-    read_screen_configuration,
-    read_screen_configuration_v1_1,
+from tests.support.experiment_lab import Lab
+from tests.support.fake_portfolio123 import (
+    AUTH,
+    AUTHENTICATED,
+    BACKTEST,
+    CREDENTIALS,
+    RANK,
+    FakePortfolio123,
+    Reply,
+    distinct,
+    exchange,
+    response,
 )
-from trialfolio.contracts.attempt import AttemptRecordV1_2, AttemptRecordV1_3, Exchange
-from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
+from tests.support.file_faults import Faults, once
+from tests.support.paths import EXPERIMENT_CONFIGS, screen_config
+from tests.support.plans import ranked_experiment, ranked_screen, screen_plan
+from tests.support.saved_records import only_attempt
+from tests.support.storage_faults import Fault
+from trialfolio.contracts.attempt import AttemptRecordV1_2, AttemptRecordV1_3
 from trialfolio.contracts.manifest import CommandRecord
-from trialfolio.contracts.plan import PlanV1_2
 from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 from trialfolio.errors import TrialFolioError
 from trialfolio.execution import Execution
-from trialfolio.experiment_execution import Cancellation, ExperimentExecution, Repeat
-from trialfolio.experiment_records import open_experiment, read_experiment
+from trialfolio.experiment_execution import Cancellation
 from trialfolio.pause import UPDATE_PAUSE_SECONDS
-from trialfolio.planning import (
-    build_experiment_plan_v1_1,
-    build_plan,
-    build_plan_v1_1,
-    installed_versions,
-)
-from trialfolio.provider import Credentials, P123ScreenBacktestClient
+from trialfolio.provider import P123ScreenBacktestClient
 from trialfolio.ranking_lock import LOCK_FILE
 from trialfolio.storage import LocalArtifactStore
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-CONFIGS = FIXTURES / "experiment-configs"
-RESPONSES = FIXTURES / "responses"
-SCREEN = FIXTURES / "screen-configs" / "definition.yaml"
-FORMULA = FIXTURES / "screen-configs" / "formula.yaml"
-
-AUTH, RANK, BACKTEST = "POST /auth", "POST /rank", "POST /screen/backtest"
 COMMAND = CommandRecord(name="run", options={}, started_at=FixedClock()())
 WAITING = "attempt.backtest.waiting"
 
 
-def authenticated() -> Reply:
-    return Reply(200, canaries.TOKEN.encode())
-
-
-def updated() -> Reply:
-    return Reply(200, (RESPONSES / "rank-update.json").read_bytes())
-
-
-def complete() -> bytes:
-    return (RESPONSES / "complete.json").read_bytes()
-
-
-def exchange(request: str, status: int | None, note: str | None = None) -> Exchange:
-    return Exchange.model_validate(
-        {"request": request, "result": "response", "status": status, "note": note}
-    )
-
-
-@pytest.fixture
-def server() -> Iterator[FakePortfolio123]:
-    fake = FakePortfolio123()
-    yield fake
-    fake.close()
-
-
-def screen() -> tuple[bytes, bytes, PlanV1_2]:
-    content = SCREEN.read_bytes()
-    read = read_screen_configuration_v1_1(content, SCREEN.name, SCREEN)
-    plan = build_plan_v1_1(read, installed_versions())
-    assert isinstance(plan, PlanV1_2) and read.definition is not None
-    return content, read.definition.content, plan
-
-
-def experiment(
-    name: str = "ranking-example.yaml",
-) -> tuple[bytes, bytes | None, PlanV1_1 | PlanV1_3]:
-    path = CONFIGS / name
-    content = path.read_bytes()
-    read = read_experiment_configuration_v1_1(content, path.name, path)
-    plan = build_experiment_plan_v1_1(read, installed_versions())
-    return content, None if read.definition is None else read.definition.content, plan
+SCREEN = screen_config("definition.yaml")
+FORMULA = screen_config("formula.yaml")
 
 
 def client(server: FakePortfolio123) -> P123ScreenBacktestClient:
-    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-    return P123ScreenBacktestClient(credentials, endpoint=server.endpoint)
+    return P123ScreenBacktestClient(CREDENTIALS, endpoint=server.endpoint)
 
 
 def run_screen(
     tmp_path: Path, server: FakePortfolio123, pause: FakePause
 ) -> TrialFolioError | None:
-    content, definition, plan = screen()
+    planned = ranked_screen()
+    content, definition, plan = planned.content, planned.definition, planned.plan
     with LocalArtifactStore(tmp_path / "out") as store:
         return Execution(
             plan,
@@ -125,58 +78,12 @@ def run_screen(
         ).run(content, lambda: client(server), definition=definition)
 
 
-def run_experiment(
-    out: Path,
-    server: FakePortfolio123,
-    pause: FakePause,
-    *,
-    name: str = "ranking-example.yaml",
-    cancellation: Cancellation | None = None,
-    store: StorageFaults | None = None,
-    repeats: tuple[Repeat, ...] = (),
-) -> ExperimentExecution:
-    """Runs the experiment `name` into `out`, a new one or, when `out` holds it, a resume."""
-    content, definition, plan = experiment(name)
-    real = LocalArtifactStore(out)
-    used = real if store is None else store
-    try:
-        with client(server) as sender:
-            saved = None
-            if (out / "experiment.lock").exists():
-                saved = open_experiment(used, ranking=True)
-                plan = saved.current.plan
-            ranked = isinstance(plan, PlanV1_3)
-            execution = ExperimentExecution(
-                plan,
-                plan.plan_hash,
-                "option",
-                used,
-                sender,
-                command=None,
-                clock=FixedClock(),
-                cancellation=cancellation,
-                experiment=saved,
-                repeats=repeats,
-                ranking_lock=out.parent / LOCK_FILE if ranked else None,
-                pause=pause.pause,
-            )
-            execution.run(content, definition=definition if ranked else None)
-    finally:
-        real.close()
-        if store is not None:
-            store.close()
-    return execution
-
-
 def script(server: FakePortfolio123, cases: int, *, auths: int = 1) -> None:
-    server.reply("/auth", *(authenticated() for _ in range(auths)))
-    server.reply("/rank", *(updated() for _ in range(cases)), method="POST")
-    server.reply("/screen/backtest", *distinct(*(complete() for _ in range(cases))))
-
-
-def only_attempt(out: Path, case_id: str) -> Path:
-    (attempt,) = sorted((out / "cases" / case_id / "attempts").iterdir())
-    return attempt
+    server.reply("/auth", *(AUTHENTICATED for _ in range(auths)))
+    server.reply("/rank", *(response("rank-update.json") for _ in range(cases)), method="POST")
+    server.reply(
+        "/screen/backtest", *distinct(*(response("complete.json").body for _ in range(cases)))
+    )
 
 
 # Where the pause comes, and how long it lasts
@@ -185,9 +92,9 @@ def only_attempt(out: Path, case_id: str) -> Path:
 def test_a_screen_runs_backtest_is_sent_10_seconds_after_its_rank_updates_200(
     tmp_path: Path, server: FakePortfolio123
 ) -> None:
-    server.reply("/auth", authenticated())
-    server.reply("/rank", updated(), method="POST")
-    server.reply("/screen/backtest", Reply(200, complete()))
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/rank", response("rank-update.json"), method="POST")
+    server.reply("/screen/backtest", response("complete.json"))
     pause = FakePause(server)
 
     error = run_screen(tmp_path, server, pause)
@@ -206,7 +113,7 @@ def test_each_case_of_an_experiment_waits_once_between_its_two_calls(
     script(server, 4)
     pause = FakePause(server)
 
-    execution = run_experiment(tmp_path / "out", server, pause)
+    execution = Lab(tmp_path, server).new(pause=pause.pause).executed
 
     assert [outcome for _, outcome in execution.outcomes] == ["succeeded"] * 4
     assert pause.slept == [
@@ -218,9 +125,9 @@ def test_the_wait_is_measured_from_the_rank_updates_200(
     tmp_path: Path, server: FakePortfolio123, faults: Faults
 ) -> None:
     # Saving the rank_update's response takes 4 seconds, so 6 remain of the 10 after its 200.
-    server.reply("/auth", authenticated())
-    server.reply("/rank", updated(), method="POST")
-    server.reply("/screen/backtest", Reply(200, complete()))
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/rank", response("rank-update.json"), method="POST")
+    server.reply("/screen/backtest", response("complete.json"))
     pause = FakePause(server)
     faults.on_write("rank-update-response.json", once(lambda: pause.advance(4)))
 
@@ -236,9 +143,9 @@ def test_nothing_is_logged_or_waited_once_10_seconds_have_passed(
     # Saving the rank_update's response takes 10 seconds, so no time is left to wait: the
     # attempt sends its backtest without sleeping, or logging that it waits.
     caplog.set_level(logging.INFO, logger="trialfolio")
-    server.reply("/auth", authenticated())
-    server.reply("/rank", updated(), method="POST")
-    server.reply("/screen/backtest", Reply(200, complete()))
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/rank", response("rank-update.json"), method="POST")
+    server.reply("/screen/backtest", response("complete.json"))
     pause = FakePause(server)
     faults.on_write("rank-update-response.json", once(lambda: pause.advance(UPDATE_PAUSE_SECONDS)))
 
@@ -253,9 +160,9 @@ def test_nothing_is_logged_or_waited_once_10_seconds_have_passed(
 def test_a_sleep_that_ends_early_is_followed_by_another_until_10_seconds_have_passed(
     tmp_path: Path, server: FakePortfolio123
 ) -> None:
-    server.reply("/auth", authenticated())
-    server.reply("/rank", updated(), method="POST")
-    server.reply("/screen/backtest", Reply(200, complete()))
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/rank", response("rank-update.json"), method="POST")
+    server.reply("/screen/backtest", response("complete.json"))
     pause = FakePause(server, shortfalls=[4.5])
 
     error = run_screen(tmp_path, server, pause)
@@ -267,9 +174,16 @@ def test_a_sleep_that_ends_early_is_followed_by_another_until_10_seconds_have_pa
 
 def test_no_attempt_waits_without_a_definition(tmp_path: Path, server: FakePortfolio123) -> None:
     content = FORMULA.read_bytes()
-    plan = build_plan(read_screen_configuration(content, FORMULA.name), installed_versions())
-    server.reply("/auth", authenticated(), authenticated())
-    server.reply("/screen/backtest", *distinct(complete(), complete(), complete()))
+    plan = screen_plan(FORMULA)
+    server.reply("/auth", AUTHENTICATED, AUTHENTICATED)
+    server.reply(
+        "/screen/backtest",
+        *distinct(
+            response("complete.json").body,
+            response("complete.json").body,
+            response("complete.json").body,
+        ),
+    )
     pause = FakePause(server)
     with LocalArtifactStore(tmp_path / "run") as store:
         error = Execution(
@@ -278,17 +192,20 @@ def test_no_attempt_waits_without_a_definition(tmp_path: Path, server: FakePortf
     assert error is None
 
     # An experiment without a definition, plan 1.1.0, doesn't wait either.
-    run_experiment(tmp_path / "experiment", server, pause, name="default-only.yaml")
+    Lab(tmp_path, server).new("default-only.yaml", pause=pause.pause)
 
     assert server.requests() == [AUTH, BACKTEST, AUTH, BACKTEST, BACKTEST]
     assert pause.slept == []
 
 
-def test_the_demos_client_never_waits(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_the_demos_client_never_waits(
+    tmp_path: Path, server: FakePortfolio123, caplog: pytest.LogCaptureFixture
+) -> None:
     # It sends nothing, so nothing ranks a backtest.
     caplog.set_level(logging.INFO, logger="trialfolio")
     pause = FakePause()
-    content, definition, plan = screen()
+    planned = ranked_screen()
+    content, definition, plan = planned.content, planned.definition, planned.plan
     with LocalArtifactStore(tmp_path / "run") as store:
         error = Execution(
             plan,
@@ -303,19 +220,7 @@ def test_the_demos_client_never_waits(tmp_path: Path, caplog: pytest.LogCaptureF
             content, lambda: SyntheticScreenBacktestClient(response_bytes()), definition=definition
         )
     assert error is None
-    content, ranking, ranked = experiment()
-    with LocalArtifactStore(tmp_path / "experiment") as store:
-        made = ExperimentExecution(
-            ranked,
-            ranked.plan_hash,
-            "not_required",
-            store,
-            SyntheticScreenBacktestClient(response_bytes()),
-            command=None,
-            clock=FixedClock(),
-            ranking_lock=tmp_path / LOCK_FILE,
-            pause=pause.pause,
-        ).run(content, definition=ranking)
+    made = Lab(tmp_path, server).new(synthetic=True, pause=pause.pause).error
 
     assert made is None
     assert pause.slept == []
@@ -330,7 +235,7 @@ def test_the_demos_client_never_waits(tmp_path: Path, caplog: pytest.LogCaptureF
 def test_no_wait_follows_a_rank_update_whose_200_wasnt_decoded_and_saved(
     tmp_path: Path, server: FakePortfolio123, reply: Reply
 ) -> None:
-    server.reply("/auth", authenticated())
+    server.reply("/auth", AUTHENTICATED)
     server.reply("/rank", reply, method="POST")
     pause = FakePause(server)
 
@@ -345,15 +250,15 @@ def test_the_wait_is_logged_before_it_begins(
     tmp_path: Path, server: FakePortfolio123, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="trialfolio")
-    server.reply("/auth", authenticated())
-    server.reply("/rank", updated(), method="POST")
-    server.reply("/screen/backtest", Reply(200, complete()))
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/rank", response("rank-update.json"), method="POST")
+    server.reply("/screen/backtest", response("complete.json"))
     logged_before_sleep: list[list[str]] = []
     pause = FakePause(server)
     pause.on_sleep = lambda: logged_before_sleep.append(
         [str(getattr(record, "event", "")) for record in caplog.records]
     )
-    _, _, plan = screen()
+    plan = ranked_screen().plan
 
     error = run_screen(tmp_path, server, pause)
 
@@ -365,10 +270,7 @@ def test_the_wait_is_logged_before_it_begins(
         " ranks by the definition just written."
     )
     assert getattr(waiting, "case_id", None) == plan.cases[0].case_id
-    assert (
-        getattr(waiting, "attempt_id", None)
-        == only_attempt(tmp_path / "out", plan.cases[0].case_id).name
-    )
+    assert getattr(waiting, "attempt_id", None) == only_attempt(tmp_path / "out").name
     assert getattr(waiting, "plan_hash", None) == plan.plan_hash
     # Logged once the rank_update's exchange ended, and before the wait and the backtest's send.
     (before,) = logged_before_sleep
@@ -390,7 +292,7 @@ def test_an_interrupt_during_the_wait_sends_no_backtest_and_its_case_awaits_a_re
 ) -> None:
     # The attempt stopped after its rank_update's response was saved, and before its backtest's
     # request and start record: failed, possibly charged, with command.interrupted.
-    out = tmp_path / "out"
+    lab = Lab(tmp_path, server)
     script(server, 4, auths=2)
     pause = FakePause(server)
 
@@ -400,13 +302,13 @@ def test_an_interrupt_during_the_wait_sends_no_backtest_and_its_case_awaits_a_re
 
     pause.on_sleep = interrupt
 
-    stopped = run_experiment(out, server, pause)
+    stopped = lab.new(pause=pause.pause).executed
 
-    _, _, plan = experiment()
+    plan = ranked_experiment(EXPERIMENT_CONFIGS / "ranking-example.yaml").plan
     baseline = plan.cases[0].case_id
     assert server.requests() == [AUTH, RANK]
     assert stopped.manifest is None
-    attempt = only_attempt(out, baseline)
+    attempt = lab.attempt(baseline)
     record = AttemptRecordV1_3.model_validate_json((attempt / "attempt.json").read_bytes())
     assert (record.outcome, record.possibly_charged) == ("failed", True)
     assert record.error is not None and record.error.code == "command.interrupted"
@@ -417,12 +319,11 @@ def test_an_interrupt_during_the_wait_sends_no_backtest_and_its_case_awaits_a_re
     assert not (attempt / "started.json").exists()
 
     # The resume doesn't send it again: only a confirmed repeat does.
-    resumed = run_experiment(out, server, pause)
+    resumed = lab.resume(pause=pause.pause).executed
 
     assert server.requests()[2:] == [AUTH, *(RANK, BACKTEST) * 3]
     assert resumed.repeat_attempts == {baseline: record.attempt_id}
-    with LocalArtifactStore(out) as store:
-        assert read_experiment(store, ranking=True).cases(plan)[0].state == "awaiting_repeat"
+    assert lab.read().cases(plan)[0].state == "awaiting_repeat"
 
 
 def test_an_attempt_record_lost_after_an_interrupt_during_the_wait_is_recorded_by_the_resume(
@@ -431,9 +332,9 @@ def test_an_attempt_record_lost_after_an_interrupt_during_the_wait_is_recorded_b
     # A second interrupt, while the attempt record is written, leaves the update record as the
     # attempt's latest, with the rank_update's response saved: the resume records it failed,
     # with the rank_update's 200 completed from that response (sending a definition).
-    out = tmp_path / "out"
+    lab = Lab(tmp_path, server, monkeypatch)
     script(server, 4, auths=2)
-    _, _, plan = experiment()
+    plan = ranked_experiment(EXPERIMENT_CONFIGS / "ranking-example.yaml").plan
     baseline = plan.cases[0].case_id
     pause = FakePause(server)
 
@@ -442,24 +343,25 @@ def test_an_attempt_record_lost_after_an_interrupt_during_the_wait_is_recorded_b
         raise KeyboardInterrupt
 
     pause.on_sleep = interrupt
-    store = StorageFaults(LocalArtifactStore(out), monkeypatch)
     # The attempt record is written once more after an interrupt, so both writes are faulted.
-    store.fail_before(f"{baseline}/attempt.json", KeyboardInterrupt())
-    store.fail_before("attempt.json", KeyboardInterrupt())
-    stopped = run_experiment(out, server, pause, store=store)
+    faults: dict[str, Fault] = {
+        f"{baseline}/attempt.json": "interrupt",
+        "attempt.json": "interrupt",
+    }
+    stopped = lab.new(pause=pause.pause, arm=lambda store: store.fail_each(faults)).executed
     assert stopped.manifest is None
-    attempt = only_attempt(out, baseline)
+    attempt = lab.attempt(baseline)
     assert not (attempt / "attempt.json").exists()
     assert (attempt / "rank-update-response.json").exists()
 
-    run_experiment(out, server, pause)
+    lab.resume(pause=pause.pause)
 
     record = AttemptRecordV1_3.model_validate_json((attempt / "attempt.json").read_bytes())
     assert (record.outcome, record.possibly_charged) == ("failed", True)
     assert record.error is not None and record.error.code == "command.interrupted"
     assert record.exchanges == (
         exchange(AUTH, 200),
-        exchange(RANK, 200, "completed_from_saved_response"),
+        exchange(RANK, 200, note="completed_from_saved_response"),
     )
     assert server.requests()[2:] == [AUTH, *(RANK, BACKTEST) * 3]
 
@@ -473,7 +375,7 @@ def test_a_cancellation_during_the_wait_still_sends_the_backtest(
     cancellation = Cancellation()
     pause = FakePause(server, on_sleep=cancellation.cancel)
 
-    execution = run_experiment(tmp_path / "out", server, pause, cancellation=cancellation)
+    execution = Lab(tmp_path, server).new(pause=pause.pause, cancellation=cancellation).executed
 
     assert server.requests() == [AUTH, RANK, BACKTEST]
     assert [outcome for _, outcome in execution.outcomes] == [
@@ -489,8 +391,8 @@ def test_a_cancellation_during_the_wait_still_sends_the_backtest(
 def test_a_screen_runs_interrupt_during_the_wait_sends_no_backtest(
     tmp_path: Path, server: FakePortfolio123
 ) -> None:
-    server.reply("/auth", authenticated())
-    server.reply("/rank", updated(), method="POST")
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/rank", response("rank-update.json"), method="POST")
     pause = FakePause(server)
 
     def interrupt() -> None:
@@ -503,8 +405,7 @@ def test_a_screen_runs_interrupt_during_the_wait_sends_no_backtest(
     assert error is not None and error.code == "command.interrupted"
     assert "The screen backtest request wasn't sent" in error.message
     assert server.requests() == [AUTH, RANK]
-    _, _, plan = screen()
-    attempt = only_attempt(tmp_path / "out", plan.cases[0].case_id)
+    attempt = only_attempt(tmp_path / "out")
     record = AttemptRecordV1_2.model_validate_json((attempt / "attempt.json").read_bytes())
     assert (record.outcome, record.possibly_charged) == ("failed", True)
     assert not (attempt / "started.json").exists()

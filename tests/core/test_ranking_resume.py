@@ -31,24 +31,36 @@ it.
 import json
 import shutil
 import uuid
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
 import pytest
 
-from tests.support import canaries
 from tests.support.clock import FixedClock, no_wait
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply, each_its_own
-from tests.support.storage_faults import StorageFaults
+from tests.support.directories import snapshot
+from tests.support.experiment_lab import RELEASE_0_4_0, Arm, Lab
+from tests.support.fake_portfolio123 import (
+    AUTH,
+    AUTHENTICATED,
+    BACKTEST,
+    CREDENTIALS,
+    RANK,
+    FakePortfolio123,
+    Reply,
+    each_its_own,
+    exchange,
+    response,
+)
+from tests.support.paths import EXPERIMENT_CONFIGS, RANKING_DEFINITIONS, screen_config
+from tests.support.plans import case_ids, ranked_experiment
+from tests.support.storage_faults import Fault, StorageFaults
 from trialfolio.canonical import sha256_hex
 from trialfolio.configuration import (
-    ExperimentConfigurationRead,
-    read_experiment_configuration_v1_1,
     read_screen_configuration_v1_1,
 )
-from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3, Exchange
+from trialfolio.contracts.attempt import AttemptRecordV1_1, AttemptRecordV1_3
 from trialfolio.contracts.experiment_manifest import ExperimentManifest, ExperimentManifestV1_1
 from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
 from trialfolio.contracts.experiment_record import ExperimentRecord, ExperimentRecordV1_1
@@ -56,233 +68,34 @@ from trialfolio.contracts.manifest import CommandRecord
 from trialfolio.contracts.plan import PlanV1_2
 from trialfolio.errors import TrialFolioError
 from trialfolio.execution import Execution
-from trialfolio.experiment_execution import (
-    AttemptEnded,
-    Cancellation,
-    ExperimentExecution,
-    ProgressEvent,
-    Repeat,
-)
-from trialfolio.experiment_records import SavedExperiment, open_experiment, read_experiment
+from trialfolio.experiment_records import read_experiment
+from trialfolio.experiment_repeats import Repeat
 from trialfolio.normalization import write_case_settings
 from trialfolio.planning import (
-    build_experiment_plan_v1_1,
     build_plan_v1_1,
     installed_versions,
     plan_hash,
-    plan_revision_v1_1,
 )
-from trialfolio.provider import Credentials, P123ScreenBacktestClient, ScreenBacktestClient
+from trialfolio.provider import P123ScreenBacktestClient
 from trialfolio.ranking_lock import LOCK_FILE, RankingLock
 from trialfolio.report import HtmlReportRenderer
 from trialfolio.runs import check_run, read_run
-from trialfolio.storage import ArtifactStore, LocalArtifactStore, StoredFile
+from trialfolio.storage import LocalArtifactStore, StoredFile
 from trialfolio.tables import read_settings_csv_v1_1, settings_csv_v1_1
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-CONFIGS = FIXTURES / "experiment-configs"
-RESPONSES = FIXTURES / "responses"
-SCREEN = FIXTURES / "screen-configs" / "definition.yaml"
-DEFINITIONS = CONFIGS / "ranking"
-
-AUTH, RANK, BACKTEST = "POST /auth", "POST /rank", "POST /screen/backtest"
 COMMAND = CommandRecord(name="run", options={}, started_at=FixedClock()())
 REVISED = "A revised ranking definition."
 
 type Json = dict[str, Any]
 
 
-def authenticated() -> Reply:
-    return Reply(200, canaries.TOKEN.encode())
-
-
-def updated() -> Reply:
-    return Reply(200, (RESPONSES / "rank-update.json").read_bytes())
-
-
-def complete() -> Reply:
-    return Reply(200, (RESPONSES / "complete.json").read_bytes())
-
-
-def exchange(request: str, status: int | None, result: str = "response", note: str | None = None):
-    return Exchange.model_validate(
-        {"request": request, "result": result, "status": status, "note": note}
-    )
-
-
-def configuration(name: str) -> tuple[bytes, ExperimentConfigurationRead]:
-    """An experiment configuration's bytes, read as release 0.4.0's reader reads it, with its
-    definition file read beside it."""
-    path = CONFIGS / name
-    content = path.read_bytes()
-    return content, read_experiment_configuration_v1_1(content, path.name, path)
-
-
-def ranked_plan(name: str) -> PlanV1_3:
-    """The plan 1.3.0 an experiment configuration with a ranking definition gives."""
-    _, read = configuration(name)
-    plan = build_experiment_plan_v1_1(read, installed_versions())
-    assert isinstance(plan, PlanV1_3)
-    return plan
-
-
-EXAMPLE = ranked_plan("ranking-example.yaml")
-
-
-@dataclass(frozen=True)
-class Ran:
-    """One run of the experiment, new or resumed, and what it sent."""
-
-    error: TrialFolioError | None
-    execution: ExperimentExecution | None
-    """None when the run was refused before it was built."""
-    received: tuple[str, ...]
-    published: tuple[str, ...]
-    """Each file the run's store published, in order."""
-
-
-type Arm = Callable[[StorageFaults], object]
-
-type Built = tuple[ExperimentExecution, bool]
-"""An execution, and whether its plan is 1.3.0, so it's given its definition's bytes."""
-
-
-class Lab:
-    """Runs one experiment into one output directory, new and then resumed, through the core, over
-    one fake server, as another interface would, with the ranking lock's file in the test's
-    temporary directory."""
-
-    def __init__(self, tmp: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        self.out = tmp / "experiment"
-        self.lock = tmp / LOCK_FILE
-        self.server = FakePortfolio123()
-        self._monkeypatch = monkeypatch
-
-    def new(
-        self,
-        name: str = "ranking-example.yaml",
-        *,
-        cancel_after: int | None = None,
-        arm: Arm | None = None,
-    ) -> Ran:
-        content, read = configuration(name)
-        plan = build_experiment_plan_v1_1(read, installed_versions())
-        cancellation = Cancellation()
-        events: list[ProgressEvent] = []
-
-        def progress(event: ProgressEvent) -> None:
-            events.append(event)
-            ended = sum(isinstance(e, AttemptEnded) for e in events)
-            if isinstance(event, AttemptEnded) and ended == cancel_after:
-                cancellation.cancel()
-
-        def build(store: ArtifactStore, client: ScreenBacktestClient) -> Built:
-            return ExperimentExecution(
-                plan,
-                plan.plan_hash,
-                "option",
-                store,
-                client,
-                command=None,
-                clock=FixedClock(),
-                progress=progress,
-                cancellation=cancellation,
-                ranking_lock=self.lock if isinstance(plan, PlanV1_3) else None,
-                pause=no_wait(),
-            ), isinstance(plan, PlanV1_3)
-
-        return self._run(content, read, build, arm=arm)
-
-    def resume(
-        self,
-        name: str = "ranking-example.yaml",
-        *,
-        reason: str | None = None,
-        repeats: Sequence[Repeat] = (),
-        arm: Arm | None = None,
-    ) -> Ran:
-        content, read = configuration(name)
-
-        def build(store: ArtifactStore, client: ScreenBacktestClient) -> Built:
-            saved = open_experiment(store, ranking=True)
-            revision = plan_revision_v1_1(read, installed_versions(), saved.current.plan)
-            plan = saved.current.plan if revision is None else revision.plan
-            return ExperimentExecution(
-                plan,
-                plan.plan_hash,
-                "option",
-                store,
-                client,
-                command=None,
-                clock=FixedClock(),
-                experiment=saved,
-                reason=reason,
-                repeats=repeats,
-                ranking_lock=self.lock if isinstance(plan, PlanV1_3) else None,
-                pause=no_wait(),
-            ), isinstance(plan, PlanV1_3)
-
-        return self._run(content, read, build, arm=arm)
-
-    def _run(
-        self,
-        content: bytes,
-        read: ExperimentConfigurationRead,
-        build: Callable[[ArtifactStore, ScreenBacktestClient], Built],
-        *,
-        arm: Arm | None,
-    ) -> Ran:
-        before = len(self.server.received)
-        real = LocalArtifactStore(self.out)
-        store = StorageFaults(real, self._monkeypatch)
-        if arm is not None:
-            arm(store)
-        credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-        client = P123ScreenBacktestClient(credentials, endpoint=self.server.endpoint)
-        definition = None if read.definition is None else read.definition.content
-        execution: ExperimentExecution | None = None
-        try:
-            execution, ranked = build(store, client)
-            error = execution.run(content, definition=definition if ranked else None)
-        except TrialFolioError as refused:
-            error = refused
-        finally:
-            client.close()
-            real.close()
-        received = tuple(f"{r.method} {r.path}" for r in self.server.received[before:])
-        return Ran(error, execution, received, tuple(store.published))
-
-    # Reading the records
-
-    def read(self) -> SavedExperiment:
-        with LocalArtifactStore(self.out) as store:
-            return read_experiment(store, ranking=True)
-
-    def manifest(self, session: int) -> ExperimentManifestV1_1:
-        return ExperimentManifestV1_1.model_validate_json(
-            (self.out / f"sessions/{session}/manifest.json").read_bytes()
-        )
-
-    def attempts(self, case_id: str) -> list[AttemptRecordV1_3]:
-        """The case's attempt records 1.3.0, by session and then sequence."""
-        records = [
-            AttemptRecordV1_3.model_validate_json((path / "attempt.json").read_bytes())
-            for path in (self.out / "cases" / case_id / "attempts").iterdir()
-            if (path / "attempt.json").exists()
-        ]
-        return sorted(records, key=lambda record: (record.session, record.sequence))
-
-    def directory(self, case_id: str) -> Path:
-        """The directory of the case's one attempt."""
-        (directory,) = sorted((self.out / "cases" / case_id / "attempts").iterdir())
-        return directory
+SCREEN = screen_config("definition.yaml")
+EXAMPLE = ranked_experiment(EXPERIMENT_CONFIGS / "ranking-example.yaml").plan
 
 
 @pytest.fixture
-def lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Lab]:
-    made = Lab(tmp_path, monkeypatch)
-    yield made
-    made.server.close()
+def lab(tmp_path: Path, server: FakePortfolio123, monkeypatch: pytest.MonkeyPatch) -> Lab:
+    return Lab(tmp_path, server, monkeypatch, reader=RELEASE_0_4_0, catch=True)
 
 
 def script(
@@ -294,19 +107,9 @@ def script(
 ) -> None:
     """Scripts the server's replies. Each backtest's 200 gets a response of its own, so no case is
     a stale backtest of the one before it (D-45), unless a test scripts the server itself."""
-    server.reply("/auth", *(authenticated() for _ in range(auths)))
+    server.reply("/auth", *(AUTHENTICATED for _ in range(auths)))
     server.reply("/rank", *ranks, method="POST")
     server.reply("/screen/backtest", *each_its_own(backtests))
-
-
-def refused(ran: Ran, code: str) -> TrialFolioError:
-    error = ran.error
-    assert error is not None and error.code == code, error
-    return error
-
-
-def ids(plan: PlanV1_1 | PlanV1_3) -> list[str]:
-    return [case.case_id for case in plan.cases]
 
 
 def each_backtest_follows_its_cases_rank_update(
@@ -339,21 +142,13 @@ def each_backtest_follows_its_cases_rank_update(
 # An attempt a stopped run left without its attempt record
 
 
-def first_case_faults(*faults: tuple[str, str]) -> Arm:
-    """Faults at the first case's attempt only: `os` fails the write with a full disk,
-    `unexpected` raises an unexpected exception before it, and `interrupt` an interrupt."""
+def first_case_faults(*faults: tuple[str, Fault]) -> Arm:
+    """Faults at the first case's attempt only, each a file's name and its kind of fault."""
     first = EXAMPLE.cases[0].case_id
 
     def arm(store: StorageFaults) -> None:
         for name, fault in faults:
-            key = f"{first}/{name}"
-            match fault:
-                case "os":
-                    store.fail_os(key)
-                case "interrupt":
-                    store.fail_before(key, KeyboardInterrupt())
-                case _:
-                    store.fail_before(key, RuntimeError())
+            store.fail(f"{first}/{name}", fault)
 
     return arm
 
@@ -363,13 +158,20 @@ def test_an_attempt_stopped_after_its_update_record_is_recorded_unknown_and_not_
 ) -> None:
     # The rank_update was sent, and its response wasn't saved: the process stopped after the
     # update record, its last write before the send, as a killed process leaves it.
-    script(lab.server, auths=2, ranks=[updated() for _ in range(4)], backtests=[complete()] * 3)
+    script(
+        lab.server,
+        auths=2,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 3,
+    )
     first = lab.new(
-        arm=first_case_faults(("rank-update-response.json", "os"), ("attempt.json", ""))
+        arm=first_case_faults(
+            ("rank-update-response.json", "full disk"), ("attempt.json", "unexpected")
+        )
     )
     assert first.received == (AUTH, RANK)
     baseline = EXAMPLE.cases[0].case_id
-    directory = lab.directory(baseline)
+    directory = lab.attempt(baseline)
     assert sorted(p.name for p in directory.iterdir()) == [
         "authenticating.json",
         "rank-update-request.json",
@@ -389,7 +191,7 @@ def test_an_attempt_stopped_after_its_update_record_is_recorded_unknown_and_not_
     # It isn't sent again, and every other case is, each rank_update right before its backtest.
     assert resumed.received == (AUTH, *(RANK, BACKTEST) * 3)
     each_backtest_follows_its_cases_rank_update(lab.server, EXAMPLE)
-    (record,) = lab.attempts(baseline)
+    (record,) = lab.attempts(baseline, AttemptRecordV1_3)
     assert (record.outcome, record.possibly_charged, record.session) == ("unknown", True, 1)
     assert record.error is not None and record.error.code == "command.interrupted"
     assert record.exchanges == (exchange(AUTH, 200), exchange(RANK, None, "interrupted"))
@@ -397,10 +199,10 @@ def test_an_attempt_stopped_after_its_update_record_is_recorded_unknown_and_not_
     assert record.ranking_update.request.path.endswith("/rank-update-request.json")
     assert (record.ranking_update.response, record.request, record.response) == (None, None, None)
     assert "The screen backtest request wasn't sent" in record.error.message
-    manifest = lab.manifest(2)
+    manifest = lab.manifest(2, ExperimentManifestV1_1)
     assert manifest.counts.provider_requests == 1 + 2 * 3
     assert (manifest.counts.cases.unknown, manifest.counts.cases.succeeded) == (1, 3)
-    error = refused(resumed, "execution.partial")
+    error = resumed.refused("execution.partial")
     assert "never sent again automatically" in error.message
 
 
@@ -408,19 +210,24 @@ def test_an_attempt_stopped_after_its_update_record_is_recorded_unknown_and_not_
     ("faults", "code"),
     [
         ((("request.json", "unexpected"), ("attempt.json", "unexpected")), "command.interrupted"),
-        ((("request.json", "interrupt"), ("attempt.json", "os")), "command.interrupted"),
+        ((("request.json", "interrupt"), ("attempt.json", "full disk")), "command.interrupted"),
     ],
     ids=["an unexpected failure", "an interrupt, and a full disk at its attempt record"],
 )
 def test_an_attempt_stopped_after_its_rank_updates_response_is_recorded_failed(
-    lab: Lab, faults: tuple[tuple[str, str], ...], code: str
+    lab: Lab, faults: tuple[tuple[str, Fault], ...], code: str
 ) -> None:
     # The rank_update's 200 was saved, and the backtest's request.json wasn't written, so the
     # backtest wasn't sent; and the attempt's record wasn't either.
-    script(lab.server, auths=2, ranks=[updated() for _ in range(4)], backtests=[complete()] * 3)
+    script(
+        lab.server,
+        auths=2,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 3,
+    )
     lab.new(arm=first_case_faults(*faults))
     baseline = EXAMPLE.cases[0].case_id
-    assert not (lab.directory(baseline) / "attempt.json").exists()
+    assert not (lab.attempt(baseline) / "attempt.json").exists()
     # Before the resume records it, it reads as the resume will record it.
     (stopped,) = lab.read().attempts_of(baseline)
     assert (
@@ -433,19 +240,19 @@ def test_an_attempt_stopped_after_its_rank_updates_response_is_recorded_failed(
     resumed = lab.resume()
 
     assert resumed.received == (AUTH, *(RANK, BACKTEST) * 3)
-    (record,) = lab.attempts(baseline)
+    (record,) = lab.attempts(baseline, AttemptRecordV1_3)
     assert (record.outcome, record.possibly_charged) == ("failed", True)
     assert record.error is not None and record.error.code == code
     assert record.exchanges == (
         exchange(AUTH, 200),
         exchange(RANK, 200, note="completed_from_saved_response"),
     )
-    response = record.ranking_update.response
-    assert response is not None and response.form == "decoded"
-    assert response.path.endswith("/rank-update-response.json")
+    updated = record.ranking_update.response
+    assert updated is not None and updated.form == "decoded"
+    assert updated.path.endswith("/rank-update-response.json")
     assert record.ranking_update.provider_metadata.cost == 1
     assert (record.request, record.response) == (None, None)
-    assert lab.manifest(2).counts.provider_requests == 1 + 2 * 3
+    assert lab.manifest(2, ExperimentManifestV1_1).counts.provider_requests == 1 + 2 * 3
     assert lab.read().cases(EXAMPLE)[0].state == "awaiting_repeat"
 
 
@@ -453,39 +260,47 @@ def test_an_interrupt_at_the_backtests_request_leaves_its_case_awaiting_a_repeat
     lab: Lab,
 ) -> None:
     # The attempt records itself, failed and possibly charged, so a resume doesn't send it.
-    script(lab.server, auths=2, ranks=[updated() for _ in range(4)], backtests=[complete()] * 3)
+    script(
+        lab.server,
+        auths=2,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 3,
+    )
     first = lab.new(arm=first_case_faults(("request.json", "interrupt")))
-    assert refused(first, "command.interrupted")
+    assert first.refused("command.interrupted")
     baseline = EXAMPLE.cases[0].case_id
-    (record,) = lab.attempts(baseline)
+    (record,) = lab.attempts(baseline, AttemptRecordV1_3)
     assert (record.outcome, record.possibly_charged) == ("failed", True)
 
     resumed = lab.resume()
 
     assert resumed.received == (AUTH, *(RANK, BACKTEST) * 3)
-    assert lab.attempts(baseline) == [record]
+    assert lab.attempts(baseline, AttemptRecordV1_3) == [record]
 
 
 def test_an_undecoded_rank_update_response_is_recorded_as_invalid(lab: Lab) -> None:
     script(
         lab.server,
         auths=2,
-        ranks=[Reply(200, b"<html>not JSON</html>"), *(updated() for _ in range(3))],
-        backtests=[complete()] * 3,
+        ranks=[
+            Reply(200, b"<html>not JSON</html>"),
+            *(response("rank-update.json") for _ in range(3)),
+        ],
+        backtests=[response("complete.json")] * 3,
     )
     lab.new(arm=first_case_faults(("attempt.json", "unexpected")))
     baseline = EXAMPLE.cases[0].case_id
-    assert (lab.directory(baseline) / "rank-update-response.raw").exists()
+    assert (lab.attempt(baseline) / "rank-update-response.raw").exists()
     (stopped,) = lab.read().attempts_of(baseline)
     assert (stopped.outcome, stopped.error_code) == ("failed", "provider.response_invalid")
 
     lab.resume()
 
-    (record,) = lab.attempts(baseline)
+    (record,) = lab.attempts(baseline, AttemptRecordV1_3)
     assert (record.outcome, record.possibly_charged) == ("failed", True)
     assert record.error is not None and record.error.code == "provider.response_invalid"
-    response = record.ranking_update.response
-    assert response is not None and response.form == "undecoded"
+    updated = record.ranking_update.response
+    assert updated is not None and updated.form == "undecoded"
     assert record.ranking_update.provider_metadata.cost is None
 
 
@@ -493,19 +308,19 @@ def test_an_undecoded_rank_update_response_is_recorded_as_invalid(lab: Lab) -> N
 def test_a_running_attempt_is_recorded_from_its_start_record(lab: Lab, saved: bool) -> None:
     # `started.json` was written, so both requests count; with its saved response, the attempt
     # succeeded, and without one, its outcome is unknown, and its case awaits a repeat.
-    faults = (
+    faults: tuple[tuple[str, Fault], ...] = (
         (("attempt.json", "unexpected"),)
         if saved
         else (
-            ("response.json", "os"),
+            ("response.json", "full disk"),
             ("attempt.json", "unexpected"),
         )
     )
     script(
         lab.server,
         auths=2,
-        ranks=[updated() for _ in range(4)],
-        backtests=[complete()] * 4,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 4,
     )
     lab.new(arm=first_case_faults(*faults))
     baseline = EXAMPLE.cases[0].case_id
@@ -518,7 +333,7 @@ def test_a_running_attempt_is_recorded_from_its_start_record(lab: Lab, saved: bo
     resumed = lab.resume()
 
     assert resumed.received == (AUTH, *(RANK, BACKTEST) * 3)
-    (record,) = lab.attempts(baseline)
+    (record,) = lab.attempts(baseline, AttemptRecordV1_3)
     assert record.request is not None and record.request.path.endswith("/request.json")
     assert record.ranking_update.response is not None
     if saved:
@@ -534,14 +349,19 @@ def test_a_running_attempt_is_recorded_from_its_start_record(lab: Lab, saved: bo
         assert record.outcome == "unknown"
         assert record.exchanges == (exchange(AUTH, 200), exchange(RANK, 200))
     assert record.possibly_charged
-    assert lab.manifest(2).counts.provider_requests == 2 + 2 * 3
+    assert lab.manifest(2, ExperimentManifestV1_1).counts.provider_requests == 2 + 2 * 3
 
 
 def test_a_metrics_table_without_its_settings_table_is_completed_with_its_weight_rows(
     lab: Lab,
 ) -> None:
-    script(lab.server, auths=2, ranks=[updated() for _ in range(4)], backtests=[complete()] * 4)
-    lab.new(arm=first_case_faults(("settings.csv", "os")))
+    script(
+        lab.server,
+        auths=2,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 4,
+    )
+    lab.new(arm=first_case_faults(("settings.csv", "full disk")))
     baseline = EXAMPLE.cases[0].case_id
     assert not (lab.out / f"cases/{baseline}/normalized/settings.csv").exists()
 
@@ -551,7 +371,7 @@ def test_a_metrics_table_without_its_settings_table_is_completed_with_its_weight
     rows = read_settings_csv_v1_1(
         (lab.out / f"cases/{baseline}/normalized/settings.csv").read_bytes(), "settings"
     )
-    manifest = lab.manifest(2)
+    manifest = lab.manifest(2, ExperimentManifestV1_1)
     listed = {a.path: a for a in manifest.artifacts}
     definition = listed["plans/1/definition.xml"].artifact_id
     weights = [row for row in rows if row.node is not None]
@@ -583,20 +403,25 @@ def test_the_settings_table_of_a_case_ranked_by_a_definition_needs_its_weights_o
 def test_an_attempt_with_only_its_authentication_record_is_failed_and_its_case_is_sent(
     lab: Lab,
 ) -> None:
-    script(lab.server, auths=2, ranks=[updated() for _ in range(4)], backtests=[complete()] * 4)
+    script(
+        lab.server,
+        auths=2,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 4,
+    )
     lab.new(
         arm=first_case_faults(
             ("rank-update-request.json", "unexpected"), ("attempt.json", "unexpected")
         )
     )
     baseline = EXAMPLE.cases[0].case_id
-    assert [p.name for p in lab.directory(baseline).iterdir()] == ["authenticating.json"]
+    assert [p.name for p in lab.attempt(baseline).iterdir()] == ["authenticating.json"]
 
     resumed = lab.resume()
 
     assert resumed.error is None
     assert resumed.received == (AUTH, *(RANK, BACKTEST) * 4)
-    stopped, sent = lab.attempts(baseline)
+    stopped, sent = lab.attempts(baseline, AttemptRecordV1_3)
     assert (stopped.outcome, stopped.possibly_charged) == ("failed", False)
     assert stopped.exchanges == (exchange(AUTH, None, "interrupted"),)
     assert stopped.ranking_update.request is None
@@ -617,7 +442,7 @@ UPDATE_ONLY: Final = (
 
 STOPPED: Final = {
     "while it authenticated": (
-        updated(),
+        response("rank-update.json"),
         (("rank-update-request.json", "unexpected"), ("attempt.json", "unexpected")),
         (
             "The run that started the attempt stopped while it authenticated, before its request was"
@@ -625,8 +450,8 @@ STOPPED: Final = {
         ),
     ),
     "after its start record": (
-        updated(),
-        (("response.json", "os"), ("attempt.json", "unexpected")),
+        response("rank-update.json"),
+        (("response.json", "full disk"), ("attempt.json", "unexpected")),
         (
             "The run that started the attempt stopped after its start record was written, before a"
             f" response was saved. {UPDATE} succeeded. The screen backtest request may have been"
@@ -634,8 +459,8 @@ STOPPED: Final = {
         ),
     ),
     "after its update record": (
-        updated(),
-        (("rank-update-response.json", "os"), ("attempt.json", "unexpected")),
+        response("rank-update.json"),
+        (("rank-update-response.json", "full disk"), ("attempt.json", "unexpected")),
         (
             "The run that started the attempt stopped after its update record was written, before"
             f" the rank_update's response was saved. {UPDATE} may have been charged, and its outcome"
@@ -643,7 +468,7 @@ STOPPED: Final = {
         ),
     ),
     "after its rank_update's response was saved": (
-        updated(),
+        response("rank-update.json"),
         (("request.json", "unexpected"), ("attempt.json", "unexpected")),
         (
             "The run that started the attempt stopped after the rank_update's response was saved,"
@@ -676,16 +501,16 @@ def test_the_attempt_record_a_resume_writes_says_where_its_run_stopped(
     script(
         lab.server,
         auths=2,
-        ranks=[first_rank, *(updated() for _ in range(3))],
-        backtests=[complete()] * 4,
+        ranks=[first_rank, *(response("rank-update.json") for _ in range(3))],
+        backtests=[response("complete.json")] * 4,
     )
     lab.new(arm=first_case_faults(*faults))
     baseline = EXAMPLE.cases[0].case_id
-    assert not (lab.directory(baseline) / "attempt.json").exists()
+    assert not (lab.attempt(baseline) / "attempt.json").exists()
 
     lab.resume()
 
-    stopped = lab.attempts(baseline)[0]
+    stopped = lab.attempts(baseline, AttemptRecordV1_3)[0]
     assert stopped.session == 1
     assert stopped.error is not None
     assert stopped.error.message == message
@@ -694,22 +519,34 @@ def test_the_attempt_record_a_resume_writes_says_where_its_run_stopped(
 def _stopped_after_update(lab: Lab) -> Path:
     """An experiment whose first case's attempt stopped after its update record, with the
     rank_update's response saved: the directory of that attempt."""
-    script(lab.server, ranks=[updated() for _ in range(4)], backtests=[complete()] * 3)
+    script(
+        lab.server,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 3,
+    )
     lab.new(arm=first_case_faults(("request.json", "unexpected"), ("attempt.json", "unexpected")))
-    return lab.directory(EXAMPLE.cases[0].case_id)
+    return lab.attempt(EXAMPLE.cases[0].case_id)
 
 
 def _stopped_after_start(lab: Lab) -> Path:
     """The same, stopped after `started.json`, without the backtest's response."""
-    script(lab.server, ranks=[updated() for _ in range(4)], backtests=[complete()] * 4)
-    lab.new(arm=first_case_faults(("response.json", "os"), ("attempt.json", "unexpected")))
-    return lab.directory(EXAMPLE.cases[0].case_id)
+    script(
+        lab.server,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 4,
+    )
+    lab.new(arm=first_case_faults(("response.json", "full disk"), ("attempt.json", "unexpected")))
+    return lab.attempt(EXAMPLE.cases[0].case_id)
 
 
 def _stopped_after_update_with_a_token(lab: Lab) -> Path:
     """As `_stopped_after_update`, at the second case's attempt, which sends with the first's
     token, so it has no authentication record: its update record is its only record."""
-    script(lab.server, ranks=[updated() for _ in range(4)], backtests=[complete()] * 3)
+    script(
+        lab.server,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 3,
+    )
     second = EXAMPLE.cases[1].case_id
 
     def arm(store: StorageFaults) -> None:
@@ -717,7 +554,7 @@ def _stopped_after_update_with_a_token(lab: Lab) -> Path:
         store.fail_before(f"{second}/attempt.json", RuntimeError())
 
     lab.new(arm=arm)
-    directory = lab.directory(second)
+    directory = lab.attempt(second)
     assert sorted(path.name for path in directory.iterdir()) == [
         "rank-update-request.json",
         "rank-update-response.json",
@@ -781,7 +618,7 @@ def test_an_attempt_without_its_record_needs_the_files_written_before_it(
 
     ran = lab.resume()
 
-    error = refused(ran, "input.not_a_run")
+    error = ran.refused("input.not_a_run")
     assert problem in error.message, error.message
     assert ran.received == () and ran.published == ()
 
@@ -794,20 +631,20 @@ def unknown_baseline(lab: Lab) -> uuid.UUID:
     whose other cases succeeded. Returns the attempt a repeat names."""
     script(
         lab.server,
-        ranks=[Reply(503, b""), *(updated() for _ in range(3))],
-        backtests=[complete()] * 3,
+        ranks=[Reply(503, b""), *(response("rank-update.json") for _ in range(3))],
+        backtests=[response("complete.json")] * 3,
     )
-    refused(lab.new(), "execution.partial")
-    (record,) = lab.attempts(EXAMPLE.cases[0].case_id)
+    lab.new().refused("execution.partial")
+    (record,) = lab.attempts(EXAMPLE.cases[0].case_id, AttemptRecordV1_3)
     assert (record.outcome, record.possibly_charged) == ("unknown", True)
     return record.attempt_id
 
 
 def test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once(lab: Lab) -> None:
-    budget = (CONFIGS / "revisions/ranking-budget-raised.yaml").name
+    budget = (EXPERIMENT_CONFIGS / "revisions/ranking-budget-raised.yaml").name
     attempt_id = unknown_baseline(lab)
     baseline = EXAMPLE.cases[0].case_id
-    script(lab.server, ranks=[updated()], backtests=[complete()])
+    script(lab.server, ranks=[response("rank-update.json")], backtests=[response("complete.json")])
     # Seven requests are counted, so the repeat's two need the raised budget.
     raised = lab.resume(
         f"revisions/{budget}", reason="A raised budget.", repeats=[Repeat(baseline, attempt_id)]
@@ -816,10 +653,10 @@ def test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once(lab: La
     assert raised.error is None
     assert raised.received == (AUTH, RANK, BACKTEST)
     each_backtest_follows_its_cases_rank_update(lab.server, EXAMPLE)
-    _, repeat = lab.attempts(baseline)
+    _, repeat = lab.attempts(baseline, AttemptRecordV1_3)
     assert (repeat.outcome, repeat.repeat_of, repeat.session) == ("succeeded", attempt_id, 2)
     assert repeat.exchanges == (exchange(AUTH, 200), exchange(RANK, 200), exchange(BACKTEST, 200))
-    assert lab.manifest(2).counts.attempts.repeats == 1
+    assert lab.manifest(2, ExperimentManifestV1_1).counts.attempts.repeats == 1
 
     # The same command, run again, doesn't repeat it: its confirmation is used.
     again = lab.resume(
@@ -835,7 +672,11 @@ def test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once(lab: La
 
 
 def test_both_kinds_of_request_are_counted_and_their_costs_summed(lab: Lab) -> None:
-    script(lab.server, ranks=[updated() for _ in range(4)], backtests=[complete()] * 4)
+    script(
+        lab.server,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 4,
+    )
     assert lab.new().error is None
 
     saved = lab.read()
@@ -850,23 +691,23 @@ def test_a_repeat_the_budget_cant_cover_waits_for_a_revision_that_raises_it(lab:
     # repeat's two don't fit, and its confirmation stays unused.
     script(
         lab.server,
-        ranks=[updated() for _ in range(4)],
-        backtests=[*(complete() for _ in range(3)), Reply(503, b"")],
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[*(response("complete.json") for _ in range(3)), Reply(503, b"")],
     )
-    refused(lab.new(), "execution.partial")
+    lab.new().refused("execution.partial")
     last = EXAMPLE.cases[-1].case_id
-    (record,) = lab.attempts(last)
+    (record,) = lab.attempts(last, AttemptRecordV1_3)
     assert (record.outcome, lab.read().provider_requests) == ("unknown", 8)
     repeat = Repeat(last, record.attempt_id)
 
     spent = lab.resume(repeats=[repeat])
 
-    error = refused(spent, "execution.partial")
+    error = spent.refused("execution.partial")
     assert spent.received == ()
     assert "budget couldn't cover the next case" in error.message
     assert spent.execution is not None and spent.execution.repeats_used == ()
 
-    script(lab.server, ranks=[updated()], backtests=[complete()])
+    script(lab.server, ranks=[response("rank-update.json")], backtests=[response("complete.json")])
     raised = lab.resume(
         "revisions/ranking-budget-raised.yaml", reason="A raised budget.", repeats=[repeat]
     )
@@ -883,12 +724,15 @@ def one_request_left(lab: Lab) -> Repeat:
     script(
         lab.server,
         auths=2,
-        ranks=[Reply(400, b"Invalid ranking system"), *(updated() for _ in range(3))],
-        backtests=[complete()] * 3,
+        ranks=[
+            Reply(400, b"Invalid ranking system"),
+            *(response("rank-update.json") for _ in range(3)),
+        ],
+        backtests=[response("complete.json")] * 3,
     )
-    refused(lab.new(), "execution.partial")
+    lab.new().refused("execution.partial")
     baseline = EXAMPLE.cases[0].case_id
-    (record,) = lab.attempts(baseline)
+    (record,) = lab.attempts(baseline, AttemptRecordV1_3)
     assert (record.outcome, record.possibly_charged, lab.read().provider_requests) == (
         "failed",
         True,
@@ -904,11 +748,11 @@ def test_a_remaining_budget_of_one_request_never_sends_a_rank_update(lab: Lab) -
 
     resumed = lab.resume(repeats=[repeat])
 
-    error = refused(resumed, "execution.partial")
+    error = resumed.refused("execution.partial")
     assert resumed.received == ()
     assert "budget couldn't cover the next case" in error.message
     assert lab.read().provider_requests == 7
-    assert lab.manifest(2).counts.provider_requests == 7
+    assert lab.manifest(2, ExperimentManifestV1_1).counts.provider_requests == 7
     assert resumed.execution is not None and resumed.execution.repeats_used == ()
 
 
@@ -919,13 +763,18 @@ def test_a_resume_whose_budget_covers_no_send_doesnt_take_the_ranking_lock(lab: 
     with RankingLock(lab.lock):
         resumed = lab.resume(repeats=[repeat])
 
-    refused(resumed, "execution.partial")
+    resumed.refused("execution.partial")
     assert resumed.received == ()
-    assert lab.manifest(2).session == 2
+    assert lab.manifest(2, ExperimentManifestV1_1).session == 2
 
 
 def test_a_changed_definition_retires_the_cases_it_changes_and_keeps_the_others(lab: Lab) -> None:
-    script(lab.server, auths=2, ranks=[updated() for _ in range(6)], backtests=[complete()] * 6)
+    script(
+        lab.server,
+        auths=2,
+        ranks=[response("rank-update.json") for _ in range(6)],
+        backtests=[response("complete.json")] * 6,
+    )
     assert lab.new().error is None
     before = {case.case_key: case.case_id for case in EXAMPLE.cases}
 
@@ -950,10 +799,10 @@ def test_a_changed_definition_retires_the_cases_it_changes_and_keeps_the_others(
     changes = record.plans[-1].changes
     assert changes is not None
     assert [case.case_key for case in changes.cases_retired] == ["baseline", "value-heavy"]
-    assert len(lab.attempts(after["tilt-earnings-yield"])) == 1
-    revised_definition = (DEFINITIONS / "value-momentum-revised.xml").read_bytes()
+    assert len(lab.attempts(after["tilt-earnings-yield"], AttemptRecordV1_3)) == 1
+    revised_definition = (RANKING_DEFINITIONS / "value-momentum-revised.xml").read_bytes()
     assert (lab.out / "plans/2/definition.xml").read_bytes() == revised_definition
-    manifest = lab.manifest(2)
+    manifest = lab.manifest(2, ExperimentManifestV1_1)
     assert manifest.counts.provider_requests == 12
     assert manifest.counts.retired_cases == 2
     listed = {a.path: a for a in manifest.artifacts}
@@ -961,23 +810,32 @@ def test_a_changed_definition_retires_the_cases_it_changes_and_keeps_the_others(
 
 
 def test_a_changed_ranking_method_retires_every_case(lab: Lab) -> None:
-    script(lab.server, ranks=[updated() for _ in range(4)], backtests=[complete()] * 4)
+    script(
+        lab.server,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 4,
+    )
     assert lab.new().error is None
 
     revised = lab.resume("revisions/ranking-method-changed.yaml", reason=REVISED)
 
     # Its budget of 8 is counted already, so none of its new cases is sent.
-    refused(revised, "execution.partial")
+    revised.refused("execution.partial")
     assert revised.received == ()
     plan = lab.read().current.plan
-    assert set(ids(plan)).isdisjoint(ids(EXAMPLE))
-    assert lab.manifest(2).counts.retired_cases == 4
+    assert set(case_ids(plan)).isdisjoint(case_ids(EXAMPLE))
+    assert lab.manifest(2, ExperimentManifestV1_1).counts.retired_cases == 4
 
 
 def test_a_revision_from_a_formula_sends_two_requests_a_case(lab: Lab) -> None:
     # example.yaml's five cases, ranked by a formula, send one request each; its revision ranked
     # by a definition sends two for each of its five new cases, within a budget of 15.
-    script(lab.server, auths=2, ranks=[updated() for _ in range(5)], backtests=[complete()] * 10)
+    script(
+        lab.server,
+        auths=2,
+        ranks=[response("rank-update.json") for _ in range(5)],
+        backtests=[response("complete.json")] * 10,
+    )
     assert lab.new("example.yaml").error is None
     since = len(lab.server.received)
 
@@ -1005,7 +863,7 @@ def test_a_revision_from_a_formula_sends_two_requests_a_case(lab: Lab) -> None:
     assert (lab.out / "plans/2/definition.xml").exists()
     # Session 2's manifest is 1.1.0, and lists the first plan's files, and its attempts', with
     # the versions they have.
-    manifest = lab.manifest(2)
+    manifest = lab.manifest(2, ExperimentManifestV1_1)
     versions = {a.path: a.schema_version for a in manifest.artifacts}
     assert versions["plans/1/plan.json"] == "1.1.0"
     assert versions["plans/1/experiment.json"] == "1.0.0"
@@ -1033,12 +891,12 @@ def test_a_revision_from_a_formula_sends_two_requests_a_case(lab: Lab) -> None:
     back = lab.resume("example.yaml", reason="The formula again.")
 
     assert back.error is None and back.received == ()
-    third = {a.path: a.schema_version for a in lab.manifest(3).artifacts}
+    third = {a.path: a.schema_version for a in lab.manifest(3, ExperimentManifestV1_1).artifacts}
     assert (third["plans/3/plan.json"], third["plans/3/experiment.json"]) == ("1.1.0", "1.1.0")
     saved = lab.read()
     assert isinstance(saved.current.plan, PlanV1_1)
     assert isinstance(saved.current.record, ExperimentRecordV1_1)
-    assert lab.manifest(3).counts.cases.succeeded == 5
+    assert lab.manifest(3, ExperimentManifestV1_1).counts.cases.succeeded == 5
     assert lab.resume("example.yaml").error is None
 
 
@@ -1048,15 +906,20 @@ def test_a_manifest_1_1_0_lists_each_file_no_manifest_listed_with_its_own_versio
     # Session 1, of example.yaml, ended without its manifest, so session 2's, the first, lists
     # every file anew: the first plan's and its attempts' with their versions 1.0.0 and 1.1.0,
     # beside the revision's 1.3.0 and 1.1.0.
-    script(lab.server, auths=2, ranks=[updated() for _ in range(5)], backtests=[complete()] * 10)
+    script(
+        lab.server,
+        auths=2,
+        ranks=[response("rank-update.json") for _ in range(5)],
+        backtests=[response("complete.json")] * 10,
+    )
     first = lab.new("example.yaml", arm=lambda store: store.fail_os("manifest.json"))
-    refused(first, "storage.write_failed")
+    first.refused("storage.write_failed")
     assert not (lab.out / "sessions/1/manifest.json").exists()
 
     revised = lab.resume("revisions/ranking-from-formula.yaml", reason=REVISED)
 
     assert revised.error is None
-    versions = {a.path: a.schema_version for a in lab.manifest(2).artifacts}
+    versions = {a.path: a.schema_version for a in lab.manifest(2, ExperimentManifestV1_1).artifacts}
     assert (
         versions["plans/1/plan.json"],
         versions["plans/1/experiment.json"],
@@ -1075,8 +938,8 @@ def test_a_manifest_1_1_0_lists_each_file_no_manifest_listed_with_its_own_versio
 
 
 def test_a_resume_of_an_experiment_without_a_definition_keeps_0_3_0s_records(lab: Lab) -> None:
-    script(lab.server, auths=2, backtests=[complete()] * 5)
-    assert refused(lab.new("example.yaml", cancel_after=2), "execution.partial")
+    script(lab.server, auths=2, backtests=[response("complete.json")] * 5)
+    assert lab.new("example.yaml", cancel_after=2).refused("execution.partial")
 
     resumed = lab.resume("example.yaml")
 
@@ -1096,13 +959,18 @@ def test_a_resume_of_an_experiment_without_a_definition_keeps_0_3_0s_records(lab
 def test_a_resume_with_cases_due_meets_the_ranking_lock_before_its_session_record(
     lab: Lab,
 ) -> None:
-    script(lab.server, auths=2, ranks=[updated() for _ in range(4)], backtests=[complete()] * 4)
-    refused(lab.new(cancel_after=1), "execution.partial")
+    script(
+        lab.server,
+        auths=2,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 4,
+    )
+    lab.new(cancel_after=1).refused("execution.partial")
 
     with RankingLock(lab.lock):
         held = lab.resume()
 
-    error = refused(held, "experiment.locked")
+    error = held.refused("experiment.locked")
     assert "ApiRankingSystem" in error.message
     assert held.received == () and held.published == ()
     assert not (lab.out / "sessions/2").exists()
@@ -1111,18 +979,25 @@ def test_a_resume_with_cases_due_meets_the_ranking_lock_before_its_session_recor
 
     assert resumed.error is None
     assert resumed.received == (AUTH, *(RANK, BACKTEST) * 3)
-    assert lab.manifest(2).session == 2
+    assert lab.manifest(2, ExperimentManifestV1_1).session == 2
 
 
 def test_a_resume_that_sends_nothing_doesnt_take_the_ranking_lock(lab: Lab) -> None:
-    script(lab.server, ranks=[updated() for _ in range(4)], backtests=[complete()] * 4)
+    script(
+        lab.server,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 4,
+    )
     assert lab.new().error is None
 
     with RankingLock(lab.lock):
         resumed = lab.resume()
 
     assert resumed.error is None and resumed.received == ()
-    assert lab.manifest(2).counts == lab.manifest(1).counts
+    assert (
+        lab.manifest(2, ExperimentManifestV1_1).counts
+        == lab.manifest(1, ExperimentManifestV1_1).counts
+    )
 
 
 # The records check of an experiment with a definition (R04-AC12)
@@ -1174,8 +1049,13 @@ def _attempt_of(out: Path, case: int) -> str:
 def _completed(lab: Lab) -> None:
     """A complete experiment of `ranking-example.yaml`: its first two cases in session 1, the
     rest in session 2, each sent with its session's token but the first."""
-    script(lab.server, auths=2, ranks=[updated() for _ in range(4)], backtests=[complete()] * 4)
-    refused(lab.new(cancel_after=2), "execution.partial")
+    script(
+        lab.server,
+        auths=2,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 4,
+    )
+    lab.new(cancel_after=2).refused("execution.partial")
     assert lab.resume().error is None
 
 
@@ -1324,7 +1204,7 @@ EXPERIMENT_BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
     ),
     "a plan whose definition.xml isn't its ranking_source's": (
         lambda out: _rewrite(
-            out, "plans/1/definition.xml", (DEFINITIONS / "value-heavy.xml").read_bytes()
+            out, "plans/1/definition.xml", (RANKING_DEFINITIONS / "value-heavy.xml").read_bytes()
         ),
         "isn't its plan's ranking definition",
     ),
@@ -1357,14 +1237,6 @@ EXPERIMENT_BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
 }
 
 
-def _files(out: Path) -> dict[str, bytes]:
-    return {
-        path.relative_to(out).as_posix(): path.read_bytes()
-        for path in out.rglob("*")
-        if path.is_file()
-    }
-
-
 @pytest.mark.parametrize("name", sorted(EXPERIMENT_BREAKS))
 def test_an_experiments_broken_records_fail_the_check_and_nothing_is_sent(
     lab: Lab, name: str
@@ -1372,37 +1244,42 @@ def test_an_experiments_broken_records_fail_the_check_and_nothing_is_sent(
     _completed(lab)
     breaking, problem = EXPERIMENT_BREAKS[name]
     breaking(lab.out)
-    before = _files(lab.out)
+    before = snapshot(lab.out)
 
     ran = lab.resume()
 
-    error = refused(ran, "input.not_a_run")
+    error = ran.refused("input.not_a_run")
     assert problem in error.message, error.message
     assert ran.received == () and ran.published == ()
-    assert _files(lab.out) == before
+    assert snapshot(lab.out) == before
 
 
 def test_an_attempt_a_resume_recorded_from_its_started_json_needs_that_record(lab: Lab) -> None:
     # Only a resume from `started.json` records an attempt `unknown` after its rank_update's 200,
     # without a backtest exchange, so its backtest may have been sent: a copy that lost that start
     # record fails the check, as one that lost a sent backtest's does.
-    script(lab.server, auths=2, ranks=[updated() for _ in range(4)], backtests=[complete()] * 4)
-    lab.new(arm=first_case_faults(("response.json", "os"), ("attempt.json", "unexpected")))
+    script(
+        lab.server,
+        auths=2,
+        ranks=[response("rank-update.json") for _ in range(4)],
+        backtests=[response("complete.json")] * 4,
+    )
+    lab.new(arm=first_case_faults(("response.json", "full disk"), ("attempt.json", "unexpected")))
     lab.resume()
-    (record,) = lab.attempts(EXAMPLE.cases[0].case_id)
+    (record,) = lab.attempts(EXAMPLE.cases[0].case_id, AttemptRecordV1_3)
     assert (record.outcome, record.exchanges) == (
         "unknown",
         (exchange(AUTH, 200), exchange(RANK, 200)),
     )
     _unlisted(lab.out, f"{_attempt_of(lab.out, 0)}/started.json")
-    before = _files(lab.out)
+    before = snapshot(lab.out)
 
     ran = lab.resume()
 
-    error = refused(ran, "input.not_a_run")
+    error = ran.refused("input.not_a_run")
     assert "its backtest was sent, or may have been, without the start record" in error.message
     assert ran.received == () and ran.published == ()
-    assert _files(lab.out) == before
+    assert snapshot(lab.out) == before
 
 
 def test_a_request_sent_with_a_token_a_401_to_a_rank_update_dropped_fails_the_check(
@@ -1414,10 +1291,15 @@ def test_a_request_sent_with_a_token_a_401_to_a_rank_update_dropped_fails_the_ch
     script(
         lab.server,
         auths=2,
-        ranks=[updated(), Reply(401, b""), updated(), updated()],
-        backtests=[complete()] * 3,
+        ranks=[
+            response("rank-update.json"),
+            Reply(401, b""),
+            response("rank-update.json"),
+            response("rank-update.json"),
+        ],
+        backtests=[response("complete.json")] * 3,
     )
-    refused(lab.new(), "execution.partial")
+    lab.new().refused("execution.partial")
     first = json.loads((lab.out / _attempt_of(lab.out, 0) / "attempt.json").read_bytes())
     source = lab.out / _attempt_of(lab.out, 3)
     attempt_id = str(uuid.uuid4())
@@ -1436,7 +1318,7 @@ def test_a_request_sent_with_a_token_a_401_to_a_rank_update_dropped_fails_the_ch
 
     ran = lab.resume()
 
-    error = refused(ran, "input.not_a_run")
+    error = ran.refused("input.not_a_run")
     assert "a token that a 401 or 403 to an earlier request had dropped" in error.message
     assert ran.received == () and ran.published == ()
 
@@ -1472,7 +1354,7 @@ def test_a_record_0_4_0_adds_without_a_reader_fails_the_check(
 
     ran = lab.resume()
 
-    error = refused(ran, "artifact.unknown_schema_version")
+    error = ran.refused("artifact.unknown_schema_version")
     assert f"`{path}`" in error.message
     assert "9.9.9" not in error.message
     assert ran.received == () and ran.published == ()
@@ -1514,20 +1396,20 @@ def test_a_record_1_1_0_of_an_experiment_without_a_definition_fails_the_check(
 ) -> None:
     # Each is valid as version 1.1.0, whose fields are 1.0.0's and more, but only an experiment
     # with a plan 1.3.0 writes it.
-    script(lab.server, backtests=[complete()] * 5)
+    script(lab.server, backtests=[response("complete.json")] * 5)
     assert lab.new("example.yaml").error is None
     _edit(lab.out, path, change)
 
     ran = lab.resume("example.yaml")
 
-    error = refused(ran, "input.not_a_run")
+    error = ran.refused("input.not_a_run")
     assert problem in error.message, error.message
     assert ran.received == () and ran.published == ()
 
 
 def test_a_rank_updates_file_under_a_plan_without_a_definition_fails_the_check(lab: Lab) -> None:
     # Only an attempt that sends a definition writes the rank_update's files.
-    script(lab.server, backtests=[complete()] * 5)
+    script(lab.server, backtests=[response("complete.json")] * 5)
     assert lab.new("example.yaml").error is None
     (first,) = sorted((lab.out / "cases").iterdir())[:1]
     (directory,) = sorted((first / "attempts").iterdir())
@@ -1535,7 +1417,7 @@ def test_a_rank_updates_file_under_a_plan_without_a_definition_fails_the_check(l
 
     ran = lab.resume("example.yaml")
 
-    error = refused(ran, "input.not_a_run")
+    error = ran.refused("input.not_a_run")
     assert "holds a file no attempt under its plan writes" in error.message
     assert ran.received == () and ran.published == ()
 
@@ -1566,11 +1448,10 @@ def write_screen(tmp: Path, server: FakePortfolio123, definition: bytes | None =
     read = read_screen_configuration_v1_1(content, SCREEN.name, SCREEN, definition=definition)
     plan = build_plan_v1_1(read, installed_versions())
     assert isinstance(plan, PlanV1_2) and read.definition is not None
-    server.reply("/auth", authenticated())
-    server.reply("/rank", updated(), method="POST")
-    server.reply("/screen/backtest", complete())
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/rank", response("rank-update.json"), method="POST")
+    server.reply("/screen/backtest", response("complete.json"))
     out = tmp / "run"
-    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
     with LocalArtifactStore(out) as store:
         error = Execution(
             plan,
@@ -1582,18 +1463,11 @@ def write_screen(tmp: Path, server: FakePortfolio123, definition: bytes | None =
             pause=no_wait(),
         ).run(
             content,
-            lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint),
+            lambda: P123ScreenBacktestClient(CREDENTIALS, endpoint=server.endpoint),
             definition=read.definition.content,
         )
     assert error is None
     return Screen(out, plan)
-
-
-@pytest.fixture
-def server() -> Iterator[FakePortfolio123]:
-    fake = FakePortfolio123()
-    yield fake
-    fake.close()
 
 
 def test_report_reads_a_run_with_a_definition_and_renders_its_own_report(
@@ -1618,7 +1492,7 @@ def test_report_reads_a_run_whose_definition_has_windows_line_endings(
 ) -> None:
     # The copy holds the file's bytes, so its artifact_id differs from the definition's hash,
     # which reads each line end as a line feed.
-    windows = (DEFINITIONS / "value-momentum.xml").read_bytes().replace(b"\n", b"\r\n")
+    windows = (RANKING_DEFINITIONS / "value-momentum.xml").read_bytes().replace(b"\n", b"\r\n")
     run = write_screen(tmp_path, server, definition=windows)
 
     saved = read_run(LocalArtifactStore(run.out))
@@ -1699,7 +1573,10 @@ RUN_BREAKS: dict[str, tuple[Callable[[Screen], object], str]] = {
     ),
     "a run whose definition.xml isn't its ranking_source's": (
         lambda run: _rewrite(
-            run.out, "definition.xml", (DEFINITIONS / "value-heavy.xml").read_bytes(), run.manifest
+            run.out,
+            "definition.xml",
+            (RANKING_DEFINITIONS / "value-heavy.xml").read_bytes(),
+            run.manifest,
         ),
         "isn't its plan's ranking definition",
     ),
@@ -1717,14 +1594,14 @@ def test_a_runs_broken_records_are_refused_and_nothing_is_written(
     run = write_screen(tmp_path, server)
     breaking, problem = RUN_BREAKS[name]
     breaking(run)
-    before = _files(run.out)
+    before = snapshot(run.out)
 
     with pytest.raises(TrialFolioError) as caught:
         read_run(LocalArtifactStore(run.out))
 
     assert caught.value.code == "input.not_a_run"
     assert problem in caught.value.message, caught.value.message
-    assert _files(run.out) == before
+    assert snapshot(run.out) == before
 
 
 def test_a_runs_attempt_with_only_its_update_record_reads_as_running(
@@ -1858,14 +1735,14 @@ def test_a_runs_attempt_without_its_record_lists_the_files_written_before_it(
     _listing_only(run, *names)
     if change is not None:
         change(run)
-    before = _files(run.out)
+    before = snapshot(run.out)
 
     with pytest.raises(TrialFolioError) as caught:
         read_run(LocalArtifactStore(run.out))
 
     assert caught.value.code == "input.not_a_run"
     assert problem in caught.value.message, caught.value.message
-    assert _files(run.out) == before
+    assert snapshot(run.out) == before
 
 
 def test_a_runs_attempt_with_its_start_record_and_no_attempt_record_reads_as_running(
@@ -1908,18 +1785,17 @@ def test_a_run_without_a_definition_refuses_versions_only_a_definition_gives(
 ) -> None:
     # Each version has a reader, and a run manifest 1.1.0 is valid with 1.0.0's fields, but only
     # a run of a plan 1.2.0 writes them.
-    formula = FIXTURES / "screen-configs" / "formula.yaml"
+    formula = screen_config("formula.yaml")
     content = formula.read_bytes()
     read = read_screen_configuration_v1_1(content, formula.name, formula)
     plan = build_plan_v1_1(read, installed_versions())
-    server.reply("/auth", authenticated())
-    server.reply("/screen/backtest", complete())
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/screen/backtest", response("complete.json"))
     out = tmp_path / "run"
-    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
     with LocalArtifactStore(out) as store:
         assert (
             Execution(plan, plan.plan_hash, "option", store, COMMAND).run(
-                content, lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint)
+                content, lambda: P123ScreenBacktestClient(CREDENTIALS, endpoint=server.endpoint)
             )
             is None
         )

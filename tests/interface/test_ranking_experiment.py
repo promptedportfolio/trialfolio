@@ -44,6 +44,7 @@ from tests.support.experiment_builder import (
     returns_each,
 )
 from tests.support.fake_portfolio123 import Reply
+from tests.support.paths import RANKING_DEFINITIONS, RESPONSES, SNAPSHOT_CONFIGS
 from tests.support.snapshot_builder import SnapshotBuilder, naming
 from tests.support.storage_faults import FaultyStores
 from tests.support.terminal import PseudoTerminal
@@ -55,8 +56,6 @@ posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows has no 
 EXAMPLE = experiment_config("ranking-example.yaml")
 BUDGET_RAISED = experiment_config("revisions/ranking-budget-raised.yaml")
 DEFINITION_CHANGED = experiment_config("revisions/ranking-definition-changed.yaml")
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-RESPONSES = FIXTURES / "responses"
 DEFINITION_HASH = "sha256:6bc59b992f83d5e4c245f37f187651ed18de6b9cb5949ac9f29b743273b26895"
 OVERWRITES = (
     "This run overwrites ApiRankingSystem, a ranking system in your Portfolio123 account, with"
@@ -231,7 +230,7 @@ def test_an_approved_experiment_sends_each_cases_rank_update_then_its_backtest(
     ):
         assert json.loads(received.body)["nodes"] == case.requests[0].params.nodes
     assert (out / "plans" / "1" / "definition.xml").read_bytes() == (
-        FIXTURES / "experiment-configs" / "ranking" / "value-momentum.xml"
+        RANKING_DEFINITIONS / "value-momentum.xml"
     ).read_bytes()
     assert {key: outcome.counts[key] for key in ("attempts", "provider_requests", "cost")} == {
         "attempts": 4,
@@ -542,7 +541,7 @@ def test_a_synthetic_snapshot_named_by_the_baseline_is_config_invalid(cli: Cli) 
     from trialfolio.snapshot_execution import SnapshotExecution
     from trialfolio.storage import LocalArtifactStore
 
-    example = FIXTURES / "ranking-snapshot-configs" / "example.yaml"
+    example = SNAPSHOT_CONFIGS / "example.yaml"
     content = example.read_bytes()
     plan = build_snapshot_plan(
         read_ranking_snapshot_configuration(content, example.name), installed_versions()

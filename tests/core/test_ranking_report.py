@@ -16,29 +16,30 @@ here by hand: the weights from the definitions' files, and the hashes from their
 """
 
 import hashlib
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 
-from tests.support import canaries
 from tests.support.clock import FixedClock, no_wait
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply, each_its_own
-from tests.support.html_report import Document, Element, parse
-from tests.support.snapshot_builder import SnapshotBuilder, naming
-from trialfolio.configuration import (
-    read_experiment_configuration_v1_1,
-    read_screen_configuration_v1_1,
+from tests.support.experiment_lab import Lab
+from tests.support.fake_portfolio123 import (
+    AUTHENTICATED,
+    CREDENTIALS,
+    FakePortfolio123,
+    Reply,
+    each_its_own,
+    response,
 )
-from trialfolio.contracts.experiment_plan import PlanV1_3
+from tests.support.html_report import Document, Element, parse
+from tests.support.paths import EXPERIMENT_CONFIGS, RANKING_DEFINITIONS, RESPONSES, screen_config
+from tests.support.plans import ranked_experiment, ranked_screen
+from tests.support.snapshot_builder import SnapshotBuilder, naming
 from trialfolio.contracts.manifest import CommandRecord
-from trialfolio.contracts.plan import PlanV1_2
 from trialfolio.contracts.ranking_snapshot import RankingSnapshotRecord
 from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 from trialfolio.execution import Execution
-from trialfolio.experiment_execution import ExperimentExecution
-from trialfolio.experiment_records import open_experiment
 from trialfolio.notices import (
     CONCISE_NOTICE,
     LICENSE_ID,
@@ -47,23 +48,16 @@ from trialfolio.notices import (
     license_url,
 )
 from trialfolio.planning import (
-    build_experiment_plan_v1_1,
-    build_plan_v1_1,
     installed_versions,
-    plan_revision_v1_1,
 )
-from trialfolio.provider import Credentials, P123ScreenBacktestClient
+from trialfolio.provider import P123ScreenBacktestClient
 from trialfolio.ranking_lock import LOCK_FILE
 from trialfolio.report import HtmlReportRenderer
 from trialfolio.runs import read_run
 from trialfolio.storage import LocalArtifactStore
 from trialfolio.tables import read_settings_csv_v1_1
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-SCREEN = FIXTURES / "screen-configs" / "definition.yaml"
-CONFIGS = FIXTURES / "experiment-configs"
-DEFINITIONS = CONFIGS / "ranking"
-RESPONSES = FIXTURES / "responses"
+SCREEN = screen_config("definition.yaml")
 
 COMMAND = CommandRecord(name="run", options={}, started_at=FixedClock()())
 
@@ -141,17 +135,6 @@ def digest(path: Path) -> str:
     return "sha256:" + hashlib.sha256(content).hexdigest()
 
 
-def reply(name: str) -> Reply:
-    return Reply(200, (RESPONSES / name).read_bytes())
-
-
-@pytest.fixture
-def server() -> Iterator[FakePortfolio123]:
-    fake = FakePortfolio123()
-    yield fake
-    fake.close()
-
-
 def write_run(
     tmp_path: Path,
     server: FakePortfolio123,
@@ -166,20 +149,12 @@ def write_run(
     `backtest`, `complete.json` by default; or, for a synthetic run, with the demo's client, and
     no command, which answers its backtest with `invented`, the demo's response by default."""
     tmp_path.mkdir(parents=True, exist_ok=True)
-    content = path.read_bytes()
-    read = read_screen_configuration_v1_1(content, path.name, path)
-    plan = build_plan_v1_1(read, installed_versions())
-    assert isinstance(plan, PlanV1_2) and read.definition is not None
-    given = (
-        {"definition": read.definition.content}
-        if read.snapshot is None
-        else {"snapshot": read.snapshot.files}
-    )
+    planned = ranked_screen(path)
+    plan = planned.plan
     out = tmp_path / "run"
-    server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
-    server.reply("/rank", reply("rank-update.json"), method="POST")
-    server.reply("/screen/backtest", backtest or reply("complete.json"))
-    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/rank", response("rank-update.json"), method="POST")
+    server.reply("/screen/backtest", backtest or response("complete.json"))
     with LocalArtifactStore(out) as store:
         execution = Execution(
             plan,
@@ -192,13 +167,14 @@ def write_run(
             pause=no_wait(),
         )
         error = execution.run(
-            content,
+            planned.content,
             (
                 (lambda: SyntheticScreenBacktestClient(invented or response_bytes()))
                 if synthetic
-                else (lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint))
+                else (lambda: P123ScreenBacktestClient(CREDENTIALS, endpoint=server.endpoint))
             ),
-            **given,  # pyright: ignore[reportArgumentType]
+            definition=planned.definition,
+            snapshot=planned.snapshot,
         )
     assert (error is None) == (backtest is None)
     return out
@@ -207,45 +183,23 @@ def write_run(
 def write_experiment(
     tmp_path: Path,
     server: FakePortfolio123,
-    path: Path = CONFIGS / "ranking-example.yaml",
+    path: Path = EXPERIMENT_CONFIGS / "ranking-example.yaml",
     backtests: Sequence[Reply] | None = None,
 ) -> Path:
     """Writes a new experiment of the configuration at `path` through the core, over the fake
     server, which answers each case's `rank_update` with `rank-update.json`, and its backtests
     with `backtests`, in the plan's order, `complete.json` for each by default."""
     tmp_path.mkdir(parents=True, exist_ok=True)
-    content = path.read_bytes()
-    read = read_experiment_configuration_v1_1(content, path.name, path)
-    plan = build_experiment_plan_v1_1(read, installed_versions())
-    assert isinstance(plan, PlanV1_3) and read.definition is not None
-    given = (
-        {"definition": read.definition.content}
-        if read.snapshot is None
-        else {"snapshot": read.snapshot.files}
-    )
-    cases = len(plan.cases)
-    server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
-    server.reply("/rank", *(reply("rank-update.json"),) * cases, method="POST")
+    cases = len(ranked_experiment(path).plan.cases)
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/rank", *(response("rank-update.json"),) * cases, method="POST")
     # Each case's response its own, so none is a stale backtest (D-45).
-    server.reply("/screen/backtest", *each_its_own(backtests or (reply("complete.json"),) * cases))
-    out = tmp_path / "experiment"
-    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
-    with (
-        P123ScreenBacktestClient(credentials, endpoint=server.endpoint) as client,
-        LocalArtifactStore(out) as store,
-    ):
-        ExperimentExecution(
-            plan,
-            plan.plan_hash,
-            "option",
-            store,
-            client,
-            command=None,
-            clock=FixedClock(),
-            ranking_lock=tmp_path / LOCK_FILE,
-            pause=no_wait(),
-        ).run(content, **given)  # pyright: ignore[reportArgumentType]
-    return out
+    server.reply(
+        "/screen/backtest", *each_its_own(backtests or (response("complete.json"),) * cases)
+    )
+    lab = Lab(tmp_path, server)
+    lab.new(path)
+    return lab.out
 
 
 def write_synthetic_sessions(
@@ -255,38 +209,15 @@ def write_synthetic_sessions(
     `names`, in `experiment-configs/`, then a revision into each of the others, in turn, one
     session each. The client answers each backtest with `invented`, the demo's response by
     default."""
-    out = tmp_path / "experiment"
+    lab = Lab(tmp_path)
+    hashes: list[str] = []
     for number, name in enumerate(names, start=1):
-        path = CONFIGS / name
-        content = path.read_bytes()
-        read = read_experiment_configuration_v1_1(content, path.name, path)
-        with LocalArtifactStore(out) as store:
-            saved = None if number == 1 else open_experiment(store, ranking=True)
-            if saved is None:
-                plan = build_experiment_plan_v1_1(read, installed_versions())
-            else:
-                revision = plan_revision_v1_1(read, installed_versions(), saved.current.plan)
-                assert revision is not None
-                plan = revision.plan
-            ranked = isinstance(plan, PlanV1_3)
-            error = ExperimentExecution(
-                plan,
-                plan.plan_hash,
-                "not_required",
-                store,
-                SyntheticScreenBacktestClient(invented or response_bytes()),
-                command=None,
-                clock=FixedClock(),
-                experiment=saved,
-                reason=None if saved is None else f"Revised into {name}.",
-                ranking_lock=tmp_path / LOCK_FILE if ranked else None,
-                pause=no_wait(),
-            ).run(
-                content,
-                definition=read.definition.content if ranked and read.definition else None,
-            )
-        assert error is None
-    return out
+        reason = None if number == 1 else f"Revised into {name}."
+        ran = lab.run(name, reason=reason, synthetic=True, invented=invented)
+        assert ran.error is None
+        assert ran.plan.plan_hash not in hashes, f"{name} isn't a revision"
+        hashes.append(ran.plan.plan_hash)
+    return lab.out
 
 
 def report(out: Path, session: int | None = None) -> Document:
@@ -347,7 +278,7 @@ def test_a_runs_report_gives_its_ranking_row_and_each_weight_by_its_path(
 
     definitions = section(document, "definitions")
     (h3,) = (h for h in definitions.find_all("h3") if h.text == "The ranking definition")
-    assert document.dd("Definition") == [digest(DEFINITIONS / "value-momentum.xml")]
+    assert document.dd("Definition") == [digest(RANKING_DEFINITIONS / "value-momentum.xml")]
     assert document.dd("Ranking method") == [
         "percentile_nas_negative: Percentile NAs Negative, sent as rankingMethod 2"
     ]
@@ -390,7 +321,7 @@ def test_a_runs_report_gives_its_definitions_source_a_file_by_its_hash(
     text = paragraph_after(document, "The ranking definition's source")
 
     assert text == (
-        f"A file, by the definition's hash, {digest(DEFINITIONS / 'value-momentum.xml')}."
+        f"A file, by the definition's hash, {digest(RANKING_DEFINITIONS / 'value-momentum.xml')}."
         " definition.xml is the run's copy of the file, byte for byte."
     )
     (h3,) = (h for h in document.root.find_all("h3") if h.text == "The ranking definition's source")
@@ -416,7 +347,7 @@ def test_a_runs_snapshot_source_gives_its_systems_name_id_and_when_it_was_read(
     assert paragraph_after(document, "The ranking definition's source") == (
         f"A ranking snapshot of the system Value and momentum, ID 104729, read {read}, as its"
         " record, snapshot.json, gives it. The definition's hash:"
-        f" {digest(DEFINITIONS / 'value-momentum.xml')}. definition.xml and snapshot.json are"
+        f" {digest(RANKING_DEFINITIONS / 'value-momentum.xml')}. definition.xml and snapshot.json are"
         " the run's copies of the snapshot's files, byte for byte."
     )
 
@@ -452,8 +383,8 @@ def test_a_runs_limitations_say_where_its_definition_was_written(
 def test_an_experiments_report_gives_a_table_of_each_cases_weights(
     tmp_path: Path, server: FakePortfolio123
 ) -> None:
-    backtests = [reply(name) for name in ("complete.json", "changed-metrics.json")]
-    backtests += [reply("complete.json")] * 2
+    backtests = [response(name) for name in ("complete.json", "changed-metrics.json")]
+    backtests += [response("complete.json")] * 2
     document = report(write_experiment(tmp_path, server, backtests=backtests), 1)
 
     rows = cells(document, "The ranking's weights")
@@ -481,8 +412,8 @@ def test_a_case_without_settings_csv_gives_its_plans_weights(
     tmp_path: Path, server: FakePortfolio123
 ) -> None:
     # `tilt-earnings-yield`'s backtest is rejected, so it has no tables.
-    backtests = [reply("complete.json")] * 2 + [Reply(400, b"Unsupported value")]
-    backtests += [reply("complete.json")]
+    backtests = [response("complete.json")] * 2 + [Reply(400, b"Unsupported value")]
+    backtests += [response("complete.json")]
     out = write_experiment(tmp_path, server, backtests=backtests)
 
     rows = cells(report(out, 1), "The ranking's weights")
@@ -498,7 +429,7 @@ def test_a_cases_weights_are_aligned_by_the_baselines_nodes_not_their_paths(
     names the second by its name, `Value P\\/E/Yield`, where the baseline's names it by its
     position, `Value P\\/E/#2`. Its weight of that node is in the node's baseline row, only the
     removed factor's row gives `Removed`, and no row is added for its path."""
-    out = write_experiment(tmp_path, server, CONFIGS / "ranking-positions.yaml")
+    out = write_experiment(tmp_path, server, EXPERIMENT_CONFIGS / "ranking-positions.yaml")
 
     rows = cells(report(out, 1), "The ranking's weights")
 
@@ -544,8 +475,8 @@ def test_swapping_responses_between_cases_changes_no_order_or_mark(
 ) -> None:
     documents: list[Document] = []
     for changed in (1, 3):
-        backtests = [reply("complete.json")] * 4
-        backtests[changed] = reply("changed-metrics.json")
+        backtests = [response("complete.json")] * 4
+        backtests[changed] = response("changed-metrics.json")
         fake = FakePortfolio123()
         try:
             out = write_experiment(tmp_path / str(changed), fake, backtests=backtests)
@@ -598,7 +529,10 @@ def test_an_experiments_source_gives_its_definitions_file_by_its_hash(
 
     assert cells(document, "The ranking definition's source") == [
         ["Plan", "Source"],
-        ["1", f"A file, by the definition's hash, {digest(DEFINITIONS / 'value-momentum.xml')}."],
+        [
+            "1",
+            f"A file, by the definition's hash, {digest(RANKING_DEFINITIONS / 'value-momentum.xml')}.",
+        ],
     ]
     table = table_after(document, "The ranking definition's source")
     assert table.inside(section(document, "data"))
@@ -609,7 +543,9 @@ def test_an_experiments_snapshot_source_gives_its_systems_name_id_and_when_it_wa
 ) -> None:
     snapshot = SnapshotBuilder(tmp_path / "home").snapshot(tmp_path / "ranking" / "value-momentum")
     record = RankingSnapshotRecord.model_validate_json((snapshot / "snapshot.json").read_bytes())
-    path = naming(CONFIGS / "ranking-example.yaml", snapshot, tmp_path / "experiment-configs")
+    path = naming(
+        EXPERIMENT_CONFIGS / "ranking-example.yaml", snapshot, tmp_path / "experiment-configs"
+    )
 
     document = report(write_experiment(tmp_path, server, path), 1)
 
@@ -619,7 +555,7 @@ def test_an_experiments_snapshot_source_gives_its_systems_name_id_and_when_it_wa
         (
             f"A ranking snapshot of the system Value and momentum, ID 104729, read {read}, as"
             " its record, snapshot.json, gives it. The definition's hash:"
-            f" {digest(DEFINITIONS / 'value-momentum.xml')}."
+            f" {digest(RANKING_DEFINITIONS / 'value-momentum.xml')}."
         ),
     ]
 
@@ -637,7 +573,10 @@ def test_each_plans_source_is_given_whether_its_ranking_is_a_definition_or_not(
     none = "None: the ranking isn't a definition."
     assert cells(third, "The ranking definition's source")[1:] == [
         ["1", none],
-        ["2", f"A file, by the definition's hash, {digest(DEFINITIONS / 'value-momentum.xml')}."],
+        [
+            "2",
+            f"A file, by the definition's hash, {digest(RANKING_DEFINITIONS / 'value-momentum.xml')}.",
+        ],
         ["3", none],
     ]
     # The current plan's ranking is a formula, so it has no table of weights; but the

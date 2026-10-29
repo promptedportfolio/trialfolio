@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.paths import EXPERIMENT_CONFIGS, ROOT, SCREEN_CONFIGS
+from tests.support.plans import experiment_plan, verified_versions
 from trialfolio.configuration import read_experiment_configuration, read_screen_configuration
 from trialfolio.contracts.common import TransportVersions, WrapperVersions
 from trialfolio.contracts.experiment_configuration import ExperimentConfiguration
@@ -32,7 +34,6 @@ from trialfolio.contracts.experiment_record import CaseChange, ExperimentRecord
 from trialfolio.contracts.plan_parts import CREDITS_PER_REQUEST_SOURCE, PlanSetting
 from trialfolio.errors import TrialFolioError
 from trialfolio.planning import (
-    VERIFIED_VERSIONS,
     PlanRevision,
     Versions,
     build_experiment_plan,
@@ -44,17 +45,9 @@ from trialfolio.planning import (
     revised_experiment_record,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-EXPERIMENTS = REPO_ROOT / "tests" / "fixtures" / "experiment-configs"
-REVISIONS = EXPERIMENTS / "revisions"
-SCREENS = REPO_ROOT / "tests" / "fixtures" / "screen-configs"
+REVISIONS = EXPERIMENT_CONFIGS / "revisions"
 
-VERSIONS = Versions(
-    trialfolio="0.3.0",
-    p123api=VERIFIED_VERSIONS["p123api"][0],
-    requests=VERIFIED_VERSIONS["requests"][0],
-    urllib3=VERIFIED_VERSIONS["urllib3"][0],
-)
+VERSIONS = verified_versions("0.3.0")
 
 EXAMPLE_KEYS = ["baseline", "liquidity-100m", "holdings-50", "rebalance-weeks-1", "slippage-050"]
 
@@ -74,12 +67,8 @@ def from_text(text: str) -> ExperimentConfiguration:
     return read_experiment_configuration(text.encode(), "experiment.yaml")
 
 
-def plan_of(path: Path, versions: Versions = VERSIONS) -> PlanV1_1:
-    return build_experiment_plan(read(path), versions)
-
-
 def example_text() -> str:
-    return (EXPERIMENTS / "example.yaml").read_text(encoding="utf-8")
+    return (EXPERIMENT_CONFIGS / "example.yaml").read_text(encoding="utf-8")
 
 
 def edited(old: str, new: str, text: str | None = None) -> str:
@@ -106,7 +95,7 @@ def screen_case(text: str) -> tuple[str, object, object]:
 
 def screen_text(*changes: tuple[str, str]) -> str:
     """`formula.yaml`, the example's baseline as a screen configuration, with each change made."""
-    text = (SCREENS / "formula.yaml").read_text(encoding="utf-8")
+    text = (SCREEN_CONFIGS / "formula.yaml").read_text(encoding="utf-8")
     for old, new in changes:
         assert text.count(old) == 1, old
         text = text.replace(old, new)
@@ -125,7 +114,7 @@ EXAMPLE_SCREENS = {
 
 
 def test_the_example_compiles_to_its_five_cases_in_the_order_of_cases() -> None:
-    plan = plan_of(EXPERIMENTS / "example.yaml")
+    plan = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
 
     assert [case.case_key for case in plan.cases] == EXAMPLE_KEYS
     variants = [
@@ -156,7 +145,7 @@ def test_the_example_compiles_to_its_five_cases_in_the_order_of_cases() -> None:
 
 @pytest.mark.parametrize("key", EXAMPLE_KEYS)
 def test_each_case_is_the_screen_with_its_settings(key: str) -> None:
-    case = by_key(plan_of(EXPERIMENTS / "example.yaml"))[key]
+    case = by_key(experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS))[key]
 
     assert (case.case_id, case.requests, case.settings) == screen_case(EXAMPLE_SCREENS[key])
 
@@ -171,7 +160,7 @@ def test_each_case_is_the_screen_with_its_settings(key: str) -> None:
     ],
 )
 def test_each_variant_is_the_baseline_with_exactly_its_change(key: str, setting: str) -> None:
-    cases = by_key(plan_of(EXPERIMENTS / "example.yaml"))
+    cases = by_key(experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS))
     baseline, case = settings_of(cases["baseline"]), settings_of(cases[key])
 
     assert [name for name in case if case[name] != baseline[name]] == [setting]
@@ -179,7 +168,7 @@ def test_each_variant_is_the_baseline_with_exactly_its_change(key: str, setting:
 
 
 def test_the_plan_records_the_research_context_and_the_budget_across_runs() -> None:
-    plan = plan_of(EXPERIMENTS / "example.yaml").model_dump(mode="json")
+    plan = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS).model_dump(mode="json")
     screen = build_plan(
         read_screen_configuration(EXAMPLE_SCREENS["baseline"].encode(), "screen.yaml"), VERSIONS
     ).model_dump(mode="json")
@@ -237,7 +226,7 @@ def test_a_prior_research_declaration_without_a_description_is_planned_as_null()
 
 
 def test_no_microcaps_gives_its_two_cases_with_no_default() -> None:
-    plan = plan_of(EXPERIMENTS / "no-microcaps.yaml")
+    plan = experiment_plan(EXPERIMENT_CONFIGS / "no-microcaps.yaml", VERSIONS)
 
     baseline, added = plan.cases
     assert [baseline.case_key, added.case_key] == ["baseline", "no-microcaps"]
@@ -270,7 +259,7 @@ def test_no_microcaps_gives_its_two_cases_with_no_default() -> None:
 def test_without_variants_the_default_is_the_rebalance_frequency_the_baseline_doesnt_use(
     baseline_weeks: int, default_key: str, default_weeks: int
 ) -> None:
-    text = (EXPERIMENTS / "default-only.yaml").read_text(encoding="utf-8")
+    text = (EXPERIMENT_CONFIGS / "default-only.yaml").read_text(encoding="utf-8")
     text = edited("rebalance_weeks: 4", f"rebalance_weeks: {baseline_weeks}", text)
 
     plan = build_experiment_plan(from_text(text), VERSIONS)
@@ -289,7 +278,7 @@ def test_without_variants_the_default_is_the_rebalance_frequency_the_baseline_do
 
 
 def test_a_rebalance_list_replaces_the_default_and_an_empty_one_turns_it_off() -> None:
-    listed = plan_of(REVISIONS / "default-explicit.yaml")
+    listed = experiment_plan(REVISIONS / "default-explicit.yaml", VERSIONS)
     off = build_experiment_plan(
         from_text(edited("  slippage_percent:\n", "  rebalance_weeks: []\n  slippage_percent:\n")),
         VERSIONS,
@@ -307,8 +296,8 @@ def test_a_rebalance_list_replaces_the_default_and_an_empty_one_turns_it_off() -
 
 
 def test_a_file_written_differently_gives_the_same_plan_and_hash() -> None:
-    example = plan_of(EXPERIMENTS / "example.yaml")
-    written_differently = plan_of(EXPERIMENTS / "written-differently.yaml")
+    example = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
+    written_differently = experiment_plan(EXPERIMENT_CONFIGS / "written-differently.yaml", VERSIONS)
 
     assert written_differently == example
     assert written_differently.plan_hash == example.plan_hash
@@ -319,7 +308,7 @@ def test_a_file_written_differently_gives_the_same_plan_and_hash() -> None:
 
 
 def test_the_plan_hash_is_the_hash_of_the_canonical_plan_and_each_case_id_of_its_settings() -> None:
-    plan = plan_of(EXPERIMENTS / "example.yaml")
+    plan = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
     saved = PlanV1_1.model_validate_json(plan.model_dump_json(indent=2))
 
     assert plan_hash(saved) == saved.plan_hash == plan.plan_hash
@@ -330,8 +319,9 @@ def test_the_plan_hash_is_the_hash_of_the_canonical_plan_and_each_case_id_of_its
 def test_the_experiment_plan_hash_is_the_same_in_another_process() -> None:
     # Two hash seeds, so an order taken from a set would show.
     script = (
-        "from tests.core.test_experiment_plan import EXPERIMENTS, plan_of\n"
-        "print(plan_of(EXPERIMENTS / 'example.yaml').plan_hash)\n"
+        "from tests.support.paths import EXPERIMENT_CONFIGS\n"
+        "from tests.support.plans import experiment_plan, verified_versions\n"
+        "print(experiment_plan(EXPERIMENT_CONFIGS / 'example.yaml', verified_versions('0.3.0')).plan_hash)\n"
     )
     hashes = {
         subprocess.run(
@@ -339,19 +329,19 @@ def test_the_experiment_plan_hash_is_the_same_in_another_process() -> None:
             capture_output=True,
             text=True,
             check=True,
-            cwd=REPO_ROOT,
+            cwd=ROOT,
             env=os.environ | {"PYTHONHASHSEED": seed},
         ).stdout.strip()
         for seed in ("1", "2")
     }
 
-    assert hashes == {plan_of(EXPERIMENTS / "example.yaml").plan_hash}
+    assert hashes == {experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS).plan_hash}
 
 
 def test_a_version_no_release_verified_isnt_planned() -> None:
     with pytest.raises(TrialFolioError) as raised:
         build_experiment_plan(
-            read(EXPERIMENTS / "example.yaml"), Versions("0.3.0", "3.1.0", "2.34.3", "2.8.0")
+            read(EXPERIMENT_CONFIGS / "example.yaml"), Versions("0.3.0", "3.1.0", "2.34.3", "2.8.0")
         )
 
     assert raised.value.code == "environment.unsupported"
@@ -372,16 +362,18 @@ def keyed(changes: tuple[CaseChange, ...]) -> list[str]:
 
 
 @pytest.mark.parametrize(
-    "path", [EXPERIMENTS / "example.yaml", EXPERIMENTS / "written-differently.yaml"]
+    "path", [EXPERIMENT_CONFIGS / "example.yaml", EXPERIMENT_CONFIGS / "written-differently.yaml"]
 )
 def test_the_configuration_that_gives_the_current_plan_resumes_it(path: Path) -> None:
-    current = PlanV1_1.model_validate_json(plan_of(EXPERIMENTS / "example.yaml").model_dump_json())
+    current = PlanV1_1.model_validate_json(
+        experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS).model_dump_json()
+    )
 
     assert plan_revision(read(path), VERSIONS, current) is None
 
 
 def test_a_revision_revises_the_current_plan_and_is_resumed_by_its_own_configuration() -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
 
     revision = revision_of(REVISIONS / "holdings-40.yaml", current)
 
@@ -390,7 +382,7 @@ def test_a_revision_revises_the_current_plan_and_is_resumed_by_its_own_configura
     # The same configuration, versions, and revised plan give the same revision.
     assert revision_of(REVISIONS / "holdings-40.yaml", current).plan == revision.plan
     assert plan_revision(read(REVISIONS / "holdings-40.yaml"), VERSIONS, revision.plan) is None
-    again = revision_of(EXPERIMENTS / "example.yaml", revision.plan)
+    again = revision_of(EXPERIMENT_CONFIGS / "example.yaml", revision.plan)
     assert again.plan.revises == revision.plan.plan_hash
     assert again.plan.plan_hash != current.plan_hash
 
@@ -414,7 +406,7 @@ REVISION_CHANGES = {
 @pytest.mark.parametrize("name", REVISION_CHANGES)
 def test_each_change_is_a_revision_that_records_the_cases_and_parts_it_changed(name: str) -> None:
     added, retired, parts = REVISION_CHANGES[name]
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
 
     revision = revision_of(REVISIONS / f"{name}.yaml", current)
 
@@ -434,7 +426,7 @@ def test_each_change_is_a_revision_that_records_the_cases_and_parts_it_changed(n
 
 
 def test_a_changed_variant_keeps_its_key_and_gets_a_new_case_id() -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
 
     revision = revision_of(REVISIONS / "holdings-40.yaml", current)
 
@@ -445,7 +437,7 @@ def test_a_changed_variant_keeps_its_key_and_gets_a_new_case_id() -> None:
 
 
 def test_a_renamed_key_keeps_every_case_id() -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
 
     revision = revision_of(REVISIONS / "key-renamed.yaml", current)
 
@@ -458,7 +450,7 @@ def test_a_renamed_key_keeps_every_case_id() -> None:
 
 
 def test_a_new_order_of_one_settings_variants_keeps_every_case_in_another_order() -> None:
-    current = plan_of(REVISIONS / "two-holdings.yaml")
+    current = experiment_plan(REVISIONS / "two-holdings.yaml", VERSIONS)
 
     revision = revision_of(REVISIONS / "two-holdings-reordered.yaml", current)
 
@@ -485,7 +477,7 @@ def test_a_new_order_of_one_settings_variants_keeps_every_case_in_another_order(
 def test_a_changed_title_or_description_is_a_revision_of_that_part_alone(
     old: str, new: str, parts: list[str]
 ) -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
 
     revision = plan_revision(from_text(edited(old, new)), VERSIONS, current)
 
@@ -495,7 +487,7 @@ def test_a_changed_title_or_description_is_a_revision_of_that_part_alone(
 
 
 def test_a_changed_baseline_setting_retires_every_case_and_adds_each_again() -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
     text = edited("  end_date: 2025-12-31\n", "  end_date: 2024-12-31\n")
 
     revision = plan_revision(from_text(text), VERSIONS, current)
@@ -510,7 +502,7 @@ def test_a_changed_baseline_setting_retires_every_case_and_adds_each_again() -> 
 
 
 def test_an_added_variant_and_a_turned_off_default_are_revisions_of_the_cases() -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
     added = edited(
         "    - key: holdings-50\n      value: 50\n",
         "    - key: holdings-50\n      value: 50\n    - key: holdings-10\n      value: 10\n",
@@ -534,7 +526,7 @@ def test_an_added_variant_and_a_turned_off_default_are_revisions_of_the_cases() 
 
 def test_a_case_that_becomes_the_baseline_is_kept_with_its_new_key_variant_and_place() -> None:
     # The baseline's holdings and the variant's trade places: the two cases keep their settings.
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
     text = edited("  max_holdings: 25\n", "  max_holdings: 50\n")
     text = edited(
         "    - key: holdings-50\n      value: 50\n",
@@ -578,9 +570,11 @@ def recorded_with(plan: PlanV1_1, **fields: object) -> PlanV1_1:
 def test_a_plan_built_with_another_version_is_a_change_of_versions_alone(
     package: str, fields: dict[str, object], earlier: str
 ) -> None:
-    current = recorded_with(plan_of(EXPERIMENTS / "example.yaml"), **fields)
+    current = recorded_with(
+        experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS), **fields
+    )
 
-    revision = revision_of(EXPERIMENTS / "example.yaml", current)
+    revision = revision_of(EXPERIMENT_CONFIGS / "example.yaml", current)
 
     changes = revision.changes.model_dump(mode="json")
     assert changes == {
@@ -614,12 +608,12 @@ def test_a_plan_built_with_another_documented_cost_is_a_change_of_versions_and_o
     """`budget` is any change to the plan's budget, not only to `provider_requests`: an earlier
     Trial Folio may have recorded another documented cost, or another source for it, for the same
     configuration."""
-    planned = plan_of(EXPERIMENTS / "example.yaml")
+    planned = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
     current = recorded_with(
         planned, trialfolio_version="0.2.1", budget=planned.budget.model_copy(update=budget)
     )
 
-    revision = revision_of(EXPERIMENTS / "example.yaml", current)
+    revision = revision_of(EXPERIMENT_CONFIGS / "example.yaml", current)
 
     assert current.budget.provider_requests == revision.plan.budget.provider_requests
     assert [change.package for change in revision.changes.versions] == ["trialfolio"]
@@ -629,10 +623,10 @@ def test_a_plan_built_with_another_documented_cost_is_a_change_of_versions_and_o
 
 
 def test_another_trialfolio_version_given_as_installed_is_a_change_of_versions() -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
     upgraded = Versions("0.3.1", VERSIONS.p123api, VERSIONS.requests, VERSIONS.urllib3)
 
-    revision = plan_revision(read(EXPERIMENTS / "example.yaml"), upgraded, current)
+    revision = plan_revision(read(EXPERIMENT_CONFIGS / "example.yaml"), upgraded, current)
 
     assert revision is not None
     assert revision.plan.trialfolio_version == "0.3.1"
@@ -645,7 +639,7 @@ def test_another_trialfolio_version_given_as_installed_is_a_change_of_versions()
 
 def test_every_version_changed_is_recorded_in_the_documented_order() -> None:
     current = recorded_with(
-        plan_of(EXPERIMENTS / "example.yaml"),
+        experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS),
         trialfolio_version="0.2.1",
         provider_wrapper=WrapperVersions(p123api="3.0.9"),
         transport=TransportVersions(requests="2.34.1", urllib3="2.7.0"),
@@ -669,7 +663,7 @@ def test_every_version_changed_is_recorded_in_the_documented_order() -> None:
 def test_another_experiment_id_or_universe_is_another_experiment_not_a_revision(
     name: str, hidden: str
 ) -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
 
     with pytest.raises(TrialFolioError) as raised:
         plan_revision(read(REVISIONS / f"{name}.yaml"), VERSIONS, current)
@@ -683,7 +677,7 @@ def test_another_experiment_id_or_universe_is_another_experiment_not_a_revision(
 
 
 def test_another_experiment_is_found_before_the_versions_are_checked() -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
     unverified = Versions("0.3.0", "3.2.0", VERSIONS.requests, VERSIONS.urllib3)
 
     with pytest.raises(TrialFolioError) as raised:
@@ -691,7 +685,7 @@ def test_another_experiment_is_found_before_the_versions_are_checked() -> None:
     assert raised.value.code == "output.not_empty"
 
     with pytest.raises(TrialFolioError) as raised:
-        plan_revision(read(EXPERIMENTS / "example.yaml"), unverified, current)
+        plan_revision(read(EXPERIMENT_CONFIGS / "example.yaml"), unverified, current)
     assert raised.value.code == "environment.unsupported"
 
 
@@ -724,7 +718,7 @@ def revised_record(
 
 
 def test_the_first_plans_record_declares_the_experiment_and_its_one_plan() -> None:
-    plan = plan_of(EXPERIMENTS / "example.yaml")
+    plan = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
 
     record = first_record(plan)
 
@@ -766,7 +760,7 @@ def test_the_first_plans_record_declares_the_experiment_and_its_one_plan() -> No
 
 
 def test_a_revisions_record_keeps_the_history_and_retires_the_changed_case() -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
     first = first_record(current)
     revision = revision_of(REVISIONS / "holdings-40.yaml", current)
 
@@ -800,7 +794,7 @@ def test_a_revisions_record_keeps_the_history_and_retires_the_changed_case() -> 
 
 @pytest.mark.parametrize("name", REVISION_CHANGES)
 def test_each_revisions_record_holds_its_planned_and_retired_cases(name: str) -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
     revision = revision_of(REVISIONS / f"{name}.yaml", current)
 
     record = revised_record(first_record(current), revision, 2, "A reason.")
@@ -821,7 +815,7 @@ def test_each_revisions_record_holds_its_planned_and_retired_cases(name: str) ->
 
 @pytest.mark.parametrize("key", ["slippage-050", "slippage-half"])
 def test_a_retired_case_planned_again_under_any_key_is_the_same_case_again(key: str) -> None:
-    first_plan = plan_of(EXPERIMENTS / "example.yaml")
+    first_plan = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
     first = first_record(first_plan)
     removed = revision_of(REVISIONS / "variant-removed.yaml", first_plan)
     second = revised_record(first, removed, 2, "Without slippage.")
@@ -843,7 +837,7 @@ def test_a_retired_case_planned_again_under_any_key_is_the_same_case_again(key: 
 
 
 def test_a_case_retired_earlier_keeps_the_last_plan_that_included_it() -> None:
-    first_plan = plan_of(EXPERIMENTS / "example.yaml")
+    first_plan = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
     removed = revision_of(REVISIONS / "variant-removed.yaml", first_plan)
     second = revised_record(first_record(first_plan), removed, 2, "Without slippage.")
     text = edited("  slippage_percent:\n    - key: slippage-050\n      value: 0.5\n", "")
@@ -865,7 +859,7 @@ def test_a_case_retired_earlier_keeps_the_last_plan_that_included_it() -> None:
 
 
 def test_records_that_dont_fit_together_are_refused() -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = experiment_plan(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS)
     first = first_record(current)
     revision = revision_of(REVISIONS / "holdings-40.yaml", current)
     second = revised_record(first, revision, 2, "Forty holdings.")

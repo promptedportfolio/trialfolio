@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.packaging.conftest import ROOT
+from tests.support.paths import ROOT
 
 pytestmark = pytest.mark.packaging
 

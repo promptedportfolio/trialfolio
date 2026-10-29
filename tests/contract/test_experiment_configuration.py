@@ -41,6 +41,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from tests.support.paths import EXPERIMENT_CONFIGS, SCREEN_CONFIGS, SNAPSHOT_CONFIGS
 from tests.support.snapshot_builder import SnapshotBuilder
 from trialfolio.configuration import (
     read_experiment_configuration,
@@ -62,8 +63,7 @@ from trialfolio.errors import TrialFolioError
 from trialfolio.planning import case_id, resolve_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-FIXTURES = REPO_ROOT / "tests" / "fixtures" / "experiment-configs"
-INVALID = FIXTURES / "invalid"
+INVALID = EXPERIMENT_CONFIGS / "invalid"
 REFERENCE = REPO_ROOT / "reference"
 SCHEMA = REPO_ROOT / "schemas" / "experiment-configuration-1.0.0.schema.json"
 
@@ -144,8 +144,8 @@ def reference_screen(path: str) -> tuple[str, str]:
 
 def test_documented_examples_resolve_to_reference_requests() -> None:
     first, second = documented_examples()
-    assert (FIXTURES / "example.yaml").read_text(encoding="utf-8") == first
-    assert (FIXTURES / "no-microcaps.yaml").read_text(encoding="utf-8") == second
+    assert (EXPERIMENT_CONFIGS / "example.yaml").read_text(encoding="utf-8") == first
+    assert (EXPERIMENT_CONFIGS / "no-microcaps.yaml").read_text(encoding="utf-8") == second
 
     cases = cases_of(read_experiment_configuration(first.encode(), "example.yaml"))
     microcaps = cases_of(read_experiment_configuration(second.encode(), "no-microcaps.yaml"))
@@ -334,7 +334,7 @@ def test_a_rebalance_list_replaces_the_default() -> None:
 
 def test_an_empty_rebalance_list_turns_the_default_off() -> None:
     configuration = read_experiment_configuration(
-        (FIXTURES / "no-microcaps.yaml").read_bytes(), "no-microcaps.yaml"
+        (EXPERIMENT_CONFIGS / "no-microcaps.yaml").read_bytes(), "no-microcaps.yaml"
     )
 
     (variant,) = configured_variants(configuration)
@@ -568,7 +568,7 @@ def test_text_never_sent_may_be_written_without_quotes() -> None:
 
 
 def test_a_screen_configuration_is_not_an_experiment() -> None:
-    path = REPO_ROOT / "tests" / "fixtures" / "screen-configs" / "formula.yaml"
+    path = SCREEN_CONFIGS / "formula.yaml"
 
     assert "`kind` must be experiment." in rejection(path.read_bytes(), path.name)
 
@@ -803,7 +803,7 @@ def read_v1_1(
     if isinstance(content, str):
         content = content.encode()
     return read_experiment_configuration_v1_1(
-        content, source_name, FIXTURES / source_name
+        content, source_name, EXPERIMENT_CONFIGS / source_name
     ).configuration
 
 
@@ -891,12 +891,12 @@ def test_documented_ranking_example_compiles_to_its_cases(tmp_path: Path) -> Non
     in single quotes names the node a path with `\\\\/` in double quotes names. The plan these
     cases compile to is checked in `tests/core/test_ranking_plan.py` (release 0.4.0's R04-T07)."""
     xml = ranking_example_xml()
-    assert (FIXTURES / "ranking" / "value-momentum.xml").read_bytes() == xml.encode()
-    assert (FIXTURES / "ranking-example.yaml").read_bytes() == ranking_example().encode()
-    snapshot = REPO_ROOT / "tests" / "fixtures" / "ranking-snapshot-configs" / "example.yaml"
+    assert (EXPERIMENT_CONFIGS / "ranking" / "value-momentum.xml").read_bytes() == xml.encode()
+    assert (EXPERIMENT_CONFIGS / "ranking-example.yaml").read_bytes() == ranking_example().encode()
+    snapshot = SNAPSHOT_CONFIGS / "example.yaml"
     assert snapshot.read_bytes() == snapshot_example().encode()
 
-    path = FIXTURES / "ranking-example.yaml"
+    path = EXPERIMENT_CONFIGS / "ranking-example.yaml"
     read = read_experiment_configuration_v1_1(path.read_bytes(), path.name, path)
 
     assert read.definition is not None and read.definition.text == xml
@@ -933,7 +933,7 @@ def test_documented_ranking_example_compiles_to_its_cases(tmp_path: Path) -> Non
 
     content = ranking_example()
     for name, rule in ALTERED_DEFINITIONS.items():
-        definition = (FIXTURES / "ranking" / "invalid" / f"{name}.xml").read_bytes()
+        definition = (EXPERIMENT_CONFIGS / "ranking" / "invalid" / f"{name}.xml").read_bytes()
         (problem,) = ranking_problems(tmp_path, content, definition)
         assert problem.startswith("- `baseline.ranking.definition` names a definition"), name
         assert rule in problem, name
@@ -1357,7 +1357,10 @@ def test_without_files_the_reader_reads_no_file_the_baselines_ranking_names() ->
 
     with pytest.raises(ValueError, match="names a file"):
         read_experiment_configuration_v1_1(
-            ranking_example().encode(), "experiment.yaml", FIXTURES / "experiment.yaml", files=False
+            ranking_example().encode(),
+            "experiment.yaml",
+            EXPERIMENT_CONFIGS / "experiment.yaml",
+            files=False,
         )
     formula = with_line("schema_version: 1.0.0", "schema_version: 1.1.0")
     read = read_experiment_configuration_v1_1(
@@ -1373,7 +1376,7 @@ def test_the_readers_name_the_versions_they_read() -> None:
     unsupported = with_line("schema_version: 1.0.0", "schema_version: 2.0.0")
     assert "Supported versions: 1.0.0, 1.1.0." in ranking_rejection(unsupported)
     assert "Supported versions: 1.0.0, 1.1.0." in rejection(
-        unsupported, "experiment.yaml", run_reader(FIXTURES)
+        unsupported, "experiment.yaml", run_reader(EXPERIMENT_CONFIGS)
     )
 
 

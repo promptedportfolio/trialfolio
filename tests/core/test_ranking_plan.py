@@ -39,6 +39,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.paths import EXPERIMENT_CONFIGS, RANKING_DEFINITIONS, SCREEN_CONFIGS
+from tests.support.plans import planned_experiment, verified_versions
 from trialfolio.configuration import (
     read_experiment_configuration,
     read_experiment_configuration_v1_1,
@@ -51,7 +53,6 @@ from trialfolio.contracts.plan import PlanV1_2
 from trialfolio.contracts.plan_parts import PlanSettingV1_2
 from trialfolio.errors import TrialFolioError
 from trialfolio.planning import (
-    VERIFIED_VERSIONS,
     PlanRevisionV1_1,
     Versions,
     build_experiment_plan,
@@ -66,18 +67,9 @@ from trialfolio.planning import (
     revised_experiment_record_v1_1,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-EXPERIMENTS = REPO_ROOT / "tests" / "fixtures" / "experiment-configs"
-DEFINITIONS = EXPERIMENTS / "ranking"
-REVISIONS = EXPERIMENTS / "revisions"
-SCREENS = REPO_ROOT / "tests" / "fixtures" / "screen-configs"
+REVISIONS = EXPERIMENT_CONFIGS / "revisions"
 
-VERSIONS = Versions(
-    trialfolio="0.4.0",
-    p123api=VERIFIED_VERSIONS["p123api"][0],
-    requests=VERIFIED_VERSIONS["requests"][0],
-    urllib3=VERIFIED_VERSIONS["urllib3"][0],
-)
+VERSIONS = verified_versions("0.4.0")
 
 CREATED_AT = datetime(2026, 10, 15, 12, 0, 0, tzinfo=UTC)
 
@@ -124,13 +116,8 @@ def hash_of(text: str) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def plan_of(path: Path, revises: str | None = None) -> PlanV1_1 | PlanV1_3:
-    read = read_experiment_configuration_v1_1(path.read_bytes(), path.name, path)
-    return build_experiment_plan_v1_1(read, VERSIONS, revises)
-
-
 def ranking_plan(path: Path) -> PlanV1_3:
-    plan = plan_of(path)
+    plan = planned_experiment(path, VERSIONS).plan
     assert isinstance(plan, PlanV1_3)
     return plan
 
@@ -157,12 +144,12 @@ def reweighted(text: str, *changes: tuple[str, str, str]) -> str:
     return text
 
 
-BASELINE = (DEFINITIONS / "value-momentum.xml").read_text(encoding="utf-8")
+BASELINE = (RANKING_DEFINITIONS / "value-momentum.xml").read_text(encoding="utf-8")
 LINES = BASELINE.split("\n")
 assert LINES[5].startswith('\t\t<StockFormula Name="Sales Yield"')
 DEFINITIONS_BY_KEY = {
     "baseline": BASELINE,
-    "value-heavy": (DEFINITIONS / "value-heavy.xml").read_text(encoding="utf-8"),
+    "value-heavy": (RANKING_DEFINITIONS / "value-heavy.xml").read_text(encoding="utf-8"),
     "tilt-earnings-yield": reweighted(
         BASELINE, ("Earnings Yield", "50", "70"), ("Sales Yield", "50", "30")
     ),
@@ -207,7 +194,7 @@ WEIGHTS_BY_KEY = {
 
 
 def test_the_ranking_example_compiles_to_plan_1_3_with_its_four_cases() -> None:
-    plan = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
+    plan = ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
 
     assert plan.schema_version == "1.3.0"
     assert [case.case_key for case in plan.cases] == EXAMPLE_KEYS
@@ -224,7 +211,7 @@ def test_the_ranking_example_compiles_to_plan_1_3_with_its_four_cases() -> None:
 def test_each_case_writes_its_whole_definition_then_backtests_ranked_by_api_ranking_system(
     key: str,
 ) -> None:
-    case = by_key(ranking_plan(EXPERIMENTS / "ranking-example.yaml"))[key]
+    case = by_key(ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml"))[key]
 
     update, backtest = (request.model_dump(mode="json") for request in case.requests)
     assert update == {
@@ -247,7 +234,7 @@ def test_each_case_writes_its_whole_definition_then_backtests_ranked_by_api_rank
 def test_each_case_holds_its_definition_s_hash_and_a_weight_row_for_each_of_its_nodes(
     key: str,
 ) -> None:
-    case = by_key(ranking_plan(EXPERIMENTS / "ranking-example.yaml"))[key]
+    case = by_key(ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml"))[key]
 
     assert ranking_row(case).model_dump(mode="json") == {
         "setting": "ranking",
@@ -287,7 +274,7 @@ def test_each_case_holds_its_definition_s_hash_and_a_weight_row_for_each_of_its_
 def test_a_case_id_covers_each_weight_row_by_its_node() -> None:
     """Plan hashing: a weight row is reduced to its `setting`, `node`, `value`, and `unit`, and
     every other row to its `setting`, `value`, and `unit`, computed here from the rule."""
-    case = by_key(ranking_plan(EXPERIMENTS / "ranking-example.yaml"))["no-sales-yield"]
+    case = by_key(ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml"))["no-sales-yield"]
     rows = []
     for row in case.settings:
         kept = {"setting", "value", "unit"} | (
@@ -305,7 +292,7 @@ def test_a_case_id_covers_each_weight_row_by_its_node() -> None:
 
 
 def test_each_ranking_variant_gives_set_and_remove_by_canonical_paths() -> None:
-    plan = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
+    plan = ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
 
     unchanged = {"value": None, "add": None, "replace": None, "with": None, "default": False}
     assert [
@@ -342,7 +329,7 @@ def test_each_ranking_variant_gives_set_and_remove_by_canonical_paths() -> None:
 
 
 def test_the_plan_records_the_file_s_source_and_a_budget_with_each_operation_s_cost() -> None:
-    built = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
+    built = ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
     saved = PlanV1_3.model_validate_json(built.model_dump_json(indent=2))
     plan = saved.model_dump(mode="json")
 
@@ -394,14 +381,14 @@ def copy_example(directory: Path, definition: bytes | None = None) -> Path:
         definition or BASELINE.encode("utf-8")
     )
     path = directory / "ranking-example.yaml"
-    path.write_bytes((EXPERIMENTS / "ranking-example.yaml").read_bytes())
+    path.write_bytes((EXPERIMENT_CONFIGS / "ranking-example.yaml").read_bytes())
     return path
 
 
 def test_a_byte_changed_in_the_definition_changes_the_baseline_s_case_and_the_plan_hash(
     tmp_path: Path,
 ) -> None:
-    example = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
+    example = ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
     changed = BASELINE.replace("<Formula>…</Formula>", "<Formula>…!</Formula>", 1)
 
     plan = ranking_plan(copy_example(tmp_path, changed.encode("utf-8")))
@@ -416,20 +403,20 @@ def test_a_definition_with_windows_line_endings_gives_the_same_plan(tmp_path: Pa
 
     plan = ranking_plan(copy_example(tmp_path, windows))
 
-    assert plan == ranking_plan(EXPERIMENTS / "ranking-example.yaml")
+    assert plan == ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
 
 
 def test_a_file_written_differently_gives_the_same_plan_and_hash() -> None:
-    example = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
+    example = ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
 
-    written_differently = ranking_plan(EXPERIMENTS / "ranking-written-differently.yaml")
+    written_differently = ranking_plan(EXPERIMENT_CONFIGS / "ranking-written-differently.yaml")
 
     assert written_differently == example
     assert written_differently.plan_hash == example.plan_hash
 
 
 def test_ranking_positions_names_each_node_by_its_canonical_path() -> None:
-    plan = ranking_plan(EXPERIMENTS / "ranking-positions.yaml")
+    plan = ranking_plan(EXPERIMENT_CONFIGS / "ranking-positions.yaml")
 
     baseline, heavy, removal = plan.cases
     assert weights(baseline) == [
@@ -472,7 +459,7 @@ def test_ranking_positions_names_each_node_by_its_canonical_path() -> None:
 
 
 def test_ranking_mixed_s_variants_of_other_settings_send_the_baseline_s_definition() -> None:
-    plan = ranking_plan(EXPERIMENTS / "ranking-mixed.yaml")
+    plan = ranking_plan(EXPERIMENT_CONFIGS / "ranking-mixed.yaml")
 
     cases = by_key(plan)
     assert list(cases) == ["baseline", "value-heavy", "holdings-50", "rebalance-weeks-1"]
@@ -503,14 +490,14 @@ def test_ranking_mixed_s_variants_of_other_settings_send_the_baseline_s_definiti
 
 
 def test_definition_yaml_gives_plan_1_2_whose_case_is_the_example_s_baseline() -> None:
-    path = SCREENS / "definition.yaml"
+    path = SCREEN_CONFIGS / "definition.yaml"
     read = read_screen_configuration_v1_1(path.read_bytes(), path.name, path)
 
     plan = build_plan_v1_1(read, VERSIONS)
 
     assert isinstance(plan, PlanV1_2)
     (case,) = plan.cases
-    baseline = by_key(ranking_plan(EXPERIMENTS / "ranking-example.yaml"))["baseline"]
+    baseline = by_key(ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml"))["baseline"]
     assert (case.case_id, case.requests, case.settings) == (
         baseline.case_id,
         baseline.requests,
@@ -554,12 +541,12 @@ def test_definition_yaml_gives_plan_1_2_whose_case_is_the_example_s_baseline() -
 def test_a_case_without_a_definition_keeps_the_case_id_0_3_0_gave() -> None:
     """A screen or an experiment ranked another way gives plan 1.0.0 or 1.1.0, as 0.3.0's planner
     does, whichever version its file is."""
-    path = EXPERIMENTS / "example.yaml"
+    path = EXPERIMENT_CONFIGS / "example.yaml"
     text = path.read_text(encoding="utf-8")
     as_1_1_0 = text.replace("schema_version: 1.0.0\n", "schema_version: 1.1.0\n")
     assert as_1_1_0 != text
 
-    plan = plan_of(path)
+    plan = planned_experiment(path, VERSIONS).plan
     plan_1_1_0 = build_experiment_plan_v1_1(
         read_experiment_configuration_v1_1(as_1_1_0.encode(), path.name, path), VERSIONS
     )
@@ -570,7 +557,7 @@ def test_a_case_without_a_definition_keeps_the_case_id_0_3_0_gave() -> None:
     assert plan == build_experiment_plan(
         read_experiment_configuration(path.read_bytes(), path.name), VERSIONS
     )
-    screen = SCREENS / "formula.yaml"
+    screen = SCREEN_CONFIGS / "formula.yaml"
     screen_text = screen.read_text(encoding="utf-8")
     screen_1_1_0 = screen_text.replace("schema_version: 1.0.0\n", "schema_version: 1.1.0\n")
     assert screen_1_1_0 != screen_text
@@ -586,12 +573,12 @@ def test_a_version_no_release_verified_isn_t_planned(kind: str) -> None:
 
     with pytest.raises(TrialFolioError) as raised:
         if kind == "screen":
-            path = SCREENS / "definition.yaml"
+            path = SCREEN_CONFIGS / "definition.yaml"
             build_plan_v1_1(
                 read_screen_configuration_v1_1(path.read_bytes(), path.name, path), unverified
             )
         else:
-            path = EXPERIMENTS / "ranking-example.yaml"
+            path = EXPERIMENT_CONFIGS / "ranking-example.yaml"
             build_experiment_plan_v1_1(
                 read_experiment_configuration_v1_1(path.read_bytes(), path.name, path), unverified
             )
@@ -637,8 +624,8 @@ def revised_record(
 
 @pytest.mark.parametrize("name", ["ranking-example.yaml", "ranking-written-differently.yaml"])
 def test_the_configuration_that_gives_the_current_plan_resumes_it(name: str) -> None:
-    current = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
-    path = EXPERIMENTS / name
+    current = ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
+    path = EXPERIMENT_CONFIGS / name
     read = read_experiment_configuration_v1_1(path.read_bytes(), path.name, path)
 
     assert plan_revision_v1_1(read, VERSIONS, current) is None
@@ -647,15 +634,18 @@ def test_the_configuration_that_gives_the_current_plan_resumes_it(name: str) -> 
 @pytest.mark.parametrize(
     ("first", "revised"),
     [
-        (EXPERIMENTS / "ranking-example.yaml", REVISIONS / "ranking-definition-changed.yaml"),
-        (EXPERIMENTS / "example.yaml", REVISIONS / "ranking-from-formula.yaml"),
+        (
+            EXPERIMENT_CONFIGS / "ranking-example.yaml",
+            REVISIONS / "ranking-definition-changed.yaml",
+        ),
+        (EXPERIMENT_CONFIGS / "example.yaml", REVISIONS / "ranking-from-formula.yaml"),
     ],
     ids=["definition-changed", "from-formula"],
 )
 def test_the_configuration_that_gave_a_revision_resumes_it(first: Path, revised: Path) -> None:
     """The revision's plan is built again with its own `revises`, the hash of the plan it revised,
     so the configuration that gave it gives it again, and the experiment resumes."""
-    current = revision_of(revised, plan_of(first)).plan
+    current = revision_of(revised, planned_experiment(first, VERSIONS).plan).plan
     assert isinstance(current, PlanV1_3)
     assert current.revises is not None
     read = read_experiment_configuration_v1_1(revised.read_bytes(), revised.name, revised)
@@ -664,7 +654,7 @@ def test_the_configuration_that_gave_a_revision_resumes_it(first: Path, revised:
 
 
 def test_a_changed_definition_keeps_the_cases_whose_definition_doesn_t_change() -> None:
-    current = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
+    current = ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
 
     revision = revision_of(REVISIONS / "ranking-definition-changed.yaml", current)
 
@@ -689,7 +679,7 @@ def test_a_changed_definition_keeps_the_cases_whose_definition_doesn_t_change() 
         "parts": ["budget"],
     }
     assert plan.ranking_source.definition == hash_of(
-        (DEFINITIONS / "value-momentum-revised.xml").read_text(encoding="utf-8")
+        (RANKING_DEFINITIONS / "value-momentum-revised.xml").read_text(encoding="utf-8")
     )
     record = revised_record(first_record(current), revision, 2)
     assert isinstance(record, ExperimentRecordV1_1)
@@ -714,7 +704,7 @@ def test_a_changed_definition_keeps_the_cases_whose_definition_doesn_t_change() 
 
 
 def test_a_changed_ranking_method_retires_every_case() -> None:
-    current = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
+    current = ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
 
     revision = revision_of(REVISIONS / "ranking-method-changed.yaml", current)
 
@@ -727,7 +717,7 @@ def test_a_changed_ranking_method_retires_every_case() -> None:
 
 
 def test_a_raised_budget_keeps_every_case() -> None:
-    current = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
+    current = ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
 
     revision = revision_of(REVISIONS / "ranking-budget-raised.yaml", current)
 
@@ -744,7 +734,7 @@ def test_a_raised_budget_keeps_every_case() -> None:
 
 
 def test_a_plan_1_1_0_from_a_formula_is_revised_into_a_plan_1_3_0() -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = planned_experiment(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS).plan
     assert isinstance(current, PlanV1_1)
     previous = first_record(current)
     assert isinstance(previous, ExperimentRecord)
@@ -788,7 +778,7 @@ def with_set_and_remove(variant: dict[str, object] | None) -> dict[str, object] 
 def test_a_revision_between_versions_changes_the_budget_with_the_same_requests() -> None:
     """Plan 1.1.0's budget and plan 1.3.0's differ in form and credits, so a revision from one to
     the other changes `budget`, even when `budget.provider_requests` is the same."""
-    example = EXPERIMENTS / "example.yaml"
+    example = EXPERIMENT_CONFIGS / "example.yaml"
     ten = example.read_bytes().replace(b"provider_requests: 6\n", b"provider_requests: 10\n")
     current = build_experiment_plan_v1_1(
         read_experiment_configuration_v1_1(ten, example.name, example), VERSIONS
@@ -806,11 +796,11 @@ def test_a_revision_between_versions_changes_the_budget_with_the_same_requests()
 
 
 def test_a_plan_1_3_0_revised_back_to_a_formula_keeps_experiment_json_1_1_0() -> None:
-    first = plan_of(EXPERIMENTS / "example.yaml")
+    first = planned_experiment(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS).plan
     ranked = revision_of(REVISIONS / "ranking-from-formula.yaml", first)
     second = revised_record(first_record(first), ranked, 2)
 
-    revision = revision_of(EXPERIMENTS / "example.yaml", ranked.plan)
+    revision = revision_of(EXPERIMENT_CONFIGS / "example.yaml", ranked.plan)
 
     assert isinstance(revision.plan, PlanV1_1)
     assert [case.case_id for case in revision.plan.cases] == list(
@@ -825,7 +815,7 @@ def test_a_plan_1_3_0_revised_back_to_a_formula_keeps_experiment_json_1_1_0() ->
 
 
 def test_a_revision_of_plans_1_1_0_alone_keeps_experiment_json_1_0_0() -> None:
-    current = plan_of(EXPERIMENTS / "example.yaml")
+    current = planned_experiment(EXPERIMENT_CONFIGS / "example.yaml", VERSIONS).plan
 
     revision = revision_of(REVISIONS / "holdings-40.yaml", current)
 
@@ -836,7 +826,7 @@ def test_a_revision_of_plans_1_1_0_alone_keeps_experiment_json_1_0_0() -> None:
 
 
 def test_the_first_record_of_a_plan_1_3_0_is_experiment_json_1_1_0() -> None:
-    plan = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
+    plan = ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
 
     record = first_record(plan)
 
@@ -848,7 +838,7 @@ def test_the_first_record_of_a_plan_1_3_0_is_experiment_json_1_1_0() -> None:
 def test_a_change_of_the_definition_s_source_alone_is_a_change_of_ranking_source() -> None:
     """A snapshot of the definition the file held keeps every case, and `experiment.json`
     records the change as `ranking_source`."""
-    current = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
+    current = ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
     snapshot = current.ranking_source.model_copy(
         update={
             "form": "snapshot",
@@ -873,8 +863,8 @@ def test_a_change_of_the_definition_s_source_alone_is_a_change_of_ranking_source
 
 
 def test_another_experiment_isn_t_a_revision() -> None:
-    current = ranking_plan(EXPERIMENTS / "ranking-example.yaml")
-    path = EXPERIMENTS / "ranking-mixed.yaml"
+    current = ranking_plan(EXPERIMENT_CONFIGS / "ranking-example.yaml")
+    path = EXPERIMENT_CONFIGS / "ranking-mixed.yaml"
     read = read_experiment_configuration_v1_1(path.read_bytes(), path.name, path)
 
     with pytest.raises(TrialFolioError) as raised:

@@ -207,22 +207,6 @@ type Review = Callable[[str], Written]
 
 
 @pytest.fixture(scope="module")
-def built(tmp_path_factory: pytest.TempPathFactory) -> Callable[[str], Path]:
-    """Builds the runs a review configuration names, once for the module, beside a copy of it,
-    and gives the copy's path."""
-    root = tmp_path_factory.mktemp("runs")
-    paths: dict[str, Path] = {}
-    builder = RunBuilder(root / "home")
-
-    def get(name: str) -> Path:
-        if name not in paths:
-            paths[name] = builder.review(name, root / name.removesuffix(".yaml"))
-        return paths[name]
-
-    return get
-
-
-@pytest.fixture(scope="module")
 def review(
     built: Callable[[str], Path], tmp_path_factory: pytest.TempPathFactory
 ) -> Callable[[str], Written]:

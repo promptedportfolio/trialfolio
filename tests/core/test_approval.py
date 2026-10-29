@@ -12,36 +12,28 @@ import io
 import json
 import subprocess
 import sys
-from pathlib import Path
 from typing import TextIO
 
 import pytest
 
 from tests.support import canaries
+from tests.support.paths import ROOT, SCREEN_CONFIGS, screen_config
+from tests.support.plans import screen_plan, verified_versions
 from tests.support.terminal import PseudoTerminal
 from trialfolio.approval import Approval, format_plan, obtain_approval
 from trialfolio.configuration import read_screen_configuration
 from trialfolio.contracts.plan import Plan
 from trialfolio.errors import TrialFolioError
-from trialfolio.planning import VERIFIED_VERSIONS, Versions, build_plan
+from trialfolio.planning import build_plan
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-FIXTURES = REPO_ROOT / "tests" / "fixtures" / "screen-configs"
-
-VERSIONS = Versions(
-    trialfolio="0.1.0",
-    p123api=VERIFIED_VERSIONS["p123api"][0],
-    requests=VERIFIED_VERSIONS["requests"][0],
-    urllib3=VERIFIED_VERSIONS["urllib3"][0],
-)
+VERSIONS = verified_versions("0.1.0")
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows has no pseudo-terminals")
 
 
 @pytest.fixture
 def plan() -> Plan:
-    path = FIXTURES / "canaries.yaml"
-    return build_plan(read_screen_configuration(path.read_bytes(), path.name), VERSIONS)
+    return screen_plan(screen_config("canaries.yaml"), VERSIONS)
 
 
 def assert_summary_only(shown: str, plan: Plan) -> None:
@@ -209,7 +201,7 @@ def test_configuration_text_cant_act_on_the_terminal() -> None:
     # request's JSON, and the settings, where the rules and the formula are JSON too.
     escape, bell, *others = HOSTILE
     hostile = f"{escape}[2J{bell}{''.join(others)}"
-    text = (FIXTURES / "canaries.yaml").read_text(encoding="utf-8")
+    text = (SCREEN_CONFIGS / "canaries.yaml").read_text(encoding="utf-8")
     for canary in canaries.CONFIGURATION:
         # A JSON string is a YAML double-quoted scalar, with each of those characters escaped.
         text = text.replace(f"'{canary}'", json.dumps(canary + hostile))
@@ -231,4 +223,4 @@ def test_without_termios_this_module_still_imports() -> None:
     # so this module didn't collect, rather than only its terminal tests skipping.
     script = "import sys\nsys.modules['termios'] = None\nimport tests.core.test_approval\n"
 
-    subprocess.run([sys.executable, "-c", script], capture_output=True, check=True, cwd=REPO_ROOT)
+    subprocess.run([sys.executable, "-c", script], capture_output=True, check=True, cwd=ROOT)

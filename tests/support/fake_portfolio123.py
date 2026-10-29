@@ -24,7 +24,12 @@ for the next.
 
 Beside it are replies the tests share: `AUTHENTICATED`, `response`, a response fixture's 200, and
 `serve_success`, which scripts a run that succeeds. TS-T03 moved them here from the interface's
-conftest.
+conftest. TS-T04 added the requests' names, `AUTH`, `RANK`, `RANK_GET`, and `BACKTEST`, as a
+request's `request` gives them; `CREDENTIALS`, the canary credentials the client sends to the
+server; `exchange`, an exchange with the server as an attempt record gives it; and
+`BeforeTheBacktest`, the real client with an action just before each backtest's call, from
+`tests/core/test_attempt_records.py`'s `Interposed` and `tests/provider/test_http_exchanges.py`'s
+`BeforeTheRequest`, which were the same.
 """
 
 import json
@@ -32,7 +37,7 @@ import socket
 import struct
 import threading
 from collections import deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import MappingProxyType
@@ -41,8 +46,19 @@ from urllib.parse import urlsplit
 
 from tests.support import canaries
 from tests.support.paths import RESPONSES
+from trialfolio.contracts.attempt import Exchange
+from trialfolio.provider import Credentials, P123ScreenBacktestClient, ScreenBacktestResponse
 
-SENT: Final = frozenset({"POST /auth", "POST /screen/backtest", "POST /rank", "GET /rank"})
+AUTH: Final = "POST /auth"
+"""Trial Folio's authentication call."""
+RANK: Final = "POST /rank"
+"""A `rank_update`, which writes a ranking definition into `ApiRankingSystem`."""
+RANK_GET: Final = "GET /rank"
+"""A `rank_get`, which reads a ranking system for a snapshot."""
+BACKTEST: Final = "POST /screen/backtest"
+"""A screen backtest."""
+
+SENT: Final = frozenset({AUTH, BACKTEST, RANK, RANK_GET})
 """Every request Trial Folio sends, by its method and its path without the query."""
 
 RANK_UPDATE_KEYS: Final = ("type", "nodes", "rankingMethod", "currency")
@@ -98,6 +114,20 @@ AUTHENTICATED: Final = Reply(200, canaries.TOKEN.encode())
 def response(name: str) -> Reply:
     """A 200 whose body is the response fixture `name`, in `responses/`."""
     return Reply(200, (RESPONSES / name).read_bytes())
+
+
+CREDENTIALS: Final = Credentials(canaries.API_ID, canaries.API_KEY)
+"""The canary API ID and API key, which a client sends to the server, and which no log, record, or
+output may hold."""
+
+
+def exchange(
+    request: str, status: int | None, result: str = "response", note: str | None = None
+) -> Exchange:
+    """An exchange with the server, `request` such as `AUTH`, as an attempt record gives it."""
+    return Exchange.model_validate(
+        {"request": request, "result": result, "status": status, "note": note}
+    )
 
 
 @dataclass(frozen=True)
@@ -211,6 +241,39 @@ class FakePortfolio123:
             self._received.append(request)
             replies = self._replies.get((request.method, path)) or self._replies.get((None, path))
             return replies.popleft() if replies else Reply(status=404)
+
+
+class BeforeTheBacktest:
+    """The real client, with an action just before each screen backtest's call: the provider
+    client is a boundary the tests may stand in at (AGENTS.md, verification expectations)."""
+
+    def __init__(self, client: P123ScreenBacktestClient, action: Callable[[], object]) -> None:
+        self._client = client
+        self._action = action
+
+    @property
+    def authenticated(self) -> bool:
+        return self._client.authenticated
+
+    @property
+    def exchanges(self) -> tuple[Exchange, ...]:
+        return self._client.exchanges
+
+    def authenticate(self) -> None:
+        self._client.authenticate()
+
+    def screen_backtest(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
+        self._action()
+        return self._client.screen_backtest(params)
+
+    def rank_update(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
+        return self._client.rank_update(params)
+
+    def rank_get(self, name: str) -> ScreenBacktestResponse:
+        return self._client.rank_get(name)
+
+    def close(self) -> None:
+        self._client.close()
 
 
 def serve_success(server: FakePortfolio123, body: str = "complete.json") -> None:

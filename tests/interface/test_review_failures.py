@@ -27,7 +27,8 @@ from tests.support.broken_runs import BROKEN, UNKNOWN_SCHEMA_VERSIONS, Json, new
 from tests.support.cli import Cli, occupied
 from tests.support.directories import metadata, snapshot
 from tests.support.environment import Outcome
-from tests.support.run_builder import REVIEW_CONFIGS, SYNTHETIC_RUN
+from tests.support.paths import REVIEW_CONFIGS
+from tests.support.run_builder import SYNTHETIC_RUN
 
 type Built = Callable[[str], Path]
 

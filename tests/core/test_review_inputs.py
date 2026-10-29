@@ -26,7 +26,6 @@ from typing import cast
 
 import pytest
 
-from tests.core.conftest import CONFIGS, RESPONSES, WriteRun, snapshot
 from tests.support.broken_runs import (
     BROKEN,
     UNKNOWN_SCHEMA_VERSIONS,
@@ -37,7 +36,10 @@ from tests.support.broken_runs import (
     rewrite,
     write_manifest,
 )
+from tests.support.directories import snapshot
 from tests.support.fake_portfolio123 import Reply
+from tests.support.paths import FIXTURES, RESPONSES, SCREEN_CONFIGS
+from tests.support.screen_runs import WriteRun
 from trialfolio.canonical import sha256_hex
 from trialfolio.configuration import read_review_configuration
 from trialfolio.contracts.manifest import RunManifest
@@ -50,10 +52,10 @@ from trialfolio.review_inputs import (
 )
 from trialfolio.storage import ArtifactStore, LocalArtifactStore
 
-FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "runs" / "synthetic-run-1.0.0"
+FIXTURE = FIXTURES / "runs" / "synthetic-run-1.0.0"
 """The committed historical run, which `trialfolio demo` wrote with the 1.0.0 schemas."""
 
-FORMULA = (CONFIGS / "formula.yaml").read_bytes()
+FORMULA = (SCREEN_CONFIGS / "formula.yaml").read_bytes()
 COMPLETE = Reply(200, (RESPONSES / "complete.json").read_bytes())
 
 

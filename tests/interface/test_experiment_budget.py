@@ -34,7 +34,7 @@ from tests.support.experiment_builder import (
     held,
     returns,
 )
-from tests.support.fake_portfolio123 import Reply
+from tests.support.fake_portfolio123 import AUTH, BACKTEST, Reply
 from tests.support.saved_records import attempt_records, session_manifest
 from trialfolio.contracts.attempt import AttemptRecordV1_1, StartRecordV1_1
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
@@ -43,8 +43,6 @@ posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows has no 
 
 DEFAULT_ONLY = experiment_config("default-only.yaml")
 EXAMPLE = experiment_config("example.yaml")
-AUTH = "POST /auth"
-SEND = "POST /screen/backtest"
 
 BUDGET_SPENT = "The experiment's budget couldn't cover the next case"
 """What `execution.partial`'s message says when the budget stops the run."""
@@ -85,7 +83,7 @@ def test_a_repeat_the_spent_budget_cant_cover_waits_for_a_revision_that_raises_i
     # A 503 leaves the baseline unknown, and the other case is sent: 2 requests, the budget.
     first = experiments.run(DEFAULT_ONLY, out, sends=[UNAVAILABLE, returns()])
     assert first.exit_code == 6, first.stderr
-    assert cli.server.requests() == [AUTH, SEND, SEND]
+    assert cli.server.requests() == [AUTH, BACKTEST, BACKTEST]
     assert [case["outcome"] for case in first.cases_by_key.values()] == ["unknown", "succeeded"]
     baseline = case_id(first, "baseline")
     (unknown,) = attempt_records(out, baseline, AttemptRecordV1_1)
@@ -121,7 +119,7 @@ def test_a_repeat_the_spent_budget_cant_cover_waits_for_a_revision_that_raises_i
     )
 
     assert raised.exit_code == 0, raised.stderr
-    assert cli.server.requests()[3:] == [AUTH, SEND]
+    assert cli.server.requests()[3:] == [AUTH, BACKTEST]
     repeat = attempt_records(out, baseline, AttemptRecordV1_1)[-1]
     assert (repeat.outcome, repeat.repeat_of) == ("succeeded", unknown.attempt_id)
     counts = session_manifest(out, 3, ExperimentManifest).counts
@@ -223,7 +221,7 @@ def test_a_running_attempt_counts_as_one_request(cli: Cli, experiments: Builder)
         " authentication call, which leaves 1 provider request and 1 authentication call."
     ) in resumed.stderr
     assert resumed.exit_code == 6, resumed.stderr
-    assert cli.server.requests()[received:] == [AUTH, SEND]
+    assert cli.server.requests()[received:] == [AUTH, BACKTEST]
     cases = resumed.cases_by_key
     assert (cases["baseline"]["outcome"], cases["rebalance-weeks-1"]["outcome"]) == (
         "succeeded",

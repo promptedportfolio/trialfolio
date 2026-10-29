@@ -34,7 +34,7 @@ from tests.support.experiment_builder import (
     experiment_config,
     returns,
 )
-from tests.support.fake_portfolio123 import Reply
+from tests.support.fake_portfolio123 import AUTH, BACKTEST, Reply
 from tests.support.saved_records import attempt_directories, session_manifest
 from tests.support.socket_faults import SocketFaults
 from tests.support.storage_faults import FaultyStores
@@ -48,8 +48,6 @@ EXAMPLE = experiment_config("example.yaml")
 KEYS = ["baseline", "liquidity-100m", "holdings-50", "rebalance-weeks-1", "slippage-050"]
 """`example.yaml`'s cases, in the plan's order."""
 HOLDINGS = KEYS.index("holdings-50")
-AUTH = "POST /auth"
-SEND = "POST /screen/backtest"
 
 QUOTA = Reply(402, b"")
 """A 402 to a case's request: `failed`, possibly charged, with `provider.quota_exceeded`."""
@@ -117,7 +115,7 @@ def test_a_failed_case_is_recorded_the_later_cases_still_run_and_the_command_exi
     assert (record.outcome, record.possibly_charged) == (outcome, True)
     assert record.error is not None and record.error.code == code
     # The later cases still run, each sent once, after the one authentication.
-    assert cli.server.requests() == [AUTH, *[SEND] * 5]
+    assert cli.server.requests() == [AUTH, *[BACKTEST] * 5]
     assert sent(cli) == KEYS
     assert [only_record(out, place).outcome for place in (HOLDINGS + 1, HOLDINGS + 2)] == [
         "succeeded",
@@ -150,7 +148,7 @@ def test_after_a_403_the_next_case_authenticates_again_and_its_request_is_sent(
     assert (forbidden.outcome, forbidden.possibly_charged) == ("failed", True)
     assert forbidden.error is not None and forbidden.error.code == "provider.auth_failed"
     # The 403 dropped the token, so the next case's attempt authenticates before its send.
-    assert cli.server.requests() == [AUTH, SEND, SEND, AUTH, SEND, SEND, SEND]
+    assert cli.server.requests() == [AUTH, BACKTEST, BACKTEST, AUTH, BACKTEST, BACKTEST, BACKTEST]
     assert sent(cli) == KEYS
     (directory,) = attempts_at(out, HOLDINGS)
     assert (directory / "authenticating.json").is_file()
@@ -324,7 +322,7 @@ def test_a_recorded_internal_error_shows_its_ending_and_the_session_goes_on(
     )
     assert lines.index(ending) < lines.index(f"Case 2 of 5 this session: {second}.")
     # The session goes on: each later case is sent, with the session's token.
-    assert cli.server.requests() == [AUTH, *[SEND] * 4]
+    assert cli.server.requests() == [AUTH, *[BACKTEST] * 4]
     assert sent(cli) == KEYS[1:]
     error = ran.error
     assert error["code"] == "execution.partial"
@@ -340,7 +338,7 @@ def test_a_recorded_internal_error_shows_its_ending_and_the_session_goes_on(
         pytest.param(
             [AUTHENTICATED],
             [returns(), returns(), QUOTA],
-            [AUTH, SEND, SEND, SEND],
+            [AUTH, BACKTEST, BACKTEST, BACKTEST],
             HOLDINGS,
             "provider.quota_exceeded",
             id="request-402",
@@ -352,7 +350,7 @@ def test_a_recorded_internal_error_shows_its_ending_and_the_session_goes_on(
         pytest.param(
             [AUTHENTICATED, REFUSED],
             [returns(), FORBIDDEN],
-            [AUTH, SEND, SEND, AUTH],
+            [AUTH, BACKTEST, BACKTEST, AUTH],
             HOLDINGS,
             "provider.auth_failed",
             id="authentication-401-after-a-403",
@@ -360,7 +358,7 @@ def test_a_recorded_internal_error_shows_its_ending_and_the_session_goes_on(
         pytest.param(
             [AUTHENTICATED, Reply(503, b"")],
             [returns(), FORBIDDEN],
-            [AUTH, SEND, SEND, AUTH],
+            [AUTH, BACKTEST, BACKTEST, AUTH],
             HOLDINGS,
             "provider.unavailable",
             id="authentication-503-after-a-403",
@@ -410,7 +408,7 @@ def test_a_resume_after_a_401_sends_each_case_not_started_the_one_refused_includ
     resumed = experiments.run(EXAMPLE, out, sends=[returns() for _ in KEYS])
 
     assert resumed.exit_code == 0, resumed.stderr
-    assert cli.server.requests()[received:] == [AUTH, *[SEND] * 5]
+    assert cli.server.requests()[received:] == [AUTH, *[BACKTEST] * 5]
     assert sent(cli, received) == KEYS
     attempts = sorted(
         (
@@ -437,7 +435,7 @@ def test_a_resume_after_a_402_sends_each_case_not_started_but_the_one_that_got_i
     resumed = experiments.run(EXAMPLE, out, sends=[returns(), returns()])
 
     assert resumed.exit_code == 6, resumed.stderr
-    assert cli.server.requests()[received:] == [AUTH, SEND, SEND]
+    assert cli.server.requests()[received:] == [AUTH, BACKTEST, BACKTEST]
     assert sent(cli, received) == KEYS[HOLDINGS + 1 :]
     # The case that got the 402 may have been charged, so it awaits a repeat.
     assert len(attempts_at(out, HOLDINGS)) == 1

@@ -39,15 +39,14 @@ from tests.support.experiment_builder import (
     held,
     returns,
 )
-from tests.support.fake_portfolio123 import FakePortfolio123
+from tests.support.fake_portfolio123 import AUTH, BACKTEST, FakePortfolio123
+from tests.support.plans import experiment_plan
 from tests.support.saved_records import attempt_directories, attempt_records, session_manifest
 from tests.support.storage_faults import FaultyStores
 from tests.support.terminal import PseudoTerminal
-from trialfolio.configuration import read_experiment_configuration
 from trialfolio.contracts.attempt import AttemptRecordV1_1, AuthenticationRecord, StartRecordV1_1
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
 from trialfolio.contracts.experiment_plan import ExperimentPlanCase, PlanV1_1
-from trialfolio.planning import build_experiment_plan, installed_versions
 from trialfolio.tables import read_metrics_csv, read_settings_csv
 
 posix_only = pytest.mark.skipif(
@@ -56,18 +55,10 @@ posix_only = pytest.mark.skipif(
 
 EXAMPLE = experiment_config("example.yaml")
 DEFAULT_ONLY = experiment_config("default-only.yaml")
-AUTH = "POST /auth"
-SEND = "POST /screen/backtest"
 CASE_ID = re.compile(rb"case-[0-9a-f]{16}")
 """A `case_id`, as a file's bytes hold it."""
 
 type Builder = ExperimentBuilder[Outcome]
-
-
-def plan_of(path: Path) -> PlanV1_1:
-    """The plan of a new experiment of the configuration at `path`, with the installed versions."""
-    configuration = read_experiment_configuration(path.read_bytes(), str(path))
-    return build_experiment_plan(configuration, installed_versions())
 
 
 def sent(server: FakePortfolio123, plan: PlanV1_1, start: int = 0) -> list[str]:
@@ -127,7 +118,7 @@ def test_run_json_gives_the_same_plan_hash_in_separate_processes_and_output_dire
         hashes.append(outcome.ids["plan_hash"])
         assert not out.exists()
 
-    assert hashes == [plan_of(EXAMPLE).plan_hash] * 2
+    assert hashes == [experiment_plan(EXAMPLE).plan_hash] * 2
     assert cli.server.requests() == []
 
 
@@ -140,7 +131,7 @@ def interrupted_resumed_and_repeated(
     run's outcome."""
     cli.ready()
     out = cli.tmp / "experiment"
-    second = plan_of(EXAMPLE).cases[1]
+    second = experiment_plan(EXAMPLE).cases[1]
     faults.fail_after(f"{second.case_id}/settings.csv", KeyboardInterrupt())
     interrupted = experiments.run(EXAMPLE, out, sends=[returns(), returns()], store_factory=faults)
     assert interrupted.exit_code == 130, interrupted.stderr
@@ -158,7 +149,7 @@ def test_an_interrupted_and_resumed_experiment_names_each_case_by_one_case_id_ev
     cli: Cli, experiments: Builder, faults: FaultyStores
 ) -> None:
     out, outcomes = interrupted_resumed_and_repeated(cli, experiments, faults)
-    plan = plan_of(EXAMPLE)
+    plan = experiment_plan(EXAMPLE)
     identities = [(case.case_key, case.case_id) for case in plan.cases]
     ids = {case_id for _, case_id in identities}
 
@@ -206,7 +197,7 @@ def test_every_attempt_a_repeat_included_has_a_distinct_version_4_uuid_in_canoni
     cli: Cli, experiments: Builder, faults: FaultyStores
 ) -> None:
     out, outcomes = interrupted_resumed_and_repeated(cli, experiments, faults)
-    holdings = plan_of(EXAMPLE).cases[2].case_id
+    holdings = experiment_plan(EXAMPLE).cases[2].case_id
 
     directories = list((out / "cases").glob("*/attempts/*"))
     attempt_ids = [path.name for path in directories]
@@ -237,7 +228,7 @@ def test_an_interrupt_after_case_n_resumes_at_case_n_plus_1_and_sends_no_request
 ) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
-    plan = plan_of(EXAMPLE)
+    plan = experiment_plan(EXAMPLE)
     case_id = plan.cases[n - 1].case_id
     faults.fail_after(f"{case_id}/settings.csv", KeyboardInterrupt())
 
@@ -262,7 +253,7 @@ def test_an_interrupt_after_case_n_resumes_at_case_n_plus_1_and_sends_no_request
     resumed = experiments.run(EXAMPLE, out, sends=[returns() for _ in range(5 - n)])
 
     assert resumed.exit_code == 0, resumed.stderr
-    assert cli.server.requests()[received:] == [AUTH, *[SEND] * (5 - n)]
+    assert cli.server.requests()[received:] == [AUTH, *[BACKTEST] * (5 - n)]
     # The requests of cases n + 1 to 5, each once, and none of cases 1 to n.
     keys = [case.case_key for case in plan.cases]
     assert sent(cli.server, plan, received) == keys[n:]
@@ -283,7 +274,7 @@ def test_a_send_killed_mid_flight_is_recorded_as_unknown_and_awaits_a_repeat_uns
 ) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
-    plan = plan_of(EXAMPLE)
+    plan = experiment_plan(EXAMPLE)
     second = plan.cases[1]
 
     experiments.kill(EXAMPLE, out, sends=[returns(), held(returns())], received=3)
@@ -320,7 +311,7 @@ def test_a_send_killed_mid_flight_is_recorded_as_unknown_and_awaits_a_repeat_uns
         "repeat_attempt_id": str(start.attempt_id),
     }
     # The resume sends the cases that are due, and not the second case's request again.
-    assert cli.server.requests()[received:] == [AUTH, SEND, SEND, SEND]
+    assert cli.server.requests()[received:] == [AUTH, BACKTEST, BACKTEST, BACKTEST]
     assert sent(cli.server, plan, received) == [case.case_key for case in plan.cases[2:]]
     complete_cases_sent_once(cli.server, plan, outcome)
     # Its attempt record, written by the resume, keeps what its start record holds.
@@ -351,7 +342,7 @@ def test_a_repeat_killed_mid_flight_is_recorded_with_its_start_records_exchanges
     # authenticates, and names the attempt it repeats.
     cli.ready()
     out = cli.tmp / "experiment"
-    plan = plan_of(EXAMPLE)
+    plan = experiment_plan(EXAMPLE)
     holdings = plan.cases[2]
     first = experiments.run(
         EXAMPLE, out, sends=[returns(), returns(), UNAVAILABLE, returns(), returns()]
@@ -400,7 +391,7 @@ def test_an_attempt_record_unwritten_after_its_response_was_saved_is_completed_f
 ) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
-    plan = plan_of(DEFAULT_ONLY)
+    plan = experiment_plan(DEFAULT_ONLY)
     baseline, rebalance = plan.cases
     # Both writes of its attempt.json fail: the first is interrupted before it starts, and the
     # second, which an interrupt gives a record that wasn't published, fails as a full disk would.
@@ -425,14 +416,14 @@ def test_an_attempt_record_unwritten_after_its_response_was_saved_is_completed_f
 
     assert resumed.exit_code == 0, resumed.stderr
     # Only the other case is sent.
-    assert cli.server.requests()[received:] == [AUTH, SEND]
+    assert cli.server.requests()[received:] == [AUTH, BACKTEST]
     assert sent(cli.server, plan, received) == [rebalance.case_key]
     complete_cases_sent_once(cli.server, plan, resumed)
     record = AttemptRecordV1_1.model_validate_json((directory / "attempt.json").read_bytes())
     assert (record.outcome, record.error, record.possibly_charged) == ("succeeded", None, True)
     assert [(e.request, e.result, e.status, e.note) for e in record.exchanges] == [
         (AUTH, "response", 200, None),
-        (SEND, "response", 200, "completed_from_saved_response"),
+        (BACKTEST, "response", 200, "completed_from_saved_response"),
     ]
     assert record.response is not None
     assert (
@@ -453,7 +444,7 @@ def test_an_authentication_call_killed_mid_flight_is_failed_counted_and_its_case
 ) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
-    plan = plan_of(DEFAULT_ONLY)
+    plan = experiment_plan(DEFAULT_ONLY)
     baseline, _ = plan.cases
 
     experiments.kill(DEFAULT_ONLY, out, authenticates=[held(AUTHENTICATED)], received=1)
@@ -475,7 +466,7 @@ def test_an_authentication_call_killed_mid_flight_is_failed_counted_and_its_case
 
     assert resumed.exit_code == 0, resumed.stderr
     # Nothing was sent, so the case is due, and the resume sends it.
-    assert cli.server.requests()[received:] == [AUTH, SEND, SEND]
+    assert cli.server.requests()[received:] == [AUTH, BACKTEST, BACKTEST]
     assert sent(cli.server, plan, received) == [case.case_key for case in plan.cases]
     old, new = attempt_records(out, baseline.case_id, AttemptRecordV1_1)
     assert old.attempt_id == authentication.attempt_id
@@ -499,7 +490,7 @@ def test_a_read_timeout_leaves_its_case_unknown_the_later_cases_run_and_a_resume
 ) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
-    plan = plan_of(EXAMPLE)
+    plan = experiment_plan(EXAMPLE)
     second = plan.cases[1]
     cli.server.reply("/auth", AUTHENTICATED)
     # The server holds the second case's response past the request timeout.
@@ -523,7 +514,7 @@ def test_a_read_timeout_leaves_its_case_unknown_the_later_cases_run_and_a_resume
     (record,) = attempt_records(out, second.case_id, AttemptRecordV1_1)
     assert (record.outcome, record.possibly_charged) == ("unknown", True)
     assert record.error is not None and record.error.code == "provider.outcome_unknown"
-    assert [(e.request, e.result) for e in record.exchanges] == [(SEND, "interrupted")]
+    assert [(e.request, e.result) for e in record.exchanges] == [(BACKTEST, "interrupted")]
     # The later cases still ran.
     assert sent(cli.server, plan) == [case.case_key for case in plan.cases]
     outcomes = [case["outcome"] for case in outcome.cases_by_key.values()]

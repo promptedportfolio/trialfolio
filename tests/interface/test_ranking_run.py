@@ -31,6 +31,12 @@ import pytest
 from tests.support.cli import Cli, plan_hash_for
 from tests.support.environment import Outcome
 from tests.support.fake_portfolio123 import AUTHENTICATED, Reply, response
+from tests.support.paths import (
+    RANKING_DEFINITIONS,
+    RESPONSES,
+    SCREEN_CONFIGS,
+    SNAPSHOT_CONFIGS,
+)
 from tests.support.snapshot_builder import SnapshotBuilder, naming
 from tests.support.storage_faults import FaultyStores
 from trialfolio.contracts.manifest import RunManifestV1_1
@@ -40,10 +46,8 @@ from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows has no pseudo-terminals")
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-DEFINITION = FIXTURES / "screen-configs" / "definition.yaml"
-VALUE_MOMENTUM = FIXTURES / "experiment-configs" / "ranking" / "value-momentum.xml"
-RESPONSES = FIXTURES / "responses"
+DEFINITION = SCREEN_CONFIGS / "definition.yaml"
+VALUE_MOMENTUM = RANKING_DEFINITIONS / "value-momentum.xml"
 DEFINITION_HASH = "sha256:6bc59b992f83d5e4c245f37f187651ed18de6b9cb5949ac9f29b743273b26895"
 """The hash of `value-momentum.xml`'s text, as the plan's `ranking` setting gives it."""
 
@@ -307,7 +311,7 @@ def test_a_screen_configuration_1_1_0_ranked_by_a_formula_runs_as_a_plan_1_0_0(c
     cli.ready()
     cli.server.reply("/auth", AUTHENTICATED)
     cli.server.reply("/screen/backtest", response("complete.json"))
-    formula = (FIXTURES / "screen-configs" / "formula.yaml").read_bytes()
+    formula = (SCREEN_CONFIGS / "formula.yaml").read_bytes()
     config = cli.tmp / "formula.yaml"
     config.write_bytes(formula.replace(b"schema_version: 1.0.0", b"schema_version: 1.1.0"))
     out = cli.tmp / "run"
@@ -397,7 +401,7 @@ def test_a_synthetic_snapshot_named_as_the_ranking_is_config_invalid(cli: Cli) -
     from trialfolio.snapshot_execution import SnapshotExecution
     from trialfolio.storage import LocalArtifactStore
 
-    example = FIXTURES / "ranking-snapshot-configs" / "example.yaml"
+    example = SNAPSHOT_CONFIGS / "example.yaml"
     content = example.read_bytes()
     plan = build_snapshot_plan(
         read_ranking_snapshot_configuration(content, example.name), installed_versions()

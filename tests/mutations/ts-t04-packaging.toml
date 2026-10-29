@@ -1,0 +1,18 @@
+# TS-T04's list of the packaging tests' mutations (docs/test-refactoring.md, the check of the
+# tests), which it ran on its base and on its branch. TS-T04 changes only what the two packaging
+# modules import: the repository's root and run_uv, from tests/support/ in place of their
+# conftest, and the experiment configurations' directory. A list's marker is the list's, so they
+# have a list of their own. tests/packaging/test_wheel.py has no mutation: its tests compare the
+# built wheel with the repository's license files, pyproject.toml's license, and the starter
+# files under src/, so no change to src/ that a test there would catch reaches it.
+
+marker = "packaging"
+
+[[mutation]]
+name = '''the plan display of a plan 1.1.0 gives its budget in other words, for packaging/test_clean_install'''
+file = "src/trialfolio/approval.py"
+old = '''                f"Budget: at most {counted(budget.provider_requests, 'provider request')}, each"
+                f" sent at most once: {counted(budget.credits, 'credit')} at Portfolio123's"'''
+new = '''                f"Budget: up to {counted(budget.provider_requests, 'provider request')}, each"
+                f" sent at most once: {counted(budget.credits, 'credit')} at Portfolio123's"'''
+tests = ["tests/packaging/test_clean_install.py"]

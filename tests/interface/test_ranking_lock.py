@@ -43,6 +43,7 @@ from tests.support.experiment_builder import (
     returns_each,
 )
 from tests.support.fake_portfolio123 import Reply, response
+from tests.support.paths import SCREEN_CONFIGS
 from tests.support.storage_faults import FaultyStores
 from trialfolio.configuration import read_experiment_configuration_v1_1
 from trialfolio.planning import build_experiment_plan_v1_1, installed_versions
@@ -52,10 +53,9 @@ posix_only = pytest.mark.skipif(
     sys.platform == "win32", reason="Windows has no pseudo-terminals, and no SIGKILL"
 )
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 EXAMPLE = experiment_config("ranking-example.yaml")
-DEFINITION = FIXTURES / "screen-configs" / "definition.yaml"
-FORMULA = FIXTURES / "screen-configs" / "formula.yaml"
+DEFINITION = SCREEN_CONFIGS / "definition.yaml"
+FORMULA = SCREEN_CONFIGS / "formula.yaml"
 LOCKED = (
     "Another Trial Folio process on this machine is writing ApiRankingSystem, for an experiment"
     " or a screen run whose ranking is a definition: it holds the ranking lock."

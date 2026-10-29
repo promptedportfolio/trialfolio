@@ -31,7 +31,7 @@ from tests.support.cli import Cli
 from tests.support.clock import STARTED
 from tests.support.directories import snapshot
 from tests.support.environment import Outcome
-from tests.support.run_builder import REVIEW_CONFIGS
+from tests.support.paths import REVIEW_CONFIGS
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.contracts.plan import Plan
 from trialfolio.contracts.review_manifest import Method, ReviewManifest

@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.provider.conftest import PARAMS, authenticate
 from tests.support import canaries
+from tests.support.clients import PARAMS, authenticate
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
 from trialfolio.provider import P123ScreenBacktestClient
 

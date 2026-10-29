@@ -21,9 +21,11 @@ from urllib.parse import unquote, urlsplit
 
 import pytest
 
-from tests.core.conftest import CONFIGS, RESPONSES, WriteRun, Written, manifest_json, snapshot
+from tests.support.directories import snapshot
 from tests.support.fake_portfolio123 import Reply
 from tests.support.html_report import parse
+from tests.support.paths import RESPONSES, SCREEN_CONFIGS
+from tests.support.screen_runs import WriteRun, Written, manifest_json
 from trialfolio.canonical import sha256_hex
 from trialfolio.contracts.manifest import ManifestArtifact, RunManifest
 from trialfolio.errors import TrialFolioError
@@ -32,8 +34,8 @@ from trialfolio.runs import read_run
 from trialfolio.storage import LocalArtifactStore
 from trialfolio.tables import metrics_csv, read_metrics_csv, read_settings_csv, settings_csv
 
-FORMULA = (CONFIGS / "formula.yaml").read_bytes()
-RANKING_NAME = (CONFIGS / "ranking-name.yaml").read_bytes()
+FORMULA = (SCREEN_CONFIGS / "formula.yaml").read_bytes()
+RANKING_NAME = (SCREEN_CONFIGS / "ranking-name.yaml").read_bytes()
 COMPLETE = Reply(200, (RESPONSES / "complete.json").read_bytes())
 RENDERER = HtmlReportRenderer("0.1.0")
 

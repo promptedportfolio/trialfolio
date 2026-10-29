@@ -21,6 +21,11 @@ experiment, in any of its attempts, or in its `normalized/`, since an attempt's 
 `case-0123456789abcdef/started.json`. R01-T11 created this ahead of R01-T15, which added the
 failed `os.link`, R02-T08 added whole paths, and R03-T11 a case's files.
 
+`fail(name, fault)` sets a fault by its kind, which a test's parameters name: a `full disk`, as
+`fail_os`; an `interrupt` or an `unexpected` failure, a `KeyboardInterrupt` or a `RuntimeError`
+before the write; or a write `published` before it failed, as when the directory's sync fails.
+`fail_each` sets one for each file of a mapping. TS-T04 wrote them once, from the three mappings of a kind to a call that tests wrote.
+
 `placeholder_identities` stands for the other way FAT and exFAT differ on macOS: each new, empty
 file has a temporary inode of its own until its first write gives it a lasting one. It patches
 `os` for the whole test, so it applies to any store, wrapped or not.
@@ -35,12 +40,17 @@ import errno
 import os
 import stat
 import sys
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
+from trialfolio.errors import TrialFolioError
 from trialfolio.storage import ArtifactStore, LocalArtifactStore, StoredFile
+
+type Fault = Literal["full disk", "interrupt", "unexpected", "published"]
+"""A kind of storage fault, as `StorageFaults.fail` sets it."""
 
 _NO_HARD_LINKS = errno.ENOTSUP if sys.platform == "darwin" else errno.EPERM
 """How `os.link` reports a file system without hard links: `ENOTSUP` on macOS, as R01-T08 saw
@@ -157,6 +167,26 @@ class StorageFaults:
         """The next write of `name` raises `error` once the file is published."""
         self._after[name] = error
 
+    def fail(self, name: str, fault: Fault) -> None:
+        """The next write of `name` fails with `fault`: a `full disk` inside the real store, as
+        `fail_os`; an `interrupt` or an `unexpected` `RuntimeError` before it starts; or, once
+        the file is `published`, `storage.write_failed`, as when the directory's sync fails."""
+        match fault:
+            case "full disk":
+                self.fail_os(name)
+            case "interrupt":
+                self.fail_before(name, KeyboardInterrupt())
+            case "unexpected":
+                self.fail_before(name, RuntimeError())
+            case "published":
+                sync = TrialFolioError("storage.write_failed", "Couldn't sync the directory.")
+                self.fail_after(name, sync)
+
+    def fail_each(self, faults: Mapping[str, Fault]) -> None:
+        """Each file's next write fails with its fault, as `fail` sets it."""
+        for name, fault in faults.items():
+            self.fail(name, fault)
+
     def check_empty(self) -> None:
         self._store.check_empty()
 
@@ -231,6 +261,9 @@ class FaultyStores:
 
     def fail_link(self, name: str) -> None:
         self._setups.append(lambda store: store.fail_link(name))
+
+    def fail(self, name: str, fault: Fault) -> None:
+        self._setups.append(lambda store: store.fail(name, fault))
 
     def __call__(self, root: str) -> ArtifactStore:
         store = StorageFaults(LocalArtifactStore(root), self._monkeypatch)

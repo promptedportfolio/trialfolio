@@ -29,11 +29,10 @@ from typing import Final
 from tests.support.cli import Cli
 from tests.support.environment import Outcome, isolated, run_cli
 from tests.support.fake_portfolio123 import AUTHENTICATED, FakePortfolio123, Reply
-from tests.support.paths import FIXTURES, RESPONSES
+from tests.support.paths import RESPONSES, SNAPSHOT_CONFIGS
 from trialfolio.configuration import read_ranking_snapshot_configuration
 from trialfolio.planning import build_snapshot_plan, installed_versions
 
-SNAPSHOT_CONFIGS: Final = FIXTURES / "ranking-snapshot-configs"
 EXAMPLE: Final = SNAPSHOT_CONFIGS / "example.yaml"
 """The snapshot configuration a snapshot is of, unless a test gives another."""
 

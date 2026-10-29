@@ -16,7 +16,6 @@ import inspect
 import json
 import sys
 import time
-from pathlib import Path
 
 import pytest
 
@@ -30,7 +29,8 @@ from tests.support.experiment_builder import (
     experiment_config,
     returns_each,
 )
-from tests.support.fake_portfolio123 import AUTHENTICATED, response
+from tests.support.fake_portfolio123 import AUTH, AUTHENTICATED, BACKTEST, RANK, response
+from tests.support.paths import SCREEN_CONFIGS
 from tests.support.snapshot_builder import serve_snapshot, take_snapshot
 from tests.support.storage_faults import StorageFaults
 from tests.support.terminal import PseudoTerminal
@@ -41,13 +41,11 @@ from trialfolio.planning import build_experiment_plan_v1_1, installed_versions
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows has no pseudo-terminals")
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-DEFINITION = FIXTURES / "screen-configs" / "definition.yaml"
-FORMULA = FIXTURES / "screen-configs" / "formula.yaml"
+DEFINITION = SCREEN_CONFIGS / "definition.yaml"
+FORMULA = SCREEN_CONFIGS / "formula.yaml"
 EXAMPLE = experiment_config("ranking-example.yaml")
 BUDGET_RAISED = experiment_config("revisions/ranking-budget-raised.yaml")
 
-AUTH, RANK, BACKTEST = "POST /auth", "POST /rank", "POST /screen/backtest"
 WAITING = (
     "Waiting 10 seconds after the rank_update before sending the backtest, so Portfolio123 ranks"
     " by the definition just written."

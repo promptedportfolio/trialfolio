@@ -61,6 +61,7 @@ from tests.support.experiment_builder import (
 )
 from tests.support.fake_portfolio123 import AUTHENTICATED, FakePortfolio123, distinct, response
 from tests.support.html_report import AttemptShown, Document, Element, parse
+from tests.support.paths import SCREEN_CONFIGS
 from tests.support.snapshot_builder import SnapshotBuilder, naming
 from tests.support.synthetic_experiment import (
     SYNTHETIC_EXPERIMENT_WITH_DEFINITION,
@@ -75,12 +76,11 @@ from trialfolio.notices import (
 )
 
 ROOT: Final = Path(__file__).resolve().parents[2]
-FIXTURES: Final = ROOT / "tests" / "fixtures"
 LICENSE_NAME: Final = (ROOT / "LICENSE").read_text(encoding="utf-8").splitlines()[0]
 """The license's name, as LICENSE's first line gives it."""
 TERMS_URL: Final = "https://www.portfolio123.com/legal"
 
-SCREEN: Final = FIXTURES / "screen-configs" / "definition.yaml"
+SCREEN: Final = SCREEN_CONFIGS / "definition.yaml"
 EXAMPLE: Final = experiment_config("ranking-example.yaml")
 POSITIONS: Final = experiment_config("ranking-positions.yaml")
 

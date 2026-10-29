@@ -22,7 +22,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.core.conftest import Faults, SyncLog, identity, once, raises, snapshot
+from tests.support.directories import snapshot
+from tests.support.file_faults import Faults, SyncLog, identity, once, raises
 from trialfolio.errors import TrialFolioError
 from trialfolio.storage import LocalArtifactStore, StoredFile
 

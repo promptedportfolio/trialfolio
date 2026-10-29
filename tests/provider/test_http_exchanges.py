@@ -15,7 +15,7 @@ success, and 0 after a failed authentication or a `not_connected` request.
 import json
 import socket
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -23,10 +23,19 @@ from typing import Literal
 import pytest
 import requests
 
-from tests.provider.conftest import PARAMS, ClientFactory, authenticate
 from tests.support import canaries
+from tests.support.clients import PARAMS, ClientFactory, authenticate
 from tests.support.deep_json import DEEP, on_a_fixed_stack
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.fake_portfolio123 import (
+    AUTH,
+    AUTHENTICATED,
+    BACKTEST,
+    BeforeTheBacktest,
+    FakePortfolio123,
+    Reply,
+    exchange,
+)
+from tests.support.paths import RESPONSES, screen_config
 from tests.support.socket_faults import SocketFaults
 from trialfolio.attempts import Attempt, AttemptStatus, provider_requests, read_attempt
 from trialfolio.configuration import read_screen_configuration
@@ -39,30 +48,15 @@ from trialfolio.provider import (
     ExchangeRefused,
     P123ScreenBacktestClient,
     ProviderError,
-    ScreenBacktestResponse,
     UndecodedResponse,
 )
 from trialfolio.storage import LocalArtifactStore
 
-AUTH = "POST /auth"
-BACKTEST = "POST /screen/backtest"
-
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-NOT_JSON = (FIXTURES / "responses/not-json.txt").read_bytes()
+NOT_JSON = (RESPONSES / "not-json.txt").read_bytes()
 """The response fixture whose body isn't JSON."""
 
 
-def response(request: str, status: int) -> Exchange:
-    return Exchange(request=request, result="response", status=status, note=None)
-
-
-def ended(request: str, result: str) -> Exchange:
-    return Exchange.model_validate(
-        {"request": request, "result": result, "status": None, "note": None}
-    )
-
-
-AUTHENTICATED = response(AUTH, 200)
+AUTHENTICATED_EXCHANGE = exchange(AUTH, 200)
 
 
 @pytest.fixture
@@ -100,7 +94,7 @@ def test_a_success_records_authentication_then_the_request(
 
     assert result == DecodedResponse(payload)
     # Every exchange passed through the adapter: it recorded exactly what the server received.
-    assert client.exchanges == (AUTHENTICATED, response(BACKTEST, 200))
+    assert client.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, 200))
     assert server.requests() == [AUTH, BACKTEST]
     sent = server.received[1]
     assert json.loads(sent.body) == PARAMS
@@ -117,7 +111,7 @@ def test_an_https_endpoint_passes_through_the_adapter_and_a_tls_failure_is_inter
     with pytest.raises(ProviderError) as raised:
         client.authenticate()
 
-    assert client.exchanges == (ended(AUTH, "interrupted"),)
+    assert client.exchanges == (exchange(AUTH, None, "interrupted"),)
     assert raised.value.code == "provider.unavailable"
 
 
@@ -144,7 +138,7 @@ def test_a_request_that_never_connected_is_not_connected(
     with pytest.raises(ProviderError) as raised:
         client.screen_backtest(PARAMS)
 
-    assert client.exchanges == (AUTHENTICATED, ended(BACKTEST, "not_connected"))
+    assert client.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, None, "not_connected"))
     assert raised.value.code == "provider.unavailable"
     assert "wasn't sent" in raised.value.message
     assert server.requests() == [AUTH]
@@ -170,7 +164,7 @@ def test_authentication_that_never_connected_is_not_connected(
     with pytest.raises(ProviderError) as raised:
         client.authenticate()
 
-    assert client.exchanges == (ended(AUTH, "not_connected"),)
+    assert client.exchanges == (exchange(AUTH, None, "not_connected"),)
     assert raised.value.code == "provider.unavailable"
     assert not client.authenticated
     assert faults.connects == (0 if fault == "name lookup" else 1)
@@ -191,7 +185,7 @@ def test_a_refused_proxy_connection_is_not_connected(
     with adapter.call("request"), pytest.raises(requests.exceptions.ProxyError):
         session.post("http://127.0.0.1:9/screen/backtest")
 
-    assert adapter.exchanges == (ended(BACKTEST, "not_connected"),)
+    assert adapter.exchanges == (exchange(BACKTEST, None, "not_connected"),)
     assert faults.connects == 1
 
 
@@ -216,7 +210,7 @@ def test_a_request_without_a_complete_response_is_interrupted(
     with pytest.raises(ProviderError) as raised:
         client.screen_backtest(PARAMS)
 
-    assert client.exchanges == (AUTHENTICATED, ended(BACKTEST, "interrupted"))
+    assert client.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, None, "interrupted"))
     assert raised.value.code == "provider.outcome_unknown"
     assert "may have been charged" in raised.value.message
     # Neither urllib3 nor the wrapper sent it again.
@@ -238,7 +232,7 @@ def test_authentication_without_a_complete_response_is_interrupted(
     with pytest.raises(ProviderError) as raised:
         client.authenticate()
 
-    assert client.exchanges == (ended(AUTH, "interrupted"),)
+    assert client.exchanges == (exchange(AUTH, None, "interrupted"),)
     assert raised.value.code == "provider.unavailable"
     assert server.requests() == [AUTH]
 
@@ -253,7 +247,7 @@ def test_ctrl_c_while_the_request_is_sent_leaves_it_interrupted(
         client.screen_backtest(PARAMS)
 
     # Recorded before it was sent, so the interrupt left it without a result.
-    assert client.exchanges == (AUTHENTICATED, ended(BACKTEST, "interrupted"))
+    assert client.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, None, "interrupted"))
 
 
 @pytest.mark.parametrize("stage", ["name lookup", "send"])
@@ -268,7 +262,7 @@ def test_ctrl_c_during_authentication_leaves_it_interrupted(
     with pytest.raises(KeyboardInterrupt):
         client.authenticate()
 
-    assert client.exchanges == (ended(AUTH, "interrupted"),)
+    assert client.exchanges == (exchange(AUTH, None, "interrupted"),)
 
 
 # Authentication's statuses (0.1.0's failure table)
@@ -302,7 +296,7 @@ def test_authentication_statuses_give_their_documented_codes(
     assert "wasn't sent" in raised.value.message
     if code == "provider.request_rejected":
         assert "isn't a problem with the API ID or key" in raised.value.message
-    assert client.exchanges == (response(AUTH, status),)
+    assert client.exchanges == (exchange(AUTH, status),)
     # The wrapper made one attempt.
     assert server.requests() == [AUTH]
     assert not client.authenticated
@@ -319,7 +313,7 @@ def test_a_redirect_on_authentication_is_refused_before_connecting(
     assert raised.value.code == "provider.request_rejected"
     assert "HTTP 307" in raised.value.message
     assert "doesn't follow redirects" in raised.value.message
-    assert client.exchanges == (response(AUTH, 307),)
+    assert client.exchanges == (exchange(AUTH, 307),)
     assert server.requests() == [AUTH]
     assert faults.connects == 1
 
@@ -354,7 +348,7 @@ def test_request_statuses_give_their_documented_codes(
     assert raised.value.code == code
     assert f"HTTP {status}" in raised.value.message
     assert "may have been charged" in raised.value.message
-    assert client.exchanges == (AUTHENTICATED, response(BACKTEST, status))
+    assert client.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, status))
     # Sent once, even after a 5xx, which the wrapper would otherwise retry.
     assert server.requests() == [AUTH, BACKTEST]
 
@@ -368,14 +362,14 @@ def test_a_status_that_isnt_http_is_interrupted(
         server.reply("/auth", Reply(600))
         with pytest.raises(ProviderError) as raised:
             client.authenticate()
-        assert client.exchanges == (ended(AUTH, "interrupted"),)
+        assert client.exchanges == (exchange(AUTH, None, "interrupted"),)
         assert raised.value.code == "provider.unavailable"
     else:
         authenticate(server, client)
         server.reply("/screen/backtest", Reply(600))
         with pytest.raises(ProviderError) as raised:
             client.screen_backtest(PARAMS)
-        assert client.exchanges == (AUTHENTICATED, ended(BACKTEST, "interrupted"))
+        assert client.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, None, "interrupted"))
         assert raised.value.code == "provider.outcome_unknown"
 
 
@@ -440,7 +434,7 @@ def test_the_wrappers_reauthentication_is_refused_before_connecting(
     assert f"HTTP {status}" in raised.value.message
     assert "refused the wrapper's re-authentication" in raised.value.message
     assert "right after Trial Folio authenticated" in raised.value.message
-    assert client.exchanges == (AUTHENTICATED, response(BACKTEST, status))
+    assert client.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, status))
     # Neither the re-authentication nor a resend reached the server, or opened a connection.
     assert server.requests() == [AUTH, BACKTEST]
     assert faults.connects == 2
@@ -462,7 +456,7 @@ def test_a_redirect_on_the_request_is_refused_before_connecting(
     assert raised.value.code == "provider.request_rejected"
     assert "redirect (HTTP 307)" in raised.value.message
     assert raised.value.provider_message is None
-    assert client.exchanges == (AUTHENTICATED, response(BACKTEST, 307))
+    assert client.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, 307))
     assert server.requests() == [AUTH, BACKTEST]
     assert faults.connects == 2
 
@@ -487,7 +481,7 @@ def test_a_200_the_wrapper_cant_decode_is_kept_undecoded(
     result = on_a_fixed_stack(lambda: client.screen_backtest(PARAMS))
 
     assert result == UndecodedResponse(body)
-    assert client.exchanges == (AUTHENTICATED, response(BACKTEST, 200))
+    assert client.exchanges == (AUTHENTICATED_EXCHANGE, exchange(BACKTEST, 200))
     assert server.requests() == [AUTH, BACKTEST]
 
 
@@ -526,7 +520,7 @@ def test_the_adapter_holds_only_the_body_of_a_200_on_the_requests_exchange(
         session.post(f"{server.endpoint}/screen/backtest")
 
     assert call.body == (b"body" if held else None)
-    assert adapter.exchanges == (response("POST /screen/backtest", status),)
+    assert adapter.exchanges == (exchange("POST /screen/backtest", status),)
 
 
 def test_an_exchange_outside_a_call_is_refused() -> None:
@@ -579,10 +573,10 @@ class Ending:
     def exchanges(self) -> tuple[Exchange, ...]:
         request = AUTH if self.call == "authentication" else BACKTEST
         if isinstance(self.result, int):
-            last = response(request, self.result)
+            last = exchange(request, self.result)
         else:
-            last = ended(request, self.result)
-        return (last,) if self.call == "authentication" else (AUTHENTICATED, last)
+            last = exchange(request, None, self.result)
+        return (last,) if self.call == "authentication" else (AUTHENTICATED_EXCHANGE, last)
 
 
 def on_authentication(
@@ -698,40 +692,6 @@ ENDINGS: dict[str, Ending] = {
 }
 
 
-class BeforeTheRequest:
-    """The real client, with an action just before the request's call, once Trial Folio has
-    authenticated: the provider client is a boundary the tests may stand in at (AGENTS.md,
-    verification expectations)."""
-
-    def __init__(self, client: P123ScreenBacktestClient, action: Callable[[], object]) -> None:
-        self._client = client
-        self._action = action
-
-    @property
-    def authenticated(self) -> bool:
-        return self._client.authenticated
-
-    @property
-    def exchanges(self) -> tuple[Exchange, ...]:
-        return self._client.exchanges
-
-    def authenticate(self) -> None:
-        self._client.authenticate()
-
-    def screen_backtest(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
-        self._action()
-        return self._client.screen_backtest(params)
-
-    def rank_update(self, params: Mapping[str, object]) -> ScreenBacktestResponse:
-        return self._client.rank_update(params)
-
-    def rank_get(self, name: str) -> ScreenBacktestResponse:
-        return self._client.rank_get(name)
-
-    def close(self) -> None:
-        self._client.close()
-
-
 @pytest.fixture
 def out(tmp_path: Path) -> Path:
     return tmp_path / "out"
@@ -740,7 +700,7 @@ def out(tmp_path: Path) -> Path:
 @pytest.fixture
 def attempt(out: Path) -> Attempt:
     """An attempt of `formula.yaml`'s plan, in an output directory claimed as `run` claims it."""
-    path = FIXTURES / "screen-configs/formula.yaml"
+    path = screen_config("formula.yaml")
     plan = build_plan(read_screen_configuration(path.read_bytes(), path.name), installed_versions())
     store = LocalArtifactStore(out)
     store.claim("plan.json", plan.model_dump_json(indent=2).encode())
@@ -761,9 +721,9 @@ def test_each_ending_gives_the_attempt_its_documented_outcome_and_possibly_charg
         ending.fault(server, faults, "/auth")
         result = attempt.run(client)
     else:
-        server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
+        server.reply("/auth", AUTHENTICATED)
         result = attempt.run(
-            BeforeTheRequest(client, lambda: ending.fault(server, faults, "/screen/backtest"))
+            BeforeTheBacktest(client, lambda: ending.fault(server, faults, "/screen/backtest"))
         )
 
     record = result.record

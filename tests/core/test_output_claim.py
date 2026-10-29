@@ -23,7 +23,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.core.conftest import Effect, Faults, SyncLog, identity, raises, snapshot
+from tests.support.directories import snapshot
+from tests.support.file_faults import Effect, Faults, SyncLog, identity, raises
 from tests.support.storage_faults import placeholder_identities
 from trialfolio.errors import TrialFolioError
 from trialfolio.storage import LocalArtifactStore

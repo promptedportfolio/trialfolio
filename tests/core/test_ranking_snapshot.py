@@ -21,15 +21,33 @@ definition takes the ranking lock on a file in the test's temporary directory.
 
 import json
 import shutil
-from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
 import pytest
 
-from tests.support import canaries
 from tests.support.clock import FixedClock, no_wait
-from tests.support.fake_portfolio123 import FakePortfolio123, Reply
+from tests.support.experiment_lab import Lab
+from tests.support.fake_portfolio123 import (
+    AUTH,
+    AUTHENTICATED,
+    BACKTEST,
+    CREDENTIALS,
+    RANK,
+    RANK_GET,
+    FakePortfolio123,
+    Reply,
+    exchange,
+    response,
+)
+from tests.support.paths import (
+    EXPERIMENT_CONFIGS,
+    RANKING_DEFINITIONS,
+    RESPONSES,
+    SNAPSHOT_CONFIGS,
+    screen_config,
+)
+from tests.support.plans import ranked_screen
 from tests.support.snapshot_builder import naming
 from tests.support.storage_faults import StorageFaults
 from trialfolio.canonical import sha256_hex
@@ -38,7 +56,7 @@ from trialfolio.configuration import (
     read_ranking_snapshot_configuration,
     read_screen_configuration_v1_1,
 )
-from trialfolio.contracts.attempt import AttemptRecordV1_2, Exchange, StartRecordV1_2
+from trialfolio.contracts.attempt import AttemptRecordV1_2, StartRecordV1_2
 from trialfolio.contracts.experiment_manifest import ExperimentManifestV1_1
 from trialfolio.contracts.experiment_plan import PlanV1_3
 from trialfolio.contracts.manifest import CommandRecord, RunManifestV1_1
@@ -52,7 +70,6 @@ from trialfolio.contracts.ranking_snapshot import (
 from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 from trialfolio.errors import TrialFolioError
 from trialfolio.execution import Execution
-from trialfolio.experiment_execution import ExperimentExecution
 from trialfolio.experiment_records import open_experiment
 from trialfolio.planning import (
     build_experiment_plan_v1_1,
@@ -60,7 +77,7 @@ from trialfolio.planning import (
     build_snapshot_plan,
     installed_versions,
 )
-from trialfolio.provider import Credentials, P123ScreenBacktestClient
+from trialfolio.provider import P123ScreenBacktestClient
 from trialfolio.ranking_lock import LOCK_FILE
 from trialfolio.runs import read_run
 from trialfolio.snapshot_execution import SnapshotExecution
@@ -68,23 +85,15 @@ from trialfolio.snapshots import SnapshotFiles
 from trialfolio.storage import LocalArtifactStore
 from trialfolio.tables import read_settings_csv_v1_1
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-SNAPSHOT_CONFIGS = FIXTURES / "ranking-snapshot-configs"
-RESPONSES = FIXTURES / "responses"
-SCREEN = FIXTURES / "screen-configs" / "definition.yaml"
-EXAMPLE = FIXTURES / "experiment-configs" / "ranking-example.yaml"
-DEFINITION = FIXTURES / "experiment-configs" / "ranking" / "value-momentum.xml"
+SCREEN = screen_config("definition.yaml")
+EXAMPLE = EXPERIMENT_CONFIGS / "ranking-example.yaml"
+DEFINITION = RANKING_DEFINITIONS / "value-momentum.xml"
 
-AUTH, RANK_GET, RANK, BACKTEST = "POST /auth", "GET /rank", "POST /rank", "POST /screen/backtest"
 STARTED_AT = FixedClock()()
 SNAPSHOT_COMMAND = SnapshotCommandRecord(
     name="run", options={"approve": None, "json": False}, started_at=STARTED_AT
 )
 RUN_COMMAND = CommandRecord(name="run", options={}, started_at=STARTED_AT)
-
-
-def rank_get(name: str = "rank-get.json") -> Reply:
-    return Reply(200, (RESPONSES / name).read_bytes())
 
 
 def snapshot_plan(name: str = "example.yaml") -> tuple[bytes, RankingSnapshotPlan]:
@@ -96,19 +105,6 @@ def snapshot_plan(name: str = "example.yaml") -> tuple[bytes, RankingSnapshotPla
 
 def artifact_id(content: bytes) -> str:
     return "sha256:" + sha256_hex(content)
-
-
-def exchange(request: str, status: int | None, result: str = "response") -> Exchange:
-    return Exchange.model_validate(
-        {"request": request, "result": result, "status": status, "note": None}
-    )
-
-
-@pytest.fixture
-def server() -> Iterator[FakePortfolio123]:
-    fake = FakePortfolio123()
-    yield fake
-    fake.close()
 
 
 def take(
@@ -123,9 +119,8 @@ def take(
     answers its `GET /rank` with `reply`, `rank-get.json`'s 200 by default. `faults` makes the
     write of a named file raise an error, before it starts."""
     content, plan = snapshot_plan()
-    server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
-    server.reply("/rank", rank_get() if reply is None else reply, method="GET")
-    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/rank", response("rank-get.json") if reply is None else reply, method="GET")
     options = {} if timeout is None else {"timeout": timeout}
     with LocalArtifactStore(out) as real:
         store: LocalArtifactStore | StorageFaults = real
@@ -139,7 +134,7 @@ def take(
         error = execution.run(
             content,
             lambda: P123ScreenBacktestClient(
-                credentials, endpoint=server.endpoint, snapshot=True, **options
+                CREDENTIALS, endpoint=server.endpoint, snapshot=True, **options
             ),
         )
     return execution, error
@@ -302,7 +297,7 @@ def test_a_snapshot_of_a_system_that_cant_be_a_ranking_completes_and_says_why(
 ) -> None:
     """The snapshot is the evidence of what the system held, whatever it holds: whether it can
     be a ranking is checked each time a configuration names it."""
-    execution, error = take(server, tmp_path / "snapshot", rank_get("rank-get-type-etf.json"))
+    execution, error = take(server, tmp_path / "snapshot", response("rank-get-type-etf.json"))
 
     assert error is None
     assert (tmp_path / "snapshot" / "definition.xml").is_file()
@@ -314,9 +309,9 @@ def test_a_snapshot_of_a_system_that_cant_be_a_ranking_completes_and_says_why(
     [
         (Reply(404, b"Not found"), "provider.request_rejected", "failed"),
         (Reply(503, b""), "provider.outcome_unknown", "unknown"),
-        (rank_get("rank-get-without-xml.json"), "provider.response_invalid", "succeeded"),
-        (rank_get("rank-get-unknown-method.json"), "provider.response_invalid", "succeeded"),
-        (rank_get("rank-get-lone-surrogate.json"), "provider.response_invalid", "succeeded"),
+        (response("rank-get-without-xml.json"), "provider.response_invalid", "succeeded"),
+        (response("rank-get-unknown-method.json"), "provider.response_invalid", "succeeded"),
+        (response("rank-get-lone-surrogate.json"), "provider.response_invalid", "succeeded"),
     ],
     ids=["404", "503", "without-xml", "unknown-method", "lone-surrogate"],
 )
@@ -437,7 +432,7 @@ def test_a_ranking_method_the_wrapper_doesnt_know_is_saved_undecoded(
 ) -> None:
     out = tmp_path / "snapshot"
 
-    _, error = take(server, out, rank_get("rank-get-unknown-method.json"))
+    _, error = take(server, out, response("rank-get-unknown-method.json"))
 
     assert error is not None
     attempt = attempt_directory(out)
@@ -501,7 +496,6 @@ def test_a_snapshot_without_a_command_sends_nothing_with_a_client_that_isnt_the_
     tmp_path: Path, server: FakePortfolio123
 ) -> None:
     content, plan = snapshot_plan()
-    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
 
     with LocalArtifactStore(tmp_path / "snapshot") as store:
         execution = SnapshotExecution(
@@ -509,7 +503,7 @@ def test_a_snapshot_without_a_command_sends_nothing_with_a_client_that_isnt_the_
         )
         with pytest.raises(ValueError, match="demo"):
             execution.run(
-                content, lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint)
+                content, lambda: P123ScreenBacktestClient(CREDENTIALS, endpoint=server.endpoint)
             )
 
     assert server.received == ()
@@ -717,7 +711,7 @@ def test_a_snapshot_manifest_of_a_version_with_no_reader_is_unknown(
 
 
 @pytest.mark.parametrize(
-    ("response", "rule"),
+    ("name", "rule"),
     [
         ("rank-get-currency-cad.json", "whose system's currency isn't USD"),
         ("rank-get-type-etf.json", "whose system's type isn't Stock"),
@@ -728,10 +722,10 @@ def test_a_snapshot_manifest_of_a_version_with_no_reader_is_unknown(
 )
 @pytest.mark.parametrize("kind", ["screen", "experiment"])
 def test_a_snapshot_that_cant_be_a_ranking_is_config_invalid(
-    tmp_path: Path, server: FakePortfolio123, response: str, rule: str, kind: str
+    tmp_path: Path, server: FakePortfolio123, name: str, rule: str, kind: str
 ) -> None:
     out = tmp_path / "ranking" / "snapshot"
-    _, error = take(server, out, rank_get(response))
+    _, error = take(server, out, response(name))
     assert error is None
     configuration, key = (
         (SCREEN, "ranking.snapshot") if kind == "screen" else (EXAMPLE, "baseline.ranking.snapshot")
@@ -780,13 +774,12 @@ def test_a_synthetic_snapshot_is_config_invalid(tmp_path: Path, kind: str) -> No
 # The copies beside each plan's configuration.yaml
 
 
-def ranked_screen(tmp_path: Path, snapshot: Path) -> tuple[bytes, SnapshotFiles, PlanV1_2]:
-    path = naming(SCREEN, snapshot, tmp_path / "screen-configs")
-    content = path.read_bytes()
-    read = read_screen_configuration_v1_1(content, path.name, path)
-    plan = build_plan_v1_1(read, installed_versions())
-    assert isinstance(plan, PlanV1_2) and read.snapshot is not None
-    return content, read.snapshot.files, plan
+def snapshot_screen(tmp_path: Path, snapshot: Path) -> tuple[bytes, SnapshotFiles, PlanV1_2]:
+    """`definition.yaml`, named by the snapshot in `snapshot`: its bytes, the snapshot's files,
+    and its plan."""
+    planned = ranked_screen(naming(SCREEN, snapshot, tmp_path / "screen-configs"))
+    assert planned.snapshot is not None
+    return planned.content, planned.snapshot, planned.plan
 
 
 def test_a_run_copies_the_snapshots_two_files_beside_its_configuration(
@@ -795,13 +788,12 @@ def test_a_run_copies_the_snapshots_two_files_beside_its_configuration(
     """From the bytes read and checked when the configuration was validated, so the copies are
     the files the approved plan was built from, even when the snapshot's files change before the
     run writes them."""
-    content, files, plan = ranked_screen(tmp_path, snapshot)
+    content, files, plan = snapshot_screen(tmp_path, snapshot)
     _break_listed(snapshot, "definition.xml")
-    server.reply("/auth", Reply(200, canaries.TOKEN.encode()))
-    server.reply("/rank", Reply(200, (RESPONSES / "rank-update.json").read_bytes()), method="POST")
-    server.reply("/screen/backtest", Reply(200, (RESPONSES / "complete.json").read_bytes()))
+    server.reply("/auth", AUTHENTICATED)
+    server.reply("/rank", response("rank-update.json"), method="POST")
+    server.reply("/screen/backtest", response("complete.json"))
     out = tmp_path / "run"
-    credentials = Credentials(canaries.API_ID, canaries.API_KEY)
 
     with LocalArtifactStore(out) as store:
         error = Execution(
@@ -815,7 +807,7 @@ def test_a_run_copies_the_snapshots_two_files_beside_its_configuration(
             pause=no_wait(),
         ).run(
             content,
-            lambda: P123ScreenBacktestClient(credentials, endpoint=server.endpoint),
+            lambda: P123ScreenBacktestClient(CREDENTIALS, endpoint=server.endpoint),
             snapshot=files,
         )
 
@@ -852,7 +844,7 @@ def test_a_run_copies_the_snapshots_two_files_beside_its_configuration(
 def test_a_run_is_given_its_snapshots_files_as_its_plan_has_them(
     tmp_path: Path, snapshot: Path
 ) -> None:
-    content, files, plan = ranked_screen(tmp_path, snapshot)
+    content, files, plan = snapshot_screen(tmp_path, snapshot)
     other = SnapshotFiles(definition=files.definition, record=files.record + b"\n")
 
     with LocalArtifactStore(tmp_path / "run") as store:
@@ -885,7 +877,7 @@ def test_a_snapshots_files_given_whose_record_names_another_definition_are_refus
     """Given a snapshot's two files' bytes in place of its directory, the configuration's reader
     checks that `snapshot.json` names `definition.xml`, though another definition that can be a
     ranking is given in its place (the executors)."""
-    content, files, _ = ranked_screen(tmp_path, snapshot)
+    content, files, _ = snapshot_screen(tmp_path, snapshot)
     other = (DEFINITION.parent / "value-momentum-revised.xml").read_bytes()
     assert other != files.definition
     path = tmp_path / "screen-configs" / SCREEN.name
@@ -904,7 +896,7 @@ def test_a_runs_snapshot_that_isnt_its_plans_is_refused_as_not_a_run(
 ) -> None:
     """A copy of another snapshot's record, listed with its own `artifact_id`, isn't the
     snapshot the plan's `ranking_source` names (a complete run)."""
-    content, files, plan = ranked_screen(tmp_path, snapshot)
+    content, files, plan = snapshot_screen(tmp_path, snapshot)
     out = tmp_path / "run"
     with LocalArtifactStore(out) as store:
         Execution(
@@ -941,23 +933,12 @@ def test_an_experiment_copies_the_snapshot_into_its_plan_and_resumes_with_it(
     plan = build_experiment_plan_v1_1(read, installed_versions())
     assert isinstance(plan, PlanV1_3) and read.snapshot is not None
     files = read.snapshot.files
-    out = tmp_path / "experiment"
+    lab = Lab(tmp_path)
+    out = lab.out
 
-    client = SyntheticScreenBacktestClient(response_bytes())
-    with LocalArtifactStore(out) as store:
-        error = ExperimentExecution(
-            plan,
-            plan.plan_hash,
-            "not_required",
-            store,
-            client,
-            command=None,
-            clock=FixedClock(),
-            ranking_lock=tmp_path / LOCK_FILE,
-            pause=no_wait(),
-        ).run(content, snapshot=files)
+    ran = lab.new(path, synthetic=True)
 
-    assert error is None
+    assert ran.error is None and ran.plan == plan
     assert (out / "plans" / "1" / "definition.xml").read_bytes() == files.definition
     assert (out / "plans" / "1" / "snapshot.json").read_bytes() == files.record
     manifest = ExperimentManifestV1_1.model_validate_json(
@@ -990,21 +971,10 @@ def test_an_experiment_copies_the_snapshot_into_its_plan_and_resumes_with_it(
     assert {row.source_artifact for row in weights} == {copy.artifact_id}
     with LocalArtifactStore(out) as store:
         saved = open_experiment(store, ranking=True)
-        assert saved.current.snapshot is not None
-        assert saved.current.read is not None and saved.current.read.snapshot is not None
-        resumed = ExperimentExecution(
-            plan,
-            plan.plan_hash,
-            "not_required",
-            store,
-            SyntheticScreenBacktestClient(response_bytes()),
-            command=None,
-            clock=FixedClock(),
-            experiment=saved,
-            ranking_lock=tmp_path / LOCK_FILE,
-            pause=no_wait(),
-        )
-        assert resumed.run(content, snapshot=files) is None
+    assert saved.current.snapshot is not None
+    assert saved.current.read is not None and saved.current.read.snapshot is not None
+    resumed = lab.resume(path, synthetic=True)
+    assert resumed.error is None and resumed.plan == plan
     assert (out / "sessions" / "2" / "manifest.json").is_file()
 
 
@@ -1012,27 +982,9 @@ def test_an_experiments_plan_whose_snapshot_record_is_missing_is_refused(
     tmp_path: Path, snapshot: Path
 ) -> None:
     path = naming(EXAMPLE, snapshot, tmp_path / "experiment-configs")
-    content = path.read_bytes()
-    read = read_experiment_configuration_v1_1(content, path.name, path)
-    plan = build_experiment_plan_v1_1(read, installed_versions())
-    assert isinstance(plan, PlanV1_3) and read.snapshot is not None
-    out = tmp_path / "experiment"
-    with LocalArtifactStore(out) as store:
-        ExperimentExecution(
-            plan,
-            plan.plan_hash,
-            "not_required",
-            store,
-            SyntheticScreenBacktestClient(response_bytes()),
-            command=None,
-            clock=FixedClock(),
-            ranking_lock=tmp_path / LOCK_FILE,
-            pause=no_wait(),
-        ).run(content, snapshot=read.snapshot.files)
     # An incomplete copy: the plan's snapshot.json, and every manifest, which would catch it first.
+    out = new_experiment(tmp_path, path)
     (out / "plans" / "1" / "snapshot.json").unlink()
-    shutil.rmtree(out / "sessions" / "1")
-    (out / "sessions" / "1").mkdir()
 
     with LocalArtifactStore(out) as store, pytest.raises(TrialFolioError) as raised:
         open_experiment(store, ranking=True)
@@ -1048,7 +1000,7 @@ def test_an_unexpected_failure_at_a_runs_snapshot_json_leaves_no_manifest(
 ) -> None:
     """Every manifest of a run whose ranking a snapshot names lists its `snapshot.json`, so a
     run that couldn't write it ends without one, as after a failure at `definition.xml`."""
-    content, files, plan = ranked_screen(tmp_path, snapshot)
+    content, files, plan = snapshot_screen(tmp_path, snapshot)
     out = tmp_path / "run"
     with LocalArtifactStore(out) as real:
         store = StorageFaults(real, monkeypatch)
@@ -1083,7 +1035,7 @@ def synthetic_run(
 def test_a_runs_snapshot_record_of_a_version_with_no_reader_is_unknown(
     tmp_path: Path, snapshot: Path
 ) -> None:
-    content, files, plan = ranked_screen(tmp_path, snapshot)
+    content, files, plan = snapshot_screen(tmp_path, snapshot)
     out = synthetic_run(tmp_path, content, plan, snapshot=files)
     manifest = read_json(out / "manifest.json")
     for entry in cast("list[dict[str, object]]", manifest["artifacts"]):
@@ -1135,32 +1087,11 @@ def new_experiment(tmp_path: Path, path: Path) -> Path:
     """A new experiment of the configuration at `path`, written through the core with the demo's
     client, every case succeeded; with no session's manifest, so its records are checked
     without one, as after an incomplete copy that lost them."""
-    content = path.read_bytes()
-    read = read_experiment_configuration_v1_1(content, path.name, path)
-    plan = build_experiment_plan_v1_1(read, installed_versions())
-    assert isinstance(plan, PlanV1_3) and read.definition is not None
-    given = (
-        {"definition": read.definition.content}
-        if read.snapshot is None
-        else {"snapshot": read.snapshot.files}
-    )
-    out = tmp_path / "experiment"
-    with LocalArtifactStore(out) as store:
-        error = ExperimentExecution(
-            plan,
-            plan.plan_hash,
-            "not_required",
-            store,
-            SyntheticScreenBacktestClient(response_bytes()),
-            command=None,
-            clock=FixedClock(),
-            ranking_lock=tmp_path / LOCK_FILE,
-            pause=no_wait(),
-        ).run(content, **given)  # pyright: ignore[reportArgumentType]
-    assert error is None
-    shutil.rmtree(out / "sessions" / "1")
-    (out / "sessions" / "1").mkdir()
-    return out
+    lab = Lab(tmp_path)
+    assert lab.new(path, synthetic=True).error is None
+    shutil.rmtree(lab.out / "sessions" / "1")
+    (lab.out / "sessions" / "1").mkdir()
+    return lab.out
 
 
 def test_an_experiments_plan_whose_ranking_is_a_file_holds_no_snapshot_record(

@@ -21,8 +21,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.core.conftest import CONFIGS, RESPONSES, Execute, execute_run
 from tests.support.deep_json import DEEP, on_a_fixed_stack
+from tests.support.paths import RESPONSES, SCREEN_CONFIGS
+from tests.support.screen_runs import Execute, execute_run
 from trialfolio.configuration import original_values
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.contracts.manifest_parts import ExternalReference
@@ -31,7 +32,7 @@ from trialfolio.contracts.tables import MetricsRow, SettingsRow, SettingsRowV1_1
 from trialfolio.errors import TrialFolioError
 from trialfolio.normalization import Value, read_response
 
-FORMULA = (CONFIGS / "formula.yaml").read_bytes()
+FORMULA = (SCREEN_CONFIGS / "formula.yaml").read_bytes()
 COMPLETE = (RESPONSES / "complete.json").read_bytes()
 
 # Each settings row as docs/contracts.md's screen settings give it for the documented example:
@@ -198,7 +199,7 @@ def test_metrics_csv_has_the_20_documented_rows_in_order(execute: Execute) -> No
 def test_a_ranking_system_is_sent_as_given_and_flagged_not_snapshotted(
     execute: Execute, config: str, sent: object, value: str, original: str
 ) -> None:
-    run = execute((CONFIGS / config).read_bytes(), COMPLETE)
+    run = execute((SCREEN_CONFIGS / config).read_bytes(), COMPLETE)
     rows = by_setting(run.write_tables().settings_rows)
 
     screen = run.sent["screen"]
@@ -232,7 +233,7 @@ def test_a_formula_ranking_is_recorded_whole_without_a_flag(execute: Execute) ->
 def test_the_manifest_labels_reproducibility_incomplete_for_each_reference_not_snapshotted(
     tmp_path: Path, config: str, references: tuple[str, ...]
 ) -> None:
-    execute_run((CONFIGS / config).read_bytes(), tmp_path / "out", COMPLETE)
+    execute_run((SCREEN_CONFIGS / config).read_bytes(), tmp_path / "out", COMPLETE)
     manifest = RunManifest.model_validate_json((tmp_path / "out" / "manifest.json").read_bytes())
 
     assert manifest.reproducibility.status == "incomplete"
@@ -429,7 +430,7 @@ def test_an_undecoded_response_writes_no_table(execute: Execute) -> None:
 
 
 def test_original_values_are_as_the_file_writes_them(execute: Execute) -> None:
-    written = (CONFIGS / "written-differently.yaml").read_bytes()
+    written = (SCREEN_CONFIGS / "written-differently.yaml").read_bytes()
     rows = by_setting(execute(written, COMPLETE).write_tables().settings_rows)
 
     assert (rows["slippage_percent"].value, rows["slippage_percent"].original_value) == (

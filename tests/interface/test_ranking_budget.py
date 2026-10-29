@@ -48,8 +48,8 @@ from tests.support.experiment_builder import (
     returns,
     returns_each,
 )
-from tests.support.fake_portfolio123 import FakePortfolio123
-from tests.support.saved_records import session_manifest
+from tests.support.fake_portfolio123 import AUTH, BACKTEST, RANK, FakePortfolio123
+from tests.support.saved_records import saved_plan, session_manifest
 from tests.support.terminal import PseudoTerminal
 from trialfolio.contracts.attempt import AttemptRecordV1_3
 from trialfolio.contracts.experiment_manifest import ExperimentManifestV1_1
@@ -66,7 +66,6 @@ FORMULA = experiment_config("example.yaml")
 FROM_FORMULA = experiment_config("revisions/ranking-from-formula.yaml")
 DEFINITIONS = experiment_config("ranking")
 REASON = "A revised ranking."
-AUTH, RANK, BACKTEST = "POST /auth", "POST /rank", "POST /screen/backtest"
 
 CASE_IDS = {
     "baseline": "case-a8c9e5f0cbee31ad",
@@ -77,13 +76,6 @@ CASE_IDS = {
 """`ranking-example.yaml`'s cases, by key, as release 0.4.0 gives them, written by hand."""
 
 type Builder = ExperimentBuilder[Outcome]
-
-
-def plan_of(out: Path, number: int) -> PlanV1_1 | PlanV1_3:
-    content = (out / "plans" / str(number) / "plan.json").read_bytes()
-    if json.loads(content)["schema_version"] == "1.1.0":
-        return PlanV1_1.model_validate_json(content)
-    return PlanV1_3.model_validate_json(content)
 
 
 def attempt_files(out: Path, case_id: str) -> dict[str, bytes]:
@@ -108,7 +100,7 @@ def each_backtest_follows_its_cases_rank_update(
             json.dumps(case.requests[1].params.model_dump(mode="json"), sort_keys=True),
         )
         for directory in sorted((out / "plans").iterdir())
-        if isinstance(plan := plan_of(out, int(directory.name)), PlanV1_3)
+        if isinstance(plan := saved_plan(out, int(directory.name)), PlanV1_3)
         for case in plan.cases
     }
     received = server.received
@@ -246,7 +238,7 @@ def test_a_changed_definition_keeps_its_unchanged_cases_attempts_and_sends_two_n
     # The session sets out to send the two new cases alone, so the budget never stops it.
     assert "Case 1 of 2 this session:" in revised.stderr
     assert "the budget can't cover" not in revised.stderr
-    plan = plan_of(out, 2)
+    plan = saved_plan(out, 2)
     assert isinstance(plan, PlanV1_3)
     cases = {case.case_key: case.case_id for case in plan.cases}
     # The two cases whose definitions the revision doesn't change keep their case_ids, and their
@@ -343,7 +335,7 @@ def test_a_revision_from_a_formula_gives_what_the_counted_backtests_and_the_rest
     assert shown.index("at most 25 credits") < shown.index("Type approve")
     # The revision is plan 1.3.0, which revises plan 1.1.0, and sends both of each new case's
     # requests, within the budget of 15.
-    first_plan, second = plan_of(out, 1), plan_of(out, 2)
+    first_plan, second = saved_plan(out, 1), saved_plan(out, 2)
     assert isinstance(first_plan, PlanV1_1) and isinstance(second, PlanV1_3)
     assert second.revises == first_plan.plan_hash
     assert cli.server.requests()[since:] == [AUTH, *(RANK, BACKTEST) * 5]

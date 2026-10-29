@@ -38,11 +38,10 @@ from tests.support.experiment_builder import (
     returns_each,
 )
 from tests.support.fake_portfolio123 import AUTHENTICATED, response, serve_success
+from tests.support.paths import SCREEN_CONFIGS
 from trialfolio.contracts.experiment_manifest import ExperimentManifest, ExperimentManifestV1_1
 from trialfolio.contracts.manifest import RunManifest, RunManifestV1_1
 
-FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
-SCREEN_CONFIGS: Final = FIXTURES / "screen-configs"
 EXAMPLE: Final = experiment_config("ranking-example.yaml")
 WRITTEN_DIFFERENTLY: Final = experiment_config("ranking-written-differently.yaml")
 

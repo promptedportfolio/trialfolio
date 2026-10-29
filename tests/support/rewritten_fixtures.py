@@ -60,13 +60,14 @@ from pathlib import Path
 from typing import Final, NoReturn
 from unittest import mock
 
-FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
+from tests.support.paths import FIXTURES, REVIEW_CONFIGS
+
 RUN: Final = FIXTURES / "runs" / "synthetic-run-1.0.0"
 """The committed run, which `trialfolio demo` wrote, and which the review and the report read."""
 RUN_WITH_DEFINITION: Final = FIXTURES / "runs" / "synthetic-run-1.1.0"
 """The committed run with a ranking definition, which the synthetic writer wrote, and which the
 ranking review and the second report read."""
-REVIEW_CONFIGURATION: Final = FIXTURES / "review-configs" / "synthetic-only.yaml"
+REVIEW_CONFIGURATION: Final = REVIEW_CONFIGS / "synthetic-only.yaml"
 """The configuration of the committed review, which names the run at `runs/demo`."""
 
 WRITTEN: Final = (

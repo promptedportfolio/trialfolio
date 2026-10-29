@@ -27,6 +27,7 @@ import pytest
 from tests.support.cli import Cli
 from tests.support.directories import snapshot
 from tests.support.fake_portfolio123 import Reply
+from tests.support.paths import RESPONSES
 from tests.support.snapshot_builder import (
     EXAMPLE,
     SNAPSHOT_CONFIGS,
@@ -42,7 +43,6 @@ from trialfolio.ranking_lock import LOCK_FILE, RankingLock
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Windows has no pseudo-terminals")
 
 INVALID = SNAPSHOT_CONFIGS / "invalid"
-RESPONSES = Path(__file__).resolve().parents[1] / "fixtures" / "responses"
 
 
 def attempt(out: Path) -> Path:

@@ -42,6 +42,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final, cast
 
+from tests.support.paths import RANKING_DEFINITIONS
 from trialfolio.canonical import sha256_hex
 from trialfolio.contracts.attempt import AttemptRecordV1_1
 from trialfolio.tables import (
@@ -50,9 +51,6 @@ from trialfolio.tables import (
     read_settings_csv_v1_1,
     settings_csv_v1_1,
 )
-
-FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures"
-DEFINITIONS: Final = FIXTURES / "experiment-configs" / "ranking"
 
 type Json = dict[str, Any]
 
@@ -551,7 +549,7 @@ BROKEN_RANKING_RUNS: Final[dict[str, tuple[Callable[[Path], None], str]]] = {
     ),
     "a run whose definition isn't its ranking_source's": (
         lambda run: rewrite(
-            run, "definition.xml", (DEFINITIONS / "synthetic-heavy.xml").read_bytes()
+            run, "definition.xml", (RANKING_DEFINITIONS / "synthetic-heavy.xml").read_bytes()
         ),
         "isn't its plan's ranking definition",
     ),
@@ -675,7 +673,9 @@ BROKEN_RANKING_EXPERIMENTS: Final[dict[str, tuple[Callable[[Path], object], str]
     ),
     "a plan whose definition isn't its ranking_source's": (
         lambda out: rewrite_record(
-            out, "plans/2/definition.xml", (DEFINITIONS / "synthetic-heavy.xml").read_bytes()
+            out,
+            "plans/2/definition.xml",
+            (RANKING_DEFINITIONS / "synthetic-heavy.xml").read_bytes(),
         ),
         "isn't its plan's ranking definition",
     ),
