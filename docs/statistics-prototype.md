@@ -100,7 +100,7 @@ The owner assigns these by ID. They aren't next items: [Doing the next item](../
 | ID | Task | Depends on |
 |---|---|---|
 | SP-T01 | **Complete this specification,** as [Completing this specification](#completing-this-specification) says. Then ask the owner to set the status to Ready. | 0.4.0 Implemented |
-| SP-T02 | **Read the return series,** check them against the reported metrics (SP-AC01, SP-AC02), and record what it found in this file. | Status Ready |
+| SP-T02 | **Read the return series,** check them against the reported metrics (SP-AC01, SP-AC02), and record what it found in this file. The owner decided on 2026-10-30 that [R05-T01](releases/0.5.0-return-analytics.md#specification-tasks-before-ready)'s run record is the evidence on the saved series: SP-T02 cites it, and checks only what that record doesn't. | Status Ready, R05-T01 |
 | SP-T03 | **Build the procedures,** with their reference calculations and their calibration on synthetic data (SP-AC03, SP-AC04, SP-AC06, SP-AC07). | SP-T02 |
 | SP-T04 | **Run them on the owner's experiments,** with the owner, and record the conclusions in this file (SP-AC05, SP-AC08). | SP-T03 |
 | SP-T05 | **Draft the methods ADR** from what SP-T02 to SP-T04 recorded, as Proposed, with each procedure it adopts or rejects and why. The owner decides the ADR. | SP-T04 |
