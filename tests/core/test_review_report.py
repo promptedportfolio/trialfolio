@@ -17,14 +17,16 @@ ranking definition in a report). R04-T11 wrote those cases.
 
 The run builder writes each run a review configuration names, the input check reads them, and
 the comparison core compares them, as a review does. The test writes the review's files and its
-manifest itself, because the command that writes them is R02-T08's, as R01-T13's
-`tests/core/test_report.py` did for a run. Every expected value is written here by hand.
+manifest itself, as R01-T13's `tests/core/test_report.py` did for a run, ahead of R02-T08's
+command, with the review ID the report and the logs give, where `Review` draws a random one:
+`write_review` writes the configuration, the copies, and `differences.csv`, each a step of its
+own, then the report, and builds the manifest. Every expected value is written here by hand.
 """
 
 import logging
 import re
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -49,7 +51,7 @@ from trialfolio.contracts.review_manifest import (
     ReviewManifestCounts,
 )
 from trialfolio.contracts.tables import DifferencesRow, DifferencesRowV1_1
-from trialfolio.differences import DIFFERENCES_PATH, METHOD, ComparedRun, compare
+from trialfolio.differences import DIFFERENCES_PATH, METHOD, ComparedRun, Differences, compare
 from trialfolio.notices import (
     CONCISE_NOTICE,
     FULL_NOTICE,
@@ -68,7 +70,7 @@ from trialfolio.report import (
     ReviewEvidence,
     write_review_report,
 )
-from trialfolio.review_inputs import check_review_inputs, local_run_stores
+from trialfolio.review_inputs import ReviewInput, check_review_inputs, local_run_stores
 from trialfolio.runs import MANIFEST_PATH
 from trialfolio.storage import LocalArtifactStore, StoredFile
 from trialfolio.tables import differences_csv, differences_csv_v1_1
@@ -122,14 +124,9 @@ def _artifact(stored: StoredFile, **fields: object) -> ReviewArtifact:
     )
 
 
-def write_review(path: Path, out: Path) -> Written:
-    """Writes the review of the configuration at `path` into `out`: its configuration, the
-    copies, `differences.csv`, the report, and the manifest, which is valid."""
-    content = path.read_bytes()
-    configuration = read_review_configuration(content, path.name)
-    inputs = check_review_inputs(configuration, local_run_stores(path))
-    differences = compare(configuration.baseline, [ComparedRun.of(checked) for checked in inputs])
-    store = LocalArtifactStore(str(out))
+def _listed_configuration(stored: StoredFile) -> ReviewArtifact:
+    """The manifest's entry for the review's `configuration.yaml`, a review configuration 1.0.0,
+    acquired when the command started."""
     source = SourceRecord(
         acquired_at=STARTED,
         format=REVIEW_CONFIGURATION_FORMAT,
@@ -138,40 +135,40 @@ def write_review(path: Path, out: Path) -> Written:
         provenance="user_supplied",
         operation=None,
     )
-    artifacts = [
+    return _artifact(stored, role="configuration", schema_version="1.0.0", source=source)
+
+
+def _write_copies(store: LocalArtifactStore, inputs: Sequence[ReviewInput]) -> list[ReviewArtifact]:
+    """Writes each result's copies under `inputs/<label>/`, and gives their entries."""
+    return [
         _artifact(
-            store.claim("configuration.yaml", content),
-            role="configuration",
-            schema_version="1.0.0",
-            source=source,
+            store.write(f"inputs/{checked.result.label}/{copy.path}", copy.content),
+            role=copy.role,
+            schema_version=copy.schema_version,
+            label=checked.result.label,
         )
+        for checked in inputs
+        for copy in checked.copies
     ]
-    for checked in inputs:
-        label = checked.result.label
-        artifacts.extend(
-            _artifact(
-                store.write(f"inputs/{label}/{copy.path}", copy.content),
-                role=copy.role,
-                schema_version=copy.schema_version,
-                label=label,
-            )
-            for copy in checked.copies
-        )
+
+
+def _write_differences(store: LocalArtifactStore, differences: Differences) -> ReviewArtifact:
+    """Writes `differences.csv`, version 1.1.0 when any result has weight rows, and gives its
+    entry."""
     weighted = [row for row in differences.rows if isinstance(row, DifferencesRowV1_1)]
     unweighted = [row for row in differences.rows if isinstance(row, DifferencesRow)]
     table = differences_csv_v1_1(weighted) if weighted else differences_csv(unweighted)
-    artifacts.append(
-        _artifact(
-            store.write(DIFFERENCES_PATH, table),
-            role="differences",
-            schema_version=differences.schema_version,
-        )
+    return _artifact(
+        store.write(DIFFERENCES_PATH, table),
+        role="differences",
+        schema_version=differences.schema_version,
     )
-    evidence = ReviewEvidence(
-        configuration, inputs, differences, REVIEW_ID, STARTED, tuple(artifacts)
-    )
-    report = write_review_report(store, evidence, HtmlReportRenderer(VERSION))
-    manifest = ReviewManifest(
+
+
+def _manifest(evidence: ReviewEvidence, report: StoredFile) -> ReviewManifest:
+    """The review's manifest, which lists the files the report links, and the report."""
+    inputs, differences = evidence.inputs, evidence.differences
+    return ReviewManifest(
         schema_version="1.0.0",
         artifact_type="review",
         trialfolio_version=VERSION,
@@ -181,9 +178,9 @@ def write_review(path: Path, out: Path) -> Written:
         synthetic=any(checked.reviewed.synthetic for checked in inputs),
         outcome="completed",
         error=None,
-        baseline=configuration.baseline,
+        baseline=evidence.configuration.baseline,
         results=tuple(checked.reviewed for checked in inputs),
-        artifacts=(*artifacts, _artifact(report, role="report", schema_version=None)),
+        artifacts=(*evidence.artifacts, _artifact(report, role="report", schema_version=None)),
         methods=(Method(name=METHOD, version=differences.method_version),),
         license_id=LICENSE_ID,
         notice_version=NOTICE_VERSION,
@@ -198,6 +195,24 @@ def write_review(path: Path, out: Path) -> Written:
             metrics=differences.metric_counts,
         ),
     )
+
+
+def write_review(path: Path, out: Path) -> Written:
+    """Writes the review of the configuration at `path` into `out`: its configuration, the
+    copies, `differences.csv`, the report, and the manifest, which is valid."""
+    content = path.read_bytes()
+    configuration = read_review_configuration(content, path.name)
+    inputs = check_review_inputs(configuration, local_run_stores(path))
+    differences = compare(configuration.baseline, [ComparedRun.of(checked) for checked in inputs])
+    store = LocalArtifactStore(str(out))
+    artifacts = (
+        _listed_configuration(store.claim("configuration.yaml", content)),
+        *_write_copies(store, inputs),
+        _write_differences(store, differences),
+    )
+    evidence = ReviewEvidence(configuration, inputs, differences, REVIEW_ID, STARTED, artifacts)
+    report = write_review_report(store, evidence, HtmlReportRenderer(VERSION))
+    manifest = _manifest(evidence, report)
     store.write(MANIFEST_PATH, manifest.model_dump_json(indent=2).encode())
     html = (out / REPORT_PATH).read_text(encoding="utf-8")
     return Written(configuration, path, out, evidence, report, manifest, html)

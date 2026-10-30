@@ -25,13 +25,16 @@ break changes real files of a real run or experiment.
 
 A break that edits a file the manifest lists, with `rewrite` or `edit_json`, updates its manifest
 entry to match, so only the checks beyond the hashes can tell, and one that removes such a file,
-with `unlist` or `unlist_record`, removes its entry too. An experiment's break, with
-`rewrite_record` or `edit_record`, does the same for the latest manifest, and for the
-`artifact_id` that each plan's `experiment.json` records for a plan's files, as release 0.3.0's
-broken experiments require. R02-T10 moved the runs' breaks here from
+with `unlist` or `unlist_record`, removes its entry too. `edit_manifest` changes a run's entries
+as the run manifest 1.0.0's model reads them, and `move` moves a file with its entry. An
+experiment's break, with `rewrite_record` or `edit_record`, does the same for the latest manifest,
+and for the `artifact_id` that each plan's `experiment.json` records for a plan's files, as
+release 0.3.0's broken experiments require. R02-T10 moved the runs' breaks here from
 `tests/core/test_review_inputs.py` and `tests/interface/test_report_command.py`, so the review's
 interface checks could share them; R03-T11 added the experiments', and R04-T13 those with a
-ranking definition.
+ranking definition. TS-T05 moved here the editors that `tests/core/test_saved_runs.py` and the
+core's two resume modules wrote again, with `edit_manifest` and `move`, from the former, and
+`record_1_1_0`, which the latter shares with `BROKEN_RANKING_EXPERIMENTS`.
 """
 
 import json
@@ -43,8 +46,10 @@ from pathlib import Path
 from typing import Any, Final, cast
 
 from tests.support.paths import RANKING_DEFINITIONS
+from tests.support.screen_runs import manifest_json
 from trialfolio.canonical import sha256_hex
 from trialfolio.contracts.attempt import AttemptRecordV1_1
+from trialfolio.contracts.manifest import ManifestArtifact, RunManifest
 from trialfolio.tables import (
     metrics_csv,
     read_metrics_csv,
@@ -99,6 +104,30 @@ def unlist(run: Path, path: str) -> None:
     manifest = json.loads((run / "manifest.json").read_bytes())
     manifest["artifacts"] = [a for a in manifest["artifacts"] if a["path"] != path]
     write_manifest(run, manifest)
+
+
+def edit_manifest(
+    run: Path, change: Callable[[list[ManifestArtifact]], list[ManifestArtifact]]
+) -> None:
+    """Changes the entries of a saved run's manifest, a run manifest 1.0.0."""
+    manifest = RunManifest.model_validate_json((run / "manifest.json").read_bytes())
+    artifacts = tuple(change(list(manifest.artifacts)))
+    (run / "manifest.json").write_bytes(
+        manifest_json(manifest.model_copy(update={"artifacts": artifacts}))
+    )
+
+
+def move(run: Path, path: str, to: str) -> None:
+    """Moves a file of a saved run, and its manifest entry with it."""
+    (run / to).parent.mkdir(parents=True, exist_ok=True)
+    (run / path).rename(run / to)
+    edit_manifest(
+        run,
+        lambda artifacts: [
+            artifact.model_copy(update={"path": to}) if artifact.path == path else artifact
+            for artifact in artifacts
+        ],
+    )
 
 
 def change_bytes(run: Path, path: str) -> None:
@@ -583,11 +612,11 @@ def _experiment_attempt_file(key: str, name: str) -> Callable[[Path], str]:
     return lambda out: f"{attempt_of(out, key)}/{name}"
 
 
-def _record_1_1_0(out: Path) -> None:
-    """An attempt record 1.1.0, valid, of an attempt of the baseline that ended before it
-    authenticated, under the current plan 1.3.0, in a new attempt's directory of session 2, which
-    no manifest lists."""
-    record = json.loads((out / attempt_of(out, "baseline") / "attempt.json").read_bytes())
+def record_1_1_0(out: Path, directory: str) -> None:
+    """An attempt record 1.1.0, valid, of an attempt that ended before it authenticated, of the
+    case of the attempt in `directory`, under the current plan 1.3.0, in a new attempt's directory
+    of session 2, which no manifest lists."""
+    record = json.loads((out / directory / "attempt.json").read_bytes())
     attempt_id = str(uuid.uuid4())
     # Validated from its JSON, as the strict model reads a file.
     old = AttemptRecordV1_1.model_validate_json(
@@ -616,9 +645,9 @@ def _record_1_1_0(out: Path) -> None:
             }
         )
     )
-    directory = out / "cases" / record["case_id"] / "attempts" / attempt_id
-    directory.mkdir()
-    (directory / "attempt.json").write_bytes(old.model_dump_json(indent=2).encode())
+    attempt = out / "cases" / record["case_id"] / "attempts" / attempt_id
+    attempt.mkdir()
+    (attempt / "attempt.json").write_bytes(old.model_dump_json(indent=2).encode())
 
 
 def _experiment_weight_changed(out: Path) -> None:
@@ -656,7 +685,7 @@ BROKEN_RANKING_EXPERIMENTS: Final[dict[str, tuple[Callable[[Path], object], str]
         "doesn't match the artifact_id its attempt record gives it",
     ),
     "an attempt record 1.1.0 under a plan 1.3.0": (
-        _record_1_1_0,
+        lambda out: record_1_1_0(out, attempt_of(out, "baseline")),
         "aren't the version an attempt under their plan writes",
     ),
     "a POST /screen/backtest exchange that doesn't follow a POST /rank with a 200": (
