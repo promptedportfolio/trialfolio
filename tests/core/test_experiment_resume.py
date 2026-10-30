@@ -1709,12 +1709,9 @@ def test_an_attempt_sent_again_without_a_confirmed_repeat_fails_the_check(lab: L
         (lab.out / "cases" / baseline / "attempts").iterdir(),
         key=lambda p: json.loads((p / "attempt.json").read_bytes())["session"],
     )
-    for name in ("authenticating.json", "started.json", "attempt.json"):
-        edit_record(
-            lab.out,
-            f"{repeated.relative_to(lab.out).as_posix()}/{name}",
-            lambda d: d.update(repeat_of=None),
-        )
+    edit_attempt(
+        lab.out, repeated.relative_to(lab.out).as_posix(), lambda d: d.update(repeat_of=None)
+    )
 
     ran = lab.resume(lab.out.parent / "raised.yaml")
 

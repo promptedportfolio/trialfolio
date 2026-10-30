@@ -27,11 +27,11 @@ Each experiment and run is built during the test, through the core, and stopped 
 needs it: by a cancellation, by storage faults, or by an interrupt, as a stopped process leaves
 it. The records check's breaks are made with the editors of `tests/support/broken_runs.py`, which
 TS-T05 moved there from this module: an experiment's with `rewrite_record`, `edit_record`, and
-`unlist_record`, and a run's with `rewrite`, `edit_json`, and `unlist`.
+`unlist_record`, and a run's with `rewrite`, `edit_json`, and `unlist`; and a copy of an attempt
+with `copy_attempt`.
 """
 
 import json
-import shutil
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -41,6 +41,7 @@ from typing import Any, Final
 import pytest
 
 from tests.support.broken_runs import (
+    copy_attempt,
     edit_json,
     edit_record,
     record_1_1_0,
@@ -1247,20 +1248,7 @@ def test_a_request_sent_with_a_token_a_401_to_a_rank_update_dropped_fails_the_ch
     )
     lab.new().refused("execution.partial")
     first = json.loads((lab.out / _attempt_of(lab.out, 0) / "attempt.json").read_bytes())
-    source = lab.out / _attempt_of(lab.out, 3)
-    attempt_id = str(uuid.uuid4())
-    directory = f"cases/{EXAMPLE.cases[3].case_id}/attempts/{attempt_id}"
-    shutil.copytree(source, lab.out / directory)
-    for name in ("updating.json", "started.json", "attempt.json"):
-        path = lab.out / directory / name
-        record = json.loads(path.read_bytes())
-        record.update(attempt_id=attempt_id, sequence=9, authenticated_by=first["attempt_id"])
-        for holder in (record, record.get("ranking_update") or {}):
-            for reference in ("request", "response"):
-                if holder.get(reference):
-                    file = holder[reference]["path"].rsplit("/", 1)[-1]
-                    holder[reference]["path"] = f"{directory}/{file}"
-        path.write_bytes((json.dumps(record, indent=2) + "\n").encode())
+    copy_attempt(lab.out, _attempt_of(lab.out, 3), sequence=9, authenticated_by=first["attempt_id"])
 
     ran = lab.resume()
 
