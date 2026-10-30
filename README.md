@@ -27,7 +27,8 @@ Portfolio123 does the backtesting. Trial Folio plans each request, records exact
 | Version 1.1 of the license: your own trust, retirement accounts, and single-member LLC count as you | [0.2.1](docs/releases/0.2.1-license.md) | Ready: signed off, tagged, and every release requirement met; not yet released |
 | Run a small, planned experiment of screen variants, with safe resume | [0.3.0](docs/releases/0.3.0-experiments.md) | Implemented: built, tested, used privately, tagged, and every release requirement met; not yet released |
 | Vary a ranking system's weights, at the top level or within a composite, or remove a factor, as an experiment's variants, and record a saved ranking system's definition with a snapshot | [0.4.0](docs/releases/0.4.0-ranking-weights.md) | Implemented: built, tested, used privately, tagged, and every release requirement met; not yet released |
-| Descriptive return analytics, statistical evaluation, grid search, robustness diagnostics, forward tracking | [Roadmap](docs/roadmap.md) | Not specified |
+| Read, in the report of a new or saved run or experiment, each case's dated returns, a fixed set of descriptive analyses, its comparison with the baseline, and equity and drawdown charts | [0.5.0](docs/releases/0.5.0-return-analytics.md) | Draft: outlined, not yet specified |
+| Statistical evaluation, grid search, robustness diagnostics, forward tracking | [Roadmap](docs/roadmap.md) | Not specified |
 
 **Supported inputs:** release 0.1.0 runs one long-only stock screen backtest through the Portfolio123 API, described in a YAML file. It accepts only the settings and values that live calls have verified:
 
