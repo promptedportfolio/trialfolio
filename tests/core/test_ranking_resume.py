@@ -98,6 +98,9 @@ def each_backtest_follows_its_cases_rank_update(
         assert pair in sent, "a backtest followed another case's rank_update"
 
 
+# An attempt a stopped run left without its attempt record
+
+
 def test_an_attempt_stopped_after_its_update_record_is_recorded_unknown_and_not_sent_again(
     lab: Lab,
 ) -> None:
