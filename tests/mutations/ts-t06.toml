@@ -1,0 +1,570 @@
+# TS-T06's list of the check of the tests (docs/test-refactoring.md), which it ran on its base and
+# on its branch. TS-T06 writes once the checks every report makes, in tests/support/html_report.py,
+# and the contract modules' helpers, in tests/support/contract_checks.py, and makes each pair of
+# records checks one test, parametrized over its experiments. So each test module it changes, or
+# whose fixtures it changes, has a mutation of its own, which runs only that module's tests: the
+# one TS-T03, TS-T04, or TS-T05 gave it, or, for a module none of them changed, the change nearest
+# what it checks. The mutations with caught_by show what each strengthened check now catches: each
+# runs only the copies that didn't check it at the base, which miss it there and catch it on the
+# branch; and that the records checks' cases, renamed or moved, still catch what they caught.
+
+# Each test module TS-T06 changes, or whose fixtures it changes, with a change a test there
+# catches: an earlier task's, for each module one of them changed.
+
+[[mutation]]
+name = '''a run manifest 1.0.0 is read as another version, for contract/test_artifact_models'''
+file = "src/trialfolio/contracts/manifest.py"
+old = '''    schema_version: Literal["1.0.0"]'''
+new = '''    schema_version: Literal["1.0.1"]'''
+tests = [
+    "tests/contract/test_artifact_models.py",
+]
+
+[[mutation]]
+name = '''an experiment manifest 1.0.0 is read as another version, for contract/test_experiment_artifact_models'''
+file = "src/trialfolio/contracts/experiment_manifest.py"
+old = '''    schema_version: Literal["1.0.0"]'''
+new = '''    schema_version: Literal["1.0.1"]'''
+tests = [
+    "tests/contract/test_experiment_artifact_models.py",
+]
+
+[[mutation]]
+name = '''no snapshot is read back, for contract/test_experiment_configuration'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = [
+    "tests/contract/test_experiment_configuration.py",
+]
+
+[[mutation]]
+name = '''a snapshot record is read as another version, for contract/test_ranking_artifact_models'''
+file = "src/trialfolio/contracts/ranking_snapshot.py"
+old = '''    that's checked each time a configuration names the snapshot."""
+
+    schema_version: Literal["1.0.0"]'''
+new = '''    that's checked each time a configuration names the snapshot."""
+
+    schema_version: Literal["1.0.1"]'''
+tests = [
+    "tests/contract/test_ranking_artifact_models.py",
+]
+
+[[mutation]]
+name = '''a snapshot configuration's system needn't be quoted, for contract/test_ranking_snapshot_configuration'''
+file = "src/trialfolio/configuration.py"
+old = '''        lambda path: path == ("system",),'''
+new = '''        lambda path: False,'''
+tests = [
+    "tests/contract/test_ranking_snapshot_configuration.py",
+]
+
+[[mutation]]
+name = '''a review manifest is read as another version, for contract/test_review_artifact_models'''
+file = "src/trialfolio/contracts/review_manifest.py"
+old = '''    schema_version: Literal["1.0.0"]'''
+new = '''    schema_version: Literal["1.0.1"]'''
+tests = [
+    "tests/contract/test_review_artifact_models.py",
+]
+
+[[mutation]]
+name = '''no review configuration's version has a reader, for contract/test_review_configuration'''
+file = "src/trialfolio/contracts/review_configuration.py"
+old = '''REVIEW_SCHEMA_VERSIONS: Final = get_args(ReviewSchemaVersion)'''
+new = '''REVIEW_SCHEMA_VERSIONS: Final = ()'''
+tests = [
+    "tests/contract/test_review_configuration.py",
+]
+
+[[mutation]]
+name = '''no snapshot is read back, for contract/test_screen_configuration'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = [
+    "tests/contract/test_screen_configuration.py",
+]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for core/test_experiment_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = [
+    "tests/core/test_experiment_report.py",
+]
+
+[[mutation]]
+name = '''an attempt stopped while it authenticated is recorded as possibly charged, for core/test_experiment_resume'''
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''        "possibly_charged": False,'''
+new = '''        "possibly_charged": True,'''
+tests = [
+    "tests/core/test_experiment_resume.py",
+]
+
+[[mutation]]
+name = '''no snapshot is read back, for core/test_ranking_report'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = [
+    "tests/core/test_ranking_report.py",
+]
+
+[[mutation]]
+name = '''the record of an attempt stopped after its update record says it stopped elsewhere, for core/test_ranking_resume'''
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''f" written, before the rank_update's response was saved. {detail}"'''
+new = '''f" written, before the rank_update's request was saved. {detail}"'''
+tests = [
+    "tests/core/test_ranking_resume.py",
+]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for core/test_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = [
+    "tests/core/test_report.py",
+]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for core/test_review_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = [
+    "tests/core/test_review_report.py",
+]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_records'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = [
+    "tests/interface/test_experiment_records.py",
+]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for interface/test_experiment_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = [
+    "tests/interface/test_experiment_report.py",
+]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_json_summary'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = [
+    "tests/interface/test_json_summary.py",
+]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_records'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = [
+    "tests/interface/test_ranking_records.py",
+]
+
+[[mutation]]
+name = '''no snapshot is read back, for interface/test_ranking_report'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = [
+    "tests/interface/test_ranking_report.py",
+]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for interface/test_report_content'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = [
+    "tests/interface/test_report_content.py",
+]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for interface/test_review_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = [
+    "tests/interface/test_review_report.py",
+]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_run_validation'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = [
+    "tests/interface/test_run_validation.py",
+]
+
+# What each strengthened check now catches (finding 10 and copies that check less, items 1 to 7).
+
+[[mutation]]
+name = '''a report refreshes itself with a meta http-equiv'''
+file = "src/trialfolio/report/page.py"
+old = '''        '<meta charset="utf-8">','''
+new = '''        '<meta charset="utf-8">',
+        '<meta http-equiv="refresh" content="60">','''
+tests = [
+    "tests/core/test_ranking_report.py::test_a_report_with_a_definition_keeps_the_notices_and_links_rules",
+    "tests/interface/test_report_content.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_review_report.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_experiment_report.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_ranking_report.py::test_it_runs_and_loads_nothing",
+]
+caught_by = [
+    "tests/core/test_ranking_report.py::test_a_report_with_a_definition_keeps_the_notices_and_links_rules",
+    "tests/interface/test_report_content.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_review_report.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_experiment_report.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_ranking_report.py::test_it_runs_and_loads_nothing",
+]
+
+[[mutation]]
+name = '''a report holds a script in a comment'''
+file = "src/trialfolio/report/page.py"
+old = '''        "<head>",'''
+new = '''        "<head>",
+        "<!-- <script src=x.js></script> -->",'''
+tests = [
+    "tests/core/test_report.py::test_it_runs_and_loads_nothing",
+    "tests/core/test_experiment_report.py::test_it_runs_and_loads_nothing",
+    "tests/core/test_review_report.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_report_content.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_review_report.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_experiment_report.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_ranking_report.py::test_it_runs_and_loads_nothing",
+]
+caught_by = [
+    "tests/core/test_report.py::test_it_runs_and_loads_nothing",
+    "tests/core/test_experiment_report.py::test_it_runs_and_loads_nothing",
+    "tests/core/test_review_report.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_report_content.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_review_report.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_experiment_report.py::test_it_runs_and_loads_nothing",
+    "tests/interface/test_ranking_report.py::test_it_runs_and_loads_nothing",
+]
+
+[[mutation]]
+name = '''a report links to Portfolio123's terms a second time'''
+file = "src/trialfolio/report/page.py"
+old = '''        f'<p class="muted">Rendered by Trial Folio {version} from {records}.</p>','''
+new = '''        f'<p class="muted">Rendered by Trial Folio {version} from {records}. {terms}</p>','''
+tests = [
+    "tests/core/test_report.py::test_its_only_outside_links_are_the_license_and_portfolio123s_terms",
+    "tests/core/test_experiment_report.py::test_its_links_are_the_two_outside_links_and_the_experiments_own_files",
+    "tests/core/test_review_report.py::test_its_links_are_the_two_outside_links_and_the_reviews_own_files",
+    "tests/core/test_ranking_report.py::test_a_report_with_a_definition_keeps_the_notices_and_links_rules",
+]
+caught_by = [
+    "tests/core/test_report.py::test_its_only_outside_links_are_the_license_and_portfolio123s_terms",
+    "tests/core/test_experiment_report.py::test_its_links_are_the_two_outside_links_and_the_experiments_own_files",
+    "tests/core/test_review_report.py::test_its_links_are_the_two_outside_links_and_the_reviews_own_files",
+    "tests/core/test_ranking_report.py::test_a_report_with_a_definition_keeps_the_notices_and_links_rules",
+]
+
+[[mutation]]
+name = '''a report has a protocol-relative link'''
+file = "src/trialfolio/report/page.py"
+old = '''        f'<p class="muted">Rendered by Trial Folio {version} from {records}.</p>','''
+new = '''        f'<p class="muted">Rendered by <a href="//example.com/">Trial Folio</a> {version} from {records}.</p>','''
+tests = [
+    "tests/core/test_ranking_report.py::test_a_report_with_a_definition_keeps_the_notices_and_links_rules",
+]
+caught_by = [
+    "tests/core/test_ranking_report.py::test_a_report_with_a_definition_keeps_the_notices_and_links_rules",
+]
+
+[[mutation]]
+name = '''a report's links to its files have a . part'''
+file = "src/trialfolio/report/fragments.py"
+old = '''    segments = (*base, *(quote(part, safe="") for part in path.split("/")))'''
+new = '''    segments = (*base, ".", *(quote(part, safe="") for part in path.split("/")))'''
+tests = [
+    "tests/core/test_experiment_report.py::test_its_links_are_the_two_outside_links_and_the_experiments_own_files",
+    "tests/core/test_ranking_report.py::test_a_report_with_a_definition_keeps_the_notices_and_links_rules",
+    "tests/interface/test_report_content.py::test_its_only_outside_links_are_the_license_and_portfolio123s_terms",
+    "tests/interface/test_experiment_report.py::test_its_only_outside_links_are_the_license_and_portfolio123s_terms",
+    "tests/interface/test_ranking_report.py::test_its_only_outside_links_are_the_license_and_portfolio123s_terms",
+]
+caught_by = [
+    "tests/core/test_experiment_report.py::test_its_links_are_the_two_outside_links_and_the_experiments_own_files",
+    "tests/core/test_ranking_report.py::test_a_report_with_a_definition_keeps_the_notices_and_links_rules",
+    "tests/interface/test_report_content.py::test_its_only_outside_links_are_the_license_and_portfolio123s_terms",
+    "tests/interface/test_experiment_report.py::test_its_only_outside_links_are_the_license_and_portfolio123s_terms",
+    "tests/interface/test_ranking_report.py::test_its_only_outside_links_are_the_license_and_portfolio123s_terms",
+]
+
+[[mutation]]
+name = '''a report names its manifest without linking it'''
+file = "src/trialfolio/report/fragments.py"
+old = '''        f"<tr><td>{_link(path, base)}</td><td>{role}</td>{'<td></td>' * (3 if results else 2)}</tr>"'''
+new = '''        f"<tr><td>{code(path)}</td><td>{role}</td>{'<td></td>' * (3 if results else 2)}</tr>"'''
+tests = [
+    "tests/core/test_ranking_report.py::test_a_report_with_a_definition_keeps_the_notices_and_links_rules",
+    "tests/interface/test_report_content.py::test_its_only_outside_links_are_the_license_and_portfolio123s_terms",
+]
+caught_by = [
+    "tests/core/test_ranking_report.py::test_a_report_with_a_definition_keeps_the_notices_and_links_rules",
+    "tests/interface/test_report_content.py::test_its_only_outside_links_are_the_license_and_portfolio123s_terms",
+]
+
+[[mutation]]
+name = '''the full notice's ID isn't the one the contract gives'''
+file = "src/trialfolio/report/page.py"
+old = '''FULL_NOTICE_ID: Final = "full-notice"'''
+new = '''FULL_NOTICE_ID: Final = "license-notice"'''
+tests = [
+    "tests/core/test_report.py::test_the_concise_notice_comes_before_any_result_and_links_to_the_full_notice",
+    "tests/core/test_experiment_report.py::test_the_concise_notice_comes_before_any_result_and_links_to_the_full_notice",
+    "tests/core/test_review_report.py::test_the_concise_notice_comes_before_any_result_and_links_to_the_full_notice",
+    "tests/interface/test_report_content.py::test_the_concise_notice_comes_first_and_links_to_the_full_notice_in_a_details_element",
+    "tests/interface/test_review_report.py::test_the_concise_notice_comes_first_and_links_to_the_full_notice_in_a_details_element",
+    "tests/interface/test_experiment_report.py::test_the_concise_notice_comes_first_and_links_to_the_full_notice_with_the_license",
+    "tests/interface/test_ranking_report.py::test_the_concise_notice_comes_first_and_links_to_the_full_notice_with_the_license",
+]
+caught_by = [
+    "tests/core/test_report.py::test_the_concise_notice_comes_before_any_result_and_links_to_the_full_notice",
+    "tests/core/test_experiment_report.py::test_the_concise_notice_comes_before_any_result_and_links_to_the_full_notice",
+    "tests/core/test_review_report.py::test_the_concise_notice_comes_before_any_result_and_links_to_the_full_notice",
+    "tests/interface/test_report_content.py::test_the_concise_notice_comes_first_and_links_to_the_full_notice_in_a_details_element",
+    "tests/interface/test_review_report.py::test_the_concise_notice_comes_first_and_links_to_the_full_notice_in_a_details_element",
+    "tests/interface/test_experiment_report.py::test_the_concise_notice_comes_first_and_links_to_the_full_notice_with_the_license",
+    "tests/interface/test_ranking_report.py::test_the_concise_notice_comes_first_and_links_to_the_full_notice_with_the_license",
+]
+
+[[mutation]]
+name = '''the data statement's link to Portfolio123's terms is only its last word'''
+file = "src/trialfolio/report/page.py"
+old = '''    terms = f'<a href="{PORTFOLIO123_TERMS_URL}">{html.escape(PORTFOLIO123_TERMS_LINK)}</a>''''
+new = '''    terms = f'Portfolio123\'s <a href="{PORTFOLIO123_TERMS_URL}">terms</a>''''
+tests = [
+    "tests/core/test_experiment_report.py::test_the_data_statement_and_the_full_notice_with_the_license_close_the_report",
+    "tests/core/test_review_report.py::test_the_data_statement_and_the_full_notice_with_the_license_close_the_report",
+    "tests/core/test_ranking_report.py::test_a_report_with_a_definition_keeps_the_notices_and_links_rules",
+    "tests/interface/test_experiment_report.py::test_the_closing_section_holds_the_portfolio123_data_statement_outside_the_full_notice",
+    "tests/interface/test_ranking_report.py::test_the_closing_section_holds_the_portfolio123_data_statement_outside_the_full_notice",
+]
+caught_by = [
+    "tests/core/test_experiment_report.py::test_the_data_statement_and_the_full_notice_with_the_license_close_the_report",
+    "tests/core/test_review_report.py::test_the_data_statement_and_the_full_notice_with_the_license_close_the_report",
+    "tests/core/test_ranking_report.py::test_a_report_with_a_definition_keeps_the_notices_and_links_rules",
+    "tests/interface/test_experiment_report.py::test_the_closing_section_holds_the_portfolio123_data_statement_outside_the_full_notice",
+    "tests/interface/test_ranking_report.py::test_the_closing_section_holds_the_portfolio123_data_statement_outside_the_full_notice",
+]
+
+[[mutation]]
+name = '''the full notice comes before the data statement'''
+file = "src/trialfolio/report/page.py"
+old = '''        (
+            f'<p id="portfolio123-data"><strong>{html.escape(PORTFOLIO123_DATA_LABEL)}</strong>'
+            f" {html.escape(statement_lead)}{terms}{html.escape(statement_rest)}</p>"
+        ),
+        f'<details id="{FULL_NOTICE_ID}">',
+        "<summary>Full research and financial-result notice, and license</summary>",
+        *notice,
+        (
+            f"<p>License: {html.escape(LICENSE_NAME)}, <code>{LICENSE_ID}</code>. Notice version"
+            f' {NOTICE_VERSION}. Read <a href="{license_url(version)}">the LICENSE'
+            f" published with Trial Folio {version}</a>.</p>"
+        ),
+        "</details>",
+'''
+new = '''        f'<details id="{FULL_NOTICE_ID}">',
+        "<summary>Full research and financial-result notice, and license</summary>",
+        *notice,
+        (
+            f"<p>License: {html.escape(LICENSE_NAME)}, <code>{LICENSE_ID}</code>. Notice version"
+            f' {NOTICE_VERSION}. Read <a href="{license_url(version)}">the LICENSE'
+            f" published with Trial Folio {version}</a>.</p>"
+        ),
+        "</details>",
+        (
+            f'<p id="portfolio123-data"><strong>{html.escape(PORTFOLIO123_DATA_LABEL)}</strong>'
+            f" {html.escape(statement_lead)}{terms}{html.escape(statement_rest)}</p>"
+        ),
+'''
+tests = [
+    "tests/interface/test_report_content.py::test_the_closing_section_holds_the_portfolio123_data_statement_outside_the_full_notice",
+    "tests/interface/test_review_report.py::test_the_closing_section_holds_the_portfolio123_data_statement_outside_the_full_notice",
+]
+caught_by = [
+    "tests/interface/test_report_content.py::test_the_closing_section_holds_the_portfolio123_data_statement_outside_the_full_notice",
+    "tests/interface/test_review_report.py::test_the_closing_section_holds_the_portfolio123_data_statement_outside_the_full_notice",
+]
+
+[[mutation]]
+name = '''a report's status says statistical validation is assessed later'''
+file = "src/trialfolio/report/fragments.py"
+old = '''    ("Statistical validation", NOT_ASSESSED),'''
+new = '''    ("Statistical validation", "Not yet assessed"),'''
+tests = [
+    "tests/core/test_ranking_report.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+    "tests/interface/test_ranking_report.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+]
+base_tests = [
+    "tests/core/test_ranking_report.py",
+    "tests/interface/test_ranking_report.py",
+]
+caught_by = [
+    "tests/core/test_ranking_report.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+    "tests/interface/test_ranking_report.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+]
+
+[[mutation]]
+name = '''a run's robustness section doesn't say it isn't assessed'''
+file = "src/trialfolio/report/run.py"
+old = '''            f"<p>{NOT_ASSESSED}. Robustness results and the concentration of contributions need"'''
+new = '''            f"<p>Robustness results and the concentration of contributions need"'''
+tests = [
+    "tests/core/test_report.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+    "tests/interface/test_report_content.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+]
+caught_by = [
+    "tests/core/test_report.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+    "tests/interface/test_report_content.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+]
+
+[[mutation]]
+name = '''an experiment session's robustness section doesn't say it isn't assessed'''
+file = "src/trialfolio/report/experiment.py"
+old = '''            f"<p>{NOT_ASSESSED}. The cases are variants of one baseline, predefined in the"'''
+new = '''            f"<p>The cases are variants of one baseline, predefined in the"'''
+tests = [
+    "tests/interface/test_experiment_report.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+]
+caught_by = [
+    "tests/interface/test_experiment_report.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+]
+
+[[mutation]]
+name = '''a review's robustness section doesn't say it isn't assessed'''
+file = "src/trialfolio/report/review.py"
+old = '''            f"<p>{NOT_ASSESSED}. Robustness results and the concentration of contributions need"'''
+new = '''            f"<p>Robustness results and the concentration of contributions need"'''
+tests = [
+    "tests/interface/test_review_report.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+]
+caught_by = [
+    "tests/interface/test_review_report.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+]
+
+[[mutation]]
+name = '''an experiment session's conclusion calls a case the top one'''
+file = "src/trialfolio/report/experiment.py"
+old = '''        " ranked, selected, or called best. Statistical validation and trading readiness are"'''
+new = '''        " ranked, selected, or called best. The top case is the first. Statistical validation and trading readiness are"'''
+tests = [
+    "tests/core/test_experiment_report.py::test_no_case_is_called_best_or_ranked",
+]
+caught_by = [
+    "tests/core/test_experiment_report.py::test_no_case_is_called_best_or_ranked",
+]
+
+[[mutation]]
+name = '''a configuration's refusal logs another message'''
+file = "src/trialfolio/configuration_messages.py"
+old = '''        "config.invalid", f"{source_name} isn't a valid configuration:\n{lines}"
+    ) from None'''
+new = '''        "config.invalid",
+        f"{source_name} isn't a valid configuration:\n{lines}",
+        f"{source_name} isn't a valid configuration.",
+    ) from None'''
+tests = [
+    "tests/contract/test_screen_configuration.py::test_invalid_configuration_is_rejected_naming_its_key",
+]
+caught_by = [
+    "tests/contract/test_screen_configuration.py::test_invalid_configuration_is_rejected_naming_its_key",
+]
+
+[[mutation]]
+name = '''a date that isn't a calendar date is given in its message'''
+file = "src/trialfolio/strict_yaml.py"
+old = '''        raise YamlRefused(path, "isn't a valid date.") from None'''
+new = '''        raise YamlRefused(path, f"isn't a valid date: {text}.") from None'''
+tests = [
+    "tests/contract/test_screen_configuration.py::test_invalid_configuration_is_rejected_naming_its_key",
+]
+caught_by = [
+    "tests/contract/test_screen_configuration.py::test_invalid_configuration_is_rejected_naming_its_key[date-impossible]",
+]
+
+[[mutation]]
+name = '''a key a configuration doesn't accept is given with its value'''
+file = "src/trialfolio/configuration_messages.py"
+old = '''        return _not_accepted(location, key, variant_settings, later_versions=later_versions)'''
+new = '''        value = document.get(location[0]) if isinstance(document, dict) else None
+        return _not_accepted(
+            location, key, variant_settings, later_versions=later_versions
+        ) + f" It was {value}."'''
+tests = [
+    "tests/contract/test_ranking_snapshot_configuration.py::test_invalid_configuration_is_rejected_naming_its_key_never_its_value[title-key]",
+]
+caught_by = [
+    "tests/contract/test_ranking_snapshot_configuration.py::test_invalid_configuration_is_rejected_naming_its_key_never_its_value[title-key]",
+]
+
+[[mutation]]
+name = '''a synthetic experiment's refusal doesn't say where to run the configuration'''
+file = "src/trialfolio/cli/experiment.py"
+old = '''            " an experiment. Nothing was sent or written. Run the configuration into another"
+            " output directory.",'''
+new = '''            " an experiment. Nothing was sent or written.",'''
+tests = [
+    "tests/interface/test_experiment_records.py::test_an_unbroken_synthetic_experiment_passes_the_check_and_isnt_resumed[R04-AC12]",
+]
+base_tests = [
+    "tests/interface/test_ranking_records.py::test_an_unbroken_synthetic_experiment_passes_the_check_and_isnt_resumed",
+]
+caught_by = [
+    "tests/interface/test_experiment_records.py::test_an_unbroken_synthetic_experiment_passes_the_check_and_isnt_resumed[R04-AC12]",
+]
+
+[[mutation]]
+name = '''a plan's definition.xml needn't be its ranking_source's'''
+file = "src/trialfolio/experiment_records.py"
+old = '''    if definition_hash(content) != source.definition:'''
+new = '''    if False:'''
+tests = [
+    "tests/interface/test_experiment_records.py::test_a_broken_copy_of_the_synthetic_experiment_fails_the_records_check",
+    "tests/core/test_experiment_resume.py::test_records_that_are_broken_fail_the_check_and_nothing_is_written",
+]
+base_tests = [
+    "tests/interface/test_ranking_records.py::test_a_broken_copy_of_the_synthetic_experiment_fails_the_records_check",
+    "tests/core/test_ranking_resume.py::test_an_experiments_broken_records_fail_the_check_and_nothing_is_sent",
+]
+caught_by = [
+    "tests/interface/test_experiment_records.py::test_a_broken_copy_of_the_synthetic_experiment_fails_the_records_check[R04-AC12-a plan whose definition isn't its ranking_source's]",
+    "tests/core/test_experiment_resume.py::test_records_that_are_broken_fail_the_check_and_nothing_is_written[R04-AC12-a plan whose definition.xml isn't its ranking_source's]",
+]
+
+[[mutation]]
+name = '''an experiment's plan isn't checked to recompute to its hash'''
+file = "src/trialfolio/experiment_records.py"
+old = '''    plan = _plan_record(reader, content, path)
+    reader.checks.check_plan_hash(plan, named(path))
+'''
+new = '''    plan = _plan_record(reader, content, path)
+'''
+tests = [
+    "tests/core/test_experiment_resume.py::test_records_that_are_broken_fail_the_check_and_nothing_is_written",
+]
+caught_by = [
+    "tests/core/test_experiment_resume.py::test_records_that_are_broken_fail_the_check_and_nothing_is_written[R03-AC17-a plan that doesn't recompute]",
+]

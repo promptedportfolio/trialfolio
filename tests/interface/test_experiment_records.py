@@ -7,32 +7,40 @@ synthetic experiment.
 Traces to R03-AC17 (a resume whose records are incomplete or changed, or show a request sent again
 without a confirmation, fails with `input.not_a_run` and exit 3, sends nothing, and reserves no
 session; a record whose schema version has no reader fails with `artifact.unknown_schema_version`)
-and to docs/contracts.md, running an experiment (a resumed experiment's step 4, and checking the
-records), experiment attempts, an experiment's normalized tables (which parser wrote them),
-`experiment.json`, the experiment manifest (a synthetic experiment stays synthetic), and artifact
-compatibility. Through the CLI's entry function in the test process, with the real client,
+and, for the cases whose IDs name it, to R04-AC12 (a copy of the committed synthetic experiment
+with a ranking definition, broken one way each, fails the same, and the unbroken copy passes the
+check), as release 0.4.0's test pairing gives it for tests/interface/test_ranking_records.py, whose
+two tests TS-T06 made cases of this module's (docs/test-refactoring.md, copies that check less,
+item 7); and to docs/contracts.md, running an experiment (a resumed experiment's step 4, and
+checking the records), experiment attempts, an experiment's normalized tables (which parser wrote
+them), `experiment.json`, the experiment manifest (a synthetic experiment stays synthetic), and
+artifact compatibility. Through the CLI's entry function in the test process, with the real client,
 `requests`, and `urllib3` over the fake server. Each broken experiment is run with
-`trialfolio run <config> --out <experiment> --approve <hash> --json`, with the hash of the plan
-the experiment gave before it was broken, so only the records check can refuse it.
+`trialfolio run <config> --out <experiment> --approve <hash> --json`, with the hash of the plan the
+experiment gave before it was broken, so only the records check can refuse it.
 
-The broken experiments are copies of the committed `experiments/synthetic-experiment-1.0.0/`,
-run with `synthetic-revised.yaml`, its current plan, and experiments the experiment builder
-writes, for the breaks that need a token dropped, a request sent again, or a table no manifest
-lists; `tests/support/broken_runs.py` breaks both. A break that edits a record updates the latest
-manifest's entry for it, and the `artifact_id` each `experiment.json` records for a plan's files,
-so each fails for the rule under test, which the message names. tests/core/test_experiment_resume.py
-checks the same breaks at the core.
+The broken experiments are copies of the committed `experiments/synthetic-experiment-1.0.0/`, run
+with `synthetic-revised.yaml`, its current plan, or, for R04-AC12's cases,
+`experiments/synthetic-experiment-1.1.0/`, run with `ranking-synthetic-revised.yaml`, and
+experiments the experiment builder writes, for the breaks that need a token dropped, a request sent
+again, or a table no manifest lists; `tests/support/broken_runs.py` breaks both. A break that edits
+a record updates the latest manifest's entry for it, and the `artifact_id` each `experiment.json`
+records for a plan's files, so each fails for the rule under test, which the message names.
+tests/core/test_experiment_resume.py checks the same breaks at the core.
 """
 
 import json
 import shutil
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 import pytest
 
 from tests.support.broken_runs import (
     BROKEN_EXPERIMENTS,
+    BROKEN_RANKING_EXPERIMENTS,
     UNKNOWN_EXPERIMENT_SCHEMA_VERSIONS,
     another_parser,
     attempt_id_of,
@@ -57,7 +65,13 @@ from tests.support.experiment_builder import (
 )
 from tests.support.fake_portfolio123 import Reply
 from tests.support.storage_faults import FaultyStores
-from tests.support.synthetic_experiment import FIRST, REVISED, SYNTHETIC_EXPERIMENT
+from tests.support.synthetic_experiment import (
+    FIRST,
+    RANKING_REVISED,
+    REVISED,
+    SYNTHETIC_EXPERIMENT,
+    SYNTHETIC_EXPERIMENT_WITH_DEFINITION,
+)
 from trialfolio.configuration import read_experiment_configuration
 from trialfolio.planning import build_experiment_plan, installed_versions
 
@@ -67,12 +81,29 @@ EXAMPLE = experiment_config("example.yaml")
 DEFAULT_ONLY = experiment_config("default-only.yaml")
 
 
-def synthetic_copy(cli: Cli) -> tuple[Path, str]:
-    """A copy of the committed synthetic experiment, and the hash of the plan `trialfolio run`
-    builds from `synthetic-revised.yaml` into it: its current plan's."""
+@dataclass(frozen=True)
+class Synthetic:
+    """A committed synthetic experiment, and the configuration whose plan is its current plan."""
+
+    directory: Path
+    revised: Path
+
+
+SYNTHETIC: Final = {
+    "R03-AC17": Synthetic(SYNTHETIC_EXPERIMENT, REVISED),
+    "R04-AC12": Synthetic(SYNTHETIC_EXPERIMENT_WITH_DEFINITION, RANKING_REVISED),
+}
+"""Each committed synthetic experiment, by the criterion its records check traces to: 0.3.0's,
+and 0.4.0's, with a ranking definition."""
+
+
+def synthetic_copy(cli: Cli, synthetic: Synthetic = SYNTHETIC["R03-AC17"]) -> tuple[Path, str]:
+    """A copy of the committed synthetic experiment, 0.3.0's unless `synthetic` gives another, and
+    the hash of the plan `trialfolio run` builds into it from the configuration of its current
+    plan, such as `synthetic-revised.yaml`."""
     out = cli.tmp / "experiment"
-    shutil.copytree(SYNTHETIC_EXPERIMENT, out)
-    return out, plan_hash(REVISED, out)
+    shutil.copytree(synthetic.directory, out)
+    return out, plan_hash(synthetic.revised, out)
 
 
 def refused(cli: Cli, config: Path, out: Path, approve: str, code: str, exit_code: int) -> str:
@@ -96,18 +127,27 @@ def refused(cli: Cli, config: Path, out: Path, approve: str, code: str, exit_cod
 # Copies of the synthetic experiment, broken one way each
 
 
-@pytest.mark.parametrize(
-    ("breaking", "problem"), BROKEN_EXPERIMENTS.values(), ids=BROKEN_EXPERIMENTS.keys()
-)
+BROKEN_COPIES: Final = [
+    pytest.param(SYNTHETIC[criterion], breaking, problem, id=f"{criterion}-{name}")
+    for criterion, breaks in (
+        ("R03-AC17", BROKEN_EXPERIMENTS),
+        ("R04-AC12", BROKEN_RANKING_EXPERIMENTS),
+    )
+    for name, (breaking, problem) in breaks.items()
+]
+"""Each break of each synthetic experiment, with the problem its message names."""
+
+
+@pytest.mark.parametrize(("synthetic", "breaking", "problem"), BROKEN_COPIES)
 def test_a_broken_copy_of_the_synthetic_experiment_fails_the_records_check(
-    cli: Cli, breaking: Callable[[Path], object], problem: str
+    cli: Cli, synthetic: Synthetic, breaking: Callable[[Path], object], problem: str
 ) -> None:
     # The records are checked before the experiment is found synthetic, which run doesn't resume.
     cli.ready()
-    out, approve = synthetic_copy(cli)
+    out, approve = synthetic_copy(cli, synthetic)
     breaking(out)
 
-    message = refused(cli, REVISED, out, approve, "input.not_a_run", 3)
+    message = refused(cli, synthetic.revised, out, approve, "input.not_a_run", 3)
 
     assert problem in message
     assert "Another title" not in message
@@ -162,11 +202,15 @@ def test_a_directory_whose_first_plan_wasnt_recorded_fails_and_says_to_remove_it
     assert "Remove the directory, and run the command again." in message
 
 
-def test_an_unbroken_synthetic_experiment_passes_the_check_and_isnt_resumed(cli: Cli) -> None:
+@pytest.mark.parametrize("synthetic", SYNTHETIC.values(), ids=SYNTHETIC.keys())
+def test_an_unbroken_synthetic_experiment_passes_the_check_and_isnt_resumed(
+    cli: Cli, synthetic: Synthetic
+) -> None:
+    # So each break above is what fails the check.
     cli.ready()
-    out, approve = synthetic_copy(cli)
+    out, approve = synthetic_copy(cli, synthetic)
 
-    message = refused(cli, REVISED, out, approve, "output.not_empty", 4)
+    message = refused(cli, synthetic.revised, out, approve, "output.not_empty", 4)
 
     assert (
         "The output directory holds a synthetic experiment, whose values are invented, and"

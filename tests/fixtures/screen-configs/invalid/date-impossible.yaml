@@ -1,5 +1,6 @@
 # Invalid: A date is a calendar date: February has no 30th.
 # Key: start_date
+# Value: 2016-02-30
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

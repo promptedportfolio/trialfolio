@@ -1,5 +1,6 @@
 # Invalid: `kind` is `screen`.
 # Key: kind
+# Value: review
 kind: review
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

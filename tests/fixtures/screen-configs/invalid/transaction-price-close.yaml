@@ -1,5 +1,6 @@
 # Invalid: `transaction_price` is `open`.
 # Key: transaction_price
+# Value: close
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

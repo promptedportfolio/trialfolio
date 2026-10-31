@@ -1,5 +1,6 @@
 # Invalid: A file holds one YAML document.
 # Key: -
+# Value: -
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

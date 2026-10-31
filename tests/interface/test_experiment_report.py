@@ -29,7 +29,6 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
-from urllib.parse import unquote, urlsplit
 
 import pytest
 
@@ -43,21 +42,21 @@ from tests.support.experiment_builder import (
     returns,
 )
 from tests.support.fake_portfolio123 import FakePortfolio123, Reply
-from tests.support.html_report import Document, Element, parse
+from tests.support.html_report import (
+    Document,
+    Element,
+    assert_closing,
+    assert_concise_notice_first,
+    assert_full_notice,
+    assert_links,
+    assert_loads_nothing,
+    assert_no_case_is_called_best,
+    assert_not_assessed,
+    parse,
+)
 from tests.support.synthetic_experiment import SYNTHETIC_EXPERIMENT
 from trialfolio.contracts.attempt import AttemptRecordV1_1
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
-from trialfolio.notices import (
-    CONCISE_NOTICE,
-    FULL_NOTICE,
-    PORTFOLIO123_DATA_LABEL,
-    PORTFOLIO123_DATA_STATEMENT,
-)
-
-ROOT = Path(__file__).resolve().parents[2]
-LICENSE_NAME = (ROOT / "LICENSE").read_text(encoding="utf-8").splitlines()[0]
-"""The license's name, as LICENSE's first line gives it."""
-TERMS_URL = "https://www.portfolio123.com/legal"
 
 EXAMPLE = experiment_config("example.yaml")
 KEYS = ("baseline", "liquidity-100m", "holdings-50", "rebalance-weeks-1", "slippage-050")
@@ -77,11 +76,6 @@ QUOTA = Reply(402, b"")
 """A 402 to a case's request: `failed`, possibly charged, and no later case starts (D-32)."""
 
 SUCCEEDED = ("succeeded",) * len(KEYS)
-
-
-def license_url(version: str) -> str:
-    """The LICENSE published with `version`, by its tag."""
-    return f"https://github.com/promptedportfolio/trialfolio/blob/v{version}/LICENSE"
 
 
 @dataclass(frozen=True)
@@ -515,16 +509,8 @@ def test_with_two_cases_responses_swapped_no_order_or_mark_changes(sessions: Ses
 @pytest.mark.parametrize("name", REAL)
 def test_no_case_is_called_best_or_ranked(sessions: Sessions, name: str) -> None:
     for session in sessions(name):
-        main = session.document.root.find_all("main")[0].text
-        said = re.findall(
-            r"[^.]*\b(?:best|better|worse|ranks?|ranked|top|winner|wins|outperforms?)\b[^.]*\.",
-            main,
-            re.IGNORECASE,
-        )
-
         # The conclusion says that no case is ranked or called best, and nothing says otherwise.
-        assert said
-        assert all("no case" in sentence.lower() for sentence in said), said
+        assert_no_case_is_called_best(session.document.root.find_all("main")[0].text)
 
 
 @pytest.mark.parametrize("name", EVERY)
@@ -532,10 +518,7 @@ def test_statistical_validation_and_trading_readiness_read_not_assessed(
     sessions: Sessions, name: str
 ) -> None:
     for session in sessions(name):
-        document = session.document
-
-        assert set(document.dd("Statistical validation")) == {"Not assessed"}
-        assert set(document.dd("Trading readiness")) == {"Not assessed"}
+        assert_not_assessed(session.document)
 
 
 # What the report holds, and doesn't (R01-AC13's rules)
@@ -546,22 +529,8 @@ def test_the_concise_notice_comes_first_and_links_to_the_full_notice_with_the_li
     sessions: Sessions, name: str
 ) -> None:
     for session in sessions(name):
-        document = session.document
-        (notice,) = (p for p in document.root.find_all("p") if p.text == CONCISE_NOTICE)
-        (link,) = notice.find_all("a")
-        href = link.attrs["href"] or ""
-        full = document.root.by_id(href.removeprefix("#"))
-
-        assert href.startswith("#")
-        assert full.tag == "details"
-        for later in (*document.root.find_all("section"), *document.root.find_all("table")):
-            assert document.before(notice, later)
-        assert [p.text for p in full.find_all("p")][: len(FULL_NOTICE)] == list(FULL_NOTICE)
-        assert LICENSE_NAME in full.text
-        assert "LicenseRef-NSPRL-1.1" in full.text
-        assert "Notice version 1.0." in full.text
-        version = session.manifest.trialfolio_version
-        assert [a.attrs["href"] for a in full.find_all("a")] == [license_url(version)]
+        assert_concise_notice_first(session.document)
+        assert_full_notice(session.document, session.manifest.trialfolio_version)
 
 
 @pytest.mark.parametrize("name", EVERY)
@@ -569,18 +538,7 @@ def test_the_closing_section_holds_the_portfolio123_data_statement_outside_the_f
     sessions: Sessions, name: str
 ) -> None:
     for session in sessions(name):
-        document = session.document
-        (details,) = document.root.find_all("details")
-        (footer,) = document.root.find_all("footer")
-        (statement,) = (
-            p for p in footer.find_all("p") if p.text.startswith(PORTFOLIO123_DATA_LABEL)
-        )
-        (terms,) = statement.find_all("a")
-
-        assert statement.text == f"{PORTFOLIO123_DATA_LABEL} {PORTFOLIO123_DATA_STATEMENT}"
-        assert not statement.inside(details)
-        assert document.before(statement, details)
-        assert terms.attrs["href"] == TERMS_URL
+        assert_closing(session.document)
 
 
 @pytest.mark.parametrize("name", EVERY)
@@ -588,42 +546,22 @@ def test_its_only_outside_links_are_the_license_and_portfolio123s_terms(
     sessions: Sessions, name: str
 ) -> None:
     for session in sessions(name):
-        document = session.document
-        hrefs = [a.attrs["href"] or "" for a in document.root.find_all("a")]
-        ids = {element.attrs.get("id") for element in document.root.iter()}
-        manifest = session.manifest
-        directory = session.out / "sessions" / str(session.number)
-        files = {
-            (session.out / artifact.path).resolve()
-            for artifact in manifest.artifacts
-            if artifact.role != "report"
-        } | {(directory / "manifest.json").resolve()}
+        directory = f"sessions/{session.number}"
 
-        outside = [href for href in hrefs if urlsplit(href).scheme or urlsplit(href).netloc]
-        assert sorted(outside) == sorted([license_url(manifest.trialfolio_version), TERMS_URL])
-        linked: set[Path] = set()
-        for href in hrefs:
-            if href in outside:
-                continue
-            assert not href.startswith("/")
-            if href.startswith("#"):
-                assert href[1:] in ids
-            else:
-                linked.add((directory / unquote(href)).resolve())
         # Each of the session's files is linked, from the session's own directory.
-        assert linked == files
+        assert_links(
+            session.document,
+            session.manifest.trialfolio_version,
+            session.out / directory / "report.html",
+            session.out,
+            f"{directory}/manifest.json",
+        )
 
 
 @pytest.mark.parametrize("name", EVERY)
 def test_it_runs_and_loads_nothing(sessions: Sessions, name: str) -> None:
     for session in sessions(name):
-        elements = list(session.document.root.iter())
-        styles = " ".join(style.text for style in session.document.root.find_all("style"))
-
-        assert not [e for e in elements if e.tag in ("script", "link", "iframe", "object", "img")]
-        assert not [name for e in elements for name in e.attrs if name.lower().startswith("on")]
-        assert not [e for e in elements if "src" in e.attrs]
-        assert not re.search(r"url\s*\(|@import", styles, re.IGNORECASE)
+        assert_loads_nothing(session.document)
 
 
 # The synthetic experiment (R03-AC11, DSC-04)

@@ -1,5 +1,6 @@
 # Invalid: `pit_method` is `complete`.
 # Key: pit_method
+# Value: prelim
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

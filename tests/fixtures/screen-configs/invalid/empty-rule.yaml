@@ -1,5 +1,6 @@
 # Invalid: Each rule is a non-empty string.
 # Key: rules[0]
+# Value: -
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

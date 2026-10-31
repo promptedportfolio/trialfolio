@@ -1,5 +1,6 @@
 # Invalid: At most 15 significant digits.
 # Key: slippage_percent
+# Value: 123456789012.3456
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

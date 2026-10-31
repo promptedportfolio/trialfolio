@@ -1,5 +1,6 @@
 # Invalid: Each rule is a formula, written in quotes or as a block scalar.
 # Key: rules[0]
+# Value: AvgDailyTot(30) > 1000000
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

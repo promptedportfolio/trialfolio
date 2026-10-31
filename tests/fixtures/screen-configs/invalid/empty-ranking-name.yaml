@@ -1,5 +1,6 @@
 # Invalid: A ranking name is a non-empty string.
 # Key: ranking.name
+# Value: -
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

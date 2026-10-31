@@ -1,5 +1,6 @@
 # Invalid: `title` is required.
 # Key: title
+# Value: -
 kind: screen
 schema_version: 1.0.0
 purpose: Reference backtest for the 0.1.0 response layout.

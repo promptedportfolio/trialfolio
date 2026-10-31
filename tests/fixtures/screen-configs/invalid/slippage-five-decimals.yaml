@@ -1,5 +1,6 @@
 # Invalid: At most 4 digits after the decimal point.
 # Key: slippage_percent
+# Value: 0.00001
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor
