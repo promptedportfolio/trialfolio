@@ -32,7 +32,6 @@ from trialfolio.notices import (
     PORTFOLIO123_DATA_LABEL,
     PORTFOLIO123_DATA_STATEMENT,
 )
-from trialfolio.report import FULL_NOTICE_ID
 
 VOID: frozenset[str] = frozenset(
     {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "wbr"}
@@ -313,6 +312,8 @@ def parse(document: str) -> Document:
 
 LICENSE_NAME: Final = (ROOT / "LICENSE").read_text(encoding="utf-8").splitlines()[0]
 """The license's name, as LICENSE's first line gives it."""
+FULL_NOTICE_ID: Final = "full-notice"
+"""The full notice's ID, which the concise notice links (docs/contracts.md, reports)."""
 LICENSE_ID: Final = "LicenseRef-NSPRL-1.1"
 NOTICE_VERSION: Final = "1.0"
 TERMS_URL: Final = "https://www.portfolio123.com/legal"
