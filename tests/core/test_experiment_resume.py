@@ -4,19 +4,26 @@ writes the tables a stopped run didn't, sends only the cases that are due and th
 repeat names, revises the plan when it's given a revision with its reason, and counts every attempt
 of the experiment. The records check, which refuses records that are incomplete or changed, is
 tests/core/test_experiment_records.py's, which TS-T07 separated from this module
-(docs/test-refactoring.md, modules to separate).
+(docs/test-refactoring.md, modules to separate). Three tests of R03-AC17 stay here, beside the
+tests of what a stopped run left and of the synthetic experiments, whose records they read: a
+running attempt's files, a `metrics.csv` another parser wrote, and the demo's client given an
+experiment the builder wrote.
 
-Traces to docs/contracts.md, running an experiment (a resumed experiment, the cases that are due,
-and the executor), uncertain completion, experiment attempts, an experiment's normalized tables,
-experiment plans and revisions (approving a revision, what a revision keeps, and the budget across
-runs), repeating a case, the experiment manifest, and the experiment report's evidence; and, at the
-core, to R03-AC02 (case identities are stable across restarts), R03-AC04 (an interruption after case
-n resumes at case n + 1, with no repeated provider call), R03-AC06 (a restart skips complete cases
-and flags an attempt with uncertain completion, which isn't repeated), R03-AC07 (an approved
-revision gives the changed case a new identity and keeps the old one), R03-AC08 (the counts add up),
-R03-AC14 (execution given a repeat checks it, and never asks), and R03-AC18 (a resume writes the
-tables a stopped run didn't). The real client, `requests`, and `urllib3` run over the fake server;
-storage faults wrap the real store; the clock is fixed.
+Traces to docs/contracts.md, running an experiment (a resumed experiment, checking the records, the
+cases that are due, and the executor), uncertain completion, experiment attempts, an experiment's
+normalized tables, experiment plans and revisions (approving a revision, what a revision keeps, and
+the budget across runs), repeating a case, the experiment manifest, and the experiment report's
+evidence; and, at the core, to R03-AC02 (case identities are stable across restarts), R03-AC04 (an
+interruption after case n resumes at case n + 1, with no repeated provider call), R03-AC06 (a
+restart skips complete cases and flags an attempt with uncertain completion, which isn't repeated),
+R03-AC07 (an approved revision gives the changed case a new identity and keeps the old one),
+R03-AC08 (the counts add up), R03-AC14 (execution given a repeat checks it, and never asks),
+R03-AC17 (records that are incomplete or changed fail with `input.not_a_run`, and send and write
+nothing: a running attempt without its `request.json`, or with two saved responses, and a
+`metrics.csv` the installed parser doesn't write; and the demo's client given an experiment the
+builder wrote fails with `output.not_empty`, as R03-AC17's pairing gives), and R03-AC18 (a resume
+writes the tables a stopped run didn't). The real client, `requests`, and `urllib3` run over the
+fake server; storage faults wrap the real store; the clock is fixed.
 
 Each experiment is built during the test, through the core, and stopped where the test needs it: by
 a cancellation, by storage faults, or by an interrupt, as a stopped process leaves it. One, for the
