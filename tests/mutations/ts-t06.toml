@@ -439,7 +439,7 @@ caught_by = [
 name = '''a date that isn't a calendar date is given in its message'''
 file = "src/trialfolio/strict_yaml.py"
 old = '''        raise YamlRefused(path, "isn't a valid date.") from None'''
-new = '''        raise YamlRefused(path, f"isn't a valid date ({text}).") from None'''
+new = '''        raise YamlRefused(path, f"isn't a valid date: {text}.") from None'''
 tests = [
     "tests/contract/test_screen_configuration.py::test_invalid_configuration_is_rejected_naming_its_key",
 ]

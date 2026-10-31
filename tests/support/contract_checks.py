@@ -79,10 +79,12 @@ def header(content: str, name: str) -> str:
 
 def contains_value(message: str, value: str) -> bool:
     """Whether `message` holds `value` as a whole, not inside a longer name: `max_holding` isn't
-    in `max_holdings`, nor `25` in `0.25`. A full stop counts as part of a name, so a value that
-    ends a sentence, as `25` in `is 25.`, isn't found either."""
+    in `max_holdings`, nor `25` in `0.25`, but `25` is in `is 25.`, whose full stop ends a
+    sentence."""
     word = r"[A-Za-z0-9_.-]"
-    return re.search(rf"(?<!{word}){re.escape(value)}(?!{word})", message) is not None
+    # A full stop continues a name only when more of the name follows it.
+    ends = rf"(?!{word}*[A-Za-z0-9_-])"
+    return re.search(rf"(?<!{word}){re.escape(value)}{ends}", message) is not None
 
 
 def assert_names_its_key_never_its_value(path: Path, message: str) -> None:
