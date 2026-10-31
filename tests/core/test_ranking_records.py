@@ -52,7 +52,7 @@ def lab(tmp_path: Path, server: FakePortfolio123, monkeypatch: pytest.MonkeyPatc
 
 # The records check of an experiment with a definition (R04-AC12). Its breaks of
 # `ranking-example.yaml`'s experiment are tests/support/ranking_records.py's, which
-# tests/core/test_experiment_resume.py's records check runs, beside R03-AC17's.
+# tests/core/test_experiment_records.py's records check runs, beside R03-AC17's.
 
 
 def test_an_attempt_a_resume_recorded_from_its_started_json_needs_that_record(lab: Lab) -> None:
