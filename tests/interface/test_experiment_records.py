@@ -26,7 +26,7 @@ experiments the experiment builder writes, for the breaks that need a token drop
 again, or a table no manifest lists; `tests/support/broken_runs.py` breaks both. A break that edits
 a record updates the latest manifest's entry for it, and the `artifact_id` each `experiment.json`
 records for a plan's files, so each fails for the rule under test, which the message names.
-tests/core/test_experiment_resume.py checks the same breaks at the core.
+tests/core/test_experiment_records.py checks the same breaks at the core.
 """
 
 import json

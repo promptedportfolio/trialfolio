@@ -22,7 +22,7 @@ read either file or the map.
 The map is the task's rows of the table in docs/test-refactoring.md's "Where the tests moved", whose
 columns are Task, Had, and Has. Had gives one name in backticks, and Has the one or more it became,
 each in backticks. A name is a test's ID, or the start of one, up to a `::` or a `[`: a module, such
-as `tests/core/test_report.py`, stands for every test in it, and a test's name for each of its
+as `tests/core/test_run_report.py`, stands for every test in it, and a test's name for each of its
 parameters. The most specific of the task's rows that covers a test moves it, and each name the row
 gives, with the rest of the test's ID kept, stands for what the test became, each of its parameters
 included. A test in a module or a class the row names is moved when the branch collects it under

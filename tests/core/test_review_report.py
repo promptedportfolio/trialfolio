@@ -17,7 +17,8 @@ ranking definition in a report). R04-T11 wrote those cases.
 
 The run builder writes each run a review configuration names, the input check reads them, and
 the comparison core compares them, as a review does. The test writes the review's files and its
-manifest itself, as R01-T13's `tests/core/test_report.py` did for a run, ahead of R02-T08's
+manifest itself, as R01-T13's `tests/core/test_report.py`, now `test_run_report.py`, did for a
+run, ahead of R02-T08's
 command, with the review ID the report and the logs give, where `Review` draws a random one:
 `write_review` writes the configuration, the copies, and `differences.csv`, each a step of its
 own, then the report, and builds the manifest. Every expected value is written here by hand.

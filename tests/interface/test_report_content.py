@@ -8,7 +8,7 @@ resources; the only outside links are the LICENSE for the version that rendered 
 Portfolio123's terms, beside the Portfolio123 data statement; "Not assessed" for statistical
 validation and trading readiness), R01-AC12 (each unavailable metric shown as unavailable, with
 its reason, never as zero), and R01-AC31 (the requested dates, the coverage, and the mismatch, or
-that the coverage couldn't be established). tests/core/test_report.py checks the same at the
+that the coverage couldn't be established). tests/core/test_run_report.py checks the same at the
 core, and the exact wording of each part.
 """
 

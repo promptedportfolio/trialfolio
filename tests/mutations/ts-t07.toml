@@ -1,0 +1,630 @@
+# TS-T07's list of the check of the tests (docs/test-refactoring.md), which it ran on its base and
+# on its branch. TS-T07 separates seven test modules along their seams, and names
+# tests/core/test_report.py test_run_report.py. So each module it changes has a mutation of its
+# own, which runs only that module's tests: on the branch, the module; at the base, base_tests,
+# the IDs the same tests had there, in the module they were separated from. Each is an earlier
+# task's, for a module one of them changed, or, for a module TS-T07 adds, the change nearest what
+# it checks. The modules whose docstrings name a separated module have their earlier task's too.
+
+[[mutation]]
+name = '''a snapshot record is read as another version, for contract/test_ranking_artifact_models'''
+file = "src/trialfolio/contracts/ranking_snapshot.py"
+old = '''    that's checked each time a configuration names the snapshot."""
+
+    schema_version: Literal["1.0.0"]'''
+new = '''    that's checked each time a configuration names the snapshot."""
+
+    schema_version: Literal["1.0.1"]'''
+tests = [
+    "tests/contract/test_ranking_artifact_models.py",
+]
+base_tests = [
+    "tests/contract/test_ranking_artifact_models.py::test_documents_round_trip",
+    "tests/contract/test_ranking_artifact_models.py::test_unknown_fields_are_rejected",
+]
+
+[[mutation]]
+name = '''plan 1.2.0 is read as another version, for contract/test_ranking_plans'''
+file = "src/trialfolio/contracts/plan.py"
+old = '''    schema_version: Literal["1.2.0"]'''
+new = '''    schema_version: Literal["1.2.1"]'''
+tests = [
+    "tests/contract/test_ranking_plans.py",
+]
+base_tests = [
+    "tests/contract/test_ranking_artifact_models.py::test_a_plan_1_3_case_is_the_baseline_exactly_when_it_has_no_variant",
+    "tests/contract/test_ranking_artifact_models.py::test_a_rank_update_s_nodes_with_a_lone_surrogate_isn_t_a_definition",
+    "tests/contract/test_ranking_artifact_models.py::test_a_variant_of_another_setting_with_other_weight_rows_says_so",
+    "tests/contract/test_ranking_artifact_models.py::test_plan_1_0_0_refuses_a_definition_and_weight_rows",
+    "tests/contract/test_ranking_artifact_models.py::test_plan_1_2_accepts",
+    "tests/contract/test_ranking_artifact_models.py::test_plan_1_2_rejects",
+    "tests/contract/test_ranking_artifact_models.py::test_plan_1_2_rejects_an_inconsistent_plan_by_its_own_rule",
+    "tests/contract/test_ranking_artifact_models.py::test_plan_1_3_accepts",
+    "tests/contract/test_ranking_artifact_models.py::test_plan_1_3_rejects",
+    "tests/contract/test_ranking_artifact_models.py::test_plan_1_3_rejects_an_inconsistent_plan_by_its_own_rule",
+    "tests/contract/test_ranking_artifact_models.py::test_snapshot_plan_rejects",
+]
+
+[[mutation]]
+name = '''an attempt record 1.2.0 is read as another version, for contract/test_ranking_attempt_records'''
+file = "src/trialfolio/contracts/attempt.py"
+old = '''    definition, its `rank_update`."""
+
+    schema_version: Literal["1.2.0"]'''
+new = '''    definition, its `rank_update`."""
+
+    schema_version: Literal["1.2.1"]'''
+tests = [
+    "tests/contract/test_ranking_attempt_records.py",
+]
+base_tests = [
+    "tests/contract/test_ranking_artifact_models.py::test_attempt_record_1_2_accepts",
+    "tests/contract/test_ranking_artifact_models.py::test_attempt_record_1_2_rejects",
+    "tests/contract/test_ranking_artifact_models.py::test_attempt_record_1_3_accepts",
+    "tests/contract/test_ranking_artifact_models.py::test_attempt_record_1_3_rejects",
+    "tests/contract/test_ranking_artifact_models.py::test_start_record_1_2_rejects",
+    "tests/contract/test_ranking_artifact_models.py::test_start_record_1_3_accepts",
+    "tests/contract/test_ranking_artifact_models.py::test_start_record_1_3_rejects",
+]
+
+[[mutation]]
+name = '''experiment.json 1.1.0 is read as another version, for contract/test_ranking_experiment_record'''
+file = "src/trialfolio/contracts/experiment_record.py"
+old = '''    schema_version: Literal["1.1.0"]'''
+new = '''    schema_version: Literal["1.1.1"]'''
+tests = [
+    "tests/contract/test_ranking_experiment_record.py",
+]
+base_tests = [
+    "tests/contract/test_ranking_artifact_models.py::test_an_entry_taken_from_a_1_0_0_record_is_written_with_set_and_remove_null",
+    "tests/contract/test_ranking_artifact_models.py::test_experiment_record_1_1_rejects",
+]
+
+[[mutation]]
+name = '''a run manifest 1.1.0 is read as another version, for contract/test_ranking_manifests'''
+file = "src/trialfolio/contracts/manifest.py"
+old = '''    schema_version: Literal["1.1.0"]'''
+new = '''    schema_version: Literal["1.1.1"]'''
+tests = [
+    "tests/contract/test_ranking_manifests.py",
+]
+base_tests = [
+    "tests/contract/test_ranking_artifact_models.py::test_experiment_manifest_1_1_accepts",
+    "tests/contract/test_ranking_artifact_models.py::test_experiment_manifest_1_1_rejects",
+    "tests/contract/test_ranking_artifact_models.py::test_run_manifest_1_1_accepts",
+    "tests/contract/test_ranking_artifact_models.py::test_run_manifest_1_1_rejects",
+    "tests/contract/test_ranking_artifact_models.py::test_snapshot_manifest_accepts",
+    "tests/contract/test_ranking_artifact_models.py::test_snapshot_manifest_rejects",
+    "tests/contract/test_ranking_artifact_models.py::test_snapshot_record_accepts",
+    "tests/contract/test_ranking_artifact_models.py::test_snapshot_record_rejects",
+]
+
+[[mutation]]
+name = '''a weight row may name a node of neither run's definition, for contract/test_ranking_rows'''
+file = "src/trialfolio/contracts/tables.py"
+old = '''    if setting is RANKING_WEIGHT and values == (ABSENT, ABSENT):'''
+new = '''    if setting is RANKING_WEIGHT and values == (ABSENT, ABSENT) and False:'''
+tests = [
+    "tests/contract/test_ranking_rows.py",
+]
+base_tests = [
+    "tests/contract/test_ranking_artifact_models.py::test_differences_row_1_0_0_refuses_a_weight_row",
+    "tests/contract/test_ranking_artifact_models.py::test_differences_row_1_1_accepts",
+    "tests/contract/test_ranking_artifact_models.py::test_differences_row_1_1_rejects",
+    "tests/contract/test_ranking_artifact_models.py::test_settings_row_1_0_0_refuses_a_weight_row_and_a_definition",
+    "tests/contract/test_ranking_artifact_models.py::test_settings_row_1_1_accepts",
+    "tests/contract/test_ranking_artifact_models.py::test_settings_row_1_1_rejects",
+]
+
+[[mutation]]
+name = '''an attempt stopped while it authenticated is recorded as possibly charged, for core/test_experiment_resume'''
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''        "possibly_charged": False,'''
+new = '''        "possibly_charged": True,'''
+tests = [
+    "tests/core/test_experiment_resume.py",
+]
+base_tests = [
+    "tests/core/test_experiment_resume.py::test_a_case_whose_saved_response_fails_validation_is_failed_before_step_8",
+    "tests/core/test_experiment_resume.py::test_a_metrics_table_the_installed_parser_doesnt_write_fails_the_check",
+    "tests/core/test_experiment_resume.py::test_a_metrics_table_without_its_settings_table_is_completed",
+    "tests/core/test_experiment_resume.py::test_a_new_experiment_takes_no_reason_and_no_repeat",
+    "tests/core/test_experiment_resume.py::test_a_reason_with_no_revision_fails_unless_its_the_current_plans_own",
+    "tests/core/test_experiment_resume.py::test_a_repeat_names_the_unknown_attempt_and_isnt_made_twice",
+    "tests/core/test_experiment_resume.py::test_a_repeat_that_cant_apply_fails_before_anything_is_written",
+    "tests/core/test_experiment_resume.py::test_a_repeat_the_budget_cant_cover_waits_for_a_revision_that_raises_it",
+    "tests/core/test_experiment_resume.py::test_a_repeat_whose_authentication_fails_leaves_its_confirmation_unused",
+    "tests/core/test_experiment_resume.py::test_a_resume_lists_every_file_of_the_experiment_and_keeps_the_earlier_entries",
+    "tests/core/test_experiment_resume.py::test_a_resume_sends_only_the_cases_after_the_last_complete_one",
+    "tests/core/test_experiment_resume.py::test_a_revision_needs_its_hash_and_a_reason",
+    "tests/core/test_experiment_resume.py::test_a_revision_whose_experiment_json_wasnt_written_isnt_a_plan",
+    "tests/core/test_experiment_resume.py::test_a_revision_writes_its_plan_sends_its_new_case_and_retires_the_old_one",
+    "tests/core/test_experiment_resume.py::test_a_running_attempt_needs_its_request_and_one_saved_response",
+    "tests/core/test_experiment_resume.py::test_a_running_attempt_with_a_saved_response_is_recorded_as_succeeded",
+    "tests/core/test_experiment_resume.py::test_a_running_attempt_without_a_saved_response_is_unknown_and_not_sent_again",
+    "tests/core/test_experiment_resume.py::test_a_saved_response_that_fails_validation_leaves_its_case_failed_without_tables",
+    "tests/core/test_experiment_resume.py::test_a_session_number_is_never_reused",
+    "tests/core/test_experiment_resume.py::test_a_synthetic_experiment_resumes_only_with_the_demos_client",
+    "tests/core/test_experiment_resume.py::test_an_attempt_directory_without_its_records_is_no_attempt",
+    "tests/core/test_experiment_resume.py::test_an_attempt_with_only_its_authentication_record_is_failed_and_its_case_is_sent",
+    "tests/core/test_experiment_resume.py::test_d32s_stop_in_a_resume_needs_a_later_case_the_session_sends",
+    "tests/core/test_experiment_resume.py::test_opening_an_experiment_takes_its_lock",
+    "tests/core/test_experiment_resume.py::test_removing_a_variant_and_bringing_it_back_keeps_its_case_and_attempt",
+    "tests/core/test_experiment_resume.py::test_resuming_a_complete_experiment_sends_nothing_and_writes_a_session",
+    "tests/core/test_experiment_resume.py::test_return_series_reads_a_response_published_before_its_write_failed",
+    "tests/core/test_experiment_resume.py::test_the_attempt_record_a_resume_writes_says_where_its_run_stopped",
+    "tests/core/test_experiment_resume.py::test_the_demos_client_cant_resume_an_experiment_that_isnt_synthetic",
+    "tests/core/test_experiment_resume.py::test_the_demos_client_cant_resume_an_experiment_the_builder_wrote",
+    "tests/core/test_experiment_resume.py::test_the_manifest_names_the_parser_that_wrote_each_table",
+    "tests/core/test_experiment_resume.py::test_the_repeats_are_checked_before_the_approval",
+    "tests/core/test_experiment_resume.py::test_the_same_configuration_written_differently_resumes_its_plan",
+    "tests/core/test_experiment_resume.py::test_the_tables_a_resume_writes_come_from_the_response_its_check_read",
+]
+
+[[mutation]]
+name = '''an experiment's plan isn't checked to recompute to its hash, for core/test_experiment_records'''
+file = "src/trialfolio/experiment_records.py"
+old = '''    plan = _plan_record(reader, content, path)
+    reader.checks.check_plan_hash(plan, named(path))
+'''
+new = '''    plan = _plan_record(reader, content, path)
+'''
+tests = [
+    "tests/core/test_experiment_records.py",
+]
+base_tests = [
+    "tests/core/test_experiment_resume.py::test_a_directory_whose_first_plan_wasnt_recorded_cant_be_resumed",
+    "tests/core/test_experiment_resume.py::test_a_request_sent_with_a_later_attempts_token_fails_the_check",
+    "tests/core/test_experiment_resume.py::test_a_request_sent_with_a_token_a_401_or_403_dropped_fails_the_check",
+    "tests/core/test_experiment_resume.py::test_a_saved_configuration_whose_schema_version_has_no_reader_fails_the_check",
+    "tests/core/test_experiment_resume.py::test_a_schema_version_without_a_reader_fails_the_check",
+    "tests/core/test_experiment_resume.py::test_a_synthetic_experiments_manifest_that_isnt_synthetic_fails_the_check",
+    "tests/core/test_experiment_resume.py::test_an_attempt_record_with_an_authentication_but_no_record_of_it_fails_the_check",
+    "tests/core/test_experiment_resume.py::test_an_attempt_sent_again_without_a_confirmed_repeat_fails_the_check",
+    "tests/core/test_experiment_resume.py::test_records_that_are_broken_fail_the_check_and_nothing_is_written",
+    "tests/core/test_experiment_resume.py::test_resuming_needs_the_plans_own_hash",
+]
+
+[[mutation]]
+name = '''the record of an attempt stopped after its update record says it stopped elsewhere, for core/test_ranking_resume'''
+file = "src/trialfolio/experiment_execution/completion.py"
+old = '''f" written, before the rank_update's response was saved. {detail}"'''
+new = '''f" written, before the rank_update's request was saved. {detail}"'''
+tests = [
+    "tests/core/test_ranking_resume.py",
+]
+base_tests = [
+    "tests/core/test_ranking_resume.py::test_a_changed_definition_retires_the_cases_it_changes_and_keeps_the_others",
+    "tests/core/test_ranking_resume.py::test_a_changed_ranking_method_retires_every_case",
+    "tests/core/test_ranking_resume.py::test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once",
+    "tests/core/test_ranking_resume.py::test_a_manifest_1_1_0_lists_each_file_no_manifest_listed_with_its_own_version",
+    "tests/core/test_ranking_resume.py::test_a_metrics_table_without_its_settings_table_is_completed_with_its_weight_rows",
+    "tests/core/test_ranking_resume.py::test_a_remaining_budget_of_one_request_never_sends_a_rank_update",
+    "tests/core/test_ranking_resume.py::test_a_repeat_the_budget_cant_cover_waits_for_a_revision_that_raises_it",
+    "tests/core/test_ranking_resume.py::test_a_resume_of_an_experiment_without_a_definition_keeps_0_3_0s_records",
+    "tests/core/test_ranking_resume.py::test_a_resume_that_sends_nothing_doesnt_take_the_ranking_lock",
+    "tests/core/test_ranking_resume.py::test_a_resume_whose_budget_covers_no_send_doesnt_take_the_ranking_lock",
+    "tests/core/test_ranking_resume.py::test_a_resume_with_cases_due_meets_the_ranking_lock_before_its_session_record",
+    "tests/core/test_ranking_resume.py::test_a_revision_from_a_formula_sends_two_requests_a_case",
+    "tests/core/test_ranking_resume.py::test_a_running_attempt_is_recorded_from_its_start_record",
+    "tests/core/test_ranking_resume.py::test_an_attempt_stopped_after_its_rank_updates_response_is_recorded_failed",
+    "tests/core/test_ranking_resume.py::test_an_attempt_stopped_after_its_update_record_is_recorded_unknown_and_not_sent_again",
+    "tests/core/test_ranking_resume.py::test_an_attempt_with_only_its_authentication_record_is_failed_and_its_case_is_sent",
+    "tests/core/test_ranking_resume.py::test_an_attempt_without_its_record_needs_the_files_written_before_it",
+    "tests/core/test_ranking_resume.py::test_an_interrupt_at_the_backtests_request_leaves_its_case_awaiting_a_repeat",
+    "tests/core/test_ranking_resume.py::test_an_undecoded_rank_update_response_is_recorded_as_invalid",
+    "tests/core/test_ranking_resume.py::test_both_kinds_of_request_are_counted_and_their_costs_summed",
+    "tests/core/test_ranking_resume.py::test_the_attempt_record_a_resume_writes_says_where_its_run_stopped",
+    "tests/core/test_ranking_resume.py::test_the_settings_table_of_a_case_ranked_by_a_definition_needs_its_weights_originals",
+]
+
+[[mutation]]
+name = '''an attempt under a plan without a definition may hold a rank_update's files, for core/test_ranking_records'''
+file = "src/trialfolio/experiment_records.py"
+old = '''    if not ranked and set(names) & _RANK_UPDATE_FILES:'''
+new = '''    if False and set(names) & _RANK_UPDATE_FILES:'''
+tests = [
+    "tests/core/test_ranking_records.py",
+]
+base_tests = [
+    "tests/core/test_ranking_resume.py::test_a_rank_updates_file_under_a_plan_without_a_definition_fails_the_check",
+    "tests/core/test_ranking_resume.py::test_a_record_0_4_0_adds_without_a_reader_fails_the_check",
+    "tests/core/test_ranking_resume.py::test_a_record_1_1_0_of_an_experiment_without_a_definition_fails_the_check",
+    "tests/core/test_ranking_resume.py::test_a_request_sent_with_a_token_a_401_to_a_rank_update_dropped_fails_the_check",
+    "tests/core/test_ranking_resume.py::test_an_attempt_a_resume_recorded_from_its_started_json_needs_that_record",
+    "tests/core/test_ranking_resume.py::test_without_ranking_the_records_check_reads_0_3_0s_versions_only",
+]
+
+[[mutation]]
+name = '''a run attempt's records needn't be the version their plan's attempts write, for core/test_ranking_saved_runs'''
+file = "src/trialfolio/runs.py"
+old = '''    expected = "1.2.0" if isinstance(plan, PlanV1_2) else "1.0.0"
+    if version != expected:'''
+new = '''    expected = "1.2.0" if isinstance(plan, PlanV1_2) else "1.0.0"
+    if False:'''
+tests = [
+    "tests/core/test_ranking_saved_runs.py",
+]
+base_tests = [
+    "tests/core/test_ranking_resume.py::test_a_reviews_check_reads_a_run_with_a_definition_as_report_does",
+    "tests/core/test_ranking_resume.py::test_a_run_without_a_definition_refuses_versions_only_a_definition_gives",
+    "tests/core/test_ranking_resume.py::test_a_runs_attempt_with_its_start_record_and_no_attempt_record_reads_as_running",
+    "tests/core/test_ranking_resume.py::test_a_runs_attempt_with_only_its_update_record_reads_as_running",
+    "tests/core/test_ranking_resume.py::test_a_runs_attempt_without_its_record_lists_the_files_written_before_it",
+    "tests/core/test_ranking_resume.py::test_a_runs_broken_records_are_refused_and_nothing_is_written",
+    "tests/core/test_ranking_resume.py::test_a_runs_record_0_4_0_adds_without_a_reader_is_unknown",
+    "tests/core/test_ranking_resume.py::test_report_reads_a_run_whose_definition_has_windows_line_endings",
+    "tests/core/test_ranking_resume.py::test_report_reads_a_run_with_a_definition_and_renders_its_own_report",
+]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_json_summary'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = [
+    "tests/interface/test_json_summary.py",
+]
+base_tests = [
+    "tests/interface/test_json_summary.py::test_a_blank_output_directory_is_a_usage_error",
+    "tests/interface/test_json_summary.py::test_a_configuration_path_that_isnt_utf8_text_is_escaped_in_the_error",
+    "tests/interface/test_json_summary.py::test_a_failed_authentication_names_its_attempt",
+    "tests/interface/test_json_summary.py::test_a_rejected_request_is_possibly_charged",
+    "tests/interface/test_json_summary.py::test_a_review_into_an_output_directory_that_isnt_empty",
+    "tests/interface/test_json_summary.py::test_a_review_that_completes",
+    "tests/interface/test_json_summary.py::test_a_review_that_fails_after_the_claim",
+    "tests/interface/test_json_summary.py::test_a_review_that_fails_before_the_claim",
+    "tests/interface/test_json_summary.py::test_a_run_directory_path_that_isnt_utf8_text_is_escaped_in_the_error",
+    "tests/interface/test_json_summary.py::test_a_run_that_succeeds",
+    "tests/interface/test_json_summary.py::test_a_run_without_approval_gives_the_plan_hash_and_creates_nothing",
+    "tests/interface/test_json_summary.py::test_a_warning_is_counted_and_goes_to_stderr",
+    "tests/interface/test_json_summary.py::test_an_invalid_configuration",
+    "tests/interface/test_json_summary.py::test_an_output_directory_that_isnt_empty",
+    "tests/interface/test_json_summary.py::test_an_output_directory_that_isnt_utf8_text_is_a_usage_error",
+    "tests/interface/test_json_summary.py::test_demo",
+    "tests/interface/test_json_summary.py::test_init",
+    "tests/interface/test_json_summary.py::test_init_into_a_directory_that_isnt_empty",
+    "tests/interface/test_json_summary.py::test_license",
+    "tests/interface/test_json_summary.py::test_missing_credentials",
+    "tests/interface/test_json_summary.py::test_report",
+    "tests/interface/test_json_summary.py::test_report_of_an_empty_directory_isnt_a_run",
+    "tests/interface/test_json_summary.py::test_report_of_something_that_isnt_a_run",
+    "tests/interface/test_json_summary.py::test_without_json_a_failure_writes_nothing_to_stdout",
+    "tests/interface/test_json_summary.py::test_without_json_report_and_demo_write_their_result",
+    "tests/interface/test_json_summary.py::test_without_json_stdout_holds_only_the_result",
+]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_summary'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = [
+    "tests/interface/test_experiment_summary.py",
+]
+base_tests = [
+    "tests/interface/test_json_summary.py::test_a_confirmed_repeat_and_then_its_used_confirmation_give_the_records_cases",
+    "tests/interface/test_json_summary.py::test_a_manifest_whose_write_fails_once_published_isnt_among_the_outputs",
+    "tests/interface/test_json_summary.py::test_a_metrics_table_written_without_its_settings_table_is_counted",
+    "tests/interface/test_json_summary.py::test_a_new_experiment_whose_claim_fails_gives_no_output_directory_and_its_counts",
+    "tests/interface/test_json_summary.py::test_a_new_experiment_whose_claim_finds_the_lock_held_gives_its_cases_without_counts",
+    "tests/interface/test_json_summary.py::test_a_repeat_interrupted_during_its_send_gives_its_own_attempt_to_confirm",
+    "tests/interface/test_json_summary.py::test_a_repeat_whose_authentication_fails_keeps_its_confirmation_in_the_summary",
+    "tests/interface/test_json_summary.py::test_a_repeat_with_a_new_experiment_or_a_screen_gives_its_summary",
+    "tests/interface/test_json_summary.py::test_a_resume_refused_before_its_session_gives_the_records_cases_and_counts",
+    "tests/interface/test_json_summary.py::test_a_resume_that_stops_before_its_session_gives_the_records_counts_and_repeats",
+    "tests/interface/test_json_summary.py::test_a_resume_while_another_process_holds_the_lock_has_no_cases_or_counts",
+    "tests/interface/test_json_summary.py::test_a_resume_whose_lock_the_file_system_refuses_has_no_counts",
+    "tests/interface/test_json_summary.py::test_a_session_record_published_before_its_write_failed_reserves_its_session",
+    "tests/interface/test_json_summary.py::test_an_approved_revision_gives_its_plan_hash_and_its_cases",
+    "tests/interface/test_json_summary.py::test_an_attempt_record_a_resume_published_before_its_write_failed_is_counted",
+    "tests/interface/test_json_summary.py::test_an_attempt_record_published_before_its_write_failed_is_read_as_written",
+    "tests/interface/test_json_summary.py::test_an_experiment_that_a_provider_failure_leaves_partial_or_stops",
+    "tests/interface/test_json_summary.py::test_an_experiment_that_completes",
+    "tests/interface/test_json_summary.py::test_an_experiment_that_stops_gives_its_output_directory_once_it_writes_there",
+    "tests/interface/test_json_summary.py::test_an_experiment_that_stops_without_its_manifest",
+    "tests/interface/test_json_summary.py::test_an_experiment_whose_records_cant_be_read_has_no_counts",
+    "tests/interface/test_json_summary.py::test_an_experiment_whose_revision_isnt_approved_gives_the_revisions_cases",
+    "tests/interface/test_json_summary.py::test_an_experiment_with_a_failed_case_ends_partial_and_gives_its_repeat",
+    "tests/interface/test_json_summary.py::test_an_experiment_without_approval_or_credentials",
+    "tests/interface/test_json_summary.py::test_an_invalid_experiment_configuration_gives_a_runs_counts",
+    "tests/interface/test_json_summary.py::test_another_answer_at_the_repeat_prompt_gives_the_records_cases_and_counts",
+    "tests/interface/test_json_summary.py::test_another_experiment_in_the_output_directory_has_no_counts",
+]
+
+[[mutation]]
+name = '''a budget one request below the cases is accepted, for contract/test_experiment_configuration'''
+file = "src/trialfolio/contracts/experiment_configuration.py"
+old = '''    if per_case == 1 and provider_requests < cases:'''
+new = '''    if per_case == 1 and provider_requests < cases - 1:'''
+tests = [
+    "tests/contract/test_experiment_configuration.py",
+]
+base_tests = [
+    "tests/contract/test_experiment_configuration.py::test_a_budget_below_the_cases_gives_their_number",
+    "tests/contract/test_experiment_configuration.py::test_a_budget_must_cover_the_default_variant",
+    "tests/contract/test_experiment_configuration.py::test_a_budget_of_exactly_the_cases_is_accepted",
+    "tests/contract/test_experiment_configuration.py::test_a_budget_whose_credits_a_plan_cant_hash_is_rejected",
+    "tests/contract/test_experiment_configuration.py::test_a_device_name_is_neither_an_experiment_id_nor_a_case_key",
+    "tests/contract/test_experiment_configuration.py::test_a_key_before_the_default_is_named_too",
+    "tests/contract/test_experiment_configuration.py::test_a_key_repeated_within_a_list_names_both_places",
+    "tests/contract/test_experiment_configuration.py::test_a_missing_kind_names_the_experiment_kind",
+    "tests/contract/test_experiment_configuration.py::test_a_rebalance_list_replaces_the_default",
+    "tests/contract/test_experiment_configuration.py::test_a_replaced_rule_keeps_its_place",
+    "tests/contract/test_experiment_configuration.py::test_a_rule_variant_written_as_block_scalars_is_accepted",
+    "tests/contract/test_experiment_configuration.py::test_a_screen_configuration_is_not_an_experiment",
+    "tests/contract/test_experiment_configuration.py::test_a_screens_header_key_in_the_baseline_says_where_it_belongs",
+    "tests/contract/test_experiment_configuration.py::test_a_setting_a_variant_cant_change_lists_those_it_can",
+    "tests/contract/test_experiment_configuration.py::test_a_variant_value_is_normalized",
+    "tests/contract/test_experiment_configuration.py::test_an_empty_rebalance_list_turns_the_default_off",
+    "tests/contract/test_experiment_configuration.py::test_an_experiment_key_isnt_called_a_label",
+    "tests/contract/test_experiment_configuration.py::test_documented_examples_resolve_to_reference_requests",
+    "tests/contract/test_experiment_configuration.py::test_each_list_keeps_its_order",
+    "tests/contract/test_experiment_configuration.py::test_each_problem_is_listed",
+    "tests/contract/test_experiment_configuration.py::test_every_invalid_case_is_in_its_readme",
+    "tests/contract/test_experiment_configuration.py::test_invalid_configuration_is_rejected_naming_its_key_never_its_value",
+    "tests/contract/test_experiment_configuration.py::test_long_text_at_its_limit_is_accepted",
+    "tests/contract/test_experiment_configuration.py::test_messages_never_include_values",
+    "tests/contract/test_experiment_configuration.py::test_model_rejects_what_the_contract_calls_invalid",
+    "tests/contract/test_experiment_configuration.py::test_replace_must_name_exactly_one_rule",
+    "tests/contract/test_experiment_configuration.py::test_text_at_its_limit_is_accepted",
+    "tests/contract/test_experiment_configuration.py::test_text_never_sent_may_be_written_without_quotes",
+    "tests/contract/test_experiment_configuration.py::test_the_baselines_text_portfolio123_receives_is_quoted",
+    "tests/contract/test_experiment_configuration.py::test_the_device_names_are_the_review_labels_twenty_two",
+    "tests/contract/test_experiment_configuration.py::test_the_documented_example_reads_as_documented",
+    "tests/contract/test_experiment_configuration.py::test_the_order_of_keys_in_variants_leaves_no_trace",
+    "tests/contract/test_experiment_configuration.py::test_two_variants_of_one_rule_with_one_change_are_one_case",
+    "tests/contract/test_experiment_configuration.py::test_two_variants_that_add_one_rule_are_one_case",
+    "tests/contract/test_experiment_configuration.py::test_unknown_prior_research_may_have_a_description",
+    "tests/contract/test_experiment_configuration.py::test_unknown_prior_research_needs_no_description",
+    "tests/contract/test_experiment_configuration.py::test_without_variants_the_default_is_the_other_rebalance_frequency",
+]
+
+[[mutation]]
+name = '''no snapshot is read back, for contract/test_ranking_configuration'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = [
+    "tests/contract/test_ranking_configuration.py",
+]
+base_tests = [
+    "tests/contract/test_experiment_configuration.py::test_a_1_0_0_file_can_t_vary_the_ranking",
+    "tests/contract/test_experiment_configuration.py::test_a_1_1_0_baseline_ranked_by_a_formula_needs_one_request_a_case",
+    "tests/contract/test_experiment_configuration.py::test_a_1_1_0_variant_of_another_setting_names_the_ranking_among_those_it_can",
+    "tests/contract/test_experiment_configuration.py::test_a_baseline_may_name_a_snapshot_instead",
+    "tests/contract/test_experiment_configuration.py::test_a_budget_of_two_requests_a_case_is_accepted",
+    "tests/contract/test_experiment_configuration.py::test_a_plain_path_with_a_plain_weight_is_reported_once_for_each",
+    "tests/contract/test_experiment_configuration.py::test_a_ranking_variant_s_key_is_unique_among_the_cases",
+    "tests/contract/test_experiment_configuration.py::test_a_set_entry_is_named_by_its_place_never_by_its_path",
+    "tests/contract/test_experiment_configuration.py::test_a_set_s_paths_and_remove_may_be_in_double_quotes",
+    "tests/contract/test_experiment_configuration.py::test_a_weight_is_read_as_a_normalized_decimal",
+    "tests/contract/test_experiment_configuration.py::test_a_weight_written_as_plain_text_is_reported_as_a_weight",
+    "tests/contract/test_experiment_configuration.py::test_an_empty_set_names_its_variant",
+    "tests/contract/test_experiment_configuration.py::test_documented_ranking_example_compiles_to_its_cases",
+    "tests/contract/test_experiment_configuration.py::test_each_weight_problem_names_its_entry",
+    "tests/contract/test_experiment_configuration.py::test_ranking_variants_come_after_rules_and_before_holdings",
+    "tests/contract/test_experiment_configuration.py::test_run_s_reader_reads_a_1_0_0_ranking_variant_s_keys_as_node_paths",
+    "tests/contract/test_experiment_configuration.py::test_run_s_reader_tells_a_1_0_0_file_its_key_needs_1_1_0",
+    "tests/contract/test_experiment_configuration.py::test_the_1_0_0_reader_gives_a_1_0_0_file_0_3_0_s_message",
+    "tests/contract/test_experiment_configuration.py::test_the_1_0_0_reader_reads_a_1_0_0_ranking_variant_s_keys_as_0_3_0_did",
+    "tests/contract/test_experiment_configuration.py::test_the_default_variant_counts_two_requests_with_a_definition",
+    "tests/contract/test_experiment_configuration.py::test_the_ranking_example_reads_as_documented",
+    "tests/contract/test_experiment_configuration.py::test_the_reader_of_both_versions_reads_1_0_0_as_before",
+    "tests/contract/test_experiment_configuration.py::test_the_readers_name_the_versions_they_read",
+    "tests/contract/test_experiment_configuration.py::test_without_files_the_reader_reads_no_file_the_baselines_ranking_names",
+]
+
+[[mutation]]
+name = '''a rank_update names another currency, for core/test_ranking_execution'''
+file = "src/trialfolio/planning/cases.py"
+old = '''"currency": "USD",'''
+new = '''"currency": "usd",'''
+tests = [
+    "tests/core/test_ranking_execution.py",
+]
+base_tests = [
+    "tests/core/test_ranking_execution.py::test_a_cancellation_never_falls_between_a_cases_two_calls",
+    "tests/core/test_ranking_execution.py::test_a_rank_update_response_published_before_its_write_failed_is_listed",
+    "tests/core/test_ranking_execution.py::test_a_rank_updates_quota_exceeded_stops_the_experiment",
+    "tests/core/test_ranking_execution.py::test_a_second_interrupt_at_an_experiments_attempt_record_says_what_each_request_did",
+    "tests/core/test_ranking_execution.py::test_a_variant_of_another_setting_sends_the_baselines_definition",
+    "tests/core/test_ranking_execution.py::test_after_a_401_to_a_rank_update_the_next_case_authenticates_again",
+    "tests/core/test_ranking_execution.py::test_an_attempt_without_its_record_counts_as_its_records_read",
+    "tests/core/test_ranking_execution.py::test_an_experiment_is_given_its_definition_as_the_plan_has_it",
+    "tests/core/test_ranking_execution.py::test_an_experiment_with_a_definition_takes_the_ranking_lock",
+    "tests/core/test_ranking_execution.py::test_an_experiment_without_a_definition_is_refused_one_and_the_ranking_lock",
+    "tests/core/test_ranking_execution.py::test_an_experiments_cases_settings_csv_takes_each_weights_original",
+    "tests/core/test_ranking_execution.py::test_an_experiments_records_are_1_3_0",
+    "tests/core/test_ranking_execution.py::test_an_update_record_published_before_its_write_failed_counts_as_written",
+    "tests/core/test_ranking_execution.py::test_each_case_of_an_experiment_writes_its_definition_then_backtests",
+    "tests/core/test_ranking_execution.py::test_only_a_weight_a_variant_changes_takes_its_original_from_the_variant",
+    "tests/core/test_ranking_execution.py::test_the_core_writes_a_synthetic_experiment_with_the_demos_client",
+]
+
+[[mutation]]
+name = '''a run with a ranking definition doesn't hold the ranking lock, for core/test_ranking_screen_run'''
+file = "src/trialfolio/execution.py"
+old = '''        if self._lock is None:
+            return self._run_claimed(configuration, client, on_claimed)'''
+new = '''        if True:
+            return self._run_claimed(configuration, client, on_claimed)'''
+tests = [
+    "tests/core/test_ranking_screen_run.py",
+]
+base_tests = [
+    "tests/core/test_ranking_execution.py::test_a_rank_update_that_times_out_leaves_the_attempt_unknown",
+    "tests/core/test_ranking_execution.py::test_a_rank_updates_events_name_its_case_and_attempt_never_the_definition",
+    "tests/core/test_ranking_execution.py::test_a_run_without_a_command_sends_nothing_with_a_client_that_isnt_the_demos",
+    "tests/core/test_ranking_execution.py::test_a_screen_run_is_given_its_definition_as_the_plan_has_it",
+    "tests/core/test_ranking_execution.py::test_a_screen_run_with_a_definition_is_refused_without_the_ranking_lock",
+    "tests/core/test_ranking_execution.py::test_a_screen_run_without_a_definition_is_refused_one",
+    "tests/core/test_ranking_execution.py::test_a_screen_run_writes_its_definition_then_backtests_ranked_by_api_ranking_system",
+    "tests/core/test_ranking_execution.py::test_a_screen_runs_records_are_1_2_0",
+    "tests/core/test_ranking_execution.py::test_a_screen_runs_settings_csv_has_a_weight_row_for_each_node",
+    "tests/core/test_ranking_execution.py::test_a_second_interrupt_at_the_attempt_record_says_what_each_request_did",
+    "tests/core/test_ranking_execution.py::test_after_each_failing_reply_to_a_rank_update_the_backtest_isnt_sent",
+    "tests/core/test_ranking_execution.py::test_an_interrupt_after_the_rank_updates_response_sends_no_backtest",
+    "tests/core/test_ranking_execution.py::test_no_backtest_follows_a_rank_update_whose_response_wasnt_saved",
+    "tests/core/test_ranking_execution.py::test_the_core_writes_a_synthetic_run_with_the_demos_client",
+]
+
+[[mutation]]
+name = '''a rank_get's response is decoded as the wrapper returned it, for core/test_ranking_snapshot'''
+file = "src/trialfolio/provider/client.py"
+old = '''self._wrapper.rank_get(name=name), RANK_GET, decode_body=True'''
+new = '''self._wrapper.rank_get(name=name), RANK_GET, decode_body=False'''
+tests = [
+    "tests/core/test_ranking_snapshot.py",
+]
+base_tests = [
+    "tests/core/test_ranking_snapshot.py::test_a_failed_rank_get_leaves_no_definition_and_a_failed_manifest",
+    "tests/core/test_ranking_snapshot.py::test_a_rank_get_that_times_out_has_an_unknown_outcome",
+    "tests/core/test_ranking_snapshot.py::test_a_ranking_method_the_wrapper_doesnt_know_is_saved_undecoded",
+    "tests/core/test_ranking_snapshot.py::test_a_response_without_the_structure_a_snapshot_needs_is_invalid",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshot_needs_its_plans_approval_and_its_configuration",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshot_of_a_system_that_cant_be_a_ranking_completes_and_says_why",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshot_reads_the_system_with_one_rank_get_and_writes_its_records",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshot_without_a_command_sends_nothing_with_a_client_that_isnt_the_demos",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshot_without_its_attempt_record_says_its_rank_get_may_have_been_sent",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshots_manifest_lists_every_file_with_its_role_and_source",
+    "tests/core/test_ranking_snapshot.py::test_a_storage_failure_at_the_snapshots_files_leaves_no_manifest",
+    "tests/core/test_ranking_snapshot.py::test_an_interrupt_while_the_response_is_saved_leaves_no_manifest",
+    "tests/core/test_ranking_snapshot.py::test_the_core_takes_a_synthetic_snapshot_with_the_demos_client",
+]
+
+[[mutation]]
+name = '''no snapshot is read back, for core/test_ranking_from_snapshot'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = [
+    "tests/core/test_ranking_from_snapshot.py",
+]
+base_tests = [
+    "tests/core/test_ranking_snapshot.py::test_a_configuration_naming_a_snapshot_is_planned_from_it_offline",
+    "tests/core/test_ranking_snapshot.py::test_a_failed_snapshot_is_input_not_a_run",
+    "tests/core/test_ranking_snapshot.py::test_a_plan_records_the_system_by_the_name_its_snapshot_gives",
+    "tests/core/test_ranking_snapshot.py::test_a_run_copies_the_snapshots_two_files_beside_its_configuration",
+    "tests/core/test_ranking_snapshot.py::test_a_run_is_given_its_snapshots_files_as_its_plan_has_them",
+    "tests/core/test_ranking_snapshot.py::test_a_run_whose_ranking_is_a_file_lists_no_snapshot_record",
+    "tests/core/test_ranking_snapshot.py::test_a_runs_snapshot_record_of_a_version_with_no_reader_is_unknown",
+    "tests/core/test_ranking_snapshot.py::test_a_runs_snapshot_that_isnt_its_plans_is_refused_as_not_a_run",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshot_directory_that_doesnt_exist_is_input_not_found",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshot_manifest_of_a_version_with_no_reader_is_unknown",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshot_record_its_manifest_gives_a_version_with_no_reader_is_unknown",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshot_record_of_a_version_with_no_reader_is_unknown",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshot_record_that_doesnt_name_its_definition_is_input_not_a_run",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshot_that_cant_be_a_ranking_is_config_invalid",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshot_that_isnt_complete_is_input_not_a_run",
+    "tests/core/test_ranking_snapshot.py::test_a_snapshots_files_given_whose_record_names_another_definition_are_refused",
+    "tests/core/test_ranking_snapshot.py::test_a_synthetic_snapshot_is_config_invalid",
+    "tests/core/test_ranking_snapshot.py::test_an_experiment_copies_the_snapshot_into_its_plan_and_resumes_with_it",
+    "tests/core/test_ranking_snapshot.py::test_an_experiments_plan_whose_ranking_is_a_file_holds_no_snapshot_record",
+    "tests/core/test_ranking_snapshot.py::test_an_experiments_plan_whose_snapshot_isnt_its_plans_is_refused_as_not_a_run",
+    "tests/core/test_ranking_snapshot.py::test_an_experiments_plan_whose_snapshot_record_is_missing_is_refused",
+    "tests/core/test_ranking_snapshot.py::test_an_experiments_snapshot_record_of_a_version_with_no_reader_is_unknown",
+    "tests/core/test_ranking_snapshot.py::test_an_unexpected_failure_at_a_runs_snapshot_json_leaves_no_manifest",
+]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for core/test_run_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = [
+    "tests/core/test_run_report.py",
+]
+base_tests = [
+    "tests/core/test_report.py::test_a_failed_authentication_shows_nothing_was_charged",
+    "tests/core/test_report.py::test_a_failed_run_accounts_for_its_attempt_and_shows_no_result",
+    "tests/core/test_report.py::test_a_ranking_by_name_labels_reproducibility_incomplete",
+    "tests/core/test_report.py::test_a_response_without_the_required_structure_shows_the_result_unavailable",
+    "tests/core/test_report.py::test_a_run_without_a_purpose_says_none_was_declared",
+    "tests/core/test_report.py::test_a_synthetic_runs_report_never_calls_it_a_backtest_or_its_values_portfolio123s",
+    "tests/core/test_report.py::test_an_unavailable_metric_shows_its_reason_and_never_zero",
+    "tests/core/test_report.py::test_an_undecodable_response_shows_the_result_unavailable",
+    "tests/core/test_report.py::test_coverage_equal_to_the_requested_dates_matches",
+    "tests/core/test_report.py::test_coverage_that_differs_shows_both_dates_and_the_mismatch",
+    "tests/core/test_report.py::test_each_metric_shows_exactly_its_digits_with_its_unit",
+    "tests/core/test_report.py::test_every_section_appears_in_order",
+    "tests/core/test_report.py::test_every_setting_shows_its_value_unit_provenance_flags_and_text_as_written",
+    "tests/core/test_report.py::test_it_runs_and_loads_nothing",
+    "tests/core/test_report.py::test_its_only_outside_links_are_the_license_and_portfolio123s_terms",
+    "tests/core/test_report.py::test_no_status_is_styled_as_a_pass",
+    "tests/core/test_report.py::test_rendering_is_deterministic_and_names_its_version",
+    "tests/core/test_report.py::test_results_are_labeled_backtested_and_a_synthetic_run_synthetic",
+    "tests/core/test_report.py::test_sections_the_evidence_cant_support_say_so",
+    "tests/core/test_report.py::test_statistical_validation_and_trading_readiness_read_not_assessed",
+    "tests/core/test_report.py::test_text_from_the_configuration_cant_add_markup_or_reorder_whats_shown",
+    "tests/core/test_report.py::test_the_account_quota_stays_out",
+    "tests/core/test_report.py::test_the_concise_notice_comes_before_any_result_and_links_to_the_full_notice",
+    "tests/core/test_report.py::test_the_full_notice_is_in_a_details_element_with_the_license",
+    "tests/core/test_report.py::test_the_portfolio123_data_statement_closes_the_report_before_the_full_notice",
+    "tests/core/test_report.py::test_the_renderer_needs_a_version_and_a_relative_run_path",
+    "tests/core/test_report.py::test_the_report_is_written_into_the_run",
+    "tests/core/test_report.py::test_without_periods_the_report_says_the_coverage_couldnt_be_established",
+]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_records'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = [
+    "tests/interface/test_experiment_records.py",
+]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_records'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = [
+    "tests/interface/test_ranking_records.py",
+]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_sending'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = [
+    "tests/interface/test_ranking_sending.py",
+]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_snapshot'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = [
+    "tests/interface/test_ranking_snapshot.py",
+]
+
+[[mutation]]
+name = '''a weight row loses its original, for interface/test_ranking_tables'''
+file = "src/trialfolio/normalization/rows.py"
+old = '''key, text = (None, None) if weight is None else (weight.key, weight.text)'''
+new = '''key, text = (None, None)'''
+tests = [
+    "tests/interface/test_ranking_tables.py",
+]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for interface/test_report_content'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = [
+    "tests/interface/test_report_content.py",
+]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for core/test_review_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = [
+    "tests/core/test_review_report.py",
+]

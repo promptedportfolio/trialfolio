@@ -11,7 +11,9 @@ couldn't be established), and R01-AC10 (reproducibility labeled incomplete); and
 docs/contracts.md, reports, REQ-08, REQ-13 (neutral status), DSC-04 (results labeled by their
 nature), and the JSON summary's rule that `quotaRemaining` stays out of shareable outputs. Each
 report is rendered from a run written over the fake server by the real client and store, as `run`
-writes it; R01-T16 checks the same through the CLI.
+writes it; R01-T16 checks the same through the CLI. TS-T07 named this module
+`test_run_report.py`, from `test_report.py`, beside the other kinds' report tests
+(docs/test-refactoring.md, the new structure, item 1).
 """
 
 import json

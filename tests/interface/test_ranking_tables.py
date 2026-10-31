@@ -13,7 +13,7 @@ variant sets, the `set` entry's place, its YAML text, such as `60.0` from
 `ranking-written-differently.yaml`, and the `artifact_id` of `plans/1/configuration.yaml`; a screen
 run's take `ranking.definition` and the `artifact_id` of its own `definition.xml`. The review part
 of R04-AC04 is `tests/interface/test_review_weights.py`'s, and the core's,
-`tests/core/test_ranking_execution.py`'s.
+`tests/core/test_ranking_screen_run.py`'s and `test_ranking_execution.py`'s.
 
 Each run and experiment is written with `trialfolio run`, through the CLI's entry function in the
 test process, over the fake server, with the fixed clock and the ranking lock in the test's own

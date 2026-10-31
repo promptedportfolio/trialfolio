@@ -27,7 +27,8 @@ timeout; and `failed`, with `provider.response_invalid` and `rank-update-respons
 already through the CLI that a screen run's three requests come in that order, that its backtest
 ranks by `ApiRankingSystem`, and that each of `ranking-example.yaml`'s cases sends its plan's
 definition, then its backtest; these tests check the rest of the row. The core's checks of the
-same are in `tests/core/test_ranking_execution.py`. The CLI's entry function runs in the test
+same are in `tests/core/test_ranking_screen_run.py` and `test_ranking_execution.py`. The CLI's
+entry function runs in the test
 process, with the fake Portfolio123 server below `urllib3`, whose end-of-test check reads every
 `POST /rank` body (R04-AC09), the fixed clock, storage faults that only record what's published,
 and the ranking lock in the test's own directory. Every expected value is written by hand.

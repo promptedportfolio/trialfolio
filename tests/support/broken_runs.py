@@ -34,7 +34,9 @@ release 0.3.0's broken experiments require. R02-T10 moved the runs' breaks here 
 interface checks could share them; R03-T11 added the experiments', and R04-T13 those with a
 ranking definition. TS-T05 moved here the editors that `tests/core/test_saved_runs.py` and the
 core's two resume modules wrote again, with `edit_manifest` and `move`, from the former, and
-`record_1_1_0`, which the latter shares with `BROKEN_RANKING_EXPERIMENTS`.
+`record_1_1_0`, which the latter shares with `BROKEN_RANKING_EXPERIMENTS`. TS-T07 moved here
+`labeled_1_1_0`, which tests/core/test_ranking_records.py and `test_ranking_saved_runs.py` share,
+from the module they were separated from, `test_ranking_resume.py`.
 """
 
 import json
@@ -189,6 +191,11 @@ def newer_schema(run: Path, target: str, change: Callable[[Json], None]) -> None
     """Applies `change` to the run's manifest, when `target` is `manifest.json`, or to the file of
     the role `target`."""
     edit_json(run, target if target == "manifest.json" else path_of(run, target), change)
+
+
+def labeled_1_1_0(content: Json) -> None:
+    """Gives a record the schema version 1.1.0, whatever its fields are."""
+    content["schema_version"] = "1.1.0"
 
 
 UNKNOWN_SCHEMA_VERSIONS: Final[dict[str, tuple[str, Callable[[Json], None], str]]] = {
