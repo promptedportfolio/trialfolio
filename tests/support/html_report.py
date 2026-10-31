@@ -394,8 +394,9 @@ def assert_links(document: Document, version: str, report: Path, root: Path, man
     are the LICENSE published with `version` and Portfolio123's terms, each once. Each link in the
     page names an element's ID. Each other link is a file in `root`, the directory of its run,
     review, or experiment, by the path from the report's directory to `root`, then the file's path
-    in `root`, without an empty, `.`, or `..` part; and they're the files the manifest at
-    `manifest` in `root` lists, other than the report, and that manifest."""
+    in `root`, without an empty, `.`, or `..` part, which resolves inside `root`, through any
+    symbolic link; and they're the files the manifest at `manifest` in `root` lists, other than the
+    report, and that manifest."""
     hrefs = [a.attrs["href"] or "" for a in document.root.find_all("a")]
     ids = {element.attrs.get("id") for element in document.root.iter()}
     outside = [href for href in hrefs if urlsplit(href).scheme or urlsplit(href).netloc]
@@ -415,6 +416,7 @@ def assert_links(document: Document, version: str, report: Path, root: Path, man
         path = path.removeprefix(prefix)
         assert all(part not in ("", ".", "..") for part in path.split("/")), href
         assert (root / path).is_file(), href
+        assert (root / path).resolve().is_relative_to(root.resolve()), href
         linked.add(path)
     assert linked == listed_files(root, manifest)
 
