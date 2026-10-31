@@ -1,5 +1,6 @@
 # Invalid: A string is never a number.
 # Key: rebalance_weeks
+# Value: 4
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

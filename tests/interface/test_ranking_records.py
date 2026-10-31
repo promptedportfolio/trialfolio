@@ -4,17 +4,21 @@ before it sends or writes anything; and a record 0.4.0 adds, of a schema version
 for, fails naming it.
 
 Traces to R04-AC12 through the CLI, as release 0.4.0's test pairing gives it for
-`tests/interface/test_ranking_records.py`: one test for each break, each `input.not_a_run`,
-exit 3, nothing sent, and no session reserved: an attempt with `started.json` and no
-`updating.json`; an update record that disagrees with its start record; a `started.json` whose
-exchanges don't end with `POST /rank` and its 200; a `rank-update-request.json` whose bytes
-aren't what the attempt record records; an attempt record 1.1.0 under a plan 1.3.0; a
-`POST /screen/backtest` exchange that doesn't follow a `POST /rank` with a 200; an attempt sent
-with a token after a 401 or a 403 to a `rank_update`; a plan whose `definition.xml` is missing,
-or whose definition isn't `ranking_source`'s; and a weight row in `settings.csv` that isn't its
-definition's. Each record 0.4.0 adds, with a schema version that has no reader, fails with
-`artifact.unknown_schema_version`. Also to docs/contracts.md, running an experiment (checking the
-records), sending a definition (resuming, in the core), and artifact compatibility.
+`tests/interface/test_ranking_records.py`: one test for each break, each `input.not_a_run`, exit 3,
+nothing sent, and no session reserved. Since TS-T06, the breaks of a copy of the committed
+synthetic experiment, and the unbroken copy, are the cases of
+tests/interface/test_experiment_records.py's two tests whose IDs name R04-AC12, beside R03-AC17's
+(docs/test-refactoring.md, copies that check less, item 7). The breaks are an attempt with
+`started.json` and no `updating.json`; an update record that disagrees with its start record; a
+`started.json` whose exchanges don't end with `POST /rank` and its 200; a
+`rank-update-request.json` whose bytes aren't what the attempt record records; an attempt record
+1.1.0 under a plan 1.3.0; a `POST /screen/backtest` exchange that doesn't follow a `POST /rank`
+with a 200; an attempt sent with a token after a 401 or a 403 to a `rank_update`; a plan whose
+`definition.xml` is missing, or whose definition isn't `ranking_source`'s; and a weight row in
+`settings.csv` that isn't its definition's. Each record 0.4.0 adds, with a schema version that has
+no reader, fails with `artifact.unknown_schema_version`. Also to docs/contracts.md, running an
+experiment (checking the records), sending a definition (resuming, in the core), and artifact
+compatibility.
 
 The CLI's entry function runs in the test process, with the real client, `requests`, and
 `urllib3` over the fake server, and the ranking lock in the test's own directory. Each broken
@@ -37,7 +41,6 @@ from pathlib import Path
 import pytest
 
 from tests.support.broken_runs import (
-    BROKEN_RANKING_EXPERIMENTS,
     UNKNOWN_RANKING_EXPERIMENT_SCHEMA_VERSIONS,
     attempt_id_of,
     attempt_of,
@@ -98,25 +101,6 @@ def refused(cli: Cli, config: Path, out: Path, approve: str, code: str, exit_cod
 
 
 @pytest.mark.parametrize(
-    ("breaking", "problem"),
-    BROKEN_RANKING_EXPERIMENTS.values(),
-    ids=BROKEN_RANKING_EXPERIMENTS.keys(),
-)
-def test_a_broken_copy_of_the_synthetic_experiment_fails_the_records_check(
-    cli: Cli, breaking: Callable[[Path], object], problem: str
-) -> None:
-    # The records are checked before the experiment is found synthetic, which run doesn't resume.
-    cli.ready()
-    out, approve = synthetic_copy(cli)
-    breaking(out)
-
-    message = refused(cli, RANKING_REVISED, out, approve, "input.not_a_run", 3)
-
-    assert problem in message
-    assert not (out / "sessions/3").exists()
-
-
-@pytest.mark.parametrize(
     ("target", "listed"),
     UNKNOWN_RANKING_EXPERIMENT_SCHEMA_VERSIONS.values(),
     ids=UNKNOWN_RANKING_EXPERIMENT_SCHEMA_VERSIONS.keys(),
@@ -141,20 +125,6 @@ def test_a_record_0_4_0_adds_whose_schema_version_has_no_reader_fails_naming_it(
 
     assert f"`{path}`" in message
     assert "9.9.9" not in message
-    assert not (out / "sessions/3").exists()
-
-
-def test_an_unbroken_synthetic_experiment_passes_the_check_and_isnt_resumed(cli: Cli) -> None:
-    # So each break above is what fails the check.
-    cli.ready()
-    out, approve = synthetic_copy(cli)
-
-    message = refused(cli, RANKING_REVISED, out, approve, "output.not_empty", 4)
-
-    assert (
-        "The output directory holds a synthetic experiment, whose values are invented, and"
-        " trialfolio run doesn't resume one"
-    ) in message
     assert not (out / "sessions/3").exists()
 
 

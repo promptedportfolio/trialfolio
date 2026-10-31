@@ -5,13 +5,34 @@ each report with `html.parser`). It isn't a double: it replaces nothing.
 From release 0.4.0's R04-T13, it also parses the parts of a report of a ranking definition: its
 weights, its definition's source, and each attempt's exchanges, its `POST /rank` among them, with
 its cost (release 0.4.0, test pairing: the report parser).
+
+TS-T06 wrote here, once, the checks of the rules every kind of report keeps, R01-AC13's and, for a
+review's, R02-AC09's, each in the strictest form any kind's copy had, which each kind's test calls
+(docs/test-refactoring.md, finding 10): the concise notice, the full notice, the closing section,
+the links, that it runs and loads nothing, "Not assessed", that no case is called best, and that
+it renders again the same. Their expected values are written here by hand, or read from LICENSE,
+apart from the notices' text, which tests/contract/test_notices.py checks against the documents.
 """
 
-from collections.abc import Iterator
+import json
+import posixpath
+import re
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from itertools import pairwise
-from typing import override
+from pathlib import Path
+from typing import Final, override
+from urllib.parse import unquote, urlsplit
+
+from tests.support.paths import ROOT
+from trialfolio.notices import (
+    CONCISE_NOTICE,
+    FULL_NOTICE,
+    PORTFOLIO123_DATA_LABEL,
+    PORTFOLIO123_DATA_STATEMENT,
+)
+from trialfolio.report import FULL_NOTICE_ID
 
 VOID: frozenset[str] = frozenset(
     {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "wbr"}
@@ -88,6 +109,8 @@ class Document:
     """Each element's position in document order, by `id()`."""
     declarations: tuple[str, ...]
     comments: tuple[str, ...]
+    source: str
+    """The report as it was parsed."""
 
     def before(self, first: Element, second: Element) -> bool:
         return self.order[id(first)] < self.order[id(second)]
@@ -277,4 +300,178 @@ def parse(document: str) -> Document:
     parser.close()
     if parser.current is not parser.root:
         raise AssertionError(f"<{parser.current.tag}> is never closed")
-    return Document(parser.root, parser.order, tuple(parser.declarations), tuple(parser.comments))
+    return Document(
+        parser.root,
+        parser.order,
+        tuple(parser.declarations),
+        tuple(parser.comments),
+        document,
+    )
+
+
+# The rules every report keeps (R01-AC13, and R02-AC09 for a review's)
+
+LICENSE_NAME: Final = (ROOT / "LICENSE").read_text(encoding="utf-8").splitlines()[0]
+"""The license's name, as LICENSE's first line gives it."""
+LICENSE_ID: Final = "LicenseRef-NSPRL-1.1"
+NOTICE_VERSION: Final = "1.0"
+TERMS_URL: Final = "https://www.portfolio123.com/legal"
+"""Portfolio123's terms, one of the two outside links D-21 allows a report."""
+LOADERS: Final = ("script", "link", "iframe", "object", "embed", "img", "base", "form", "svg")
+"""The elements that could run or load something, none of which a report holds."""
+RANKING_WORDS: Final = re.compile(
+    r"[^.]*\b(?:best|better|worse|ranks?|ranked|top|winner|wins|outperforms?)\b[^.]*\.",
+    re.IGNORECASE,
+)
+"""A sentence with a word that could call a case best or rank it."""
+
+
+def license_link(version: str) -> str:
+    """The LICENSE published with Trial Folio `version`, by its tag: the other outside link D-21
+    allows a report."""
+    return f"https://github.com/promptedportfolio/trialfolio/blob/v{version}/LICENSE"
+
+
+def assert_concise_notice_first(document: Document) -> None:
+    """The concise notice, `#notice`, is the one paragraph with its text, before every section and
+    table, and its one link is to the full notice, in the page, a `<details>` element."""
+    notice = document.root.by_id("notice")
+    (paragraph,) = (p for p in document.root.find_all("p") if p.text == CONCISE_NOTICE)
+    (link,) = notice.find_all("a")
+
+    assert paragraph is notice
+    assert link.attrs["href"] == f"#{FULL_NOTICE_ID}"
+    assert document.root.by_id(FULL_NOTICE_ID).tag == "details"
+    for later in (*document.root.find_all("section"), *document.root.find_all("table")):
+        assert document.before(notice, later)
+
+
+def assert_full_notice(document: Document, version: str) -> None:
+    """The full notice is the one `<details>` element, with the full notice's paragraphs first, the
+    license's name and identifier, and the notice's version, and its one link is to the LICENSE
+    published with `version`, the version that rendered the report."""
+    (details,) = document.root.find_all("details")
+    paragraphs = [p.text for p in details.find_all("p")]
+
+    assert details is document.root.by_id(FULL_NOTICE_ID)
+    assert paragraphs[: len(FULL_NOTICE)] == list(FULL_NOTICE)
+    assert LICENSE_NAME in details.text
+    assert LICENSE_ID in details.text
+    assert f"Notice version {NOTICE_VERSION}." in details.text
+    assert [a.attrs["href"] for a in details.find_all("a")] == [license_link(version)]
+
+
+def assert_closing(document: Document) -> None:
+    """The closing section, `#closing`, is the one `<footer>`, after every section. It holds the
+    Portfolio123 data statement, whose one link is to Portfolio123's terms, and then the full
+    notice, outside which the statement is."""
+    (footer,) = document.root.find_all("footer")
+    (details,) = document.root.find_all("details")
+    (statement,) = (p for p in footer.find_all("p") if p.text.startswith(PORTFOLIO123_DATA_LABEL))
+    (terms,) = statement.find_all("a")
+
+    assert footer is document.root.by_id("closing")
+    assert statement.text == f"{PORTFOLIO123_DATA_LABEL} {PORTFOLIO123_DATA_STATEMENT}"
+    assert terms.text == "Portfolio123's terms"
+    assert terms.attrs["href"] == TERMS_URL
+    assert not statement.inside(details)
+    assert document.before(statement, details)
+    assert details.inside(footer)
+    for section in document.root.find_all("section"):
+        assert document.before(section, footer)
+
+
+def listed_files(root: Path, manifest: str) -> set[str]:
+    """The files a report links, by their paths in `root`, the directory of its run, review, or
+    experiment: the manifest at `manifest` in `root`, which lists the report, and each other file
+    it lists."""
+    content = json.loads((root / manifest).read_bytes())
+    return {manifest} | {a["path"] for a in content["artifacts"] if a["role"] != "report"}
+
+
+def assert_links(document: Document, version: str, report: Path, root: Path, manifest: str) -> None:
+    """The report at `report` links only these. Its outside links, those with a scheme or a host,
+    are the LICENSE published with `version` and Portfolio123's terms, each once. Each link in the
+    page names an element's ID. Each other link is a file in `root`, the directory of its run,
+    review, or experiment, by the path from the report's directory to `root`, then the file's path
+    in `root`, without an empty, `.`, or `..` part; and they're the files the manifest at
+    `manifest` in `root` lists, other than the report, and that manifest."""
+    hrefs = [a.attrs["href"] or "" for a in document.root.find_all("a")]
+    ids = {element.attrs.get("id") for element in document.root.iter()}
+    outside = [href for href in hrefs if urlsplit(href).scheme or urlsplit(href).netloc]
+    up = posixpath.relpath(root.resolve(), report.parent.resolve())
+    prefix = "" if up == "." else f"{up}/"
+
+    assert sorted(outside) == sorted([license_link(version), TERMS_URL])
+    linked: set[str] = set()
+    for href in hrefs:
+        if href in outside:
+            continue
+        if href.startswith("#"):
+            assert href[1:] in ids, href
+            continue
+        path = unquote(href)
+        assert path.startswith(prefix), href
+        path = path.removeprefix(prefix)
+        assert all(part not in ("", ".", "..") for part in path.split("/")), href
+        assert (root / path).is_file(), href
+        linked.add(path)
+    assert linked == listed_files(root, manifest)
+
+
+def assert_loads_nothing(document: Document) -> None:
+    """The report runs and loads nothing: it declares only `<!DOCTYPE html>`; it has none of the
+    `LOADERS`, no event attribute, no `src` or `style` attribute, and no `<meta http-equiv>`; its
+    one stylesheet loads and imports nothing; and no `<script` is in its text, a comment's
+    included."""
+    elements = list(document.root.iter())
+    (style,) = document.root.find_all("style")
+
+    assert document.declarations == ("DOCTYPE html",)
+    assert not [e for e in elements if e.tag in LOADERS]
+    assert not [name for e in elements for name in e.attrs if name.lower().startswith("on")]
+    assert not [e for e in elements if "src" in e.attrs or "style" in e.attrs]
+    assert not [e for e in elements if e.tag == "meta" and "http-equiv" in e.attrs]
+    assert not re.search(r"url\s*\(|@import", style.text, re.IGNORECASE)
+    assert "<script" not in document.source.lower()
+
+
+def assert_not_assessed(document: Document) -> None:
+    """Statistical validation and trading readiness read "Not assessed", in each list of facts that
+    names them and in their sections, and so does the section on robustness and concentration."""
+    assert set(document.dd("Statistical validation")) == {"Not assessed"}
+    assert set(document.dd("Trading readiness")) == {"Not assessed"}
+    assert "Statistical validation: Not assessed." in document.root.by_id("statistics").text
+    assert "Trading readiness: Not assessed." in document.root.by_id("feasibility").text
+    assert document.root.by_id("robustness").text.startswith(
+        "6. Robustness and concentration Not assessed."
+    )
+
+
+def assert_no_case_is_called_best(text: str, *allowed: str) -> list[str]:
+    """No sentence of `text`, a report's `<main>`, calls a case best or ranks it: each sentence with
+    one of the `RANKING_WORDS` says that no case is, or holds one of the phrases `allowed`, and at
+    least one says that no case is. Gives those sentences."""
+    said = RANKING_WORDS.findall(text)
+
+    assert any("no case" in sentence.lower() for sentence in said), said
+    assert all(
+        "no case" in sentence.lower() or any(phrase in sentence for phrase in allowed)
+        for sentence in said
+    ), said
+    return said
+
+
+def assert_renders_the_same_again(
+    html: str, render: Callable[[str], str], version: str, later: str
+) -> Document:
+    """`render`, given a version of Trial Folio, renders the report again: with `version`, it gives
+    `html`, byte for byte, and with `later`, a report that names `later` as the version that
+    rendered it, with the LICENSE published with it. Gives that report, parsed."""
+    assert render(version) == html
+    document = parse(render(later))
+
+    details = document.root.by_id(FULL_NOTICE_ID)
+    assert [a.attrs["href"] for a in details.find_all("a")] == [license_link(later)]
+    assert document.dd("Report rendered by") == [f"Trial Folio {later}"]
+    return document

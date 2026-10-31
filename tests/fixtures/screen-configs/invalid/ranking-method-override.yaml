@@ -1,5 +1,6 @@
 # Invalid: A ranking method override isn't supported.
 # Key: ranking
+# Value: 2
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

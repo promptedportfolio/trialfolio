@@ -1,5 +1,6 @@
 # Invalid: A number written as a string is rejected.
 # Key: slippage_percent
+# Value: -
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

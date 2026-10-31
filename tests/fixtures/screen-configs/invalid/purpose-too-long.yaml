@@ -1,5 +1,6 @@
 # Invalid: `purpose` has up to 2,000 characters.
 # Key: purpose
+# Value: -
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

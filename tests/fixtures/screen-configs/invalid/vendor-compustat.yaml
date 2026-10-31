@@ -1,5 +1,6 @@
 # Invalid: `data_vendor` is `FactSet` only (D-16).
 # Key: data_vendor
+# Value: Compustat
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

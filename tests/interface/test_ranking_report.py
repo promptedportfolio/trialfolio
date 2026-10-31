@@ -23,13 +23,16 @@ Traces to R04-AC06, as release 0.4.0's test pairing gives it for
   backtest's; and, in its limitations, that each definition is written into `ApiRankingSystem`
   before its backtest, and what the ranking lock can't exclude;
 - it never holds the definition's text, and it keeps R01-AC13's rules: the notices,
-  `LicenseRef-NSPRL-1.1`, no script or external resource, the two outside links, and the data
-  statement; and the synthetic run's and experiment's reports say their values are invented
-  (DSC-04).
+  `LicenseRef-NSPRL-1.1`, no script or external resource, the two outside links, the data
+  statement, and "Not assessed"; and the synthetic run's and experiment's reports say their
+  values are invented (DSC-04).
 
 `tests/core/test_ranking_report.py` checks the same at the core, with the exact wording R04-T11
 settled, which these checks repeat where a test needs it, with the lock's wording as R04-T13
 gives it.
+TS-T06 added the test of "Not assessed", which no test of a report with a definition made, and
+the checks of R01-AC13's rules are tests/support/html_report.py's, which every kind of report's
+tests call (docs/test-refactoring.md, finding 10).
 
 Each run, experiment, and snapshot is written once for the module, with `trialfolio run`, through
 the CLI's entry function in the test process, over a fake server of its own, with the fixed clock
@@ -47,7 +50,6 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, cast
-from urllib.parse import unquote, urlsplit
 
 import pytest
 
@@ -60,7 +62,20 @@ from tests.support.experiment_builder import (
     experiment_config,
 )
 from tests.support.fake_portfolio123 import AUTHENTICATED, FakePortfolio123, distinct, response
-from tests.support.html_report import AttemptShown, Document, Element, parse
+from tests.support.html_report import (
+    AttemptShown,
+    Document,
+    Element,
+    assert_closing,
+    assert_concise_notice_first,
+    assert_full_notice,
+    assert_links,
+    assert_loads_nothing,
+    assert_no_case_is_called_best,
+    assert_not_assessed,
+    listed_files,
+    parse,
+)
 from tests.support.paths import SCREEN_CONFIGS
 from tests.support.snapshot_builder import SnapshotBuilder, naming
 from tests.support.synthetic_experiment import (
@@ -68,17 +83,6 @@ from tests.support.synthetic_experiment import (
     SYNTHETIC_RUN_WITH_DEFINITION,
     write_synthetic_ranking_experiment,
 )
-from trialfolio.notices import (
-    CONCISE_NOTICE,
-    FULL_NOTICE,
-    PORTFOLIO123_DATA_LABEL,
-    PORTFOLIO123_DATA_STATEMENT,
-)
-
-ROOT: Final = Path(__file__).resolve().parents[2]
-LICENSE_NAME: Final = (ROOT / "LICENSE").read_text(encoding="utf-8").splitlines()[0]
-"""The license's name, as LICENSE's first line gives it."""
-TERMS_URL: Final = "https://www.portfolio123.com/legal"
 
 SCREEN: Final = SCREEN_CONFIGS / "definition.yaml"
 EXAMPLE: Final = experiment_config("ranking-example.yaml")
@@ -156,11 +160,6 @@ SYNTHETIC: Final = (
 )
 """A ranking definition's limitations, for a run or an experiment that sent its definitions, and
 for a synthetic one."""
-
-
-def license_url(version: str) -> str:
-    """The LICENSE published with `version`, by its tag."""
-    return f"https://github.com/promptedportfolio/trialfolio/blob/v{version}/LICENSE"
 
 
 @dataclass(frozen=True)
@@ -511,20 +510,11 @@ def test_no_case_is_called_best_or_ranked(reports: Reports, name: str) -> None:
         main = " ".join(prose(shown.document.root.find_all("main")[0]).split())
         # The budget cites Portfolio123's documentation of the call by its page's title.
         main = main.replace("API functions: Rank,", "")
-        said = re.findall(
-            r"[^.]*\b(?:best|better|worse|ranks?|ranked|top|winner|wins|outperforms?)\b[^.]*\.",
-            main,
-            re.IGNORECASE,
-        )
 
         # The conclusion and the weights' table say that no case is ranked or called best, and
         # nothing says otherwise: the only other sentences that rank are the method's, whose
         # backtest ranks by `ApiRankingSystem`'s name.
-        assert any("no case" in sentence.lower() for sentence in said)
-        assert all(
-            "no case" in sentence.lower() or "ranks by that system's name" in sentence
-            for sentence in said
-        ), said
+        assert_no_case_is_called_best(main, "ranks by that system's name")
 
 
 # The definition's source, the calls, and the limitations
@@ -673,22 +663,8 @@ def test_the_concise_notice_comes_first_and_links_to_the_full_notice_with_the_li
     reports: Reports, name: str
 ) -> None:
     for shown in reports(name):
-        document = shown.document
-        (notice,) = (p for p in document.root.find_all("p") if p.text == CONCISE_NOTICE)
-        (link,) = notice.find_all("a")
-        href = link.attrs["href"] or ""
-        full = document.root.by_id(href.removeprefix("#"))
-
-        assert href.startswith("#")
-        assert full.tag == "details"
-        for later in (*document.root.find_all("section"), *document.root.find_all("table")):
-            assert document.before(notice, later)
-        assert [p.text for p in full.find_all("p")][: len(FULL_NOTICE)] == list(FULL_NOTICE)
-        assert LICENSE_NAME in full.text
-        assert "LicenseRef-NSPRL-1.1" in full.text
-        assert "Notice version 1.0." in full.text
-        version = cast("str", shown.manifest["trialfolio_version"])
-        assert [a.attrs["href"] for a in full.find_all("a")] == [license_url(version)]
+        assert_concise_notice_first(shown.document)
+        assert_full_notice(shown.document, cast("str", shown.manifest["trialfolio_version"]))
 
 
 @pytest.mark.parametrize("name", EVERY)
@@ -696,18 +672,7 @@ def test_the_closing_section_holds_the_portfolio123_data_statement_outside_the_f
     reports: Reports, name: str
 ) -> None:
     for shown in reports(name):
-        document = shown.document
-        (details,) = document.root.find_all("details")
-        (footer,) = document.root.find_all("footer")
-        (statement,) = (
-            p for p in footer.find_all("p") if p.text.startswith(PORTFOLIO123_DATA_LABEL)
-        )
-        (terms,) = statement.find_all("a")
-
-        assert statement.text == f"{PORTFOLIO123_DATA_LABEL} {PORTFOLIO123_DATA_STATEMENT}"
-        assert not statement.inside(details)
-        assert document.before(statement, details)
-        assert terms.attrs["href"] == TERMS_URL
+        assert_closing(shown.document)
 
 
 @pytest.mark.parametrize("name", EVERY)
@@ -715,45 +680,28 @@ def test_its_only_outside_links_are_the_license_and_portfolio123s_terms(
     reports: Reports, name: str
 ) -> None:
     for shown in reports(name):
-        document = shown.document
-        hrefs = [a.attrs["href"] or "" for a in document.root.find_all("a")]
-        ids = {element.attrs.get("id") for element in document.root.iter()}
-        manifest = shown.manifest
-        directory = shown.path.parent
-        artifacts = cast("list[dict[str, str]]", manifest["artifacts"])
-        files = {
-            (shown.out / artifact["path"]).resolve()
-            for artifact in artifacts
-            if artifact["role"] != "report"
-        } | {shown.listed.resolve()}
+        version = cast("str", shown.manifest["trialfolio_version"])
+        manifest = shown.listed.relative_to(shown.out).as_posix()
 
-        outside = [href for href in hrefs if urlsplit(href).scheme or urlsplit(href).netloc]
-        version = cast("str", manifest["trialfolio_version"])
-        assert sorted(outside) == sorted([license_url(version), TERMS_URL])
-        linked: set[Path] = set()
-        for href in hrefs:
-            if href in outside:
-                continue
-            assert not href.startswith("/")
-            if href.startswith("#"):
-                assert href[1:] in ids
-            else:
-                linked.add((directory / unquote(href)).resolve())
         # Each file the manifest lists is linked, the definition's copy among them.
-        assert linked == files
-        assert any(path.name == "definition.xml" for path in linked)
+        assert_links(shown.document, version, shown.path, shown.out, manifest)
+        assert any(
+            Path(path).name == "definition.xml" for path in listed_files(shown.out, manifest)
+        )
 
 
 @pytest.mark.parametrize("name", EVERY)
 def test_it_runs_and_loads_nothing(reports: Reports, name: str) -> None:
     for shown in reports(name):
-        elements = list(shown.document.root.iter())
-        styles = " ".join(style.text for style in shown.document.root.find_all("style"))
+        assert_loads_nothing(shown.document)
 
-        assert not [e for e in elements if e.tag in ("script", "link", "iframe", "object", "img")]
-        assert not [name for e in elements for name in e.attrs if name.lower().startswith("on")]
-        assert not [e for e in elements if "src" in e.attrs]
-        assert not re.search(r"url\s*\(|@import", styles, re.IGNORECASE)
+
+@pytest.mark.parametrize("name", EVERY)
+def test_statistical_validation_and_trading_readiness_read_not_assessed(
+    reports: Reports, name: str
+) -> None:
+    for shown in reports(name):
+        assert_not_assessed(shown.document)
 
 
 # The synthetic run and experiment (DSC-04)

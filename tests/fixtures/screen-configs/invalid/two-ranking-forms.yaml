@@ -1,5 +1,6 @@
 # Invalid: `ranking` holds exactly one form.
 # Key: ranking
+# Value: 424242
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

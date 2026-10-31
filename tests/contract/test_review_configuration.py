@@ -17,6 +17,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from tests.support.contract_checks import (
+    Rejection,
+    assert_names_its_key_never_its_value,
+    contains_value,
+)
 from tests.support.paths import REVIEW_CONFIGS, SCREEN_CONFIGS
 from trialfolio.configuration import read_review_configuration
 from trialfolio.contracts.common import WINDOWS_DEVICE_NAMES
@@ -26,7 +31,6 @@ from trialfolio.contracts.review_configuration import (
     ReviewResult,
 )
 from trialfolio.contracts.screen_settings import DECLARABLE_SETTINGS
-from trialfolio.errors import TrialFolioError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INVALID = REVIEW_CONFIGS / "invalid"
@@ -83,15 +87,7 @@ def documented_example() -> str:
     return found.group(1)
 
 
-def rejection(content: bytes | str, source_name: str = "review.yaml") -> str:
-    """Reads `content`, expects `config.invalid`, and returns the message."""
-    if isinstance(content, str):
-        content = content.encode()
-    with pytest.raises(TrialFolioError) as caught:
-        read_review_configuration(content, source_name)
-    assert caught.value.code == "config.invalid"
-    assert caught.value.log_message == caught.value.message
-    return caught.value.message
+rejection = Rejection(read_review_configuration, "review.yaml")
 
 
 def with_line(old: str, new: str) -> str:
@@ -99,13 +95,6 @@ def with_line(old: str, new: str) -> str:
     example = documented_example()
     assert example.count(old) == 1, old
     return example.replace(old, new)
-
-
-def contains_value(message: str, value: str) -> bool:
-    """Whether `message` holds `value` as a whole, not inside a longer name: `max_holding` is
-    in `max_holding.` but not in `max_holdings`."""
-    word = r"[A-Za-z0-9_.-]"
-    return re.search(rf"(?<!{word}){re.escape(value)}(?!{word})", message) is not None
 
 
 def test_documented_example_is_valid() -> None:
@@ -136,27 +125,11 @@ def test_documented_example_is_valid() -> None:
     assert (REVIEW_CONFIGS / "example.yaml").read_text(encoding="utf-8") == documented_example()
 
 
-def header(content: str, name: str) -> str:
-    found = re.search(rf"^# {name}: (.+)$", content, re.MULTILINE)
-    assert found, f"no '# {name}:' line"
-    return found.group(1)
-
-
 @pytest.mark.parametrize("path", sorted(INVALID.glob("*.yaml")), ids=lambda path: path.stem)
 def test_invalid_configuration_is_rejected_naming_its_key_never_its_value(path: Path) -> None:
-    content = path.read_text(encoding="utf-8")
-    key, value = header(content, "Key"), header(content, "Value")
-
     message = rejection(path.read_bytes(), path.name)
 
-    assert message.startswith(f"{path.name} isn't a valid configuration:")
-    if key != "-":
-        assert f"`{key}`" in message
-    if value != "-":
-        assert not contains_value(message, value)
-    body = "\n".join(line for line in content.splitlines() if not line.startswith("#"))
-    for long_value in re.findall(r":[ \t]+'?([^'\n]{20,}?)'?$", body, re.MULTILINE):
-        assert long_value not in message
+    assert_names_its_key_never_its_value(path, message)
 
 
 def test_every_invalid_case_is_in_its_readme() -> None:

@@ -498,11 +498,12 @@ def unlist_record(out: Path, path: str) -> None:
     latest.write_bytes(_json_bytes(manifest))
 
 
-def _transport_changed(record: Json) -> None:
+def transport_changed(record: Json) -> None:
+    """Gives a start or attempt record another `urllib3` version."""
     record["transport"]["urllib3"] = "0.0.1"
 
 
-def _rank_update_status(status: int) -> Callable[[Json], None]:
+def rank_update_status(status: int) -> Callable[[Json], None]:
     """Gives a record's `POST /rank` exchange another status."""
 
     def change(record: Json) -> None:
@@ -516,7 +517,7 @@ def _backtest_after_a_failed_rank_update(record: Json) -> None:
     """Gives an attempt record's `POST /rank` exchange a 500, and no saved `rank_update`
     response, which follows only a 200, so the record shows a backtest sent after a `rank_update`
     that didn't get its 200, and nothing else wrong."""
-    _rank_update_status(500)(record)
+    rank_update_status(500)(record)
     record["ranking_update"]["response"] = None
 
 
@@ -543,13 +544,11 @@ BROKEN_RANKING_RUNS: Final[dict[str, tuple[Callable[[Path], None], str]]] = {
         "wrote its update record first",
     ),
     "an update record that disagrees with its start record": (
-        lambda run: edit_json(run, _run_attempt_file("updating.json")(run), _transport_changed),
+        lambda run: edit_json(run, _run_attempt_file("updating.json")(run), transport_changed),
         "doesn't hold the update record's values and exchanges",
     ),
     "a started.json whose exchanges don't end with POST /rank and its 200": (
-        lambda run: edit_json(
-            run, _run_attempt_file("started.json")(run), _rank_update_status(500)
-        ),
+        lambda run: edit_json(run, _run_attempt_file("started.json")(run), rank_update_status(500)),
         "isn't a valid start record",
     ),
     # The manifest's entry is updated to match, so only the attempt record's reference catches
@@ -662,7 +661,7 @@ BROKEN_RANKING_EXPERIMENTS: Final[dict[str, tuple[Callable[[Path], object], str]
     ),
     "an update record that disagrees with its start record": (
         lambda out: edit_record(
-            out, _experiment_attempt_file("value-heavy", "updating.json")(out), _transport_changed
+            out, _experiment_attempt_file("value-heavy", "updating.json")(out), transport_changed
         ),
         "the start record doesn't hold the update record's values",
     ),
@@ -670,7 +669,7 @@ BROKEN_RANKING_EXPERIMENTS: Final[dict[str, tuple[Callable[[Path], object], str]
         lambda out: edit_record(
             out,
             _experiment_attempt_file("value-heavy", "started.json")(out),
-            _rank_update_status(500),
+            rank_update_status(500),
         ),
         "isn't a valid start record",
     ),

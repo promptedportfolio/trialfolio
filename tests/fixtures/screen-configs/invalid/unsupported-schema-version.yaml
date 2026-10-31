@@ -1,5 +1,6 @@
 # Invalid: `schema_version` is a supported version.
 # Key: schema_version
+# Value: 2.0.0
 kind: screen
 schema_version: 2.0.0
 title: Earnings yield with a liquidity floor

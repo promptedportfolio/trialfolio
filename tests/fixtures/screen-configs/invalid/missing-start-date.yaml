@@ -1,5 +1,6 @@
 # Invalid: `start_date` is required.
 # Key: start_date
+# Value: -
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

@@ -1,5 +1,6 @@
 # Invalid: A string is never a boolean.
 # Key: ranking.lower_is_better
+# Value: false
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

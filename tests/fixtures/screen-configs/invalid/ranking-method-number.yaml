@@ -1,5 +1,6 @@
 # Invalid: `ranking_method` is one of its words, never the number `rank_update` sends.
 # Key: ranking.ranking_method
+# Value: 2
 kind: screen
 schema_version: 1.1.0
 title: Earnings yield with a liquidity floor

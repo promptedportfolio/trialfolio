@@ -5,7 +5,9 @@ Traces to release 0.4.0's test pairing: the snapshot example, `ranking-snapshot-
 example.yaml`, byte for byte (R04-AC08); and each file in tests/fixtures/ranking-snapshot-
 configs/invalid/, one for each rule of the snapshot configuration and of every configuration
 file, fails with `config.invalid`, and the message names the offending key, never its value (the
-invalid ranking cases). R04-T05 wrote them. `trialfolio run` takes a snapshot configuration from
+invalid ranking cases). R04-T05 wrote them. TS-T06 added the check, the other kinds' (docs/
+test-refactoring.md, copies that check less, item 6), that no value of 20 characters or more
+in the file is in the message. `trialfolio run` takes a snapshot configuration from
 R04-T10, which runs `misspelled-key.yaml` and `unquoted-system.yaml` through the CLI.
 """
 
@@ -14,10 +16,14 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.contract_checks import (
+    Rejection,
+    assert_names_its_key_never_its_value,
+    header,
+)
 from tests.support.paths import SCREEN_CONFIGS, SNAPSHOT_CONFIGS
 from trialfolio.configuration import read_ranking_snapshot_configuration, read_run_configuration
 from trialfolio.contracts.ranking_snapshot_configuration import RankingSnapshotConfiguration
-from trialfolio.errors import TrialFolioError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INVALID = SNAPSHOT_CONFIGS / "invalid"
@@ -37,21 +43,7 @@ def read(content: bytes | str) -> RankingSnapshotConfiguration:
     return read_ranking_snapshot_configuration(content, "snapshot.yaml")
 
 
-def rejection(content: bytes | str, source_name: str = "snapshot.yaml") -> str:
-    """Reads `content`, expects `config.invalid`, and returns the message."""
-    if isinstance(content, str):
-        content = content.encode()
-    with pytest.raises(TrialFolioError) as caught:
-        read_ranking_snapshot_configuration(content, source_name)
-    assert caught.value.code == "config.invalid"
-    assert caught.value.log_message == caught.value.message
-    return caught.value.message
-
-
-def header(content: str, name: str) -> str:
-    found = re.search(rf"^# {name}: (.+)$", content, re.MULTILINE)
-    assert found, f"no '# {name}:' line"
-    return found.group(1)
+rejection = Rejection(read_ranking_snapshot_configuration, "snapshot.yaml")
 
 
 def test_the_documented_example_reads_as_documented() -> None:
@@ -74,16 +66,12 @@ def test_each_fixture_reads(name: str, system: str) -> None:
 
 @pytest.mark.parametrize("path", sorted(INVALID.glob("*.yaml")), ids=lambda path: path.stem)
 def test_invalid_configuration_is_rejected_naming_its_key_never_its_value(path: Path) -> None:
-    content = path.read_text(encoding="utf-8")
-    key, value = header(content, "Key"), header(content, "Value")
-
     message = rejection(path.read_bytes(), path.name)
 
-    assert message.startswith(f"{path.name} isn't a valid configuration:")
-    if key != "-":
-        assert f"`{key}`" in message
-    if value != "-":
-        assert value not in message
+    assert_names_its_key_never_its_value(path, message)
+    # Nor is the value inside a longer name: no name a snapshot's message gives holds one.
+    value = header(path.read_text(encoding="utf-8"), "Value")
+    assert value == "-" or value not in message
 
 
 def test_every_invalid_case_is_in_its_readme() -> None:

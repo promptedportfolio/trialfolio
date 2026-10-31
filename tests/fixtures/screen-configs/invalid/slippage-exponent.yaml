@@ -1,5 +1,6 @@
 # Invalid: Plain notation: no exponent.
 # Key: slippage_percent
+# Value: 2.5e-1
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

@@ -18,31 +18,26 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
 
 import pytest
 
 from tests.support.cli import Cli
 from tests.support.fake_portfolio123 import serve_success
-from tests.support.html_report import Document, parse
+from tests.support.html_report import (
+    Document,
+    assert_closing,
+    assert_concise_notice_first,
+    assert_full_notice,
+    assert_links,
+    assert_loads_nothing,
+    assert_not_assessed,
+    parse,
+)
 from tests.support.paths import FIXTURES, screen_config
-from trialfolio.contracts.manifest import RunManifest
-from trialfolio.notices import (
-    CONCISE_NOTICE,
-    FULL_NOTICE,
-    PORTFOLIO123_DATA_LABEL,
-    PORTFOLIO123_DATA_STATEMENT,
-)
 
-ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = FIXTURES / "runs" / "synthetic-run-1.0.0"
-LICENSE_NAME = (ROOT / "LICENSE").read_text(encoding="utf-8").splitlines()[0]
-"""The license's name, as LICENSE's first line gives it."""
-LICENSE_URL = (
-    f"https://github.com/promptedportfolio/trialfolio/blob/v{version('trialfolio')}/LICENSE"
-)
-"""The LICENSE published with the version under test, by its tag."""
-TERMS_URL = "https://www.portfolio123.com/legal"
+VERSION = version("trialfolio")
+"""The version under test, which renders each report."""
 
 
 @dataclass(frozen=True)
@@ -100,74 +95,27 @@ def report(request: pytest.FixtureRequest, cli: Cli) -> Report:
 def test_the_concise_notice_comes_first_and_links_to_the_full_notice_in_a_details_element(
     report: Report,
 ) -> None:
-    document = report.document
-    (notice,) = (p for p in document.root.find_all("p") if p.text == CONCISE_NOTICE)
-    (link,) = notice.find_all("a")
-    href = link.attrs["href"] or ""
-    full = document.root.by_id(href.removeprefix("#"))
-
-    assert href.startswith("#")
-    assert full.tag == "details"
-    for later in (*document.root.find_all("section"), *document.root.find_all("table")):
-        assert document.before(notice, later)
-    assert [p.text for p in full.find_all("p")][: len(FULL_NOTICE)] == list(FULL_NOTICE)
-    assert LICENSE_NAME in full.text
-    assert "LicenseRef-NSPRL-1.1" in full.text
-    assert "Notice version 1.0." in full.text
-    assert [a.attrs["href"] for a in full.find_all("a")] == [LICENSE_URL]
+    assert_concise_notice_first(report.document)
+    assert_full_notice(report.document, VERSION)
 
 
 def test_the_closing_section_holds_the_portfolio123_data_statement_outside_the_full_notice(
     report: Report,
 ) -> None:
-    document = report.document
-    (details,) = document.root.find_all("details")
-    (footer,) = document.root.find_all("footer")
-    (statement,) = (p for p in footer.find_all("p") if p.text.startswith(PORTFOLIO123_DATA_LABEL))
-    (terms,) = statement.find_all("a")
-
-    assert statement.text == f"{PORTFOLIO123_DATA_LABEL} {PORTFOLIO123_DATA_STATEMENT}"
-    assert not statement.inside(details)
-    assert terms.text == "Portfolio123's terms"
-    assert terms.attrs["href"] == TERMS_URL
+    assert_closing(report.document)
 
 
 def test_its_only_outside_links_are_the_license_and_portfolio123s_terms(report: Report) -> None:
-    document = report.document
-    hrefs = [a.attrs["href"] or "" for a in document.root.find_all("a")]
-    ids = {element.attrs.get("id") for element in document.root.iter()}
-    manifest = RunManifest.model_validate_json((report.run / "manifest.json").read_bytes())
-    files = {
-        (report.run / artifact.path).resolve()
-        for artifact in manifest.artifacts
-        if artifact.role != "report"
-    } | {(report.run / "manifest.json").resolve()}
-
-    outside = [href for href in hrefs if urlsplit(href).scheme or urlsplit(href).netloc]
-    assert sorted(outside) == sorted([LICENSE_URL, TERMS_URL])
-    for href in hrefs:
-        if href in outside:
-            continue
-        assert not href.startswith("/")
-        if href.startswith("#"):
-            assert href[1:] in ids
-        else:
-            assert (report.out / unquote(href)).resolve() in files, href
+    # A report `trialfolio report` rendered elsewhere links the run's files from its own directory.
+    assert_links(report.document, VERSION, report.out / "report.html", report.run, "manifest.json")
 
 
 def test_it_runs_and_loads_nothing(report: Report) -> None:
-    elements = list(report.document.root.iter())
-    styles = " ".join(style.text for style in report.document.root.find_all("style"))
-
-    assert not [e for e in elements if e.tag in ("script", "link")]
-    assert not [name for e in elements for name in e.attrs if name.lower().startswith("on")]
-    assert not [e for e in elements if "src" in e.attrs]
-    assert not re.search(r"url\s*\(", styles, re.IGNORECASE)
+    assert_loads_nothing(report.document)
 
 
 def test_statistical_validation_and_trading_readiness_read_not_assessed(report: Report) -> None:
-    assert set(report.document.dd("Statistical validation")) == {"Not assessed"}
-    assert set(report.document.dd("Trading readiness")) == {"Not assessed"}
+    assert_not_assessed(report.document)
 
 
 # Unavailable metrics (R01-AC12)

@@ -6,19 +6,22 @@ exclude; it never shows the definition's text, and it orders, ranks, and marks n
 (docs/contracts.md, a ranking definition in a report).
 
 Traces to R04-AC06 at the core, with the exact wording R04-T11 settled; and to R01-AC13's rules,
-which a report with a definition keeps: the notices, `LicenseRef-NSPRL-1.1`, no script or
-external resource, the two outside links, and the data statement; and DSC-04, for the synthetic
-run's and experiment's. Each run and experiment is written through the core, with the real
-client, `requests`, and `urllib3` over the fake server, or with the demo's client for a synthetic
-one, with the fixed clock, and the ranking lock on a file in the test's temporary directory. The
-snapshot is the snapshot builder's, real `trialfolio run` output. Every expected value is written
-here by hand: the weights from the definitions' files, and the hashes from their bytes.
+which a report with a definition keeps: the notices, `LicenseRef-NSPRL-1.1`, no script or external
+resource, the two outside links, the data statement, and "Not assessed"; and DSC-04, for the
+synthetic run's and experiment's. TS-T06 added the test of "Not assessed", which no test of a
+report with a definition checked, and the strict form of the others, in
+tests/support/html_report.py (docs/test-refactoring.md, copies that check less, items 1, 2, and 4).
+Each run and experiment is written through the core, with the real client, `requests`, and
+`urllib3` over the fake server, or with the demo's client for a synthetic one, with the fixed
+clock, and the ranking lock on a file in the test's temporary directory. The snapshot is the
+snapshot builder's, real `trialfolio run` output. Every expected value is written here by hand: the
+weights from the definitions' files, and the hashes from their bytes.
 """
 
 import hashlib
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import pytest
 
@@ -32,7 +35,17 @@ from tests.support.fake_portfolio123 import (
     each_its_own,
     response,
 )
-from tests.support.html_report import Document, Element, parse
+from tests.support.html_report import (
+    Document,
+    Element,
+    assert_closing,
+    assert_concise_notice_first,
+    assert_full_notice,
+    assert_links,
+    assert_loads_nothing,
+    assert_not_assessed,
+    parse,
+)
 from tests.support.paths import EXPERIMENT_CONFIGS, RANKING_DEFINITIONS, RESPONSES, screen_config
 from tests.support.plans import ranked_experiment, ranked_screen
 from tests.support.snapshot_builder import SnapshotBuilder, naming
@@ -40,13 +53,6 @@ from trialfolio.contracts.manifest import CommandRecord
 from trialfolio.contracts.ranking_snapshot import RankingSnapshotRecord
 from trialfolio.demo import SyntheticScreenBacktestClient, response_bytes
 from trialfolio.execution import Execution
-from trialfolio.notices import (
-    CONCISE_NOTICE,
-    LICENSE_ID,
-    PORTFOLIO123_DATA_STATEMENT,
-    PORTFOLIO123_TERMS_URL,
-    license_url,
-)
 from trialfolio.planning import (
     installed_versions,
 )
@@ -610,44 +616,60 @@ def test_an_experiments_limitations_say_where_each_definition_is_written(
 # What every report with a definition holds
 
 
+@dataclass(frozen=True)
+class Report:
+    """A report with a definition, at `path`, in `root`, the directory of its run or experiment,
+    where `manifest` is the manifest that lists it."""
+
+    path: Path
+    root: Path
+    manifest: str
+
+    @property
+    def html(self) -> str:
+        return self.path.read_text(encoding="utf-8")
+
+
 @pytest.fixture
-def documents(tmp_path: Path, server: FakePortfolio123) -> list[tuple[str, Document]]:
-    """A run's report, and an experiment session's, each with a definition, as HTML text and
-    parsed."""
-    run = (write_run(tmp_path / "run", server) / "report.html").read_text(encoding="utf-8")
+def documents(tmp_path: Path, server: FakePortfolio123) -> list[Report]:
+    """A run's report, and an experiment session's, each with a definition."""
+    run = write_run(tmp_path / "run", server)
     fake = FakePortfolio123()
     try:
         experiment = write_experiment(tmp_path / "experiment", fake)
     finally:
         fake.close()
-    session = (experiment / "sessions/1/report.html").read_text(encoding="utf-8")
-    return [(run, parse(run)), (session, parse(session))]
+    return [
+        Report(run / "report.html", run, "manifest.json"),
+        Report(experiment / "sessions/1/report.html", experiment, "sessions/1/manifest.json"),
+    ]
 
 
-def test_a_report_never_holds_the_definitions_text(
-    documents: list[tuple[str, Document]],
-) -> None:
-    for html, _ in documents:
+def test_a_report_never_holds_the_definitions_text(documents: list[Report]) -> None:
+    for shown in documents:
         for part in ("&lt;RankingSystem", "&lt;Composite", "&lt;StockFormula", "RankType"):
-            assert part not in html
+            assert part not in shown.html
 
 
 def test_a_report_with_a_definition_keeps_the_notices_and_links_rules(
-    documents: list[tuple[str, Document]],
+    documents: list[Report],
 ) -> None:
-    for html, document in documents:
-        assert document.root.by_id("notice").text == CONCISE_NOTICE
-        assert LICENSE_ID in document.root.by_id("full-notice").text
-        assert PORTFOLIO123_DATA_STATEMENT in document.root.by_id("closing").text
-        assert "<script" not in html
-        assert not any(name.startswith("on") for e in document.root.iter() for name in e.attrs)
-        outside = {
-            href
-            for a in document.root.find_all("a")
-            if (href := a.attrs.get("href")) is not None and urlsplit(href).scheme
-        }
-        version = installed_versions().trialfolio
-        assert outside == {license_url(version), PORTFOLIO123_TERMS_URL}
+    version = installed_versions().trialfolio
+    for shown in documents:
+        document = parse(shown.html)
+
+        assert_concise_notice_first(document)
+        assert_full_notice(document, version)
+        assert_closing(document)
+        assert_links(document, version, shown.path, shown.root, shown.manifest)
+        assert_loads_nothing(document)
+
+
+def test_statistical_validation_and_trading_readiness_read_not_assessed(
+    documents: list[Report],
+) -> None:
+    for shown in documents:
+        assert_not_assessed(parse(shown.html))
 
 
 # Synthetic runs and experiments (DSC-04)

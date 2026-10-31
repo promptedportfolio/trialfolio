@@ -32,11 +32,11 @@ import hashlib
 import json
 from collections.abc import Callable
 from copy import deepcopy
-from typing import Any
 
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from tests.support.contract_checks import Change, Document, accepts, changed, digest, rejects
 from trialfolio.contracts.attempt import (
     AttemptRecordV1_2,
     AttemptRecordV1_3,
@@ -61,13 +61,6 @@ from trialfolio.contracts.tables import (
     SettingsRow,
     SettingsRowV1_1,
 )
-
-type Document = dict[str, Any]
-type Change = Callable[[Document], object]
-
-
-def digest(seed: str) -> str:
-    return "sha256:" + seed * 32
 
 
 def hash_of(definition: str) -> str:
@@ -1066,21 +1059,6 @@ IDS = [
     "settings-row-1.1.0",
     "differences-row-1.1.0",
 ]
-
-
-def changed(build: Callable[[], Document], change: Change) -> Document:
-    document = deepcopy(build())
-    change(document)
-    return document
-
-
-def accepts(model: type[BaseModel], document: Document) -> None:
-    model.model_validate_json(json.dumps(document))
-
-
-def rejects(model: type[BaseModel], document: Document) -> None:
-    with pytest.raises(ValidationError):
-        model.model_validate_json(json.dumps(document))
 
 
 @pytest.mark.parametrize(("model", "build"), VALID, ids=IDS)

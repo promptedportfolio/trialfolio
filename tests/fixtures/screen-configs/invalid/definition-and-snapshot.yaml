@@ -1,5 +1,6 @@
 # Invalid: `ranking` holds exactly one form: a definition or a snapshot, not both.
 # Key: ranking
+# Value: ../ranking-snapshots/value-momentum/
 kind: screen
 schema_version: 1.1.0
 title: Earnings yield with a liquidity floor

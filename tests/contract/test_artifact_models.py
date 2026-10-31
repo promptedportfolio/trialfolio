@@ -8,12 +8,11 @@ from JSON text, with `model_validate_json`.
 
 import json
 from collections.abc import Callable
-from copy import deepcopy
-from typing import Any
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
+from tests.support.contract_checks import Change, Document, changed, rejects
 from trialfolio.contracts.acknowledgment import AcknowledgmentRecord
 from trialfolio.contracts.attempt import AttemptRecord, StartRecord
 from trialfolio.contracts.manifest import RunManifest
@@ -28,9 +27,6 @@ from trialfolio.contracts.tables import (
     MetricsRow,
     SettingsRow,
 )
-
-type Document = dict[str, Any]
-type Change = Callable[[Document], object]
 
 PLAN_HASH = "sha256:" + "a1" * 32
 ARTIFACT_ID = "sha256:" + "b2" * 32
@@ -374,17 +370,6 @@ VALID: list[tuple[type[BaseModel], Callable[[], Document]]] = [
     (JsonSummary, summary),
     (AcknowledgmentRecord, acknowledgment),
 ]
-
-
-def changed(build: Callable[[], Document], change: Change) -> Document:
-    document = deepcopy(build())
-    change(document)
-    return document
-
-
-def rejects(model: type[BaseModel], document: Document) -> None:
-    with pytest.raises(ValidationError):
-        model.model_validate_json(json.dumps(document))
 
 
 @pytest.mark.parametrize(("model", "build"), VALID, ids=lambda item: getattr(item, "__name__", ""))

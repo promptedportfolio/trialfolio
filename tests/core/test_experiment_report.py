@@ -30,33 +30,33 @@ import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
 
 import pytest
 
 from tests.support.clock import STARTED
 from tests.support.experiment_lab import RELEASE_0_3_0, Lab, Ran
 from tests.support.fake_portfolio123 import AUTHENTICATED, FakePortfolio123, Reply, response
-from tests.support.html_report import Document, Element, parse
+from tests.support.html_report import (
+    Document,
+    Element,
+    assert_closing,
+    assert_concise_notice_first,
+    assert_full_notice,
+    assert_links,
+    assert_loads_nothing,
+    assert_no_case_is_called_best,
+    assert_not_assessed,
+    assert_renders_the_same_again,
+    parse,
+)
 from tests.support.paths import EXPERIMENT_CONFIGS, RESPONSES
 from trialfolio.contracts.experiment_manifest import ExperimentCommandRecord, ExperimentManifest
 from trialfolio.contracts.experiment_plan import PlanV1_1
 from trialfolio.errors import TrialFolioError
 from trialfolio.experiment_execution import ExperimentExecution, SessionStarted
 from trialfolio.experiment_repeats import Repeat
-from trialfolio.notices import (
-    CONCISE_NOTICE,
-    FULL_NOTICE,
-    LICENSE_ID,
-    LICENSE_NAME,
-    NOTICE_VERSION,
-    PORTFOLIO123_DATA_LABEL,
-    PORTFOLIO123_DATA_STATEMENT,
-    PORTFOLIO123_TERMS_URL,
-    license_url,
-)
 from trialfolio.planning import installed_versions
-from trialfolio.report import FULL_NOTICE_ID, ExperimentEvidence, HtmlReportRenderer
+from trialfolio.report import ExperimentEvidence, HtmlReportRenderer
 
 VERSION = installed_versions().trialfolio
 
@@ -341,15 +341,7 @@ NOTICES = ["completed", "troubled", "synthetic"]
 def test_the_concise_notice_comes_before_any_result_and_links_to_the_full_notice(
     sessions: Sessions, name: str
 ) -> None:
-    document = sessions(name)[-1].document
-    notice = document.root.by_id("notice")
-    (link,) = notice.find_all("a")
-
-    assert notice.text == CONCISE_NOTICE
-    assert link.attrs["href"] == f"#{FULL_NOTICE_ID}"
-    assert document.root.by_id(FULL_NOTICE_ID).tag == "details"
-    for later in (*document.root.find_all("section"), *document.root.find_all("table")):
-        assert document.before(notice, later)
+    assert_concise_notice_first(sessions(name)[-1].document)
 
 
 @pytest.mark.parametrize("name", NOTICES)
@@ -357,24 +349,9 @@ def test_the_data_statement_and_the_full_notice_with_the_license_close_the_repor
     sessions: Sessions, name: str
 ) -> None:
     document = sessions(name)[-1].document
-    closing = document.root.by_id("closing")
-    details = document.root.by_id(FULL_NOTICE_ID)
-    (statement,) = (p for p in closing.find_all("p") if p.text.startswith("Portfolio123 data."))
-    paragraphs = [p.text for p in details.find_all("p")]
 
-    assert statement.text == f"{PORTFOLIO123_DATA_LABEL} {PORTFOLIO123_DATA_STATEMENT}"
-    assert [a.attrs["href"] for a in statement.find_all("a")] == [PORTFOLIO123_TERMS_URL]
-    assert not statement.inside(details)
-    assert document.before(statement, details)
-    assert details.inside(closing)
-    assert paragraphs[: len(FULL_NOTICE)] == list(FULL_NOTICE)
-    assert LICENSE_NAME in details.text
-    assert LICENSE_ID == "LicenseRef-NSPRL-1.1"
-    assert LICENSE_ID in details.text
-    assert f"Notice version {NOTICE_VERSION}." in details.text
-    assert [a.attrs["href"] for a in details.find_all("a")] == [license_url(VERSION)]
-    for section in document.root.find_all("section"):
-        assert document.before(section, closing)
+    assert_closing(document)
+    assert_full_notice(document, VERSION)
 
 
 @pytest.mark.parametrize("name", NOTICES)
@@ -382,59 +359,27 @@ def test_its_links_are_the_two_outside_links_and_the_experiments_own_files(
     sessions: Sessions, name: str
 ) -> None:
     session = sessions(name)[-1]
-    document = session.document
-    hrefs = [a.attrs["href"] or "" for a in document.root.find_all("a")]
-    ids = {element.attrs.get("id") for element in document.root.iter()}
-    outside = {href for href in hrefs if urlsplit(href).scheme or urlsplit(href).netloc}
-    relative = [href for href in hrefs if href not in outside and not href.startswith("#")]
-    directory = session.out / "sessions" / str(session.number)
+    directory = f"sessions/{session.number}"
 
-    assert outside == {license_url(VERSION), PORTFOLIO123_TERMS_URL}
-    for href in hrefs:
-        if href.startswith("#"):
-            assert href[1:] in ids
-    linked: set[str] = set()
-    for href in relative:
-        assert not href.startswith("/")
-        assert href.startswith("../../")
-        target = (directory / unquote(href)).resolve()
-        assert target.is_file()
-        assert target.is_relative_to(session.out.resolve())
-        linked.add(target.relative_to(session.out.resolve()).as_posix())
-    assert linked == {
-        f"sessions/{session.number}/manifest.json",
-        *(a.path for a in session.manifest.artifacts if a.role != "report"),
-    }
+    assert_links(
+        session.document,
+        VERSION,
+        session.out / directory / "report.html",
+        session.out,
+        f"{directory}/manifest.json",
+    )
 
 
 @pytest.mark.parametrize("name", NOTICES)
 def test_it_runs_and_loads_nothing(sessions: Sessions, name: str) -> None:
-    document = sessions(name)[-1].document
-    elements = list(document.root.iter())
-    (style,) = document.root.find_all("style")
-
-    assert document.declarations == ("DOCTYPE html",)
-    assert not [e for e in elements if e.tag in ("script", "link", "iframe", "object", "embed")]
-    assert not [e for e in elements if e.tag in ("img", "base", "form", "svg")]
-    assert not [name for e in elements for name in e.attrs if name.startswith("on")]
-    assert not [e for e in elements if "src" in e.attrs or "style" in e.attrs]
-    assert not [e for e in elements if e.tag == "meta" and "http-equiv" in e.attrs]
-    assert not re.search(r"url\s*\(|@import", style.text, re.IGNORECASE)
+    assert_loads_nothing(sessions(name)[-1].document)
 
 
 @pytest.mark.parametrize("name", NOTICES)
 def test_statistical_validation_and_trading_readiness_read_not_assessed(
     sessions: Sessions, name: str
 ) -> None:
-    document = sessions(name)[-1].document
-
-    assert set(document.dd("Statistical validation")) == {"Not assessed"}
-    assert set(document.dd("Trading readiness")) == {"Not assessed"}
-    assert "Statistical validation: Not assessed." in document.root.by_id("statistics").text
-    assert "Trading readiness: Not assessed." in document.root.by_id("feasibility").text
-    assert document.root.by_id("robustness").text.startswith(
-        "6. Robustness and concentration Not assessed."
-    )
+    assert_not_assessed(sessions(name)[-1].document)
 
 
 def test_every_section_appears_in_order(sessions: Sessions) -> None:
@@ -831,6 +776,7 @@ def test_no_case_is_called_best_or_ranked(sessions: Sessions) -> None:
     for name in ("completed", "troubled"):
         main = sessions(name)[-1].document.root.find_all("main")[0].text
 
+        assert_no_case_is_called_best(main)
         assert re.findall(r"[^.]*\bbest\b[^.]*\.", main) == [
             " No case is ranked, selected, or called best."
         ]
@@ -1506,11 +1452,11 @@ def test_text_from_the_configuration_or_the_reason_cant_add_markup_or_reorder_wh
 def test_rendering_is_deterministic_and_names_its_version(sessions: Sessions) -> None:
     session = sessions("troubled")[1]
 
-    assert HtmlReportRenderer(VERSION).render_experiment(session.evidence) == session.html
-    later = parse(HtmlReportRenderer("0.4.1").render_experiment(session.evidence))
-    details = later.root.by_id(FULL_NOTICE_ID)
-    assert [a.attrs["href"] for a in details.find_all("a")] == [license_url("0.4.1")]
-    assert later.dd("Report rendered by") == ["Trial Folio 0.4.1"]
+    def render(version: str) -> str:
+        return HtmlReportRenderer(version).render_experiment(session.evidence)
+
+    later = assert_renders_the_same_again(session.html, render, VERSION, "0.4.1")
+
     assert later.dd("Session written by")[0].startswith(f"Trial Folio {VERSION},")
 
 
