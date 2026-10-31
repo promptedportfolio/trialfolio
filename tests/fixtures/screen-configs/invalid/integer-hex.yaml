@@ -1,5 +1,6 @@
 # Invalid: Integers have no base prefix.
 # Key: max_holdings
+# Value: 0x10
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

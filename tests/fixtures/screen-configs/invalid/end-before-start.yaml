@@ -1,5 +1,6 @@
 # Invalid: `end_date` is later than `start_date`.
 # Key: end_date
+# Value: 2015-12-31
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

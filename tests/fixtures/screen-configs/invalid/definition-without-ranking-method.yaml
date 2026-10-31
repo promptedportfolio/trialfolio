@@ -1,5 +1,6 @@
 # Invalid: `ranking_method` is required with `definition`.
 # Key: ranking.ranking_method
+# Value: -
 kind: screen
 schema_version: 1.1.0
 title: Earnings yield with a liquidity floor

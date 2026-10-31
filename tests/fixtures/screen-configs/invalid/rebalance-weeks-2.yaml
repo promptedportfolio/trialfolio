@@ -1,5 +1,6 @@
 # Invalid: `rebalance_weeks` is 1 or 4.
 # Key: rebalance_weeks
+# Value: 2
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

@@ -1,5 +1,6 @@
 # Invalid: `schema_version` is required.
 # Key: schema_version
+# Value: -
 kind: screen
 title: Earnings yield with a liquidity floor
 purpose: Reference backtest for the 0.1.0 response layout.

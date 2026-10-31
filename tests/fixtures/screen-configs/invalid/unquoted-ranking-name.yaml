@@ -1,5 +1,6 @@
 # Invalid: A ranking name is text Portfolio123 receives, written in quotes or as a block scalar.
 # Key: ranking.name
+# Value: Synthetic Value Composite
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

@@ -1,5 +1,6 @@
 # Invalid: Keys are text.
 # Key: -
+# Value: one
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

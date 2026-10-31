@@ -41,6 +41,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from tests.support.contract_checks import (
+    Rejection,
+    assert_names_its_key_never_its_value,
+    contains_value,
+)
 from tests.support.paths import EXPERIMENT_CONFIGS, SCREEN_CONFIGS, SNAPSHOT_CONFIGS
 from tests.support.snapshot_builder import SnapshotBuilder
 from trialfolio.configuration import (
@@ -83,19 +88,7 @@ def example() -> str:
     return documented_examples()[0]
 
 
-def rejection(
-    content: bytes | str,
-    source_name: str = "experiment.yaml",
-    reader: Callable[[bytes, str], object] = read_experiment_configuration,
-) -> str:
-    """Reads `content`, expects `config.invalid`, and returns the message."""
-    if isinstance(content, str):
-        content = content.encode()
-    with pytest.raises(TrialFolioError) as caught:
-        reader(content, source_name)
-    assert caught.value.code == "config.invalid"
-    assert caught.value.log_message == caught.value.message
-    return caught.value.message
+rejection = Rejection(read_experiment_configuration, "experiment.yaml")
 
 
 def with_line(old: str, new: str, text: str | None = None) -> str:
@@ -107,12 +100,6 @@ def with_line(old: str, new: str, text: str | None = None) -> str:
 
 def read(content: str) -> ExperimentConfiguration:
     return read_experiment_configuration(content.encode(), "experiment.yaml")
-
-
-def contains_value(message: str, value: str) -> bool:
-    """Whether `message` holds `value` as a whole, not inside a longer name."""
-    word = r"[A-Za-z0-9_.-]"
-    return re.search(rf"(?<!{word}){re.escape(value)}(?!{word})", message) is not None
 
 
 def resolved(screen: ScreenFields) -> tuple[str, str]:
@@ -190,16 +177,9 @@ def test_the_documented_example_reads_as_documented() -> None:
     assert variants[3].screen.slippage_percent == Decimal("0.5")
 
 
-def header(content: str, name: str) -> str:
-    found = re.search(rf"^# {name}: (.+)$", content, re.MULTILINE)
-    assert found, f"no '# {name}:' line"
-    return found.group(1)
-
-
 @pytest.mark.parametrize("path", sorted(INVALID.glob("*.yaml")), ids=lambda path: path.stem)
 def test_invalid_configuration_is_rejected_naming_its_key_never_its_value(path: Path) -> None:
     content = path.read_text(encoding="utf-8")
-    key, value = header(content, "Key"), header(content, "Value")
 
     message = rejection(
         path.read_bytes(),
@@ -207,17 +187,10 @@ def test_invalid_configuration_is_rejected_naming_its_key_never_its_value(path: 
         lambda content, name: read_experiment_configuration_v1_1(content, name, path),
     )
 
-    assert message.startswith(f"{path.name} isn't a valid configuration:")
-    if key != "-":
-        assert f"`{key}`" in message
-    if value != "-":
-        assert not contains_value(message, value)
+    assert_names_its_key_never_its_value(path, message)
     # A variant is named by its place, never by its key, which is the user's text.
     for variant_key in re.findall(r"^ *- key: (\S+)$", content, re.MULTILINE):
         assert not contains_value(message, variant_key)
-    body = "\n".join(line for line in content.splitlines() if not line.startswith("#"))
-    for long_value in re.findall(r":[ \t]+'?([^'\n]{20,}?)'?$", body, re.MULTILINE):
-        assert long_value not in message
 
 
 def test_every_invalid_case_is_in_its_readme() -> None:

@@ -1,5 +1,6 @@
 # Invalid: `lower_is_better` is allowed only with `formula`.
 # Key: ranking
+# Value: false
 kind: screen
 schema_version: 1.1.0
 title: Earnings yield with a liquidity floor

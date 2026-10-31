@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from tests.support.contract_checks import Change, Document, accepts, changed, digest, rejects
 from trialfolio.contracts.attempt import AttemptRecordV1_1, AuthenticationRecord, StartRecordV1_1
 from trialfolio.contracts.common import RevisionReason
 from trialfolio.contracts.experiment_manifest import ExperimentManifest
@@ -29,14 +30,6 @@ from trialfolio.contracts.experiment_plan import PlanV1_1, PlanVariant
 from trialfolio.contracts.experiment_record import ExperimentRecord, SessionRecord
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS
 from trialfolio.contracts.summary import JsonSummaryV1_2
-
-type Document = dict[str, Any]
-type Change = Callable[[Document], object]
-
-
-def digest(seed: str) -> str:
-    return "sha256:" + seed * 32
-
 
 PLAN_HASH = digest("a1")
 EARLIER_PLAN = digest("a0")
@@ -593,21 +586,6 @@ IDS = [
     "manifest",
     "summary",
 ]
-
-
-def changed(build: Callable[[], Document], change: Change) -> Document:
-    document = deepcopy(build())
-    change(document)
-    return document
-
-
-def accepts(model: type[BaseModel], document: Document) -> None:
-    model.model_validate_json(json.dumps(document))
-
-
-def rejects(model: type[BaseModel], document: Document) -> None:
-    with pytest.raises(ValidationError):
-        model.model_validate_json(json.dumps(document))
 
 
 @pytest.mark.parametrize(("model", "build"), VALID, ids=IDS)

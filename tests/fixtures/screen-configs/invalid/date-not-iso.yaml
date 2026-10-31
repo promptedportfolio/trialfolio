@@ -1,5 +1,6 @@
 # Invalid: A date as a string is exactly `YYYY-MM-DD`.
 # Key: start_date
+# Value: 2016/01/01
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

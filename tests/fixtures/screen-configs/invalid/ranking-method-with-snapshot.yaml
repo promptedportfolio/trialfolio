@@ -1,5 +1,6 @@
 # Invalid: `ranking_method` is allowed only with `definition`: a snapshot records its system's ranking method.
 # Key: ranking
+# Value: percentile_nas_negative
 kind: screen
 schema_version: 1.1.0
 title: Earnings yield with a liquidity floor

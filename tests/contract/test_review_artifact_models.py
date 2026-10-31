@@ -9,23 +9,14 @@ from JSON text, with `model_validate_json`.
 
 import json
 from collections.abc import Callable
-from copy import deepcopy
-from typing import Any
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
+from tests.support.contract_checks import Change, Document, accepts, changed, digest, rejects
 from trialfolio.contracts.review_manifest import ReviewManifest
 from trialfolio.contracts.summary import JsonSummaryV1_1
 from trialfolio.contracts.tables import DIFFERENCES_COLUMNS, DifferencesRow
-
-type Document = dict[str, Any]
-type Change = Callable[[Document], object]
-
-
-def digest(seed: str) -> str:
-    return "sha256:" + seed * 32
-
 
 REVIEW_ID = "6f1c2a3b-4d5e-4f60-8a71-b2c3d4e5f607"
 CASE_ID = "case-0123456789abcdef"
@@ -200,21 +191,6 @@ VALID: list[tuple[type[BaseModel], Callable[[], Document]]] = [
     (DifferencesRow, metric_row),
     (JsonSummaryV1_1, summary),
 ]
-
-
-def changed(build: Callable[[], Document], change: Change) -> Document:
-    document = deepcopy(build())
-    change(document)
-    return document
-
-
-def accepts(model: type[BaseModel], document: Document) -> None:
-    model.model_validate_json(json.dumps(document))
-
-
-def rejects(model: type[BaseModel], document: Document) -> None:
-    with pytest.raises(ValidationError):
-        model.model_validate_json(json.dumps(document))
 
 
 @pytest.mark.parametrize(("model", "build"), VALID, ids=lambda item: getattr(item, "__name__", ""))

@@ -1,5 +1,6 @@
 # Invalid: Integers are plain decimal digits; a YAML 1.1 loader reads `1:30` as 90.
 # Key: max_holdings
+# Value: 1:30
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

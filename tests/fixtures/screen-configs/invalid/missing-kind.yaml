@@ -1,5 +1,6 @@
 # Invalid: `kind` is required.
 # Key: kind
+# Value: -
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor
 purpose: Reference backtest for the 0.1.0 response layout.

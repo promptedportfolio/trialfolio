@@ -14,7 +14,11 @@ restart skips complete cases and flags an attempt with uncertain completion, whi
 R03-AC07 (an approved revision gives the changed case a new identity and keeps the old one),
 R03-AC08 (the counts add up), R03-AC14 (execution given a repeat checks it, and never asks),
 R03-AC17 (records that are incomplete or changed fail with `input.not_a_run`, and send and write
-nothing), and R03-AC18 (a resume writes the tables a stopped run didn't). The real client,
+nothing), and R03-AC18 (a resume writes the tables a stopped run didn't); and, for the records
+check's cases whose IDs name it, to R04-AC12 (an experiment's records with a ranking definition
+that are incomplete or changed fail the same), as tests/core/test_ranking_resume.py traced it
+until TS-T06 made its test of them cases of this module's (docs/test-refactoring.md, copies that
+check less, item 7). The real client,
 `requests`, and `urllib3` run over the fake server; storage faults wrap the real store; the clock is
 fixed.
 
@@ -24,7 +28,9 @@ the demo's client given an experiment that isn't synthetic, is `trialfolio run`'
 experiment builder through the CLI's entry function (R03-AC17's pairing). The records check's
 breaks are made with the editors of `tests/support/broken_runs.py`, which TS-T05 moved there from
 this module: each edit updates the latest manifest's entry, and, for a plan's file, the
-`artifact_id` each `experiment.json` records, so only the check under test can tell.
+`artifact_id` each `experiment.json` records, so only the check under test can tell. Its breaks of
+an experiment with a ranking definition, R04-AC12's, are tests/support/ranking_records.py's, of
+`ranking-example.yaml`'s experiment, which the lab reads as release 0.4.0 does.
 """
 
 import json
@@ -32,6 +38,7 @@ import logging
 import shutil
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
@@ -48,7 +55,7 @@ from tests.support.cli import Cli
 from tests.support.clock import FixedClock
 from tests.support.directories import snapshot
 from tests.support.experiment_builder import ExperimentBuilder
-from tests.support.experiment_lab import RELEASE_0_3_0, Lab
+from tests.support.experiment_lab import RELEASE_0_3_0, RELEASE_0_4_0, Lab, Reader
 from tests.support.fake_portfolio123 import (
     AUTH,
     AUTHENTICATED,
@@ -60,6 +67,7 @@ from tests.support.fake_portfolio123 import (
 )
 from tests.support.paths import EXPERIMENT_CONFIGS, RESPONSES
 from tests.support.plans import case_ids, experiment_plan
+from tests.support.ranking_records import RANKING_BREAKS, completed_ranking_example
 from tests.support.storage_faults import StorageFaults
 from trialfolio.canonical import sha256_hex
 from trialfolio.contracts.attempt import AttemptRecordV1_1
@@ -1559,17 +1567,49 @@ BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
 }
 
 
-@pytest.mark.parametrize("name", sorted(BREAKS))
-def test_records_that_are_broken_fail_the_check_and_nothing_is_written(lab: Lab, name: str) -> None:
-    _completed(lab)
-    breaking, problem = BREAKS[name]
+@dataclass(frozen=True)
+class Checked:
+    """An experiment whose records a test breaks: the release whose reader the lab reads it with,
+    how the lab completes it, and the configuration a resume reads, or None for its own."""
+
+    reader: Reader
+    completed: Callable[[Lab], None]
+    resumed_with: str | None
+
+
+CHECKED: Final = {
+    "R03-AC17": Checked(RELEASE_0_3_0, _completed, "revisions/key-renamed.yaml"),
+    "R04-AC12": Checked(RELEASE_0_4_0, completed_ranking_example, None),
+}
+"""`example.yaml`'s experiment, and `ranking-example.yaml`'s, with a ranking definition, by the
+criterion their records check traces to."""
+
+BROKEN_RECORDS: Final = [
+    pytest.param(CHECKED[criterion], *breaks[name], id=f"{criterion}-{name}")
+    for criterion, breaks in (("R03-AC17", BREAKS), ("R04-AC12", RANKING_BREAKS))
+    for name in sorted(breaks)
+]
+"""Each break of each experiment, with the problem the check's message gives for it."""
+
+
+@pytest.mark.parametrize(("checked", "breaking", "problem"), BROKEN_RECORDS)
+def test_records_that_are_broken_fail_the_check_and_nothing_is_written(
+    tmp_path: Path,
+    server: FakePortfolio123,
+    monkeypatch: pytest.MonkeyPatch,
+    checked: Checked,
+    breaking: Callable[[Path], object],
+    problem: str,
+) -> None:
+    lab = Lab(tmp_path, server, monkeypatch, reader=checked.reader, catch=True)
+    checked.completed(lab)
     breaking(lab.out)
     before = snapshot(lab.out)
 
-    ran = lab.resume("revisions/key-renamed.yaml")
+    ran = lab.resume(checked.resumed_with)
 
     error = ran.refused("input.not_a_run")
-    assert problem in error.message
+    assert problem in error.message, error.message
     assert ran.received == () and ran.published == ()
     assert snapshot(lab.out) == before
 

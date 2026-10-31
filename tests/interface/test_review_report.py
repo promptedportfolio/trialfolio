@@ -24,34 +24,31 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
 
 import pytest
 
 from tests.support.cli import Cli
 from tests.support.fake_portfolio123 import FakePortfolio123
-from tests.support.html_report import Document, Element, parse
+from tests.support.html_report import (
+    Document,
+    Element,
+    assert_closing,
+    assert_concise_notice_first,
+    assert_full_notice,
+    assert_links,
+    assert_loads_nothing,
+    assert_not_assessed,
+    parse,
+)
 from trialfolio.configuration import read_review_configuration
 from trialfolio.contracts.manifest import RunManifest
 from trialfolio.contracts.review_configuration import ReviewConfiguration
 from trialfolio.contracts.review_manifest import ReviewManifest
 from trialfolio.contracts.tables import MetricsRow
-from trialfolio.notices import (
-    CONCISE_NOTICE,
-    FULL_NOTICE,
-    PORTFOLIO123_DATA_LABEL,
-    PORTFOLIO123_DATA_STATEMENT,
-)
 from trialfolio.tables import read_metrics_csv, read_settings_csv
 
-ROOT = Path(__file__).resolve().parents[2]
-LICENSE_NAME = (ROOT / "LICENSE").read_text(encoding="utf-8").splitlines()[0]
-"""The license's name, as LICENSE's first line gives it."""
-LICENSE_URL = (
-    f"https://github.com/promptedportfolio/trialfolio/blob/v{version('trialfolio')}/LICENSE"
-)
-"""The LICENSE published with the version under test, by its tag."""
-TERMS_URL = "https://www.portfolio123.com/legal"
+VERSION = version("trialfolio")
+"""The version under test, which renders each report."""
 
 BENCHMARK_RELATIVE = [
     ("strategy", "correlation"),
@@ -177,38 +174,16 @@ def test_the_concise_notice_comes_first_and_links_to_the_full_notice_in_a_detail
     review: Review, name: str
 ) -> None:
     document = review(name).document
-    (notice,) = (p for p in document.root.find_all("p") if p.text == CONCISE_NOTICE)
-    (link,) = notice.find_all("a")
-    href = link.attrs["href"] or ""
-    full = document.root.by_id(href.removeprefix("#"))
 
-    assert href.startswith("#")
-    assert full.tag == "details"
-    for later in (*document.root.find_all("section"), *document.root.find_all("table")):
-        assert document.before(notice, later)
-    assert [p.text for p in full.find_all("p")][: len(FULL_NOTICE)] == list(FULL_NOTICE)
-    assert LICENSE_NAME in full.text
-    assert "LicenseRef-NSPRL-1.1" in full.text
-    assert "Notice version 1.0." in full.text
-    assert [a.attrs["href"] for a in full.find_all("a")] == [LICENSE_URL]
+    assert_concise_notice_first(document)
+    assert_full_notice(document, VERSION)
 
 
 @NOTICES
 def test_the_closing_section_holds_the_portfolio123_data_statement_outside_the_full_notice(
     review: Review, name: str
 ) -> None:
-    document = review(name).document
-    (details,) = document.root.find_all("details")
-    (footer,) = document.root.find_all("footer")
-    (statement,) = (p for p in footer.find_all("p") if p.text.startswith(PORTFOLIO123_DATA_LABEL))
-    (terms,) = statement.find_all("a")
-
-    assert statement.text == f"{PORTFOLIO123_DATA_LABEL} {PORTFOLIO123_DATA_STATEMENT}"
-    assert not statement.inside(details)
-    assert terms.text == "Portfolio123's terms"
-    assert terms.attrs["href"] == TERMS_URL
-    for section in document.root.find_all("section"):
-        assert document.before(section, footer)
+    assert_closing(review(name).document)
 
 
 @NOTICES
@@ -216,26 +191,11 @@ def test_its_only_links_are_the_two_outside_links_and_the_reviews_own_files(
     review: Review, name: str
 ) -> None:
     reviewed = review(name)
-    document = reviewed.document
-    hrefs = [a.attrs["href"] or "" for a in document.root.find_all("a")]
-    ids = {element.attrs.get("id") for element in document.root.iter()}
-    listed = {"manifest.json"} | {
-        artifact.path for artifact in reviewed.manifest.artifacts if artifact.role != "report"
-    }
 
-    outside = [href for href in hrefs if urlsplit(href).scheme or urlsplit(href).netloc]
-    assert sorted(outside) == sorted([LICENSE_URL, TERMS_URL])
-    relative = [href for href in hrefs if href not in outside and not href.startswith("#")]
-    for href in hrefs:
-        if href.startswith("#"):
-            assert href[1:] in ids
-    for href in relative:
-        # A path in the review: never one that leaves it, so none reaches a run.
-        assert not href.startswith("/")
-        assert ".." not in href.split("/")
-        assert unquote(href) in listed, href
-        assert (reviewed.out / unquote(href)).resolve().is_file()
-    assert {unquote(href) for href in relative} == listed
+    # A path in the review: never one that leaves it, so none reaches a run.
+    assert_links(
+        reviewed.document, VERSION, reviewed.out / "report.html", reviewed.out, "manifest.json"
+    )
 
 
 @NOTICES
@@ -250,24 +210,14 @@ def test_no_run_path_and_no_path_of_the_command_appears(review: Review, name: st
 
 @NOTICES
 def test_it_runs_and_loads_nothing(review: Review, name: str) -> None:
-    document = review(name).document
-    elements = list(document.root.iter())
-    styles = " ".join(style.text for style in document.root.find_all("style"))
-
-    assert not [e for e in elements if e.tag in ("script", "link")]
-    assert not [name for e in elements for name in e.attrs if name.lower().startswith("on")]
-    assert not [e for e in elements if "src" in e.attrs]
-    assert not re.search(r"url\s*\(", styles, re.IGNORECASE)
+    assert_loads_nothing(review(name).document)
 
 
 @NOTICES
 def test_statistical_validation_and_trading_readiness_read_not_assessed(
     review: Review, name: str
 ) -> None:
-    document = review(name).document
-
-    assert set(document.dd("Statistical validation")) == {"Not assessed"}
-    assert set(document.dd("Trading readiness")) == {"Not assessed"}
+    assert_not_assessed(review(name).document)
 
 
 # Benchmarks (R02-AC03)

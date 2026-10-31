@@ -1,5 +1,6 @@
 # Invalid: The universe is text Portfolio123 receives, written in quotes or as a block scalar.
 # Key: universe
+# Value: SP500
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

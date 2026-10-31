@@ -1,5 +1,6 @@
 # Invalid: A boolean is never a number.
 # Key: max_holdings
+# Value: true
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

@@ -1,5 +1,6 @@
 # Invalid: A ranking ID is a positive integer.
 # Key: ranking.id
+# Value: 0
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

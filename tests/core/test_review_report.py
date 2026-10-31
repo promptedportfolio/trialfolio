@@ -29,14 +29,24 @@ import shutil
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
 from uuid import UUID
 
 import pytest
 
 from tests.support.clock import STARTED
 from tests.support.fake_portfolio123 import Reply
-from tests.support.html_report import Document, Element, parse
+from tests.support.html_report import (
+    Document,
+    Element,
+    assert_closing,
+    assert_concise_notice_first,
+    assert_full_notice,
+    assert_links,
+    assert_loads_nothing,
+    assert_not_assessed,
+    assert_renders_the_same_again,
+    parse,
+)
 from tests.support.run_builder import Run, RunBuilder
 from trialfolio.configuration import read_review_configuration
 from trialfolio.contracts.manifest_parts import SourceRecord
@@ -52,19 +62,8 @@ from trialfolio.contracts.review_manifest import (
 )
 from trialfolio.contracts.tables import DifferencesRow, DifferencesRowV1_1
 from trialfolio.differences import DIFFERENCES_PATH, METHOD, ComparedRun, Differences, compare
-from trialfolio.notices import (
-    CONCISE_NOTICE,
-    FULL_NOTICE,
-    LICENSE_ID,
-    LICENSE_NAME,
-    NOTICE_VERSION,
-    PORTFOLIO123_DATA_LABEL,
-    PORTFOLIO123_DATA_STATEMENT,
-    PORTFOLIO123_TERMS_URL,
-    license_url,
-)
+from trialfolio.notices import LICENSE_ID, NOTICE_VERSION
 from trialfolio.report import (
-    FULL_NOTICE_ID,
     REPORT_PATH,
     HtmlReportRenderer,
     ReviewEvidence,
@@ -262,15 +261,7 @@ NOTICES = ["example.yaml", "synthetic.yaml"]
 def test_the_concise_notice_comes_before_any_result_and_links_to_the_full_notice(
     review: Review, name: str
 ) -> None:
-    document = review(name).document
-    notice = document.root.by_id("notice")
-    (link,) = notice.find_all("a")
-
-    assert notice.text == CONCISE_NOTICE
-    assert link.attrs["href"] == f"#{FULL_NOTICE_ID}"
-    assert document.root.by_id(FULL_NOTICE_ID).tag == "details"
-    for later in (*document.root.find_all("section"), *document.root.find_all("table")):
-        assert document.before(notice, later)
+    assert_concise_notice_first(review(name).document)
 
 
 @pytest.mark.parametrize("name", NOTICES)
@@ -278,23 +269,9 @@ def test_the_data_statement_and_the_full_notice_with_the_license_close_the_repor
     review: Review, name: str
 ) -> None:
     document = review(name).document
-    closing = document.root.by_id("closing")
-    details = document.root.by_id(FULL_NOTICE_ID)
-    (statement,) = (p for p in closing.find_all("p") if p.text.startswith("Portfolio123 data."))
-    paragraphs = [p.text for p in details.find_all("p")]
 
-    assert statement.text == f"{PORTFOLIO123_DATA_LABEL} {PORTFOLIO123_DATA_STATEMENT}"
-    assert [a.attrs["href"] for a in statement.find_all("a")] == [PORTFOLIO123_TERMS_URL]
-    assert not statement.inside(details)
-    assert document.before(statement, details)
-    assert details.inside(closing)
-    assert paragraphs[: len(FULL_NOTICE)] == list(FULL_NOTICE)
-    assert LICENSE_NAME in details.text
-    assert LICENSE_ID in details.text
-    assert f"Notice version {NOTICE_VERSION}." in details.text
-    assert [a.attrs["href"] for a in details.find_all("a")] == [license_url(VERSION)]
-    for section in document.root.find_all("section"):
-        assert document.before(section, closing)
+    assert_closing(document)
+    assert_full_notice(document, VERSION)
 
 
 @pytest.mark.parametrize("name", NOTICES)
@@ -302,26 +279,8 @@ def test_its_links_are_the_two_outside_links_and_the_reviews_own_files(
     review: Review, name: str
 ) -> None:
     written = review(name)
-    document = written.document
-    hrefs = [a.attrs["href"] or "" for a in document.root.find_all("a")]
-    ids = {element.attrs.get("id") for element in document.root.iter()}
-    outside = {href for href in hrefs if urlsplit(href).scheme or urlsplit(href).netloc}
-    relative = [href for href in hrefs if href not in outside and not href.startswith("#")]
 
-    assert outside == {license_url(VERSION), PORTFOLIO123_TERMS_URL}
-    for href in hrefs:
-        if href.startswith("#"):
-            assert href[1:] in ids
-    for href in relative:
-        assert not href.startswith("/")
-        assert ".." not in href.split("/")
-        target = (written.out / unquote(href)).resolve()
-        assert target.is_file()
-        assert target.is_relative_to(written.out.resolve())
-    assert {unquote(href) for href in relative} == {
-        MANIFEST_PATH,
-        *(artifact.path for artifact in written.manifest.artifacts if artifact.role != "report"),
-    }
+    assert_links(written.document, VERSION, written.out / REPORT_PATH, written.out, MANIFEST_PATH)
 
 
 @pytest.mark.parametrize("name", NOTICES)
@@ -338,32 +297,14 @@ def test_no_run_path_appears(review: Review, name: str) -> None:
     "name", ["example.yaml", "synthetic.yaml", "without-tables.yaml", "shared-response.yaml"]
 )
 def test_it_runs_and_loads_nothing(review: Review, name: str) -> None:
-    document = review(name).document
-    elements = list(document.root.iter())
-    (style,) = document.root.find_all("style")
-
-    assert document.declarations == ("DOCTYPE html",)
-    assert not [e for e in elements if e.tag in ("script", "link", "iframe", "object", "embed")]
-    assert not [e for e in elements if e.tag in ("img", "base", "form", "svg")]
-    assert not [name for e in elements for name in e.attrs if name.startswith("on")]
-    assert not [e for e in elements if "src" in e.attrs or "style" in e.attrs]
-    assert not [e for e in elements if e.tag == "meta" and "http-equiv" in e.attrs]
-    assert not re.search(r"url\s*\(|@import", style.text, re.IGNORECASE)
+    assert_loads_nothing(review(name).document)
 
 
 @pytest.mark.parametrize("name", NOTICES)
 def test_statistical_validation_and_trading_readiness_read_not_assessed(
     review: Review, name: str
 ) -> None:
-    document = review(name).document
-
-    assert set(document.dd("Statistical validation")) == {"Not assessed"}
-    assert set(document.dd("Trading readiness")) == {"Not assessed"}
-    assert "Statistical validation: Not assessed." in document.root.by_id("statistics").text
-    assert "Trading readiness: Not assessed." in document.root.by_id("feasibility").text
-    assert document.root.by_id("robustness").text.startswith(
-        "6. Robustness and concentration Not assessed."
-    )
+    assert_not_assessed(review(name).document)
 
 
 def test_every_section_appears_in_order_and_says_what_it_cant_support(review: Review) -> None:
@@ -975,11 +916,11 @@ def test_text_from_the_configuration_or_portfolio123_cant_add_markup_or_reorder_
 def test_rendering_is_deterministic_and_names_its_version(review: Review) -> None:
     written = review("example.yaml")
 
-    assert HtmlReportRenderer(VERSION).render_review(written.evidence) == written.html
-    later = parse(HtmlReportRenderer("0.3.1").render_review(written.evidence))
-    details = later.root.by_id(FULL_NOTICE_ID)
-    assert [a.attrs["href"] for a in details.find_all("a")] == [license_url("0.3.1")]
-    assert later.dd("Report rendered by") == ["Trial Folio 0.3.1"]
+    def render(version: str) -> str:
+        return HtmlReportRenderer(version).render_review(written.evidence)
+
+    later = assert_renders_the_same_again(written.html, render, VERSION, "0.3.1")
+
     assert later.dd("Review ID") == [str(REVIEW_ID)]
     assert later.dd("Method") == ["screen-run-differences version 1"]
 

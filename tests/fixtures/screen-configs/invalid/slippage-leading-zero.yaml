@@ -1,5 +1,6 @@
 # Invalid: Plain notation: no leading zero before another digit.
 # Key: slippage_percent
+# Value: 00.25
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

@@ -1,5 +1,6 @@
 # Invalid: Dates have no time part.
 # Key: start_date
+# Value: 2016-01-01 09:30:00
 kind: screen
 schema_version: 1.0.0
 title: Earnings yield with a liquidity floor

@@ -2,7 +2,10 @@
 
 Traces to R01-AC02, R01-AC09, and R01-AC11 (Compustat) in release 0.1.0's test pairing, and to
 the configuration file rules in docs/contracts.md. The fixtures are in
-tests/fixtures/screen-configs/. `test_documented_example_resolves_to_reference_request` traces to
+tests/fixtures/screen-configs/. Since TS-T06, each invalid file's message never holds the value
+on its `# Value:` line, or any value of 20 characters or more in the file, and a refusal's log
+message is its message, as the other kinds' are (docs/test-refactoring.md, copies that check
+less, item 5). `test_documented_example_resolves_to_reference_request` traces to
 the example's validation against the request Portfolio123 accepted in R01-T01.
 
 Screen configuration 1.1.0's tests, at the end, trace to R04-AC02's ranking forms, as release
@@ -18,7 +21,6 @@ tested in tests/contract/test_ranking_definitions.py.
 
 import json
 import re
-from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -27,6 +29,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from tests.support.contract_checks import Rejection, assert_names_its_key_never_its_value
 from tests.support.paths import SCREEN_CONFIGS
 from tests.support.snapshot_builder import SnapshotBuilder
 from trialfolio.configuration import (
@@ -46,7 +49,6 @@ from trialfolio.contracts.screen_configuration import (
     SnapshotRanking,
 )
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS_BY_NAME, check_value
-from trialfolio.errors import TrialFolioError
 from trialfolio.planning import VERIFIED_VERSIONS, Versions, build_plan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -75,16 +77,7 @@ def read_fixture(name: str) -> ScreenConfiguration:
     return read_screen_configuration(path.read_bytes(), path.name)
 
 
-def rejection(
-    content: bytes,
-    source_name: str = "screen.yaml",
-    reader: Callable[[bytes, str], object] = read_screen_configuration,
-) -> str:
-    """Reads `content`, expects `config.invalid`, and returns the message."""
-    with pytest.raises(TrialFolioError) as caught:
-        reader(content, source_name)
-    assert caught.value.code == "config.invalid"
-    return caught.value.message
+rejection = Rejection(read_screen_configuration, "screen.yaml")
 
 
 def with_line(old: str, new: str) -> bytes:
@@ -143,19 +136,13 @@ def test_documented_example_resolves_to_reference_request() -> None:
 
 @pytest.mark.parametrize("path", sorted(INVALID.glob("*.yaml")), ids=lambda path: path.stem)
 def test_invalid_configuration_is_rejected_naming_its_key(path: Path) -> None:
-    content = path.read_bytes()
-    key = re.search(r"^# Key: (.+)$", content.decode(), re.MULTILINE)
-    assert key, f"{path.name} has no '# Key:' line"
-
     message = rejection(
-        content,
+        path.read_bytes(),
         path.name,
         lambda content, name: read_screen_configuration_v1_1(content, name, path),
     )
 
-    assert message.startswith(f"{path.name} isn't a valid configuration:")
-    if key.group(1) != "-":
-        assert f"`{key.group(1)}`" in message
+    assert_names_its_key_never_its_value(path, message)
 
 
 def test_a_ranking_given_as_xml_names_the_system_it_would_change() -> None:
