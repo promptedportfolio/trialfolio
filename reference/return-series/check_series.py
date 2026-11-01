@@ -31,15 +31,20 @@ What it prints is only what a run record may hold: dates, versions, counts, sett
 outcomes. Never a level, a return, a metric, a ranking system's name or ID, or anything else of a
 response's or a request's contents.
 
-Comparisons. A value reproduced from the series is "equal at the precision" when it's within half a
-unit of the request's `precision` of the reported value, and "equal at its digits" when it's within
-half a unit of the reported value's last saved decimal. Where it isn't, it's "within the rounding"
-when the reported value is in the range the inputs' rounding allows, each level, or each period
-return, to half a unit of the precision, widened by half a unit of the reported value's own digits;
-and otherwise "within one unit of its digits", or "differs". The range is exact for a period's
-return, the total and annualized returns, and the compounded period returns; for the maximum
-drawdown and the standard deviation, it's a bound that holds the exact range. A `100 USD` value is
-compared exactly, then by how many units of the precision it's apart.
+Comparisons. Every saved value is read as rounded to the request's `precision`, though its text
+can have fewer decimals, since saving drops only trailing zeros (docs/contracts.md, "Numbers and
+precision"); or to its own decimals, where it has more, or where no request gives the precision.
+Those are its digits. A value reproduced from the series is "equal at the precision" when it's
+within half a unit of the request's `precision` of the reported value, and "equal at its digits"
+when it's within half a unit of the reported value's digits, which differs only without a
+precision. Where it isn't, it's "within the rounding" when the reported value is in the range the
+inputs' rounding allows, each level, or each period return, to half a unit of its digits, widened
+by half a unit of the reported value's digits; and otherwise "within one unit of its digits", or
+"differs". The range is exact for a period's return, the total and annualized returns, and the
+compounded period returns; for the maximum drawdown and the standard deviation, it's a bound that
+holds the exact range. `Excess%` is `Ret%` minus `Bench%` "exactly", or "within the rounding" when
+it's within the sum of the three values' half units. A `100 USD` value is compared exactly, then by
+how many units of the precision it's apart.
 
 The calendar. The script's own calendar of the New York Stock Exchange's full-day closures, for
 2016 to 2025 only: New Year's Day (on a Sunday, the Monday after; on a Saturday, none); Martin
@@ -118,6 +123,13 @@ def decimals(value: Decimal) -> int:
 
 def half_unit(places: int) -> Decimal:
     return Decimal(5).scaleb(-places - 1)
+
+
+def digits(value: Decimal, precision: int | None) -> int:
+    """The decimals a saved value was rounded to: the request's precision, since saving drops only
+    trailing zeros (docs/contracts.md, "Numbers and precision"), or its own, where it has more, or
+    where the precision isn't known."""
+    return max(decimals(value), precision or 0)
 
 
 def parse_date(value: Any) -> date | None:
@@ -412,7 +424,7 @@ def check_periods(
             counts["not numbers"] += 1
             continue
         ret, bench, excess = (v for v in values if v is not None)
-        allowed = sum(half_unit(decimals(v)) for v in (ret, bench, excess))
+        allowed = sum(half_unit(digits(v, precision)) for v in (ret, bench, excess))
         counts[
             "exactly"
             if ret - bench == excess
@@ -458,7 +470,7 @@ def compare(
     if value is None or reported is None:
         return "unavailable"
     difference = abs(value - reported)
-    own = half_unit(decimals(reported))
+    own = half_unit(digits(reported, precision))
     if precision is not None and difference <= half_unit(precision):
         return "equal at the precision"
     if difference <= own:
@@ -555,7 +567,7 @@ def check_compounded(
             continue
         low = mid = high = Decimal(1)
         for value in known:
-            half = half_unit(max(decimals(value), precision or 0))
+            half = half_unit(digits(value, precision))
             mid *= 1 + value / HUNDRED
             low *= 1 + (value - half) / HUNDRED
             high *= 1 + (value + half) / HUNDRED
