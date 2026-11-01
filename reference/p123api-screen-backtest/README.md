@@ -64,7 +64,7 @@ R01-T02 documents the layout as [`p123api-screen-backtest` version 1](../../docs
 | `r_squared` equals `correlation` squared, rounded to 4 places | Passed |
 | `correlation` and `beta` from the monthly returns | Close to the reported values, but not equal |
 | `sharpe_ratio` and `sortino_ratio` from the monthly returns with a zero risk-free rate, and `alpha` from the monthly regression | Not reproduced |
-| `100 USD Investment` and `100 USD in SPY:USA` equal the `chart` levels at each period's `End Dt` | Passed for all 131 periods |
+| `100 USD Investment` and `100 USD in SPY:USA` equal the `chart` levels at each period's `End Dt` | Passed for all 131 periods. R05-T01 found on 2026-11-01 that, compared exactly, 5 of the 131 `100 USD in SPY:USA` values are one unit of the fourth decimal apart from the level ([its run record](../return-series/README.md#the-checks)). |
 | `Ret%` and `Bench%` equal the change in the `chart` levels from `Tran Dt` to `End Dt`, within 0.001 | Passed for all 131 periods |
 | `Excess%` equals `Ret%` minus `Bench%`, within 0.0001 | Passed |
 | `Turn` equals `Sold Pos` divided by `#Pos`, times 100 | Passed for all 131 periods |
