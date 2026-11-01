@@ -2,7 +2,7 @@
 
 **Status:** Draft. **Don't build from it yet.** SP-T01 completes it, once [0.4.0](releases/0.4.0-ranking-weights.md) is Implemented, and then the owner sets it to Ready.
 **Decided by:** [D-43](spec.md#decisions), on 2026-10-14.
-**Depends on:** release 0.4.0 Implemented, and the experiments of [0.3.0](releases/0.3.0-experiments.md) and 0.4.0 that the owner has saved. It sends nothing to Portfolio123, so it spends no credits.
+**Depends on:** release 0.4.0 Implemented, and the experiments of [0.3.0](releases/0.3.0-experiments.md) and 0.4.0 that the owner has saved; and, for SP-T02, release 0.5.0's [R05-T01](releases/0.5.0-return-analytics.md#specification-tasks-before-ready), as the owner decided on 2026-10-30 ([D-43](spec.md#decisions)). It sends nothing to Portfolio123, so it spends no credits.
 
 This is an offline prototype of the statistics the roadmap's [statistical evaluation](roadmap.md) target needs. It isn't a release: it has no version or tag, and it's never distributed. It evaluates methods, not strategies. Its job is evidence:
 
