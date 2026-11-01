@@ -1,16 +1,19 @@
 """Write the synthetic responses that show each of `check_series.py`'s checks can fail (R05-T01).
 
-Each is a screen-backtest response, in a folder of its own with the request beside it, as
-`check_series.py --fixtures` reads it. None is derived from a saved response. The levels run in
-equal steps, rounded to 4 decimals, between round anchor values on given dates, so every reported
-value can be checked by hand from the anchors. Each failure is planted on purpose, as each
-function's docstring gives it, and the run record (`../README.md`) gives what the script reports
-for each.
+Each is a screen-backtest response, in a folder of its own, with the request beside it but for
+`mixed-digits/`'s, as `check_series.py --fixtures` reads it. None is derived from a saved
+response. The levels run in equal steps, rounded to 4 decimals, or to 1 in `mixed-digits/`,
+between round anchor values on given dates, or are given, so every reported value can be checked
+by hand from the anchors. Each failure is planted on purpose, as each function's docstring gives
+it, and the run record (`../README.md`) gives what the script reports for each.
 
 - `every-weekday/`: one `chart` entry per weekday from 2016-01-01 to 2016-04-29, with four
   periods, a month each, so that the metric, closure, `100 USD`, and precision checks run.
 - `gaps/`: a `chart` with a gap of a week and a Saturday, whose windows are longer than the bound.
 - `not-parallel/`: a `chart` whose arrays aren't the same length.
+- `mixed-digits/`: one entry per weekday, without a request, with levels of 1 decimal and one of
+  4, so that each level's rounding is its own.
+- `beyond-precision/`: levels with more decimals than the request's precision.
 
 Numbers are written as Trial Folio saves them, in their shortest round-trip form, which drops
 trailing zeros (docs/contracts.md, "Numbers and precision").
@@ -46,9 +49,12 @@ def weekdays(start: date, end: date) -> list[date]:
     return [d for d in days if d.weekday() < 5]
 
 
-def levels(dates: list[date], anchors: dict[date, Decimal], flat: set[date]) -> list[Decimal]:
+def levels(
+    dates: list[date], anchors: dict[date, Decimal], flat: set[date], quantum: Decimal = FOUR
+) -> list[Decimal]:
     """Each anchor's value on its date, and, between two anchors, equal steps over the dates that
-    aren't flat, rounded to 4 decimals. A flat date repeats the level before it."""
+    aren't flat, rounded to `quantum`, 4 decimals unless it's given. A flat date repeats the level
+    before it."""
     value = {dates[0]: anchors[dates[0]]}
     for a, b in pairwise(sorted(anchors)):
         span = [d for d in dates if a < d <= b]
@@ -56,8 +62,9 @@ def levels(dates: list[date], anchors: dict[date, Decimal], flat: set[date]) -> 
         moved = 0
         for d in span:
             moved += d not in flat
-            value[d] = (anchors[a] + step * moved).quantize(FOUR)
-        assert value[b] == anchors[b], b
+            value[d] = (anchors[a] + step * moved).quantize(quantum)
+        assert value[b] == anchors[b].quantize(quantum), b
+        value[b] = anchors[b]
     return [value[d] for d in dates]
 
 
@@ -235,14 +242,107 @@ def not_parallel() -> tuple[dict[str, Any], dict[str, Any]]:
     return response(dates, port, bench, rows, stats), request(dates[0], dates[-1])
 
 
+def mixed_digits() -> tuple[dict[str, Any], None]:
+    """Four monthly periods, over one entry per weekday from 2016-01-04 to 2016-04-29, with no
+    request beside it, so each value is read at the decimals its text has. The strategy's month
+    ends are 100, 110, 99.0625, 108.9, and 100, and its levels between them equal steps, rounded
+    to 1 decimal: 1 decimal each, except 99.0625, with 4. The benchmark's levels rise by 0.2 at
+    each entry from 100, 1 decimal each. Each reported value is calculated from the levels,
+    rounded to 4 decimals, except where it's planted.
+
+    Planted, each within what the levels' rounding allows, each level to half a unit of its own
+    decimals, but not if every level were read at the 4 decimals of 99.0625: the second period's
+    Ret%, -9.91, from 110 to 99.0625, which give -9.9432; the third's, 9.96, from 99.0625 to
+    108.9, which give 9.9306; the strategy's total_return, 0.03, and annualized_return, 0.12,
+    where its last level, 100, gives 0; its max_drawdown, -9.97, where 110 and 99.0625 give
+    -9.9432; and its standard_dev, 48.83, where its monthly changes, from the end of January to
+    the end of March, give 48.6806."""
+    start, end = date(2016, 1, 4), date(2016, 4, 29)
+    dates = weekdays(start, end)
+    month_ends = [date(2016, 1, 29), date(2016, 2, 29), date(2016, 3, 31), end]
+    port_ends = dict(zip([start, *month_ends], map(D, ("100", "110", "99.0625", "108.9", "100"))))
+    port = levels(dates, port_ends, set(), D("0.1"))
+    bench = [D(100) + D("0.2") * i for i in range(len(dates))]
+    index = {d: i for i, d in enumerate(dates)}
+    planted = {2: D("-9.91"), 3: D("9.96")}
+    rows: list[list[Any]] = []
+    for number, (tran, close) in enumerate(pairwise([start, *month_ends]), 1):
+        a, b = index[tran], index[close]
+        ret = planted.get(number, rounded((port[b] / port[a] - 1) * 100))
+        bench_ret = rounded((bench[b] / bench[a] - 1) * 100)
+        rows.append(
+            [number, str(tran), str(close), ret, bench_ret, ret - bench_ret, port[b], bench[b]]
+        )
+    days = D((end - start).days)
+    monthly = [bench[index[d]] for d in month_ends[:-1]]
+    changes = [(b / a - 1) * 100 for a, b in pairwise(monthly)]
+    mean = sum(changes, D(0)) / len(changes)
+    variance = sum(((c - mean) ** 2 for c in changes), D(0)) / (len(changes) - 1)
+    deviation = variance.sqrt() * D(12).sqrt()
+    stats = {
+        "samples": 2,
+        "port": {
+            "total_return": D("0.03"),
+            "annualized_return": D("0.12"),
+            "max_drawdown": D("-9.97"),
+            "standard_dev": D("48.83"),
+        },
+        "bench": {
+            "total_return": bench[-1] - 100,
+            "annualized_return": rounded(((bench[-1] / 100) ** (D("365.25") / days) - 1) * 100),
+            "max_drawdown": D(0),
+            "standard_dev": rounded(deviation),
+        },
+    }
+    return response(dates, port, bench, rows, stats), None
+
+
+def beyond_precision() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Two periods, over three entries two days apart, from 2016-01-04 to 2016-01-08, with the
+    request beside it, at precision 4. The strategy's levels are 100, 100.000001, and 100.999981,
+    the last two with 6 decimals; the benchmark's 100, 100.5, and 101. Each reported value is
+    calculated from the levels, rounded to 4 decimals, except where it's planted, and each
+    `100 USD` value is the level.
+
+    Planted: the second period's Ret%, 1.0001, where the levels give 0.99998: within what their
+    rounding would allow at the precision's 4 decimals, but not at their own 6."""
+    dates = [date(2016, 1, 4), date(2016, 1, 6), date(2016, 1, 8)]
+    port = [D(100), D("100.000001"), D("100.999981")]
+    bench = [D(100), D("100.5"), D(101)]
+    rows: list[list[Any]] = []
+    totals = {"port": D(1), "bench": D(1)}
+    for number, (a, b) in enumerate(pairwise(range(len(dates))), 1):
+        ret = D("1.0001") if number == 2 else rounded((port[b] / port[a] - 1) * 100)
+        bench_ret = rounded((bench[b] / bench[a] - 1) * 100)
+        totals["port"] *= 1 + ret / 100
+        totals["bench"] *= 1 + bench_ret / 100
+        values = [ret, bench_ret, ret - bench_ret, port[b], bench[b]]
+        rows.append([number, str(dates[a]), str(dates[b]), *values])
+    stats: dict[str, Any] = {
+        "samples": 0,
+        **{
+            subject: {"total_return": rounded((total - 1) * 100)}
+            for subject, total in totals.items()
+        },
+    }
+    return response(dates, port, bench, rows, stats), request(dates[0], dates[-1])
+
+
 def main() -> None:
-    made = {"every-weekday": every_weekday(), "gaps": with_gaps(), "not-parallel": not_parallel()}
+    made = {
+        "every-weekday": every_weekday(),
+        "gaps": with_gaps(),
+        "not-parallel": not_parallel(),
+        "mixed-digits": mixed_digits(),
+        "beyond-precision": beyond_precision(),
+    }
     for name, (payload, sent) in made.items():
         folder = HERE / name
         folder.mkdir(exist_ok=True)
         for file, value in (("response.json", payload), ("request.json", sent)):
-            text = json.dumps(written(value), indent=2) + "\n"
-            (folder / file).write_text(text, encoding="utf-8")
+            if value is not None:
+                text = json.dumps(written(value), indent=2) + "\n"
+                (folder / file).write_text(text, encoding="utf-8")
 
 
 if __name__ == "__main__":

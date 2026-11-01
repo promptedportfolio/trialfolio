@@ -42,13 +42,14 @@ Those are its digits. A value reproduced from the series is "equal at the precis
 within half a unit of the request's `precision` of the reported value, and "equal at its digits"
 when it's within half a unit of the reported value's digits, which differs only without a
 precision. Where it isn't, it's "within the rounding" when the reported value is in the range the
-inputs' rounding allows, each level, or each period return, to half a unit of its digits, widened
-by half a unit of the reported value's digits; and otherwise "within one unit of its digits", or
-"differs". The range is exact for a period's return, the total and annualized returns, and the
-compounded period returns; for the maximum drawdown and the standard deviation, it's a bound that
-holds the exact range. `Excess%` is `Ret%` minus `Bench%` "exactly", or "within the rounding" when
-it's within the sum of the three values' half units. A `100 USD` value is compared exactly, then by
-how many units of the precision it's apart.
+inputs' rounding allows, each level, or each period return, to half a unit of its own digits,
+widened by half a unit of the reported value's digits; and otherwise "within one unit of its
+digits", or "differs". The range is exact for a period's return, the total and annualized
+returns, and the compounded period returns; for the maximum drawdown and the standard deviation,
+it's a bound that holds the exact range. `Excess%` is `Ret%` minus `Bench%` "exactly", or "within
+the rounding" when it's within the sum of the three values' half units. A `100 USD` value is
+compared exactly, then by how many units of the precision it's apart, or, without a precision, of
+the levels' most decimals.
 
 The calendar. The script's own calendar of the New York Stock Exchange's full-day closures, for
 2016 to 2025 only: New Year's Day (on a Sunday, the Monday after; on a Saturday, none); Martin
@@ -231,8 +232,11 @@ class Series:
     levels: dict[str, list[Decimal]]
     index: dict[date, int]
     repeats: dict[str, set[date]]
-    half: Decimal
-    """Half a unit of the levels' digits: of the precision, where it's known."""
+    halves: dict[str, list[Decimal]]
+    """Half a unit of each level's own digits, which bounds its rounding."""
+    unit: Decimal
+    """A unit of the precision, where it's known, or else of the levels' most decimals: what a
+    `100 USD` value's distance from its level is counted in."""
 
 
 @dataclass
@@ -313,10 +317,12 @@ def read_chart(chart: Any, precision: int | None, checked: Checked) -> Series | 
     }
     for subject in values:
         out[f"{subject}.second_repeats"] = len(read) > 1 and read[1] in repeats[subject]
+    halves = {s: [half_unit(digits(v, precision)) for v in values[s]] for s in values}
     places = (
         precision if precision is not None else max(decimals(v) for s in values for v in values[s])
     )
-    return Series(read, values, {d: i for i, d in enumerate(read)}, repeats, half_unit(places))
+    index = {d: i for i, d in enumerate(read)}
+    return Series(read, values, index, repeats, halves, 2 * half_unit(places))
 
 
 def period_rows(results: dict[str, Any], checked: Checked) -> list[dict[str, Any]] | None:
@@ -417,11 +423,12 @@ def check_periods(
             reported = number(row[column])
             if reported is None:
                 continue
-            start = series.levels[subject][series.index[row["tran"]]]
-            end = series.levels[subject][series.index[row["end"]]]
+            first, last = series.index[row["tran"]], series.index[row["end"]]
+            start, end = series.levels[subject][first], series.levels[subject][last]
+            h_start, h_end = series.halves[subject][first], series.halves[subject][last]
             mid = (end / start - 1) * HUNDRED
-            low = ((end - series.half) / (start + series.half) - 1) * HUNDRED
-            high = ((end + series.half) / (start - series.half) - 1) * HUNDRED
+            low = ((end - h_end) / (start + h_start) - 1) * HUNDRED
+            high = ((end + h_end) / (start - h_start) - 1) * HUNDRED
             counts[compare(mid, reported, precision, (low, high))] += 1
         out[f"{column}.from_levels"] = counts
     counts = Counter()
@@ -449,9 +456,10 @@ def usd_counts(
     series: Series, rows: list[dict[str, Any]], subject: str, column: str, shut: set[date]
 ) -> Counter[str]:
     """How far each period's `100 USD` value is from the `chart` level at its `End Dt`, in units
-    of the levels' last digit, and whether an `End Dt` where they differ is a closure."""
+    of the precision, or without one, of the levels' most decimals, and whether an `End Dt` where
+    they differ is a closure."""
     counts: Counter[str] = Counter()
-    levels, unit = series.levels[subject], 2 * series.half
+    levels, unit = series.levels[subject], series.unit
     for row in rows:
         value = number(row[column])
         if value is None:
@@ -499,10 +507,10 @@ def check_metrics(
     out["months"] = len(monthly) - 1
     samples = number(stats.get("samples"))
     out["samples_equal"] = samples is not None and samples == out["months"]
-    h = series.half
     for subject, levels in series.levels.items():
-        last = levels[-1]
-        drawdown, bounds = max_drawdown(levels, h)
+        halves = series.halves[subject]
+        last, h = levels[-1], halves[-1]
+        drawdown, bounds = max_drawdown(levels, halves)
         reproduced = {
             "total_return": (last - HUNDRED, (last - h - HUNDRED, last + h - HUNDRED)),
             "annualized_return": (
@@ -510,7 +518,9 @@ def check_metrics(
                 (annualized(last - h, days), annualized(last + h, days)),
             ),
             "max_drawdown": (drawdown, bounds),
-            "standard_dev": monthly_deviation([levels[i] for i in monthly], h),
+            "standard_dev": monthly_deviation(
+                [levels[i] for i in monthly], [halves[i] for i in monthly]
+            ),
         }
         for metric, (value, range_) in reproduced.items():
             reported = number(stats[subject].get(metric))
@@ -525,28 +535,35 @@ def annualized(last: Decimal, days: Decimal) -> Decimal:
     return ((last / HUNDRED) ** (Decimal("365.25") / days) - 1) * HUNDRED
 
 
-def max_drawdown(levels: list[Decimal], h: Decimal) -> tuple[Decimal, tuple[Decimal, Decimal]]:
-    """The largest decline from a peak, in percent, and the range the levels' rounding allows:
-    every trough lower and every peak higher by `h`, and the deepest pair's the other way."""
-    peak, worst, low = levels[0], Decimal(0), Decimal(0)
-    pair = (levels[0], levels[0])
-    for level in levels:
-        peak = max(peak, level)
-        drawdown = (level / peak - 1) * HUNDRED
+def max_drawdown(
+    levels: list[Decimal], halves: list[Decimal]
+) -> tuple[Decimal, tuple[Decimal, Decimal]]:
+    """The largest decline from a peak, in percent, and the range the levels' rounding allows,
+    each level by its own half unit: every trough lower, against the highest any level up to it
+    could be, and the deepest pair's the other way."""
+    peak, worst, low = 0, Decimal(0), Decimal(0)
+    top = levels[0] + halves[0]
+    pair = (0, 0)
+    for i, level in enumerate(levels):
+        peak = i if level > levels[peak] else peak
+        top = max(top, level + halves[i])
+        drawdown = (level / levels[peak] - 1) * HUNDRED
         if drawdown < worst:
-            worst, pair = drawdown, (peak, level)
-        low = min(low, ((level - h) / (peak + h) - 1) * HUNDRED)
-    high = min(Decimal(0), ((pair[1] + h) / (pair[0] - h) - 1) * HUNDRED)
+            worst, pair = drawdown, (peak, i)
+        low = min(low, ((level - halves[i]) / top - 1) * HUNDRED)
+    p, t = pair
+    high = min(Decimal(0), ((levels[t] + halves[t]) / (levels[p] - halves[p]) - 1) * HUNDRED)
     return worst, (low, high)
 
 
 def monthly_deviation(
-    levels: list[Decimal], h: Decimal
+    levels: list[Decimal], halves: list[Decimal]
 ) -> tuple[Decimal | None, tuple[Decimal, Decimal] | None]:
     """The sample standard deviation of the monthly changes, in percent, times the square root of
     12, and the range the levels' rounding allows. Each change moves at most as far as its two
-    levels' rounding allows, and the standard deviation at most by the length of those moves over
-    the square root of n - 1, since centering doesn't lengthen a vector."""
+    levels' rounding allows, each by its own half unit, and the standard deviation at most by the
+    length of those moves over the square root of n - 1, since centering doesn't lengthen a
+    vector."""
     changes = [(b / a - 1) * HUNDRED for a, b in pairwise(levels)]
     if len(changes) < 2:
         return None, None
@@ -555,8 +572,8 @@ def monthly_deviation(
     variance = sum(((c - mean) ** 2 for c in changes), Decimal(0)) / (len(changes) - 1)
     deviation = variance.sqrt() * root
     moves = [
-        max((b + h) / (a - h) - b / a, b / a - (b - h) / (a + h)) * HUNDRED
-        for a, b in pairwise(levels)
+        max((b + hb) / (a - ha) - b / a, b / a - (b - hb) / (a + ha)) * HUNDRED
+        for (a, ha), (b, hb) in pairwise(zip(levels, halves, strict=True))
     ]
     bound = sum((m * m for m in moves), Decimal(0)).sqrt() / Decimal(len(changes) - 1).sqrt()
     return deviation, (deviation - bound * root, deviation + bound * root)
