@@ -6,10 +6,14 @@ experiment, with the editors of `tests/support/broken_runs.py`.
 
 TS-T06 moved them here from tests/core/test_ranking_resume.py, with `script`, which scripts the
 fake server's replies, and `attempt_at`, so that the records check of
-tests/core/test_experiment_resume.py runs them, beside R03-AC17's breaks, as one test, and
-tests/core/test_ranking_resume.py still uses them (docs/test-refactoring.md, copies that check
-less, item 7). Their two editors of a record's exchanges, `transport_changed` and
-`rank_update_status`, are broken_runs.py's, which they repeated.
+tests/core/test_experiment_resume.py, which TS-T07 separated into
+tests/core/test_experiment_records.py, runs them, beside R03-AC17's breaks, as one test, and
+tests/core/test_ranking_resume.py and, since TS-T07, test_ranking_records.py still use them
+(docs/test-refactoring.md, copies that check less, item 7). Their two editors of a record's exchanges, `transport_changed` and
+`rank_update_status`, are broken_runs.py's, which they repeated. TS-T07 moved here
+`first_case_faults`, which arms storage faults at the first case's attempt, from
+tests/core/test_ranking_resume.py, whose records check, now tests/core/test_ranking_records.py, it
+shares.
 """
 
 from collections.abc import Callable, Sequence
@@ -24,7 +28,7 @@ from tests.support.broken_runs import (
     transport_changed,
     unlist_record,
 )
-from tests.support.experiment_lab import Lab
+from tests.support.experiment_lab import Arm, Lab
 from tests.support.fake_portfolio123 import (
     AUTHENTICATED,
     FakePortfolio123,
@@ -34,6 +38,7 @@ from tests.support.fake_portfolio123 import (
 )
 from tests.support.paths import EXPERIMENT_CONFIGS, RANKING_DEFINITIONS
 from tests.support.plans import ranked_experiment
+from tests.support.storage_faults import Fault, StorageFaults
 from trialfolio.canonical import sha256_hex
 from trialfolio.tables import read_settings_csv_v1_1, settings_csv_v1_1
 
@@ -72,6 +77,18 @@ def completed_ranking_example(lab: Lab) -> None:
     )
     lab.new(cancel_after=2).refused("execution.partial")
     assert lab.resume().error is None
+
+
+def first_case_faults(*faults: tuple[str, Fault]) -> Arm:
+    """Faults at `EXAMPLE`'s first case's attempt only, each a file's name and its kind of
+    fault."""
+    first = EXAMPLE.cases[0].case_id
+
+    def arm(store: StorageFaults) -> None:
+        for name, fault in faults:
+            store.fail(f"{first}/{name}", fault)
+
+    return arm
 
 
 def _weight_row_changed(out: Path) -> None:

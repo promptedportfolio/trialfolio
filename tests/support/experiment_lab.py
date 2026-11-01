@@ -34,9 +34,14 @@ TS-T04 wrote it once, from the ten drivers of nine core modules: the `Lab`s of
 `test_ranking_snapshot.py`. It keeps what only one of them had: the reader as a parameter; the
 events, a progress callback, and a cancellation; the synthetic client and its response; the
 approval, its hash, and the command; the store's wrapper; and the ranking lock and the pause.
+
+`unknown_baseline` runs `default-only.yaml` so that its baseline awaits a repeat. TS-T07 moved it
+here from tests/core/test_experiment_resume.py, whose repeats and records check, now
+tests/core/test_experiment_records.py, both use it.
 """
 
 import json
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,9 +51,17 @@ import pytest
 from pydantic import BaseModel
 
 from tests.support.clock import FixedClock, no_wait
-from tests.support.fake_portfolio123 import BACKTEST, CREDENTIALS, FakePortfolio123, Received
+from tests.support.fake_portfolio123 import (
+    AUTHENTICATED,
+    BACKTEST,
+    CREDENTIALS,
+    FakePortfolio123,
+    Received,
+    Reply,
+    response,
+)
 from tests.support.paths import EXPERIMENT_CONFIGS
-from tests.support.plans import Planned, planned_experiment, with_ranking
+from tests.support.plans import Planned, experiment_plan, planned_experiment, with_ranking
 from tests.support.saved_records import attempt_directories, attempt_records, session_manifest
 from tests.support.storage_faults import StorageFaults
 from trialfolio.configuration import (
@@ -495,3 +508,15 @@ class Lab(Records):
         if synthetic:
             return SyntheticScreenBacktestClient(invented or response_bytes())
         return P123ScreenBacktestClient(CREDENTIALS, endpoint=self.server.endpoint)
+
+
+def unknown_baseline(lab: Lab) -> uuid.UUID:
+    """Runs `default-only.yaml` with a 503 to the baseline's request, which leaves it `unknown`,
+    awaiting a repeat, and returns its attempt's ID."""
+    baseline = experiment_plan(EXPERIMENT_CONFIGS / "default-only.yaml").cases[0].case_id
+    lab.server.reply("/auth", AUTHENTICATED)
+    lab.server.reply("/screen/backtest", Reply(503), response("complete.json"))
+    assert lab.new("default-only.yaml").refused("execution.partial")
+    (record,) = lab.attempts(baseline, AttemptRecordV1_1)
+    assert record.outcome == "unknown"
+    return record.attempt_id

@@ -29,8 +29,8 @@ refuse it. The broken experiments are copies of the committed
 plan, and, for the token a 401 or 403 to a `rank_update` dropped, an experiment the experiment
 builder writes; `tests/support/broken_runs.py` breaks both, and updates the latest manifest's
 entry for each file it edits, so each fails for the rule under test, which the message names.
-`tests/core/test_ranking_resume.py` checks the same breaks at the core, and
-`tests/interface/test_report_command.py` a run's, through `trialfolio report`.
+`tests/core/test_experiment_records.py` and `test_ranking_records.py` check the same breaks at
+the core, and `tests/interface/test_report_command.py` a run's, through `trialfolio report`.
 """
 
 import json

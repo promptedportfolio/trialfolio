@@ -6,7 +6,7 @@ that each change a test caught at the base, a test still catches on the branch.
 
 A list is a TOML file, such as `tests/mutations/ts-t01.toml`:
 
-    tests = ["tests/core/test_report.py"]   # the tests each mutation runs, unless it names its own
+    tests = ["tests/core/test_run_report.py"]  # the tests each mutation runs, unless it names its own
     base_tests = ["..."]                    # optional: those tests' names at the base, if they moved
     marker = "reference"                    # optional: the -m that selects them, if not the default's
 
