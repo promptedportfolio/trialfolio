@@ -312,6 +312,10 @@ def test_an_escaped_slash_names_the_same_node_in_single_and_double_quotes(tmp_pa
     assert cases[0][2][1] == "Value/P\\/E"
 
 
+# Experiment configuration 1.1.0's other rules: the ranking example's structure, a baseline ranked
+# by a definition or a snapshot, and ranking variants.
+
+
 def test_the_ranking_example_reads_as_documented() -> None:
     """Its structure: the baseline ranked by a definition file, with its ranking method, three
     ranking variants, no default, and a budget of two requests a case. The definition, and the

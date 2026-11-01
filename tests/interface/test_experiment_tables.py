@@ -486,6 +486,9 @@ def test_a_revision_for_another_version_writes_the_settings_table_a_storage_faul
     assert_completes_the_settings_table(cli, stopped, reference)
 
 
+# R01-AC14's format rules
+
+
 def test_each_cases_tables_follow_the_format_rules(cli: Cli, experiments: Builder) -> None:
     out = written(cli, experiments)
 
