@@ -1,0 +1,396 @@
+# TS-T08's list of the check of the tests (docs/test-refactoring.md), which it ran on its base and
+# on its branch. TS-T08 shortens the long functions the plan's findings name, and gives two
+# modules' traces the word. So each module it changes has a mutation of its own, which runs only
+# that module's tests: an earlier task's, for each module one changed, or, for the two whose
+# docstrings alone change, which none did, the change nearest what they check. Then each function
+# it shortens has one or more of its own, which run only its tests: on the branch, the tests it
+# became, and at the base, in base_tests, the test it was. Each test a function was split into
+# has one whose caught_by names it, so each shows that its part of the checks went with it.
+
+# Each module's own
+
+[[mutation]]
+name = '''no snapshot is read back, for contract/test_ranking_configuration'''
+file = "src/trialfolio/snapshots.py"
+old = '''_READABLE: Final = ("1.0.0",)'''
+new = '''_READABLE: Final = ()'''
+tests = ["tests/contract/test_ranking_configuration.py"]
+
+[[mutation]]
+name = '''a report says what isn't assessed in other words, for core/test_experiment_report'''
+file = "src/trialfolio/report/fragments.py"
+old = '''NOT_ASSESSED: Final = "Not assessed"'''
+new = '''NOT_ASSESSED: Final = "Not yet assessed"'''
+tests = ["tests/core/test_experiment_report.py"]
+
+[[mutation]]
+name = '''an attempt whose request was sent isn't possibly charged, for core/test_attempt_records'''
+file = "src/trialfolio/attempts/endings.py"
+old = '''    charged = outcome == "unknown" or any(e.result != "not_connected" for e in sends)
+    return Ending(outcome, charged, request_detail(outcome, possibly_charged=charged, name=name))'''
+new = '''    charged = outcome == "unknown"
+    return Ending(outcome, charged, request_detail(outcome, possibly_charged=charged, name=name))'''
+tests = ["tests/core/test_attempt_records.py"]
+
+[[mutation]]
+name = '''a manifest counts the failed cases as succeeded, for interface/test_experiment_counts'''
+file = "src/trialfolio/case_state.py"
+old = '''succeeded=outcomes.count("succeeded"),'''
+new = '''succeeded=outcomes.count("failed"),'''
+tests = ["tests/interface/test_experiment_counts.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_tables'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_tables.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_storage'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_storage.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_experiment_failures'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_experiment_failures.py"]
+
+[[mutation]]
+name = '''a summary's error is reported as internal.unexpected, for interface/test_ranking_resume'''
+file = "src/trialfolio/cli/summary.py"
+old = '''ErrorDetail(code=error.code, message=error.message)'''
+new = '''ErrorDetail(code="internal.unexpected", message=error.message)'''
+tests = ["tests/interface/test_ranking_resume.py"]
+
+[[mutation]]
+name = '''an error's string form is its message, for contract/test_errors'''
+file = "src/trialfolio/errors.py"
+old = '''        super().__init__(log_message)'''
+new = '''        super().__init__(message)'''
+tests = ["tests/contract/test_errors.py"]
+
+[[mutation]]
+name = '''quotaRemaining is compared with the results, for unit/test_stale_backtests'''
+file = "src/trialfolio/stale_backtests.py"
+old = '''value = {key: item for key, item in members.items() if key not in IGNORED_KEYS}'''
+new = '''value = {key: item for key, item in members.items() if key != "cost"}'''
+tests = ["tests/unit/test_stale_backtests.py"]
+
+# The ranking example's validation, from test_documented_ranking_example_compiles_to_its_cases. Its
+# test that the examples are the fixtures, byte for byte, compares docs/contracts.md with the
+# fixtures, which no change to src/ reaches, so it has none.
+
+[[mutation]]
+name = '''a removed factor leaves a blank line, for the ranking example's cases'''
+file = "src/trialfolio/ranking_definitions.py"
+old = '''            start = line_start - 1'''
+new = '''            start = line_start'''
+tests = [
+    "tests/contract/test_ranking_configuration.py::test_documented_ranking_example_compiles_to_its_cases",
+]
+caught_by = [
+    "tests/contract/test_ranking_configuration.py::test_documented_ranking_example_compiles_to_its_cases",
+]
+
+[[mutation]]
+name = '''a weight of 0 is accepted, for the ranking example's altered definitions'''
+file = "src/trialfolio/ranking_definitions.py"
+old = '''    if weight.is_zero():'''
+new = '''    if weight.is_zero() and False:'''
+tests = [
+    "tests/contract/test_ranking_configuration.py::test_the_ranking_example_fails_with_each_altered_definition",
+]
+base_tests = [
+    "tests/contract/test_ranking_configuration.py::test_documented_ranking_example_compiles_to_its_cases",
+]
+caught_by = [
+    "tests/contract/test_ranking_configuration.py::test_the_ranking_example_fails_with_each_altered_definition",
+]
+
+[[mutation]]
+name = '''a set's weights may change their sum, for the ranking example's altered sets'''
+file = "src/trialfolio/ranking_definitions.py"
+old = '''    if sum((entry.weight for entry in entries), Decimal(0)) == baseline:'''
+new = '''    if True:'''
+tests = [
+    "tests/contract/test_ranking_configuration.py::test_the_ranking_example_fails_with_each_altered_set",
+]
+base_tests = [
+    "tests/contract/test_ranking_configuration.py::test_documented_ranking_example_compiles_to_its_cases",
+]
+caught_by = [
+    "tests/contract/test_ranking_configuration.py::test_the_ranking_example_fails_with_each_altered_set",
+]
+
+[[mutation]]
+name = '''a variant may remove a composite, for the ranking example's paths'''
+file = "src/trialfolio/ranking_definitions.py"
+old = '''        if removed.kind == "Composite":
+            raise VariantProblem('''
+new = '''        if removed.kind == "Composites":
+            raise VariantProblem('''
+tests = [
+    "tests/contract/test_ranking_configuration.py::test_a_path_to_two_nodes_and_the_removal_of_a_composite_or_its_only_factor_fail",
+]
+base_tests = [
+    "tests/contract/test_ranking_configuration.py::test_documented_ranking_example_compiles_to_its_cases",
+]
+caught_by = [
+    "tests/contract/test_ranking_configuration.py::test_a_path_to_two_nodes_and_the_removal_of_a_composite_or_its_only_factor_fail",
+]
+
+[[mutation]]
+name = '''\/ starts no escape in a node path, for the ranking example's escaped slash'''
+file = "src/trialfolio/ranking_definitions.py"
+old = '''        if escaped in ("/", "\\") or (escaped == "#" and index == 0):'''
+new = '''        if escaped in ("\\",) or (escaped == "#" and index == 0):'''
+tests = [
+    "tests/contract/test_ranking_configuration.py::test_an_escaped_slash_names_the_same_node_in_single_and_double_quotes",
+]
+base_tests = [
+    "tests/contract/test_ranking_configuration.py::test_documented_ranking_example_compiles_to_its_cases",
+]
+caught_by = [
+    "tests/contract/test_ranking_configuration.py::test_an_escaped_slash_names_the_same_node_in_single_and_double_quotes",
+]
+
+# The experiment report's counts, from test_the_report_shows_each_count_as_the_manifest_records_it
+
+[[mutation]]
+name = '''the report shows the retries as the retired cases, for its counts'''
+file = "src/trialfolio/report/experiment_cases.py"
+old = '''("Retired cases", str(counts.retired_cases)),'''
+new = '''("Retired cases", str(counts.retries)),'''
+tests = [
+    "tests/core/test_experiment_report.py::test_the_report_shows_each_count_as_the_manifest_records_it",
+]
+caught_by = [
+    "tests/core/test_experiment_report.py::test_the_report_shows_each_count_as_the_manifest_records_it",
+]
+
+[[mutation]]
+name = '''the report gives the requests' limit as the authentication calls', for the budget's limits'''
+file = "src/trialfolio/report/experiment_cases.py"
+old = '''f" {counts.authentication_calls} of its {counts.budget.authentication_calls}. Each"'''
+new = '''f" {counts.authentication_calls} of its {counts.budget.provider_requests}. Each"'''
+tests = [
+    "tests/core/test_experiment_report.py::test_the_report_shows_each_count_as_the_manifest_records_it",
+    "tests/core/test_experiment_report.py::test_each_of_the_budgets_two_limits_is_shown_as_the_limit_its_named",
+]
+base_tests = [
+    "tests/core/test_experiment_report.py::test_the_report_shows_each_count_as_the_manifest_records_it",
+]
+caught_by = [
+    "tests/core/test_experiment_report.py::test_each_of_the_budgets_two_limits_is_shown_as_the_limit_its_named",
+]
+
+# A success's records, from test_a_success_writes_the_start_record_before_sending_and_the_attempt_record_after
+
+[[mutation]]
+name = '''a request's file is listed as a start record, for a success's order'''
+file = "src/trialfolio/attempts/files.py"
+old = '''"request.json", _request_json(params), "provider_request", list_published=list_published'''
+new = '''"request.json", _request_json(params), "start_record", list_published=list_published'''
+tests = [
+    "tests/core/test_attempt_records.py::test_a_success_writes_the_start_record_before_sending_and_the_attempt_record_after",
+    "tests/core/test_attempt_records.py::test_after_a_success_the_records_say_what_it_ran_and_name_its_files_by_their_hashes",
+    "tests/core/test_attempt_records.py::test_after_a_success_the_saved_request_and_response_are_what_was_sent_and_served",
+]
+base_tests = [
+    "tests/core/test_attempt_records.py::test_a_success_writes_the_start_record_before_sending_and_the_attempt_record_after",
+]
+caught_by = [
+    "tests/core/test_attempt_records.py::test_a_success_writes_the_start_record_before_sending_and_the_attempt_record_after",
+]
+
+[[mutation]]
+name = '''the quota remaining is recorded as the cost, for a success's records'''
+file = "src/trialfolio/attempts/files.py"
+old = '''cost=_count(fields.get("cost")), quota_remaining=_count(fields.get("quotaRemaining"))'''
+new = '''cost=_count(fields.get("cost")), quota_remaining=_count(fields.get("cost"))'''
+tests = [
+    "tests/core/test_attempt_records.py::test_a_success_writes_the_start_record_before_sending_and_the_attempt_record_after",
+    "tests/core/test_attempt_records.py::test_after_a_success_the_records_say_what_it_ran_and_name_its_files_by_their_hashes",
+    "tests/core/test_attempt_records.py::test_after_a_success_the_saved_request_and_response_are_what_was_sent_and_served",
+]
+base_tests = [
+    "tests/core/test_attempt_records.py::test_a_success_writes_the_start_record_before_sending_and_the_attempt_record_after",
+]
+caught_by = [
+    "tests/core/test_attempt_records.py::test_after_a_success_the_records_say_what_it_ran_and_name_its_files_by_their_hashes",
+]
+
+[[mutation]]
+name = '''a decoded response is saved inside a list, for a success's payloads'''
+file = "src/trialfolio/attempts/files.py"
+old = '''    return (json.dumps(payload) + "\n").encode("ascii")'''
+new = '''    return (json.dumps([payload]) + "\n").encode("ascii")'''
+tests = [
+    "tests/core/test_attempt_records.py::test_a_success_writes_the_start_record_before_sending_and_the_attempt_record_after",
+    "tests/core/test_attempt_records.py::test_after_a_success_the_records_say_what_it_ran_and_name_its_files_by_their_hashes",
+    "tests/core/test_attempt_records.py::test_after_a_success_the_saved_request_and_response_are_what_was_sent_and_served",
+]
+base_tests = [
+    "tests/core/test_attempt_records.py::test_a_success_writes_the_start_record_before_sending_and_the_attempt_record_after",
+]
+caught_by = [
+    "tests/core/test_attempt_records.py::test_after_a_success_the_saved_request_and_response_are_what_was_sent_and_served",
+]
+
+# The settings table a resume writes, from test_a_resume_writes_the_settings_table_a_storage_fault_left_out
+
+[[mutation]]
+name = '''a resume keeps no record of the settings table it wrote, for both tests of the stop'''
+file = "src/trialfolio/experiment_execution/records.py"
+old = '''        self._ledger.keep_tables(case_id, CaseTables.completed(saved, settings, rows))'''
+new = '''        pass'''
+tests = [
+    "tests/interface/test_experiment_tables.py::test_a_resume_writes_the_settings_table_a_storage_fault_left_out",
+    "tests/interface/test_experiment_tables.py::test_a_revision_for_another_version_writes_the_settings_table_a_storage_fault_left_out",
+]
+base_tests = [
+    "tests/interface/test_experiment_tables.py::test_a_resume_writes_the_settings_table_a_storage_fault_left_out",
+]
+caught_by = [
+    "tests/interface/test_experiment_tables.py::test_a_resume_writes_the_settings_table_a_storage_fault_left_out",
+    "tests/interface/test_experiment_tables.py::test_a_revision_for_another_version_writes_the_settings_table_a_storage_fault_left_out",
+]
+
+[[mutation]]
+name = '''a revision records the packages whose versions didn't change, for another version's'''
+file = "src/trialfolio/planning/revisions.py"
+old = '''            for package in VERSIONED_PACKAGES
+            if before[package] != after[package]'''
+new = '''            for package in VERSIONED_PACKAGES
+            if before[package] == after[package]'''
+tests = [
+    "tests/interface/test_experiment_tables.py::test_a_resume_writes_the_settings_table_a_storage_fault_left_out",
+    "tests/interface/test_experiment_tables.py::test_a_revision_for_another_version_writes_the_settings_table_a_storage_fault_left_out",
+]
+base_tests = [
+    "tests/interface/test_experiment_tables.py::test_a_resume_writes_the_settings_table_a_storage_fault_left_out",
+]
+caught_by = [
+    "tests/interface/test_experiment_tables.py::test_a_revision_for_another_version_writes_the_settings_table_a_storage_fault_left_out",
+]
+
+# The stop, and its two outcomes, from stops_and_runs_again, which both tests below call
+
+[[mutation]]
+name = '''an unrecorded directory's message says to delete it, for the refusal'''
+file = "src/trialfolio/experiment_execution/ending.py"
+old = '''" incomplete, and the directory can't be resumed: remove the directory, and run the"'''
+new = '''" incomplete, and the directory can't be resumed: delete the directory, and run the"'''
+tests = [
+    "tests/interface/test_experiment_storage.py::test_a_storage_failure_leaves_the_session_without_its_manifest",
+    "tests/interface/test_experiment_storage.py::test_an_interrupt_leaves_the_session_without_its_manifest",
+]
+caught_by = [
+    "tests/interface/test_experiment_storage.py::test_a_storage_failure_leaves_the_session_without_its_manifest",
+    "tests/interface/test_experiment_storage.py::test_an_interrupt_leaves_the_session_without_its_manifest",
+]
+
+[[mutation]]
+name = '''a session without its manifest says the output is incomplete in other words, for the resume'''
+file = "src/trialfolio/experiment_execution/ending.py"
+old = '''" output reads as incomplete until running the same command again resumes it."'''
+new = '''" output reads as incomplete until running the same command once more resumes it."'''
+tests = [
+    "tests/interface/test_experiment_storage.py::test_a_storage_failure_leaves_the_session_without_its_manifest",
+    "tests/interface/test_experiment_storage.py::test_an_interrupt_leaves_the_session_without_its_manifest",
+]
+caught_by = [
+    "tests/interface/test_experiment_storage.py::test_a_storage_failure_leaves_the_session_without_its_manifest",
+    "tests/interface/test_experiment_storage.py::test_an_interrupt_leaves_the_session_without_its_manifest",
+]
+
+# What a failed case shows, from test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_report
+
+[[mutation]]
+name = '''Portfolio123's message names its case by its case_id, for the failed case's message'''
+file = "src/trialfolio/experiment_execution/ending.py"
+old = '''        f' Portfolio123\'s message for `{case.case_key}`: "{text}".''''
+new = '''        f' Portfolio123\'s message for `{case.case_id}`: "{text}".''''
+tests = [
+    "tests/interface/test_experiment_failures.py::test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_report",
+    "tests/interface/test_experiment_failures.py::test_a_failed_cases_log_names_it_by_its_case_id_and_holds_none_of_what_the_message_adds",
+]
+base_tests = [
+    "tests/interface/test_experiment_failures.py::test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_report",
+]
+caught_by = [
+    "tests/interface/test_experiment_failures.py::test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_report",
+]
+
+[[mutation]]
+name = '''the loggable message holds Portfolio123's message, for the failed case's log'''
+file = "src/trialfolio/experiment_execution/ending.py"
+old = '''        f"{lead} {listing(lambda c: c.case_id)}.{stale_logged}{why}{charged}{tail}",'''
+new = '''        f"{lead} {listing(lambda c: c.case_id)}.{said}{stale_logged}{why}{charged}{tail}",'''
+tests = [
+    "tests/interface/test_experiment_failures.py::test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_report",
+    "tests/interface/test_experiment_failures.py::test_a_failed_cases_log_names_it_by_its_case_id_and_holds_none_of_what_the_message_adds",
+]
+base_tests = [
+    "tests/interface/test_experiment_failures.py::test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_report",
+]
+caught_by = [
+    "tests/interface/test_experiment_failures.py::test_a_failed_cases_log_names_it_by_its_case_id_and_holds_none_of_what_the_message_adds",
+]
+
+# A confirmed repeat, from test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once
+
+[[mutation]]
+name = '''a ranking experiment's attempt records no repeat_of, for the confirmed repeat'''
+file = "src/trialfolio/experiment_execution/cases.py"
+old = '''                repeat_of=repeat_of,
+                clock=context.clock,
+                synthetic=context.synthetic,
+                pause=self._pause,'''
+new = '''                repeat_of=None,
+                clock=context.clock,
+                synthetic=context.synthetic,
+                pause=self._pause,'''
+tests = [
+    "tests/interface/test_ranking_resume.py::test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once",
+]
+caught_by = [
+    "tests/interface/test_ranking_resume.py::test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once",
+]
+
+# The expected counts, written as a base for each table, changed for each case
+
+[[mutation]]
+name = '''the summary counts a case more than planned, for the four tests of the counts'''
+file = "src/trialfolio/cli/experiment.py"
+old = '''        cases_planned=counts.cases.planned,'''
+new = '''        cases_planned=counts.cases.planned + 1,'''
+tests = [
+    "tests/interface/test_experiment_counts.py::test_a_failed_or_uncertain_case_is_counted_and_the_later_cases_are_too",
+    "tests/interface/test_experiment_counts.py::test_after_a_stop_the_cases_not_started_are_counted_not_yet_run",
+    "tests/interface/test_experiment_counts.py::test_a_repeat_the_spent_budget_doesnt_start_is_counted_once_a_revision_raises_it",
+    "tests/interface/test_experiment_counts.py::test_a_repeat_is_counted_and_its_case_by_its_latest_attempt_that_may_have_been_charged",
+]
+caught_by = [
+    "tests/interface/test_experiment_counts.py::test_a_failed_or_uncertain_case_is_counted_and_the_later_cases_are_too",
+    "tests/interface/test_experiment_counts.py::test_after_a_stop_the_cases_not_started_are_counted_not_yet_run",
+    "tests/interface/test_experiment_counts.py::test_a_repeat_the_spent_budget_doesnt_start_is_counted_once_a_revision_raises_it",
+    "tests/interface/test_experiment_counts.py::test_a_repeat_is_counted_and_its_case_by_its_latest_attempt_that_may_have_been_charged",
+]
+
+[[mutation]]
+name = '''the summary's attempts leave out the unknown ones, for the four tests of the counts'''
+file = "src/trialfolio/cli/experiment.py"
+old = '''        attempts=sum((attempts.succeeded, attempts.failed, attempts.unknown, attempts.running)),'''
+new = '''        attempts=sum((attempts.succeeded, attempts.failed, attempts.running)),'''
+tests = [
+    "tests/interface/test_experiment_counts.py::test_a_failed_or_uncertain_case_is_counted_and_the_later_cases_are_too",
+    "tests/interface/test_experiment_counts.py::test_after_a_stop_the_cases_not_started_are_counted_not_yet_run",
+    "tests/interface/test_experiment_counts.py::test_a_repeat_the_spent_budget_doesnt_start_is_counted_once_a_revision_raises_it",
+    "tests/interface/test_experiment_counts.py::test_a_repeat_is_counted_and_its_case_by_its_latest_attempt_that_may_have_been_charged",
+]

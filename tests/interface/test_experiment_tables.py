@@ -23,6 +23,7 @@ import hashlib
 import io
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, get_args
 
@@ -358,60 +359,61 @@ def test_a_case_answered_with_an_invalid_structure_has_no_tables_and_is_failed(
 # The tables a stopped run didn't write
 
 
-@pytest.mark.parametrize("earlier", [False, True], ids=["same-version", "earlier-version"])
-def test_a_resume_writes_the_settings_table_a_storage_fault_left_out(
+@dataclass(frozen=True)
+class Stopped:
+    """A run of `example.yaml` that a storage fault stopped at a case's `settings.csv`."""
+
+    out: Path
+    case: ExperimentPlanCase
+    """The case whose `settings.csv` the fault left out, `rebalance-weeks-1`."""
+    metrics: bytes
+    """The case's `metrics.csv`, which the run wrote before the fault."""
+    received: int
+    """How many requests the server had received when the run stopped."""
+
+    @property
+    def directory(self) -> Path:
+        return tables(self.out, self.case.case_id)
+
+
+def stop_at_the_settings_table(
     cli: Cli,
     experiments: Builder,
     faults: FaultyStores,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    earlier: bool,
-) -> None:
-    # The same experiment, uninterrupted, gives the tables the resume should complete.
-    reference = written(cli, experiments, name="reference")
+    versions: Path | None = None,
+) -> Stopped:
+    """Runs `example.yaml` with a storage fault at `rebalance-weeks-1`'s `settings.csv`, so it
+    stops at the fourth case's tables, and the fifth is never sent; checks that it left only the
+    case's `metrics.csv`, with `versions`, when it's given, on the path, as the installed
+    packages, so the session records another version of Trial Folio; and gives what it left."""
     out = cli.tmp / "experiment"
     case = case_named(EXAMPLE, "rebalance-weeks-1")  # Its response's coverage is flagged.
     faults.fail_os(f"{case.case_id}/settings.csv")
-    # The run stops at the fourth case's tables, so the fifth is never sent.
     sends = [returns(name) for name in ANSWERS[:4]]
-    if earlier:
-        # The first run is another version of Trial Folio's, so the resume is a revision whose
-        # only change is Trial Folio's version.
-        versions = tmp_path / "earlier-trialfolio"
-        versions.mkdir()
-        fake_distribution(versions, "trialfolio", "0.2.9")
-        with monkeypatch.context() as patch:
+    with monkeypatch.context() as patch:
+        if versions is not None:
             patch.syspath_prepend(versions)
-            stopped = experiments.run(EXAMPLE, out, sends=sends, store_factory=faults)
-    else:
         stopped = experiments.run(EXAMPLE, out, sends=sends, store_factory=faults)
     assert stopped.exit_code == 4, stopped.stderr
     assert stopped.error_code == "storage.write_failed"
     directory = tables(out, case.case_id)
     assert sorted(path.name for path in directory.iterdir()) == ["metrics.csv"]
     session = SessionRecord.model_validate_json((out / "sessions/1/session.json").read_bytes())
-    assert (session.trialfolio_version == "0.2.9") is earlier
+    assert (session.trialfolio_version == "0.2.9") is (versions is not None)
     metrics = (directory / "metrics.csv").read_bytes()
-    received = len(cli.server.received)
+    return Stopped(out, case, metrics, len(cli.server.received))
 
-    options = ("--revision-reason", "Upgraded Trial Folio.") if earlier else ()
-    resumed = experiments.run(EXAMPLE, out, *options, sends=[returns(ANSWERS[4])])
 
-    assert resumed.exit_code == 0, resumed.stderr
-    if earlier:
-        record = ExperimentRecord.model_validate_json(
-            (out / "plans/2/experiment.json").read_bytes()
-        )
-        changes = record.plans[-1].changes
-        assert changes is not None
-        assert [change.package for change in changes.versions] == ["trialfolio"]
-        assert (changes.parts, changes.cases_added, changes.cases_retired) == ((), (), ())
-    else:
-        assert not (out / "plans/2").exists()
-    # Only the last case was due: the case whose settings.csv was missing isn't sent again.
-    assert cli.server.requests()[received:] == ["POST /auth", "POST /screen/backtest"]
+def assert_completes_the_settings_table(cli: Cli, stopped: Stopped, reference: Path) -> None:
+    """Only the last case was due, so the resume sent only it: the case whose `settings.csv` was
+    missing isn't sent again, and its `settings.csv` is the one the same experiment, uninterrupted,
+    wrote into `reference`, its `metrics.csv` is as the stopped run left it, and the resume's
+    manifest names the installed parser for the case's response, and lists both tables."""
+    out, case, directory = stopped.out, stopped.case, stopped.directory
+    assert cli.server.requests()[stopped.received :] == ["POST /auth", "POST /screen/backtest"]
     assert len(list((out / "cases" / case.case_id / "attempts").iterdir())) == 1
-    assert (directory / "metrics.csv").read_bytes() == metrics
+    assert (directory / "metrics.csv").read_bytes() == stopped.metrics
     reference_tables = tables(reference, case.case_id)
     assert (directory / "settings.csv").read_bytes() == (
         reference_tables / "settings.csv"
@@ -434,6 +436,54 @@ def test_a_resume_writes_the_settings_table_a_storage_fault_left_out(
     assert entries[f"{normalized}/metrics.csv"].artifact_id == artifact_id(
         directory / "metrics.csv"
     )
+
+
+def test_a_resume_writes_the_settings_table_a_storage_fault_left_out(
+    cli: Cli, experiments: Builder, faults: FaultyStores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The same experiment, uninterrupted, gives the tables the resume should complete.
+    reference = written(cli, experiments, name="reference")
+    stopped = stop_at_the_settings_table(cli, experiments, faults, monkeypatch)
+
+    resumed = experiments.run(EXAMPLE, stopped.out, sends=[returns(ANSWERS[4])])
+
+    assert resumed.exit_code == 0, resumed.stderr
+    assert not (stopped.out / "plans/2").exists()
+    assert_completes_the_settings_table(cli, stopped, reference)
+
+
+def test_a_revision_for_another_version_writes_the_settings_table_a_storage_fault_left_out(
+    cli: Cli,
+    experiments: Builder,
+    faults: FaultyStores,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    reference = written(cli, experiments, name="reference")
+    # The first run is another version of Trial Folio's, so the resume is a revision whose only
+    # change is Trial Folio's version.
+    versions = tmp_path / "earlier-trialfolio"
+    versions.mkdir()
+    fake_distribution(versions, "trialfolio", "0.2.9")
+    stopped = stop_at_the_settings_table(cli, experiments, faults, monkeypatch, versions)
+
+    resumed = experiments.run(
+        EXAMPLE,
+        stopped.out,
+        "--revision-reason",
+        "Upgraded Trial Folio.",
+        sends=[returns(ANSWERS[4])],
+    )
+
+    assert resumed.exit_code == 0, resumed.stderr
+    record = ExperimentRecord.model_validate_json(
+        (stopped.out / "plans/2/experiment.json").read_bytes()
+    )
+    changes = record.plans[-1].changes
+    assert changes is not None
+    assert [change.package for change in changes.versions] == ["trialfolio"]
+    assert (changes.parts, changes.cases_added, changes.cases_retired) == ((), (), ())
+    assert_completes_the_settings_table(cli, stopped, reference)
 
 
 # R01-AC14's format rules
