@@ -2,7 +2,7 @@
 
 **Status:** Draft. **Don't build from it yet.** SP-T01 completes it, once [0.4.0](releases/0.4.0-ranking-weights.md) is Implemented, and then the owner sets it to Ready.
 **Decided by:** [D-43](spec.md#decisions), on 2026-10-14.
-**Depends on:** release 0.4.0 Implemented, and the experiments of [0.3.0](releases/0.3.0-experiments.md) and 0.4.0 that the owner has saved. It sends nothing to Portfolio123, so it spends no credits.
+**Depends on:** release 0.4.0 Implemented, and the experiments of [0.3.0](releases/0.3.0-experiments.md) and 0.4.0 that the owner has saved; and, for SP-T02, release 0.5.0's [R05-T01](releases/0.5.0-return-analytics.md#specification-tasks-before-ready), as the owner decided on 2026-10-30 ([D-43](spec.md#decisions)). It sends nothing to Portfolio123, so it spends no credits.
 
 This is an offline prototype of the statistics the roadmap's [statistical evaluation](roadmap.md) target needs. It isn't a release: it has no version or tag, and it's never distributed. It evaluates methods, not strategies. Its job is evidence:
 
@@ -100,7 +100,7 @@ The owner assigns these by ID. They aren't next items: [Doing the next item](../
 | ID | Task | Depends on |
 |---|---|---|
 | SP-T01 | **Complete this specification,** as [Completing this specification](#completing-this-specification) says. Then ask the owner to set the status to Ready. | 0.4.0 Implemented |
-| SP-T02 | **Read the return series,** check them against the reported metrics (SP-AC01, SP-AC02), and record what it found in this file. | Status Ready |
+| SP-T02 | **Read the return series,** check them against the reported metrics (SP-AC01, SP-AC02), and record what it found in this file. The owner decided on 2026-10-30 that [R05-T01](releases/0.5.0-return-analytics.md#specification-tasks-before-ready)'s run record is the evidence on the saved series: SP-T02 cites it, and checks only what that record doesn't. | Status Ready, R05-T01 |
 | SP-T03 | **Build the procedures,** with their reference calculations and their calibration on synthetic data (SP-AC03, SP-AC04, SP-AC06, SP-AC07). | SP-T02 |
 | SP-T04 | **Run them on the owner's experiments,** with the owner, and record the conclusions in this file (SP-AC05, SP-AC08). | SP-T03 |
 | SP-T05 | **Draft the methods ADR** from what SP-T02 to SP-T04 recorded, as Proposed, with each procedure it adopts or rejects and why. The owner decides the ADR. | SP-T04 |

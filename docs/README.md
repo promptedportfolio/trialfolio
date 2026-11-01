@@ -29,6 +29,7 @@ These are the specifications for Trial Folio. Each release file's **Status** lin
 | [releases/0.3.0-verification.md](releases/0.3.0-verification.md) | Release 0.3.0's verification record: each command's date, versions, and outcome, and the evidence for each acceptance criterion |
 | [releases/0.4.0-ranking-weights.md](releases/0.4.0-ranking-weights.md) | Experiments that vary a ranking system's node weights or remove a factor (R04) |
 | [releases/0.4.0-verification.md](releases/0.4.0-verification.md) | Release 0.4.0's verification record: each command's date, versions, and outcome, and the evidence for each acceptance criterion |
+| [releases/0.5.0-return-analytics.md](releases/0.5.0-return-analytics.md) | Descriptive return analytics in the reports of new and saved runs and experiments: each case's dated series, a fixed, versioned analysis set, the comparison with the baseline, and equity and drawdown charts (R05) |
 | [adrs/0001-python-and-portfolio123-integration.md](adrs/0001-python-and-portfolio123-integration.md) | Python, `p123api`, and the third-party code boundary, with verification notes |
 | [adrs/0002-pydantic-contracts-and-protocols.md](adrs/0002-pydantic-contracts-and-protocols.md) | Pydantic models, generated schemas, and narrow protocols |
 | [adrs/0003-versioned-research-artifacts.md](adrs/0003-versioned-research-artifacts.md) | File-based, immutable, versioned artifacts |
