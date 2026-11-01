@@ -17,15 +17,17 @@ screen-backtest response it finds, what those analyses rely on, against the veri
   response, and `total_return` from the period returns, compounded;
 - the rolling windows of 7, 30, 90, 180, and 365 calendar days, by the release outline's proposed
   rule: a window ends at each `chart` date, and starts at the latest `chart` date at least that many
-  days earlier. It counts them, and the windows longer than their length by more than 2 days.
+  days earlier. It counts them, and the windows longer than their length by more than 2 days, in
+  every `chart` it reads, so that a gap shows, though a `chart` of every weekday can't have one.
 
 It reads the responses under each `payloads/` and `exports/` folder of the reference directory
 given, which hold the owner's runs, experiments, live checks, and walk-throughs, and, with
-`--fixtures`, the committed synthetic responses under `tests/fixtures/` and the demo's packaged
-`response.json`. A response saved by a script, outside any attempt, is read with the request beside
-it, `request-<x>.json` for `response-<x>.json`, or the `request.json` above `payloads/`; or with the
-request `--request` names for its folder. It reads numbers as decimals, never as binary floats, as
-Trial Folio does. It sends nothing, and writes nothing.
+`--fixtures`, the committed synthetic responses under `tests/fixtures/`, the demo's packaged
+`response.json`, and the ones beside this script, under `synthetic/`, which plant a failure for
+each check (`synthetic/generate.py`). A response saved by a script, outside any attempt, is read
+with the request beside it, `request-<x>.json` for `response-<x>.json`, or the `request.json` above
+`payloads/`; or with the request `--request` names for its folder. It reads numbers as decimals,
+never as binary floats, as Trial Folio does. It sends nothing, and writes nothing.
 
 What it prints is only what a run record may hold: dates, versions, counts, settings' kinds, and
 outcomes. Never a level, a return, a metric, a ranking system's name or ID, or anything else of a
@@ -257,6 +259,7 @@ def check_response(payload: dict[str, Any], request: dict[str, Any] | None) -> C
         check_periods(series, rows, out["precision"], checked)
     if series is not None and out.get("every_weekday"):
         check_metrics(series, payload["stats"], out["precision"], checked)
+    if series is not None:
         check_windows(series, checked)
     if rows is not None:
         check_compounded(rows, payload["stats"], out["precision"], checked)
@@ -709,8 +712,11 @@ def script_request(base: Path, path: Path, given: Path | None) -> dict[str, Any]
 
 
 def find_fixtures(root: Path) -> list[tuple[Found, Path]]:
+    """The committed synthetic responses: the tests' fixtures, the demo's packaged response, and
+    the ones beside this script, under `synthetic/`, each with the request beside it."""
     paths = sorted((root / "tests" / "fixtures").rglob("*.json"))
     paths.append(root / "src" / "trialfolio" / "demo_data" / "response.json")
+    paths += sorted((root / "reference" / "return-series" / "synthetic").rglob("*.json"))
     found: list[tuple[Found, Path]] = []
     for path in paths:
         payload = load(path)
@@ -931,18 +937,51 @@ def latest_record(root: Path) -> dict[str, Any] | None:
 
 
 def show_fixtures(responses: dict[str, Response], invalid: list[Found]) -> None:
+    """Every check's outcome for each committed synthetic response, so that a check a response
+    plants a failure for shows it."""
     print("\n== Committed synthetic responses")
     for response in responses.values():
         o = response.checked.outcome
         print(f"  {len(response.found)} file(s): {', '.join(i.location for i in response.found)}")
         print(
             f"    chart {o.get('chart')}, parallel {o.get('parallel')}, {o.get('points')} dates "
-            f"from {o.get('first')} to {o.get('last')}, every weekday {o.get('every_weekday')}, "
-            f"starts at 100 {o.get('start_100')}; {o.get('periods')} periods; Ret% "
-            f"{summed([o], 'Ret%.from_levels')}; Bench% {summed([o], 'Bench%.from_levels')}; "
-            f"Excess% {summed([o], 'excess')}; compounded {o.get('port.compounded')} and "
-            f"{o.get('bench.compounded')}"
+            f"from {o.get('first')} to {o.get('last')}, dates valid {o.get('dates_valid')}, "
+            f"levels positive numbers {o.get('levels_numbers')}, only weekdays "
+            f"{o.get('weekdays_only')}, every weekday {o.get('every_weekday')}, largest gap "
+            f"{o.get('max_gap')} days, starts at 100 {o.get('start_100')}, values with more "
+            f"decimals than the precision {o.get('over_precision')}"
         )
+        print(
+            f"    {o.get('periods')} periods; coverage equals the requested dates "
+            f"{o.get('coverage_is_request')}; each End Dt is the next Tran Dt "
+            f"{o.get('contiguous')}; Ret% {summed([o], 'Ret%.from_levels')}; Bench% "
+            f"{summed([o], 'Bench%.from_levels')}; Excess% {summed([o], 'excess')}; 100 USD for "
+            f"port {summed([o], 'usd.port')}; for bench {summed([o], 'usd.bench')}"
+        )
+        metrics = ", ".join(
+            f"{subject}.{metric} {o.get(f'{subject}.{metric}', 'not checked')}"
+            for subject in LEVELS
+            for metric in (*METRICS, "compounded")
+        )
+        print(f"    {metrics}; stats.samples is the months' count {o.get('samples_equal')}")
+        if "closures" in o:
+            for subject in LEVELS:
+                print(
+                    f"    {subject}: of {o['closures']} closures, repeats the entry before on "
+                    f"{o[f'{subject}.repeat_on_closure_dates'] or 'none'}; repeats on "
+                    f"{o[f'{subject}.repeat_after']} of the {o['after_closures']} weekdays after "
+                    f"them; elsewhere {o[f'{subject}.repeat_elsewhere'] or 'none'}; moves on "
+                    f"{o[f'{subject}.moves_after']}: {summed([o], f'{subject}.moves_after_kind')}"
+                )
+        else:
+            print("    Closures not checked")
+        windows = "; ".join(
+            f"{n} days {o[f'windows.{n}'][0]}, over {n + 2} days {o[f'windows.{n}'][1]}, "
+            f"the most days over {o[f'windows.{n}'][2]}"
+            for n in WINDOWS
+            if f"windows.{n}" in o
+        )
+        print(f"    Windows: {windows or 'not checked'}")
     for item in invalid:
         print(f"  Without the required structure: {item.location}")
 

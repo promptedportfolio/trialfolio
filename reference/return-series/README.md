@@ -8,7 +8,7 @@ This run record and the script that made the checks, [`check_series.py`](check_s
 
 - **The owner's saved responses:** every screen-backtest response in the `payloads/` folders of the main checkout's `reference/`, from 0.1.0's reference calls, live check, and the user guide's walk-through, 0.2.0's live exercise, 0.3.0's variant checks, live check, and walk-through, and 0.4.0's route checks, live check, walk-through, and diagnostic. A response is a run's or an experiment's `response.json`, in `cases/<case_id>/attempts/<attempt_id>/`, or one that a script saved outside any attempt: [R01-T01's](../p123api-screen-backtest/README.md), [R01-T05's](../p123api-screen-backtest-values/README.md), and [the diagnostic's](../ranking-touch/README.md). A ranking snapshot holds none, and no folder has an `exports/`. Runs or experiments the owner keeps outside `reference/` weren't read.
 - **Each response's request,** for its dates, precision, benchmark, and kind of ranking: the attempt's `request.json`; a script's `request-<x>.json` beside its `response-<x>.json`; for R01-T01's, the committed [`request.json`](../p123api-screen-backtest/request.json). The diagnostic saved none. Its [run record](../ranking-touch/README.md#settings) says it sent the request of the 0.4.0 walk-through's baseline case, byte for byte, so the script read that one, given with `--request`.
-- **The committed synthetic responses:** every response under `tests/fixtures/`, the historical run and experiment fixtures' among them, and the demo's packaged `src/trialfolio/demo_data/response.json`.
+- **The committed synthetic responses:** every response under `tests/fixtures/`, the historical run and experiment fixtures' among them, the demo's packaged `src/trialfolio/demo_data/response.json`, and the three beside this record, in [`synthetic/`](synthetic/), each with its request. Those three plant a failure for each of the script's checks, as [the committed synthetic responses](#the-committed-synthetic-responses) gives. [`synthetic/generate.py`](synthetic/generate.py) wrote them, from round levels on given dates that can be checked by hand, and derived nothing from a saved response.
 
 ## Run record
 
@@ -94,7 +94,7 @@ By the release outline's rule: a window ends at each `chart` date, and starts at
 | 180 | 2,481 | 0 | 2 |
 | 365 | 2,348 | 0 | 2 |
 
-So the bound holds in every saved `chart`: no window is more than 2 days longer than its length, and none crosses a gap. In each response, 150 to 203 windows of each length start or end on an entry that repeats the one before it, most of them on the weekday after a closure.
+So the bound holds in every saved `chart`: no window is more than 2 days longer than its length, and none crosses a gap. It can't fail in a `chart` of every weekday, whose longest gap is a weekend, so the script counts the windows in every `chart` it reads, and the synthetic response with a gap shows it reporting longer ones. In each response, 150 to 203 windows of each length start or end on an entry that repeats the one before it, most of them on the weekday after a closure.
 
 ### The saved experiments
 
@@ -115,6 +115,11 @@ Every case with a response has the same 2,609 `chart` dates, from 2016-01-01 to 
 | The demo's packaged response | The same form of `chart`, with 5 dates. Its 4 periods reproduce, as above, and both compounded totals agree with `total_return`, within the rounding. |
 | The 7 under `tests/fixtures/responses/` with the required structure | The same form of `chart`, with 5 dates; `coverage-mismatch.json`'s from 2016-01-04 to 2025-12-26. `no-periods.json` has no period. The periods of the others reproduce, except one of `canaries.json`'s, whose `Ret%` and `Excess%` don't. |
 | `tests/fixtures/responses/invalid-structure.json` | Without the required structure |
+| `synthetic/every-weekday/`, one entry per weekday from 2016-01-01 to 2016-04-29, with 4 periods of a month each | One entry per weekday, so every check runs. As planted: the first period's `Excess%`, 7.51, differs from `Ret%` minus `Bench%`, 7.5, by less than the three values' half units at the decimals their text has; the last period's `100 USD Investment` is 2 units of the fourth decimal from the level; the strategy's `annualized_return` and `max_drawdown` differ from the levels', and so does the benchmark's `standard_dev`, 22.05, from 22.0454, by less than half a unit of its text's second decimal; 1 value has more decimals than the precision; and the strategy's level repeats the entry before on a closure, 2016-02-15. Everything else agrees at the precision: the period returns, the other metrics, `stats.samples`, and the compounded totals. Its 81 seven-day, 65 thirty-day, and 22 ninety-day windows are at most 2 days longer than their length. |
+| `synthetic/gaps/`, from 2016-01-04 to 2016-01-29, without 2016-01-11 to 2016-01-15, and with a Saturday | As planted: not only weekdays, and not every weekday, with a gap of 10 days; 6 of its 11 seven-day windows more than 2 days longer than their length, by up to 8 days; the strategy's level doesn't start at 100; the periods' coverage isn't the requested dates; and the second period doesn't start at the first's `End Dt`. Its period returns reproduce at the precision. |
+| `synthetic/not-parallel/` | As planted: `chart`'s arrays aren't parallel |
+
+Each failure the three plant is reported. Each check was also broken, one at a time, in a scratch copy of the script, never committed, and the output on the synthetic responses alone changed each time: the windows' bound, the maximum drawdown, the metrics' verdicts, the closures, the `100 USD` values, the decimals over the precision, the coverage, the contiguous periods, the weekdays, the start at 100, the parallel arrays, the precision a saved value is read at, and the windows' check on a `chart` that isn't every weekday.
 
 ## Findings for R05-T02
 
