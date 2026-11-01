@@ -29,8 +29,10 @@ with the request beside it, `request-<x>.json` for `response-<x>.json`, or the `
 `payloads/`; or with the request `--request` names for its folder. It reads numbers as decimals,
 never as binary floats, as Trial Folio does. It sends nothing, and writes nothing.
 
-What it prints is only what a run record may hold: dates, versions, counts, settings' kinds, and
-outcomes. Never a level, a return, a metric, a ranking system's name or ID, or anything else of a
+What it prints is dates, versions, counts, settings' kinds, and outcomes, and where it found each
+response: its reference folder, its path below `payloads/`, and, for a run's or an experiment's,
+its output directory and case ID. Those names were chosen when each was saved, so check them
+before quoting any. Never a level, a return, a metric, a ranking system's name or ID, or anything else of a
 response's or a request's contents.
 
 Comparisons. Every saved value is read as rounded to the request's `precision`, though its text
@@ -309,6 +311,8 @@ def read_chart(chart: Any, precision: int | None, checked: Checked) -> Series | 
         s: {read[i] for i in range(1, len(read)) if values[s][i] == values[s][i - 1]}
         for s in values
     }
+    for subject in values:
+        out[f"{subject}.second_repeats"] = len(read) > 1 and read[1] in repeats[subject]
     places = (
         precision if precision is not None else max(decimals(v) for s in values for v in values[s])
     )
@@ -815,6 +819,9 @@ def show_group(name: str, outcomes: list[Outcome]) -> None:
     print(
         f"  Starts on a closure: {tally(outcomes, 'starts_on_closure')}; ends on one: {tally(outcomes, 'ends_on_closure')}"
     )
+    print(
+        f"  The second chart entry repeats the first: port {tally(outcomes, 'port.second_repeats')}, bench {tally(outcomes, 'bench.second_repeats')}"
+    )
     for subject in LEVELS:
         print(
             f"  {subject} repeats the entry before: in all {spread(o.get(f'{subject}.repeats') for o in outcomes)}; "
@@ -948,8 +955,9 @@ def show_fixtures(responses: dict[str, Response], invalid: list[Found]) -> None:
             f"from {o.get('first')} to {o.get('last')}, dates valid {o.get('dates_valid')}, "
             f"levels positive numbers {o.get('levels_numbers')}, only weekdays "
             f"{o.get('weekdays_only')}, every weekday {o.get('every_weekday')}, largest gap "
-            f"{o.get('max_gap')} days, starts at 100 {o.get('start_100')}, values with more "
-            f"decimals than the precision {o.get('over_precision')}"
+            f"{o.get('max_gap')} days, starts at 100 {o.get('start_100')}, the second entry "
+            f"repeats the first {o.get('port.second_repeats')} and {o.get('bench.second_repeats')}, "
+            f"values with more decimals than the precision {o.get('over_precision')}"
         )
         print(
             f"    {o.get('periods')} periods; coverage equals the requested dates "
