@@ -31,20 +31,17 @@ new = '''        interpretation="interpreted",'''
 tests = ["tests/reference/test_reference_responses.py"]
 
 # tests/reference/test_reference_review.py: the review of a run against itself, and its checker
-# for each branch
+# for each branch. A first run of this list had a mutation for the other branch's checker, a run
+# without a saved response: a metric without a value classified as not comparable. No test failed
+# with it at the base, so no metric row of the live check's runs lacks a value, and none is a run
+# without a saved response, which has only unavailable metric rows. So that checker runs on none
+# of the owner's runs, at the base as on the branch, and no mutation can show it.
 
 [[mutation]]
 name = '''results that share a response aren't flagged, for a run with a saved response'''
 file = "src/trialfolio/differences.py"
 old = '''flags: set[FlagCode] = {"identical_source"} if identical else set()'''
 new = '''flags: set[FlagCode] = set()'''
-tests = ["tests/reference/test_reference_review.py"]
-
-[[mutation]]
-name = '''a metric without a value isn't comparable, for a run without one'''
-file = "src/trialfolio/differences.py"
-old = '''        classification, reason = "unavailable", "input_unavailable"'''
-new = '''        classification, reason = "not_comparable", "input_unavailable"'''
 tests = ["tests/reference/test_reference_review.py"]
 
 # tests/reference/test_reference_ranking.py: variant_between's two kinds of pair
