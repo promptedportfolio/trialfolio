@@ -1,0 +1,64 @@
+# TS-T08's list of the reference tests' mutations (docs/test-refactoring.md, the check of the tests,
+# and its question 13), which ran on the owner's machine, from TS-T08's worktree, with
+# TRIALFOLIO_REFERENCE_DIR naming the main checkout's reference/, on the base and on the branch.
+# TS-T08 shortens the three reference modules' long functions, and renames none of their tests.
+# So each module keeps TS-T03's mutation, where it has one, and each step or checker TS-T08 takes
+# out of a long function has a mutation of its own, which the module's one test catches.
+
+marker = "reference"
+
+# tests/reference/test_reference_responses.py: the reference run, and its three checkers
+
+[[mutation]]
+name = '''a decimal's places are counted one too many, for the metrics as documented'''
+file = "src/trialfolio/normalization/rows.py"
+old = '''return len(value.text.partition(".")[2])'''
+new = '''return len(value.text.partition(".")[2]) + 1'''
+tests = ["tests/reference/test_reference_responses.py"]
+
+[[mutation]]
+name = '''the coverage ends where it starts, for the coverage of the requested dates'''
+file = "src/trialfolio/normalization/rows.py"
+old = '''        "coverage_end": coverage.end,'''
+new = '''        "coverage_end": coverage.start,'''
+tests = ["tests/reference/test_reference_responses.py"]
+
+[[mutation]]
+name = '''every setting reads as interpreted, for the settings as documented'''
+file = "src/trialfolio/normalization/rows.py"
+old = '''        interpretation=setting.interpretation,'''
+new = '''        interpretation="interpreted",'''
+tests = ["tests/reference/test_reference_responses.py"]
+
+# tests/reference/test_reference_review.py: the review of a run against itself, and its checker
+# for each branch
+
+[[mutation]]
+name = '''results that share a response aren't flagged, for a run with a saved response'''
+file = "src/trialfolio/differences.py"
+old = '''flags: set[FlagCode] = {"identical_source"} if identical else set()'''
+new = '''flags: set[FlagCode] = set()'''
+tests = ["tests/reference/test_reference_review.py"]
+
+[[mutation]]
+name = '''a metric without a value isn't comparable, for a run without one'''
+file = "src/trialfolio/differences.py"
+old = '''        classification, reason = "unavailable", "input_unavailable"'''
+new = '''        classification, reason = "not_comparable", "input_unavailable"'''
+tests = ["tests/reference/test_reference_review.py"]
+
+# tests/reference/test_reference_ranking.py: variant_between's two kinds of pair
+
+[[mutation]]
+name = '''a set weight is written in scientific notation, for a change of weights'''
+file = "src/trialfolio/ranking_definitions.py"
+old = '''        (*entry.node.weight_span, format(entry.weight, "f").encode("ascii")) for entry in changed'''
+new = '''        (*entry.node.weight_span, format(entry.weight, "e").encode("ascii")) for entry in changed'''
+tests = ["tests/reference/test_reference_ranking.py"]
+
+[[mutation]]
+name = '''a removed factor leaves a blank line, for a removed factor'''
+file = "src/trialfolio/ranking_definitions.py"
+old = '''            start = line_start - 1'''
+new = '''            start = line_start'''
+tests = ["tests/reference/test_reference_ranking.py"]

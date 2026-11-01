@@ -21,7 +21,7 @@ with a 200 reports a cost of 5 credits, and `missing-metrics.json` has 3 unavail
 import json
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -262,61 +262,27 @@ def outcome_shown(out: Path, session: int, key: str) -> str:
 
 # A failed case, and the later cases still run (R03-AC05)
 
+ONE_CASE_ENDED = Expected(
+    planned=5,
+    succeeded=4,
+    attempts_succeeded=4,
+    provider_requests=5,
+    authentication_calls=1,
+    budget=6,
+    cost=20,
+    metrics_unavailable=3,
+    warnings=1,
+)
+"""Every case sent once, and four succeeded: each case of the table adds how the fifth ended."""
+FAILED = replace(ONE_CASE_ENDED, failed=1, attempts_failed=1)
+
 
 @pytest.mark.parametrize(
     ("reply", "expected"),
     [
-        pytest.param(
-            REJECTED,
-            Expected(
-                planned=5,
-                succeeded=4,
-                failed=1,
-                attempts_succeeded=4,
-                attempts_failed=1,
-                provider_requests=5,
-                authentication_calls=1,
-                budget=6,
-                cost=20,
-                metrics_unavailable=3,
-                warnings=1,
-            ),
-            id="400",
-        ),
-        pytest.param(
-            NOT_FOUND,
-            Expected(
-                planned=5,
-                succeeded=4,
-                failed=1,
-                attempts_succeeded=4,
-                attempts_failed=1,
-                provider_requests=5,
-                authentication_calls=1,
-                budget=6,
-                cost=20,
-                metrics_unavailable=3,
-                warnings=1,
-            ),
-            id="404",
-        ),
-        pytest.param(
-            UNAVAILABLE,
-            Expected(
-                planned=5,
-                succeeded=4,
-                unknown=1,
-                attempts_succeeded=4,
-                attempts_unknown=1,
-                provider_requests=5,
-                authentication_calls=1,
-                budget=6,
-                cost=20,
-                metrics_unavailable=3,
-                warnings=1,
-            ),
-            id="503",
-        ),
+        pytest.param(REJECTED, FAILED, id="400"),
+        pytest.param(NOT_FOUND, FAILED, id="404"),
+        pytest.param(UNAVAILABLE, replace(ONE_CASE_ENDED, unknown=1, attempts_unknown=1), id="503"),
     ],
 )
 def test_a_failed_or_uncertain_case_is_counted_and_the_later_cases_are_too(
@@ -333,6 +299,22 @@ def test_a_failed_or_uncertain_case_is_counted_and_the_later_cases_are_too(
     assert_counts(outcome, out, 1, expected)
 
 
+STOPPED_AT_THE_BASELINE = Expected(
+    planned=5,
+    failed=1,
+    not_yet_run=4,
+    attempts_failed=1,
+    provider_requests=0,
+    authentication_calls=1,
+    budget=6,
+    cost=None,
+    warnings=2,
+)
+"""The baseline's attempt sent nothing: it's failed, no request is counted, and the session
+stops, and ends partial. The table's two other stops change it by what their sessions sent
+first."""
+
+
 @pytest.mark.parametrize(
     ("sends", "authenticates", "expected"),
     [
@@ -340,61 +322,25 @@ def test_a_failed_or_uncertain_case_is_counted_and_the_later_cases_are_too(
             [returns(), returns(), QUOTA],
             [AUTHENTICATED],
             # Cases 4 and 5 don't start: the session stops, and ends partial.
-            Expected(
-                planned=5,
+            replace(
+                STOPPED_AT_THE_BASELINE,
                 succeeded=2,
-                failed=1,
                 not_yet_run=2,
                 attempts_succeeded=2,
-                attempts_failed=1,
                 provider_requests=3,
-                authentication_calls=1,
-                budget=6,
                 cost=10,
-                warnings=2,
             ),
             id="402",
         ),
-        pytest.param(
-            [],
-            [REFUSED],
-            # The baseline's attempt sent nothing: it's failed, and no request is counted.
-            Expected(
-                planned=5,
-                failed=1,
-                not_yet_run=4,
-                attempts_failed=1,
-                provider_requests=0,
-                authentication_calls=1,
-                budget=6,
-                cost=None,
-                warnings=2,
-            ),
-            id="authentication-401",
-        ),
-        pytest.param(
-            [],
-            [UNAVAILABLE],
-            Expected(
-                planned=5,
-                failed=1,
-                not_yet_run=4,
-                attempts_failed=1,
-                provider_requests=0,
-                authentication_calls=1,
-                budget=6,
-                cost=None,
-                warnings=2,
-            ),
-            id="authentication-503",
-        ),
+        pytest.param([], [REFUSED], STOPPED_AT_THE_BASELINE, id="authentication-401"),
+        pytest.param([], [UNAVAILABLE], STOPPED_AT_THE_BASELINE, id="authentication-503"),
         pytest.param(
             [returns(), FORBIDDEN],
             [AUTHENTICATED, REFUSED],
             # liquidity-100m's request gets a 403, which may have been charged; holdings-50
             # authenticates again, gets a 401, and sends nothing; cases 4 and 5 don't start.
-            Expected(
-                planned=5,
+            replace(
+                STOPPED_AT_THE_BASELINE,
                 succeeded=1,
                 failed=2,
                 not_yet_run=2,
@@ -402,7 +348,6 @@ def test_a_failed_or_uncertain_case_is_counted_and_the_later_cases_are_too(
                 attempts_failed=2,
                 provider_requests=2,
                 authentication_calls=2,
-                budget=6,
                 cost=5,
                 warnings=3,
             ),
@@ -577,6 +522,21 @@ def test_a_revision_that_removes_a_variant_plans_one_case_fewer(
 
 # A spent budget (R03-AC10)
 
+BASELINE_UNKNOWN = Expected(
+    planned=2,
+    succeeded=1,
+    unknown=1,
+    attempts_succeeded=1,
+    attempts_unknown=1,
+    provider_requests=2,
+    authentication_calls=1,
+    budget=2,
+    cost=5,
+    warnings=1,
+)
+"""`default-only.yaml`'s first session, whose baseline's 503 leaves it unknown, and whose default
+variant succeeds: each later session of the spent budget's test changes it."""
+
 
 def test_a_repeat_the_spent_budget_doesnt_start_is_counted_once_a_revision_raises_it(
     cli: Cli, experiments: Builder
@@ -586,45 +546,15 @@ def test_a_repeat_the_spent_budget_doesnt_start_is_counted_once_a_revision_raise
     # default-only.yaml's budget is its 2 cases: the baseline's 503 leaves it unknown.
     first = experiments.run(DEFAULT_ONLY, out, sends=[UNAVAILABLE, returns()])
     assert first.exit_code == 6, first.stderr
-    assert_counts(
-        first,
-        out,
-        1,
-        Expected(
-            planned=2,
-            succeeded=1,
-            unknown=1,
-            attempts_succeeded=1,
-            attempts_unknown=1,
-            provider_requests=2,
-            authentication_calls=1,
-            budget=2,
-            cost=5,
-            warnings=1,
-        ),
-    )
+    assert_counts(first, out, 1, BASELINE_UNKNOWN)
     option = repeat_option(first, "baseline")
 
     spent = experiments.run(DEFAULT_ONLY, out, "--repeat", option)
 
+    # The spent budget doesn't start the repeat: the counts are the first session's, with one more
+    # warning.
     assert spent.exit_code == 6, spent.stderr
-    assert_counts(
-        spent,
-        out,
-        2,
-        Expected(
-            planned=2,
-            succeeded=1,
-            unknown=1,
-            attempts_succeeded=1,
-            attempts_unknown=1,
-            provider_requests=2,
-            authentication_calls=1,
-            budget=2,
-            cost=5,
-            warnings=2,
-        ),
-    )
+    assert_counts(spent, out, 2, replace(BASELINE_UNKNOWN, warnings=2))
 
     raised = experiments.run(
         experiment_config("revisions/default-only-budget-3.yaml"),
@@ -641,16 +571,17 @@ def test_a_repeat_the_spent_budget_doesnt_start_is_counted_once_a_revision_raise
         raised,
         out,
         3,
-        Expected(
-            planned=2,
+        replace(
+            BASELINE_UNKNOWN,
             succeeded=2,
+            unknown=0,
             attempts_succeeded=2,
-            attempts_unknown=1,
             repeats=1,
             provider_requests=3,
             authentication_calls=2,
             budget=3,
             cost=10,
+            warnings=0,
         ),
     )
 
@@ -753,6 +684,21 @@ def test_a_lowered_budget_keeps_the_requests_counted_above_it(
 
 # A repeat (R03-AC14)
 
+REPEATED = Expected(
+    planned=5,
+    succeeded=4,
+    attempts_succeeded=4,
+    attempts_unknown=1,
+    repeats=1,
+    provider_requests=6,
+    authentication_calls=2,
+    budget=6,
+    cost=20,
+    warnings=1,
+)
+"""Four cases succeeded, and holdings-50's first attempt is unknown; its repeat, in a second
+session, is counted: each case of the table adds how the repeat ended, and so how its case is."""
+
 
 @pytest.mark.parametrize(
     ("sends", "authenticates", "outcome", "expected"),
@@ -761,56 +707,21 @@ def test_a_lowered_budget_keeps_the_requests_counted_above_it(
             [returns()],
             [AUTHENTICATED],
             "succeeded",
-            Expected(
-                planned=5,
-                succeeded=5,
-                attempts_succeeded=5,
-                attempts_unknown=1,
-                repeats=1,
-                provider_requests=6,
-                authentication_calls=2,
-                budget=6,
-                cost=25,
-            ),
+            replace(REPEATED, succeeded=5, attempts_succeeded=5, cost=25, warnings=0),
             id="200",
         ),
         pytest.param(
             [REJECTED],
             [AUTHENTICATED],
             "failed",
-            Expected(
-                planned=5,
-                succeeded=4,
-                failed=1,
-                attempts_succeeded=4,
-                attempts_failed=1,
-                attempts_unknown=1,
-                repeats=1,
-                provider_requests=6,
-                authentication_calls=2,
-                budget=6,
-                cost=20,
-                warnings=1,
-            ),
+            replace(REPEATED, failed=1, attempts_failed=1),
             id="400",
         ),
         pytest.param(
             [UNAVAILABLE],
             [AUTHENTICATED],
             "unknown",
-            Expected(
-                planned=5,
-                succeeded=4,
-                unknown=1,
-                attempts_succeeded=4,
-                attempts_unknown=2,
-                repeats=1,
-                provider_requests=6,
-                authentication_calls=2,
-                budget=6,
-                cost=20,
-                warnings=1,
-            ),
+            replace(REPEATED, unknown=1, attempts_unknown=2),
             id="503",
         ),
         pytest.param(
@@ -819,20 +730,7 @@ def test_a_lowered_budget_keeps_the_requests_counted_above_it(
             # The repeat sent nothing, so its failed attempt changes nothing known about the
             # case's request: it's still unknown, by the attempt the repeat repeated.
             "unknown",
-            Expected(
-                planned=5,
-                succeeded=4,
-                unknown=1,
-                attempts_succeeded=4,
-                attempts_failed=1,
-                attempts_unknown=1,
-                repeats=1,
-                provider_requests=5,
-                authentication_calls=2,
-                budget=6,
-                cost=20,
-                warnings=1,
-            ),
+            replace(REPEATED, unknown=1, attempts_failed=1, provider_requests=5),
             id="authentication-401",
         ),
     ],

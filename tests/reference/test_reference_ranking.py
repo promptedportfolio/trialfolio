@@ -118,25 +118,38 @@ def variant_between(first: RankingDefinition, second: RankingDefinition) -> Betw
     lacks, and whether the two differ only there. None when no variant can give `second`'s
     nodes from `first`'s, by their kind, name, depth, and weight."""
     if len(second.nodes) == len(first.nodes):
-        if _shape(first, list(first.nodes)) != _shape(second, list(second.nodes)):
-            return None
-        changed = [
-            node for node, other in zip(first.nodes, second.nodes, strict=True)
-            if node.weight != other.weight
-        ]  # fmt: skip
-        parents = {node.parent for node in changed}
-        if len(parents) != 1:
-            return None
-        (parent,) = parents
-        siblings = first.children(None if parent is None else first.nodes[parent])
-        weights = {node.path: second.nodes[node.index].weight for node in siblings}
-        kind = KINDS[0] if parent is None else KINDS[1]
-        only = _lines(first, siblings) == _lines(
-            second, [second.nodes[node.index] for node in siblings]
-        )
-        return Between(kind, _variant(weights, None), only)
-    if len(second.nodes) != len(first.nodes) - 1:
+        return _weights_changed(first, second)
+    if len(second.nodes) == len(first.nodes) - 1:
+        return _factor_removed(first, second)
+    return None
+
+
+def _weights_changed(first: RankingDefinition, second: RankingDefinition) -> Between | None:
+    """For two definitions of as many nodes: the variant that sets the weights of the one parent
+    whose nodes' weights differ, when the two have the same shape."""
+    if _shape(first, list(first.nodes)) != _shape(second, list(second.nodes)):
         return None
+    changed = [
+        node for node, other in zip(first.nodes, second.nodes, strict=True)
+        if node.weight != other.weight
+    ]  # fmt: skip
+    parents = {node.parent for node in changed}
+    if len(parents) != 1:
+        return None
+    (parent,) = parents
+    siblings = first.children(None if parent is None else first.nodes[parent])
+    weights = {node.path: second.nodes[node.index].weight for node in siblings}
+    kind = KINDS[0] if parent is None else KINDS[1]
+    only = _lines(first, siblings) == _lines(
+        second, [second.nodes[node.index] for node in siblings]
+    )
+    return Between(kind, _variant(weights, None), only)
+
+
+def _factor_removed(first: RankingDefinition, second: RankingDefinition) -> Between | None:
+    """For a second definition of one node fewer: the variant that removes the factor it lacks,
+    and sets the weights of the nodes beside it, the first that gives the second's text whole, or
+    else the first that gives its nodes."""
     # Two factors can have the same kind, name, and depth, so the text says which was removed.
     found: Between | None = None
     for removed in first.nodes:

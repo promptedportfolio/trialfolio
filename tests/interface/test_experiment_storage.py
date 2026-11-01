@@ -21,6 +21,7 @@ session discards it, as a run does (CLI behavior, what a run writes after its at
 
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -175,25 +176,44 @@ def records(out: Path) -> dict[str, bytes]:
     }
 
 
-def stops_and_runs_again(
-    cli: Cli,
-    experiments: Builder,
-    faults: FaultyStores,
-    monkeypatch: pytest.MonkeyPatch,
-    at: str,
-    code: str,
-    exit_code: int,
-) -> None:
+@dataclass(frozen=True)
+class Stop:
+    """What a run of `default-only.yaml` that a fault stopped said, and left."""
+
+    out: Path
+    approve: tuple[str, str]
+    """The command's approval, which the same command, run again, gives too: the new
+    experiment's plan hash."""
+    message: str
+    published: list[str]
+    """Each file the run published, in order."""
+    left: dict[str, bytes | None]
+    """Everything under `out`, as `snapshot` gives it."""
+    kept: dict[str, bytes]
+    """The experiment's records, as `records` gives them."""
+    attempts: dict[str, int]
+    received: int
+    """How many requests the server had received."""
+
+
+def stop_at(
+    cli: Cli, experiments: Builder, faults: FaultyStores, at: str, code: str, exit_code: int
+) -> Stop:
     """Runs `default-only.yaml` with `faults` set at `at`, checks that it stops with `code` and
-    `exit_code` without its session's manifest, and runs the same command again."""
+    `exit_code` without its session's manifest, having written each file once, and gives what it
+    said and left."""
     cli.ready()
     out = cli.tmp / "experiment"
     # The same command, run twice: approved by the new experiment's plan hash.
     approve = ("--approve", plan_hash(DEFAULT_ONLY, out))
-    sends = [returns(), returns()]
 
     stopped = experiments.run(
-        DEFAULT_ONLY, out, *approve, sends=sends, approve=False, store_factory=faults
+        DEFAULT_ONLY,
+        out,
+        *approve,
+        sends=[returns(), returns()],
+        approve=False,
+        store_factory=faults,
     )
 
     message = failed(stopped, code, exit_code)
@@ -209,48 +229,90 @@ def stops_and_runs_again(
     assert len(published) == len(set(published))
     if at == "published-manifest":
         assert published[-1] == "sessions/1/manifest.json"
-    left = snapshot(out)
-    kept = records(out)
-    before = attempts(out)
-    received = len(cli.server.received)
-    again_faults = FaultyStores(monkeypatch)
-
-    again = experiments.run(
-        DEFAULT_ONLY, out, *approve, sends=sends, approve=False, store_factory=again_faults
+    return Stop(
+        out=out,
+        approve=approve,
+        message=message,
+        published=published,
+        left=snapshot(out),
+        kept=records(out),
+        attempts=attempts(out),
+        received=len(cli.server.received),
     )
 
-    if at in BEFORE_THE_PLAN:
-        assert UNRECORDED in message
-        assert cli.server.received == ()
-        refused = failed(again, "output.not_empty", 4)
-        assert "Remove the directory, and run the command again." in refused
-        assert cli.server.received == ()
-        assert again_faults.published == []
-        assert snapshot(out) == left
-        return
-    assert INCOMPLETE in message
+
+def assert_refused(cli: Cli, stop: Stop, again: Outcome, again_faults: FaultyStores) -> None:
+    """A fault before the first plan's `experiment.json`: nothing was sent, the message said the
+    directory can't be resumed, and the same command, run again, fails with `output.not_empty`,
+    says so too, and sends and writes nothing."""
+    assert UNRECORDED in stop.message
+    assert cli.server.received == ()
+    refused = failed(again, "output.not_empty", 4)
+    assert "Remove the directory, and run the command again." in refused
+    assert cli.server.received == ()
+    assert again_faults.published == []
+    assert snapshot(stop.out) == stop.left
+
+
+def assert_resumed(
+    cli: Cli, stop: Stop, at: str, code: str, again: Outcome, again_faults: FaultyStores
+) -> None:
+    """A fault after it: the message said what the latest attempt's records say about its
+    request, and that the output is incomplete, and the same command, run again, resumes the
+    experiment, sending only the cases that are due, and replacing no record."""
+    assert INCOMPLETE in stop.message
     # It says what the latest attempt's records say about its request (docs/contracts.md, an
     # ending without a manifest).
-    assert REQUEST[at] in message
+    assert REQUEST[at] in stop.message
     if at == "attempt-record" and code == "storage.write_failed":
-        assert RUNNING in message
+        assert RUNNING in stop.message
     sent, resumed_exit_code = RESUMED[at]
     assert again.exit_code == resumed_exit_code, again.stderr
     assert again.ids["session"] == 2
-    assert (out / "sessions/2/manifest.json").is_file()
+    assert (stop.out / "sessions/2/manifest.json").is_file()
     expected = ["POST /auth", *["POST /screen/backtest"] * len(sent)] if sent else []
-    assert cli.server.requests()[received:] == expected
-    after = attempts(out)
-    assert {key: after[key] - before[key] for key in after} == {
+    assert cli.server.requests()[stop.received :] == expected
+    after = attempts(stop.out)
+    assert {key: after[key] - stop.attempts[key] for key in after} == {
         key: int(key in sent) for key in after
     }
     # No record was replaced: each file the stopped run left is as it was, and the resume wrote
     # none of them, nor any file twice.
-    for path, content in kept.items():
-        assert (out / path).read_bytes() == content
+    for path, content in stop.kept.items():
+        assert (stop.out / path).read_bytes() == content
     resumed = again_faults.published
     assert len(resumed) == len(set(resumed))
-    assert set(resumed).isdisjoint(published)
+    assert set(resumed).isdisjoint(stop.published)
+
+
+def stops_and_runs_again(
+    cli: Cli,
+    experiments: Builder,
+    faults: FaultyStores,
+    monkeypatch: pytest.MonkeyPatch,
+    at: str,
+    code: str,
+    exit_code: int,
+) -> None:
+    """Runs `default-only.yaml` with `faults` set at `at`, checks that it stops with `code` and
+    `exit_code` without its session's manifest, and runs the same command again, which refuses
+    the directory before the first plan is recorded, and resumes the experiment after it."""
+    stop = stop_at(cli, experiments, faults, at, code, exit_code)
+    again_faults = FaultyStores(monkeypatch)
+
+    again = experiments.run(
+        DEFAULT_ONLY,
+        stop.out,
+        *stop.approve,
+        sends=[returns(), returns()],
+        approve=False,
+        store_factory=again_faults,
+    )
+
+    if at in BEFORE_THE_PLAN:
+        assert_refused(cli, stop, again, again_faults)
+    else:
+        assert_resumed(cli, stop, at, code, again, again_faults)
 
 
 # A storage failure, and an interrupt, at each of the session's files

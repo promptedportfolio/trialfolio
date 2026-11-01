@@ -13,8 +13,11 @@ run` reads with the reader of both versions, so its messages are that reader's. 
 the definition, and the example's cases, are R04-T06's: since then, the reader of both versions
 reads the baseline's definition file, from the configuration's directory, so it's given the
 configuration's path, and applies each ranking variant.
-`test_documented_ranking_example_compiles_to_its_cases` repeats the ranking example's validation,
-which R04-T02 left for R04-T04's test pairing to give R04-T06. What the reader reads in the
+The ranking example's six tests, from `test_the_ranking_examples_are_the_fixtures_byte_for_byte` to
+`test_an_escaped_slash_names_the_same_node_in_single_and_double_quotes`, repeat the ranking
+example's validation, which R04-T02 left for R04-T04's test pairing to give R04-T06; TS-T08
+separated them from `test_documented_ranking_example_compiles_to_its_cases`, which keeps the
+example's cases (docs/test-refactoring.md, long functions). What the reader reads in the
 definition, and each variant's case, are tested in tests/contract/test_ranking_definitions.py. The
 invalid files' test, which reads each version's invalid files, is
 tests/contract/test_experiment_configuration.py's, and the 0.3.0 experiment example these tests
@@ -128,34 +131,76 @@ invalid definitions in `ranking/invalid/`, with the rule its message gives."""
 
 VALUE_HEAVY_SET = "{'Value': 60, 'Momentum': 20, 'Quality': 20}"
 
-ALTERED_VARIANTS = [
-    (
+ALTERED_VARIANTS = {
+    "a-path-that-names-no-node": (
         "{'Value': 60, 'Momentum': 20, 'Qualty': 20}",
         "set[2]` is a node path whose segment 1 names none",
     ),
-    ("{'Value': 50, 'Momentum': 20}", "set` leaves out its parent's node at position 3."),
-    ("{'Value': 60, 'Momentum/Year Return': 20, 'Quality': 20}", "set[1]` names a node of another"),
-    ("{'Value': 60, '#1': 60, 'Momentum': 20, 'Quality': 20}", "set[1]` names the same node as"),
-    ("{'Value': 60, 'Momentum': 20, 'Quality': 30}", "set` gives weights that don't sum to"),
-    ("{'Value': 40, 'Momentum': 30, 'Quality': 30}", "set` gives every node the weight it has"),
+    "a-node-left-out": (
+        "{'Value': 50, 'Momentum': 20}",
+        "set` leaves out its parent's node at position 3.",
+    ),
+    "nodes-of-two-parents": (
+        "{'Value': 60, 'Momentum/Year Return': 20, 'Quality': 20}",
+        "set[1]` names a node of another",
+    ),
+    "one-node-named-twice": (
+        "{'Value': 60, '#1': 60, 'Momentum': 20, 'Quality': 20}",
+        "set[1]` names the same node as",
+    ),
+    "weights-of-another-sum": (
+        "{'Value': 60, 'Momentum': 20, 'Quality': 30}",
+        "set` gives weights that don't sum to",
+    ),
+    "weights-that-change-nothing": (
+        "{'Value': 40, 'Momentum': 30, 'Quality': 30}",
+        "set` gives every node the weight it has",
+    ),
+}
+"""The alterations of the example's `value-heavy` variant that its validation lists, by an ID of
+their own, each with the start of the problem its message gives, after `variants.ranking[0].`."""
+
+SALES_YIELD_LINES = [
+    (
+        '\t\t<StockFormula Name="Sales Yield" Weight="50" RankType="Higher" Scope="Universe" '
+        'Description="">'
+    ),
+    "\t\t\t<Formula>…</Formula>",
+    "\t\t</StockFormula>",
 ]
-"""The alterations of the example's `value-heavy` variant that its validation lists, with the
-start of the problem its message gives, after `variants.ranking[0].`."""
+"""The lines of the example's Sales Yield factor, which `no-sales-yield` removes: its definition's
+lines 6 to 8, from 1."""
 
 
-def test_documented_ranking_example_compiles_to_its_cases(tmp_path: Path) -> None:
-    """Repeats the ranking example's validation, which R04-T02 left for R04-T04 (release 0.4.0's
-    other checks in the default suite). Its XML and YAML are the fixtures, byte for byte, and so
-    is the snapshot example; the experiment gives the four cases the example describes, each with
-    the definition it describes; each alteration the validation lists fails; and a path with `\\/`
-    in single quotes names the node a path with `\\\\/` in double quotes names. The plan these
-    cases compile to is checked in `tests/core/test_ranking_plan.py` (release 0.4.0's R04-T07)."""
+def with_weights(text: str, *changes: tuple[str, str, str]) -> str:
+    """`text` with each change's node, by its name, given the new weight in place of the old, each
+    written once."""
+    for name, old, new in changes:
+        written = f'Name="{name}" Weight="{old}"'
+        assert text.count(written) == 1
+        text = text.replace(written, f'Name="{name}" Weight="{new}"')
+    return text
+
+
+# The ranking example's validation, which R04-T02 left for R04-T04 (release 0.4.0's other checks in
+# the default suite), repeated: each test is one of its checks.
+
+
+def test_the_ranking_examples_are_the_fixtures_byte_for_byte() -> None:
+    """The ranking example's XML and YAML are the fixtures, byte for byte, and so is the snapshot
+    example."""
     xml = ranking_example_xml()
     assert (EXPERIMENT_CONFIGS / "ranking" / "value-momentum.xml").read_bytes() == xml.encode()
     assert (EXPERIMENT_CONFIGS / "ranking-example.yaml").read_bytes() == ranking_example().encode()
     snapshot = SNAPSHOT_CONFIGS / "example.yaml"
     assert snapshot.read_bytes() == snapshot_example().encode()
 
+
+def test_documented_ranking_example_compiles_to_its_cases() -> None:
+    """The experiment gives the four cases the example describes, each with the definition it
+    describes. The plan these cases compile to is checked in `tests/core/test_ranking_plan.py`
+    (release 0.4.0's R04-T07)."""
+    xml = ranking_example_xml()
     path = EXPERIMENT_CONFIGS / "ranking-example.yaml"
     read = read_experiment_configuration_v1_1(path.read_bytes(), path.name, path)
 
@@ -166,42 +211,51 @@ def test_documented_ranking_example_compiles_to_its_cases(tmp_path: Path) -> Non
     ]
     assert keys == ["baseline", "value-heavy", "tilt-earnings-yield", "no-sales-yield"]
     heavy, tilt, no_sales = (case.definition.text for case in read.ranking_cases)
-
-    def weights(text: str, *changes: tuple[str, str, str]) -> str:
-        for name, old, new in changes:
-            written = f'Name="{name}" Weight="{old}"'
-            assert text.count(written) == 1
-            text = text.replace(written, f'Name="{name}" Weight="{new}"')
-        return text
-
-    assert heavy == weights(
+    assert heavy == with_weights(
         xml, ("Value", "40", "60"), ("Momentum", "30", "20"), ("Quality", "30", "20")
     )
-    assert tilt == weights(xml, ("Earnings Yield", "50", "70"), ("Sales Yield", "50", "30"))
+    assert tilt == with_weights(xml, ("Earnings Yield", "50", "70"), ("Sales Yield", "50", "30"))
     lines = xml.split("\n")
-    assert lines[5:8] == [
-        (
-            '\t\t<StockFormula Name="Sales Yield" Weight="50" RankType="Higher" Scope="Universe" '
-            'Description="">'
-        ),
-        "\t\t\t<Formula>…</Formula>",
-        "\t\t</StockFormula>",
-    ]
+    assert lines[5:8] == SALES_YIELD_LINES
     removed = "\n".join(lines[:5] + lines[8:])
-    assert no_sales == weights(removed, ("Earnings Yield", "50", "100"))
+    assert no_sales == with_weights(removed, ("Earnings Yield", "50", "100"))
     assert len({xml, heavy, tilt, no_sales}) == 4
 
+
+@pytest.mark.parametrize(
+    ("name", "rule"), list(ALTERED_DEFINITIONS.items()), ids=list(ALTERED_DEFINITIONS)
+)
+def test_the_ranking_example_fails_with_each_altered_definition(
+    tmp_path: Path, name: str, rule: str
+) -> None:
+    definition = (EXPERIMENT_CONFIGS / "ranking" / "invalid" / f"{name}.xml").read_bytes()
+
+    (problem,) = ranking_problems(tmp_path, ranking_example(), definition)
+
+    assert problem.startswith("- `baseline.ranking.definition` names a definition"), name
+    assert rule in problem, name
+
+
+@pytest.mark.parametrize(
+    ("altered", "problem"), list(ALTERED_VARIANTS.values()), ids=list(ALTERED_VARIANTS)
+)
+def test_the_ranking_example_fails_with_each_altered_set(
+    tmp_path: Path, altered: str, problem: str
+) -> None:
+    content = with_line(VALUE_HEAVY_SET, altered, ranking_example())
+
+    found = ranking_problems(tmp_path, content, ranking_example_xml().encode())
+
+    assert found == [found[0]] and found[0].startswith(f"- `variants.ranking[0].{problem}")
+
+
+def test_a_path_to_two_nodes_and_the_removal_of_a_composite_or_its_only_factor_fail(
+    tmp_path: Path,
+) -> None:
+    """The validation's other alterations, of `tilt-earnings-yield`'s and `no-sales-yield`'s
+    paths, each with what its problems give, among the others its change makes."""
+    xml = ranking_example_xml()
     content = ranking_example()
-    for name, rule in ALTERED_DEFINITIONS.items():
-        definition = (EXPERIMENT_CONFIGS / "ranking" / "invalid" / f"{name}.xml").read_bytes()
-        (problem,) = ranking_problems(tmp_path, content, definition)
-        assert problem.startswith("- `baseline.ranking.definition` names a definition"), name
-        assert rule in problem, name
-    for altered, problem in ALTERED_VARIANTS:
-        found = ranking_problems(
-            tmp_path, with_line(VALUE_HEAVY_SET, altered, content), xml.encode()
-        )
-        assert found == [found[0]] and found[0].startswith(f"- `variants.ranking[0].{problem}")
     # Two nodes that share a name, which the path names.
     shared = xml.replace('Name="Sales Yield"', 'Name="Earnings Yield"').encode()
     assert any(
@@ -218,7 +272,7 @@ def test_documented_ranking_example_compiles_to_its_cases(tmp_path: Path) -> Non
     assert ranking_problems(tmp_path, composite, xml.encode())[0].startswith(
         "- `variants.ranking[2].remove` names a composite."
     )
-    only = xml.encode().replace("\n".join(lines[5:8]).encode() + b"\n", b"")
+    only = xml.encode().replace("\n".join(SALES_YIELD_LINES).encode() + b"\n", b"")
     only = only.replace(b'Name="Earnings Yield" Weight="50"', b'Name="Earnings Yield" Weight="100"')
     alone = with_line(
         "      remove: 'Value/Sales Yield'", "      remove: 'Value/Earnings Yield'", content
@@ -227,20 +281,25 @@ def test_documented_ranking_example_compiles_to_its_cases(tmp_path: Path) -> Non
         problem.startswith("- `variants.ranking[2].remove` names its parent's only node")
         for problem in ranking_problems(tmp_path, alone, only)
     )
-    # An escaped / in single quotes, and in double quotes, where YAML reads its own escapes first.
-    slashed = xml.replace('Name="Sales Yield"', 'Name="P/E"').encode()
+
+
+def test_an_escaped_slash_names_the_same_node_in_single_and_double_quotes(tmp_path: Path) -> None:
+    """A path with `\\/` in single quotes names the node a path with `\\\\/` in double quotes names,
+    as YAML reads its own escapes first in double quotes."""
+    slashed = ranking_example_xml().replace('Name="Sales Yield"', 'Name="P/E"').encode()
     single = with_line(
         "      set: {'Value/Earnings Yield': 70, 'Value/Sales Yield': 30}",
         "      set: {'Value/Earnings Yield': 70, 'Value/P\\/E': 30}",
-        content,
+        ranking_example(),
     )
     single = with_line("      remove: 'Value/Sales Yield'", "      remove: 'Value/P\\/E'", single)
     double = single.replace("'Value/P\\/E'", '"Value/P\\\\/E"')
+    (tmp_path / "ranking").mkdir()
+    (tmp_path / "ranking" / "value-momentum.xml").write_bytes(slashed)
+    path = tmp_path / "experiment.yaml"
     cases = []
     for written in (single, double):
-        path = tmp_path / "experiment.yaml"
         path.write_text(written, encoding="utf-8")
-        (tmp_path / "ranking" / "value-momentum.xml").write_bytes(slashed)
         cases.append(
             [
                 (case.definition.text, case.remove and case.remove.path)
