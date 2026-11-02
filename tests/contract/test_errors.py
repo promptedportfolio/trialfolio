@@ -1,5 +1,8 @@
 """Trial Folio's errors keep their code and message, and a loggable message that is also their
-string form (docs/contracts.md, errors: offending values reach the terminal, never the logs)."""
+string form.
+
+Traces to docs/contracts.md, errors: offending values reach the terminal, never the logs.
+"""
 
 import copy
 import pickle

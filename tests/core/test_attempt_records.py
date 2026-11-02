@@ -180,14 +180,11 @@ def check_recorded(out: Path, attempt: Attempt, result: AttemptResult) -> Attemp
 # Success
 
 
-def test_a_success_writes_the_start_record_before_sending_and_the_attempt_record_after(
-    server: FakePortfolio123,
-    client: P123ScreenBacktestClient,
-    store: StorageFaults,
-    attempt: Attempt,
-    plan: Plan,
-    out: Path,
-) -> None:
+def succeed(
+    server: FakePortfolio123, client: P123ScreenBacktestClient, attempt: Attempt, out: Path
+) -> tuple[AttemptResult, list[bool]]:
+    """Runs `attempt` to a 200 with `PAYLOAD`, and gives its result, and whether its start record
+    was there when its backtest was sent."""
     answers(server, Reply(200, json.dumps(PAYLOAD).encode()))
     directory = out / attempt.directory
     started_when_sent: list[bool] = []
@@ -197,6 +194,18 @@ def test_a_success_writes_the_start_record_before_sending_and_the_attempt_record
             client, lambda: started_when_sent.append((directory / "started.json").exists())
         )
     )
+
+    return result, started_when_sent
+
+
+def test_a_success_writes_the_start_record_before_sending_and_the_attempt_record_after(
+    server: FakePortfolio123,
+    client: P123ScreenBacktestClient,
+    store: StorageFaults,
+    attempt: Attempt,
+    out: Path,
+) -> None:
+    result, started_when_sent = succeed(server, client, attempt, out)
 
     # The start record was durable before the request was sent, and nothing was written twice.
     assert started_when_sent == [True]
@@ -212,7 +221,19 @@ def test_a_success_writes_the_start_record_before_sending_and_the_attempt_record
         "provider_response",
         "attempt_record",
     ]
-    start = StartRecord.model_validate_json((directory / "started.json").read_bytes())
+    assert server.requests() == [AUTH, BACKTEST]
+
+
+def test_after_a_success_the_records_say_what_it_ran_and_name_its_files_by_their_hashes(
+    server: FakePortfolio123,
+    client: P123ScreenBacktestClient,
+    attempt: Attempt,
+    plan: Plan,
+    out: Path,
+) -> None:
+    result, _ = succeed(server, client, attempt, out)
+
+    start = StartRecord.model_validate_json((out / attempt.directory / "started.json").read_bytes())
     assert start.exchanges == (AUTHENTICATED_EXCHANGE,)
     assert start.plan_hash == plan.plan_hash
     assert start.case_id == plan.cases[0].case_id
@@ -243,8 +264,18 @@ def test_a_success_writes_the_start_record_before_sending_and_the_attempt_record
     assert record.response is not None
     assert record.response.form == "decoded"
 
+
+def test_after_a_success_the_saved_request_and_response_are_what_was_sent_and_served(
+    server: FakePortfolio123,
+    client: P123ScreenBacktestClient,
+    attempt: Attempt,
+    out: Path,
+) -> None:
+    result, _ = succeed(server, client, attempt, out)
+
     # The response decodes to what was served, and the request to what was sent, number for
     # number: the slippage's text is the body's.
+    directory = out / attempt.directory
     assert json.loads((directory / "response.json").read_bytes()) == PAYLOAD
     assert result.response == DecodedResponse(PAYLOAD)
     sent = server.received[1].body
@@ -252,7 +283,6 @@ def test_a_success_writes_the_start_record_before_sending_and_the_attempt_record
     assert json.loads(saved_request) == json.loads(sent)
     assert b'"slippage": 0.25' in sent
     assert b'"slippage": 0.25' in saved_request
-    assert server.requests() == [AUTH, BACKTEST]
 
 
 def test_an_undecodable_200_is_saved_raw_and_succeeds_for_capture(

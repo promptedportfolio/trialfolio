@@ -33,6 +33,7 @@ import pytest
 from tests.support.cli import Cli
 from tests.support.fake_portfolio123 import FakePortfolio123
 from trialfolio.contracts.review_manifest import ReviewManifest
+from trialfolio.contracts.tables import DifferencesRow
 from trialfolio.tables import read_differences_csv
 
 pytestmark = pytest.mark.reference
@@ -79,6 +80,75 @@ def digests(root: Path) -> dict[str, str]:
     }
 
 
+def reviewed_against_itself(
+    run: Path, server: FakePortfolio123, monkeypatch: pytest.MonkeyPatch
+) -> tuple[ReviewManifest, tuple[DifferencesRow, ...]]:
+    """Reviews `run` against itself with `trialfolio review`, in a temporary directory, checks that
+    it succeeds and leaves the run unchanged, and gives the review's manifest and its
+    `differences.csv` rows."""
+    before = digests(run)
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        configuration = root / "review.yaml"
+        # The run's absolute path, as JSON text, which YAML reads as a quoted scalar.
+        configuration.write_text(CONFIGURATION.format(run=json.dumps(str(run))), encoding="utf-8")
+        out = root / "review"
+        with monkeypatch.context() as patch:
+            cli = Cli(patch, root, server)
+            cli.accept_license()
+            outcome = cli("review", configuration, "--out", out, "--json")
+
+        # Only the error code: a message could hold a value.
+        error = outcome.summary["error"]
+        code = error["code"] if isinstance(error, dict) else None
+        exit_code = outcome.exit_code
+        assert exit_code == 0, (run.name, code)
+        manifest = ReviewManifest.model_validate_json((out / "manifest.json").read_bytes())
+        rows = read_differences_csv(
+            (out / "normalized" / "differences.csv").read_bytes(), "differences.csv"
+        )
+
+    assert digests(run) == before, run.name
+    return manifest, rows
+
+
+def assert_shares_its_response(metrics: list[DifferencesRow], run: Path) -> None:
+    """With a saved response, which both results share: every metric row is differenced, with a
+    difference of zero, or `unavailable`, and every one is flagged `identical_source`."""
+    not_zero = [
+        f"{row.subject} {row.name}"
+        for row in metrics
+        if row.classification == "differenced"
+        and (row.difference is None or Decimal(row.difference) != 0)
+    ]
+    assert not not_zero, run.name
+    neither = [
+        f"{row.subject} {row.name}"
+        for row in metrics
+        if row.classification not in ("differenced", "unavailable")
+    ]
+    assert not neither, run.name
+    unflagged = [
+        f"{row.subject} {row.name}"
+        for row in metrics
+        if "identical_source" not in row.flags or not row.flagged
+    ]
+    assert not unflagged, run.name
+
+
+def assert_has_no_response(metrics: list[DifferencesRow], run: Path) -> None:
+    """Without one: every metric row is `unavailable`, with `input_unavailable`, and none carries
+    a flag, since two results with no saved response don't share one."""
+    available = [
+        f"{row.subject} {row.name}"
+        for row in metrics
+        if (row.classification, row.reason) != ("unavailable", "input_unavailable")
+    ]
+    assert not available, run.name
+    shared = [f"{row.subject} {row.name}" for row in metrics if row.flags]
+    assert not shared, run.name
+
+
 def test_each_live_check_run_reviewed_against_itself_is_the_same(
     reference_dir: Path, server: FakePortfolio123, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -88,31 +158,8 @@ def test_each_live_check_run_reviewed_against_itself_is_the_same(
     server.close()  # A review sends nothing.
 
     for run in runs:
-        before = digests(run)
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            configuration = root / "review.yaml"
-            # The run's absolute path, as JSON text, which YAML reads as a quoted scalar.
-            configuration.write_text(
-                CONFIGURATION.format(run=json.dumps(str(run))), encoding="utf-8"
-            )
-            out = root / "review"
-            with monkeypatch.context() as patch:
-                cli = Cli(patch, root, server)
-                cli.accept_license()
-                outcome = cli("review", configuration, "--out", out, "--json")
+        manifest, rows = reviewed_against_itself(run, server, monkeypatch)
 
-            # Only the error code: a message could hold a value.
-            error = outcome.summary["error"]
-            code = error["code"] if isinstance(error, dict) else None
-            exit_code = outcome.exit_code
-            assert exit_code == 0, (run.name, code)
-            manifest = ReviewManifest.model_validate_json((out / "manifest.json").read_bytes())
-            rows = read_differences_csv(
-                (out / "normalized" / "differences.csv").read_bytes(), "differences.csv"
-            )
-
-        assert digests(run) == before, run.name
         first, second = manifest.results
         assert first.run_manifest == second.run_manifest
         assert first.response == second.response
@@ -125,31 +172,6 @@ def test_each_live_check_run_reviewed_against_itself_is_the_same(
         flagged = [row.name for row in settings if row.flagged]
         assert not flagged, run.name
         if first.response is not None:
-            not_zero = [
-                f"{row.subject} {row.name}"
-                for row in metrics
-                if row.classification == "differenced"
-                and (row.difference is None or Decimal(row.difference) != 0)
-            ]
-            assert not not_zero, run.name
-            neither = [
-                f"{row.subject} {row.name}"
-                for row in metrics
-                if row.classification not in ("differenced", "unavailable")
-            ]
-            assert not neither, run.name
-            unflagged = [
-                f"{row.subject} {row.name}"
-                for row in metrics
-                if "identical_source" not in row.flags or not row.flagged
-            ]
-            assert not unflagged, run.name
+            assert_shares_its_response(metrics, run)
         else:
-            available = [
-                f"{row.subject} {row.name}"
-                for row in metrics
-                if (row.classification, row.reason) != ("unavailable", "input_unavailable")
-            ]
-            assert not available, run.name
-            shared = [f"{row.subject} {row.name}" for row in metrics if row.flags]
-            assert not shared, run.name
+            assert_has_no_response(metrics, run)

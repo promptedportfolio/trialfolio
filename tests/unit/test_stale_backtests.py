@@ -1,5 +1,7 @@
-"""The rule of a stale backtest, which the executor and the records check share
-(`trialfolio.stale_backtests`; docs/contracts.md, running an experiment: a stale backtest; D-45).
+"""The rule of a stale backtest, which the executor and the records check share,
+`trialfolio.stale_backtests`.
+
+Traces to docs/contracts.md, running an experiment (a stale backtest), and to D-45.
 
 A session sends each case once, so two of its attempts never send the same definition and the
 same backtest request, and each session's attempts are compared only with one another: these

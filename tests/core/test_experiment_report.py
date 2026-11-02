@@ -1107,13 +1107,12 @@ def test_the_costs_and_assumptions_name_the_cases_that_change_them(sessions: Ses
 # The counts (R03-AC08's report part)
 
 
-def test_the_report_shows_each_count_as_the_manifest_records_it(sessions: Sessions) -> None:
-    first, second = sessions("troubled")
-    *_, repeated = sessions("repeated")
-
-    for session, expected in (
-        (
-            first,
+@pytest.mark.parametrize(
+    ("name", "place", "expected"),
+    [
+        pytest.param(
+            "troubled",
+            0,
             {
                 "planned": "Planned cases: 5 = 2 succeeded + 2 failed + 0 skipped + 1 unknown + 0"
                 " not yet run.",
@@ -1125,9 +1124,11 @@ def test_the_report_shows_each_count_as_the_manifest_records_it(sessions: Sessio
                 ),
                 "Cost": "15 credits, as Portfolio123 reported",
             },
+            id="troubled-1",
         ),
-        (
-            second,
+        pytest.param(
+            "troubled",
+            1,
             {
                 "planned": "Planned cases: 5 = 4 succeeded + 1 failed + 0 skipped + 0 unknown + 0"
                 " not yet run.",
@@ -1139,9 +1140,11 @@ def test_the_report_shows_each_count_as_the_manifest_records_it(sessions: Sessio
                 ),
                 "Cost": "25 credits, as Portfolio123 reported",
             },
+            id="troubled-2",
         ),
-        (
-            repeated,
+        pytest.param(
+            "repeated",
+            2,
             {
                 "planned": "Planned cases: 2 = 1 succeeded + 1 failed + 0 skipped + 0 unknown + 0"
                 " not yet run.",
@@ -1153,45 +1156,58 @@ def test_the_report_shows_each_count_as_the_manifest_records_it(sessions: Sessio
                 ),
                 "Cost": "5 credits, as Portfolio123 reported",
             },
+            id="repeated-3",
         ),
-    ):
-        document = session.document
-        counts = session.manifest.counts
-        cases = document.root.by_id("cases")
+    ],
+)
+def test_the_report_shows_each_count_as_the_manifest_records_it(
+    sessions: Sessions, name: str, place: int, expected: dict[str, str]
+) -> None:
+    """Each session's report shows each count as the test expects it, and as its manifest
+    records it: the two sessions of `troubled`, and the third of `repeated`."""
+    session = sessions(name)[place]
+    document = session.document
+    counts = session.manifest.counts
+    cases = document.root.by_id("cases")
 
-        assert cases.find_all("p")[0].text.startswith(expected["planned"])
-        assert document.dd("Attempts") == [expected["Attempts"]]
-        assert document.dd("Repeats") == [expected["Repeats"]]
-        assert document.dd("Retired cases") == [expected["Retired cases"]]
-        assert document.dd("Retries") == ["0"]
-        assert document.dd("Counted against the budget")[0].startswith(
-            expected["Counted against the budget"]
+    assert cases.find_all("p")[0].text.startswith(expected["planned"])
+    assert document.dd("Attempts") == [expected["Attempts"]]
+    assert document.dd("Repeats") == [expected["Repeats"]]
+    assert document.dd("Retired cases") == [expected["Retired cases"]]
+    assert document.dd("Retries") == ["0"]
+    assert document.dd("Counted against the budget")[0].startswith(
+        expected["Counted against the budget"]
+    )
+    assert document.dd("Cost") == [expected["Cost"]]
+    # The manifest records the same counts.
+    shown = cases.find_all("p")[0].text
+    assert (
+        f"{counts.cases.planned} = {counts.cases.succeeded} succeeded + {counts.cases.failed}"
+        f" failed + {counts.cases.skipped} skipped + {counts.cases.unknown} unknown +"
+        f" {counts.cases.not_yet_run} not yet run."
+    ) in shown
+    assert document.dd("Attempts") == [
+        (
+            f"{counts.attempts.succeeded} succeeded, {counts.attempts.failed} failed,"
+            f" {counts.attempts.unknown} unknown, {counts.attempts.running} running"
         )
-        assert document.dd("Cost") == [expected["Cost"]]
-        # The manifest records the same counts.
-        shown = cases.find_all("p")[0].text
-        assert (
-            f"{counts.cases.planned} = {counts.cases.succeeded} succeeded + {counts.cases.failed}"
-            f" failed + {counts.cases.skipped} skipped + {counts.cases.unknown} unknown +"
-            f" {counts.cases.not_yet_run} not yet run."
-        ) in shown
-        assert document.dd("Attempts") == [
-            (
-                f"{counts.attempts.succeeded} succeeded, {counts.attempts.failed} failed,"
-                f" {counts.attempts.unknown} unknown, {counts.attempts.running} running"
-            )
-        ]
-        assert document.dd("Repeats")[0].startswith(f"{counts.attempts.repeats}:")
-        assert document.dd("Retired cases") == [str(counts.retired_cases)]
-        assert document.dd("Counted against the budget")[0].startswith(
-            f"Provider requests: {counts.provider_requests} of the budget's"
-            f" {counts.budget.provider_requests}. Authentication calls:"
-            f" {counts.authentication_calls} of its {counts.budget.authentication_calls}."
-        )
-        assert document.dd("Cost") == [f"{counts.cost} credits, as Portfolio123 reported"]
-    # A plan's two limits are equal, so the counts are rendered with limits that differ, to show
-    # that each is the limit it's named as.
-    evidence = first.evidence
+    ]
+    assert document.dd("Repeats")[0].startswith(f"{counts.attempts.repeats}:")
+    assert document.dd("Retired cases") == [str(counts.retired_cases)]
+    assert document.dd("Counted against the budget")[0].startswith(
+        f"Provider requests: {counts.provider_requests} of the budget's"
+        f" {counts.budget.provider_requests}. Authentication calls:"
+        f" {counts.authentication_calls} of its {counts.budget.authentication_calls}."
+    )
+    assert document.dd("Cost") == [f"{counts.cost} credits, as Portfolio123 reported"]
+
+
+def test_each_of_the_budgets_two_limits_is_shown_as_the_limit_its_named(
+    sessions: Sessions,
+) -> None:
+    """A plan's two limits are equal, so the counts are rendered with limits that differ, to show
+    that each is the limit it's named as."""
+    evidence = sessions("troubled")[0].evidence
     limits = evidence.counts.budget.model_copy(update={"authentication_calls": 9})
     counts = evidence.counts.model_copy(update={"budget": limits})
     document = parse(

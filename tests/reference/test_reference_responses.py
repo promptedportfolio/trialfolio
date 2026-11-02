@@ -35,6 +35,8 @@ import pytest
 from tests.support.cli import Cli
 from tests.support.fake_portfolio123 import AUTHENTICATED, FakePortfolio123, Reply
 from trialfolio.configuration import read_screen_configuration
+from trialfolio.contracts.plan import Plan
+from trialfolio.contracts.tables import MetricsRow, SettingsRow
 from trialfolio.planning import build_plan, installed_versions
 from trialfolio.tables import read_metrics_csv, read_settings_csv
 
@@ -232,13 +234,43 @@ def same_json(first: object, second: object) -> bool:
     return json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
 
 
-@pytest.mark.parametrize("call", CALLS.values(), ids=CALLS.keys())
-def test_a_reference_response_normalizes_as_documented(
+@dataclass(frozen=True)
+class Normalized:
+    """What a reference run normalized: its request, its case's ID, and its two tables' rows."""
+
+    request: dict[str, Any]
+    case_id: str
+    metrics: tuple[MetricsRow, ...]
+    settings: tuple[SettingsRow, ...]
+
+
+def planned(request: Mapping[str, Any], root: Path) -> tuple[Path, Plan]:
+    """Writes the screen configuration that sends `request` into `root`, plans it, and checks
+    that planning it gives that request back exactly. Gives the configuration's path, and its
+    plan."""
+    configuration_path = root / "screen.yaml"
+    configuration_path.write_text(
+        screen_configuration(request, "Reference conformance"), encoding="utf-8"
+    )
+    configuration = read_screen_configuration(
+        configuration_path.read_bytes(), str(configuration_path)
+    )
+    plan = build_plan(configuration, installed_versions())
+    (planned,) = plan.cases[0].requests
+    round_trip = same_json(planned.params.model_dump(mode="json"), request)
+    assert round_trip, "the configuration doesn't plan the reference request"
+    return configuration_path, plan
+
+
+def reference_run(
     call: ReferenceCall,
     reference_dir: Path,
     server: FakePortfolio123,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+) -> Normalized:
+    """Plans the screen configuration that sends `call`'s request, runs it with `trialfolio run`,
+    whose request the server answers with the reference response, and gives what it normalized.
+    Skips when either file isn't there."""
     request_path = reference_dir / call.request
     response_path = reference_dir / call.response
     for path in (request_path, response_path):
@@ -248,17 +280,7 @@ def test_a_reference_response_normalizes_as_documented(
 
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
-        configuration_path = root / "screen.yaml"
-        configuration_path.write_text(
-            screen_configuration(request, "Reference conformance"), encoding="utf-8"
-        )
-        configuration = read_screen_configuration(
-            configuration_path.read_bytes(), str(configuration_path)
-        )
-        plan = build_plan(configuration, installed_versions())
-        (planned,) = plan.cases[0].requests
-        round_trip = same_json(planned.params.model_dump(mode="json"), request)
-        assert round_trip, "the configuration doesn't plan the reference request"
+        configuration_path, plan = planned(request, root)
 
         cli = Cli(monkeypatch, root, server)
         cli.ready()
@@ -281,7 +303,12 @@ def test_a_reference_response_normalizes_as_documented(
 
         metrics = read_metrics_csv((out / "normalized/metrics.csv").read_bytes(), "metrics.csv")
         settings = read_settings_csv((out / "normalized/settings.csv").read_bytes(), "settings.csv")
+    return Normalized(request, plan.cases[0].case_id, metrics, settings)
 
+
+def assert_metrics_as_documented(metrics: tuple[MetricsRow, ...]) -> None:
+    """`metrics.csv` has the documented rows, in order, each available, none with more decimal
+    places than the request asked for."""
     assert tuple((row.subject, row.metric_id) for row in metrics) == DOCUMENTED_METRICS
     unavailable = [f"{r.subject} {r.metric_id}" for r in metrics if r.availability != "available"]
     assert not unavailable
@@ -292,6 +319,12 @@ def test_a_reference_response_normalizes_as_documented(
         or (row.source_decimals or 0) > PRECISION
     ]
     assert not too_precise
+
+
+def assert_covers_the_requested_dates(
+    metrics: tuple[MetricsRow, ...], request: Mapping[str, Any]
+) -> None:
+    """The strategy's coverage is the requested dates, over at least one period."""
     rows = {row.metric_id: row for row in metrics if row.subject == "strategy"}
     covered = (rows["coverage_start"].value, rows["coverage_end"].value) == (
         request["startDt"],
@@ -300,6 +333,12 @@ def test_a_reference_response_normalizes_as_documented(
     assert covered, "the coverage differs from the requested dates"
     assert int(rows["coverage_periods"].value or "0") > 0
 
+
+def assert_settings_as_documented(
+    settings: tuple[SettingsRow, ...], request: Mapping[str, Any]
+) -> None:
+    """`settings.csv` has the documented rows for the request, in order, and only its inferred
+    rows cite a rule."""
     observed = tuple(
         (
             row.setting,
@@ -317,8 +356,22 @@ def test_a_reference_response_normalizes_as_documented(
     assert [row[0] for row in observed] == [row[0] for row in expected]
     differing = [ours[0] for ours, documented in zip(observed, expected) if ours != documented]
     assert not differing
-    case_id = plan.cases[0].case_id
-    assert all(row.label == case_id for row in (*metrics, *settings))
     # Only the inferred rows cite a rule.
     cited = [row.setting for row in settings if row.inference_rule is not None]
     assert cited == [row.setting for row in settings if row.provenance == "inferred"]
+
+
+@pytest.mark.parametrize("call", CALLS.values(), ids=CALLS.keys())
+def test_a_reference_response_normalizes_as_documented(
+    call: ReferenceCall,
+    reference_dir: Path,
+    server: FakePortfolio123,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    normalized = reference_run(call, reference_dir, server, monkeypatch)
+
+    assert_metrics_as_documented(normalized.metrics)
+    assert_covers_the_requested_dates(normalized.metrics, normalized.request)
+    assert_settings_as_documented(normalized.settings, normalized.request)
+    rows = (*normalized.metrics, *normalized.settings)
+    assert all(row.label == normalized.case_id for row in rows)

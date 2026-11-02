@@ -30,7 +30,9 @@ the core.
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -308,6 +310,42 @@ def test_an_attempt_record_unwritten_after_the_rank_updates_response_is_recorded
 # A confirmed repeat sends both again, once
 
 
+class Stopped(NamedTuple):
+    """A case whose attempt a stop left possibly charged, awaiting a repeat."""
+
+    key: str
+    attempt: str
+    """The stopped attempt's ID."""
+    due: int
+    """How many cases a resume then sends."""
+
+
+def stop_value_heavy_during_its_rank_update(
+    cli: Cli, experiments: Builder, faults: FaultyStores, out: Path
+) -> Stopped:
+    """`value-heavy`, killed with `SIGKILL` during its `rank_update`, after the baseline
+    succeeded: its attempt's update record is its only record, and the two cases after it are
+    due."""
+    return Stopped("value-heavy", str(killed_value_heavy(cli, experiments, out).attempt_id), 2)
+
+
+def stop_the_baseline_before_its_backtest(
+    cli: Cli, experiments: Builder, faults: FaultyStores, out: Path
+) -> Stopped:
+    """The baseline, interrupted at its backtest's `request.json`, once its `rank_update`'s 200
+    was saved: its attempt record is written, and the three cases after it are due."""
+    faults.fail_before(f"{CASE_IDS['baseline']}/request.json", KeyboardInterrupt())
+    interrupted_baseline(experiments, faults, out)
+    (record,) = attempt_records(out, CASE_IDS["baseline"], AttemptRecordV1_3)
+    return Stopped("baseline", str(record.attempt_id), 3)
+
+
+STOPS: dict[str, Callable[[Cli, Builder, FaultyStores, Path], Stopped]] = {
+    "killed": stop_value_heavy_during_its_rank_update,
+    "interrupted": stop_the_baseline_before_its_backtest,
+}
+
+
 @pytest.mark.parametrize(
     "stopped",
     [pytest.param("killed", marks=posix_only), "interrupted"],
@@ -318,16 +356,8 @@ def test_a_confirmed_repeat_sends_the_rank_update_then_the_backtest_once(
 ) -> None:
     cli.ready()
     out = cli.tmp / "experiment"
-    if stopped == "killed":
-        key, attempt = "value-heavy", str(killed_value_heavy(cli, experiments, out).attempt_id)
-        sends = returns_each(2)
-    else:
-        key = "baseline"
-        faults.fail_before(f"{CASE_IDS[key]}/request.json", KeyboardInterrupt())
-        interrupted_baseline(experiments, faults, out)
-        (record,) = attempt_records(out, CASE_IDS[key], AttemptRecordV1_3)
-        attempt = str(record.attempt_id)
-        sends = returns_each(3)
+    key, attempt, due = STOPS[stopped](cli, experiments, faults, out)
+    sends = returns_each(due)
     resumed = experiments.run(EXAMPLE, out, ranks=[RANK_UPDATED] * len(sends), sends=sends)
     assert resumed.exit_code == 6, resumed.stderr
     # Seven of the budget's 8 requests are counted, so the repeat's two need the raised budget.

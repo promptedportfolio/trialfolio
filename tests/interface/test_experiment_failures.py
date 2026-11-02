@@ -19,6 +19,7 @@ plan gives it.
 
 import functools
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -168,27 +169,62 @@ MISSPELLED = Reply(
 live walk-through: `failed`, possibly charged, with `provider.unsupported_capability`."""
 
 
-@pytest.mark.parametrize(
-    ("reply", "code", "revise"),
-    [
-        pytest.param(REJECTED, "provider.unsupported_capability", True, id="400"),
-        pytest.param(MISSPELLED, "provider.unsupported_capability", True, id="409"),
-        pytest.param(
-            Reply(429, b"Too many requests"), "provider.request_rejected", False, id="429"
-        ),
-    ],
+@dataclass(frozen=True)
+class Failure:
+    """A reply that fails `holdings-50`'s request, the error code its attempt records, and whether
+    the command's message says to revise the plan."""
+
+    reply: Reply
+    code: str
+    revise: bool
+
+
+FAILURES = {
+    "400": Failure(REJECTED, "provider.unsupported_capability", True),
+    "409": Failure(MISSPELLED, "provider.unsupported_capability", True),
+    "429": Failure(Reply(429, b"Too many requests"), "provider.request_rejected", False),
+}
+
+REVISE = (
+    "Portfolio123 rejected a setting of `holdings-50`: a repeat sends the same request"
+    " again, so change the setting instead, and revise the plan with --revision-reason."
 )
-def test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_report(
-    cli: Cli, experiments: Builder, reply: Reply, code: str, revise: bool
-) -> None:
+
+
+def fail_holdings(cli: Cli, experiments: Builder, failure: Failure) -> tuple[Outcome, Path]:
+    """Writes `example.yaml`'s experiment, whose `holdings-50` gets the failure's reply, and
+    gives the command's outcome and the experiment's directory."""
     cli.ready()
     out = cli.tmp / "experiment"
+    sends = [returns(), returns(), failure.reply, returns(), returns()]
 
-    ran = experiments.run(EXAMPLE, out, sends=[returns(), returns(), reply, returns(), returns()])
+    ran = experiments.run(EXAMPLE, out, sends=sends)
 
     assert ran.exit_code == 6, ran.stderr
+    return ran, out
+
+
+def assert_gives_portfolio123s_message(
+    outcome: Outcome, failure: Failure, out: Path, session: int
+) -> None:
+    """The command's message gives Portfolio123's message for `holdings-50`, says to revise the
+    plan when the failure is one a revision fixes, and ends with the session's report."""
+    message = outcome.error["message"]
+    text = failure.reply.body.decode()
+    assert f'Portfolio123\'s message for `holdings-50`: "{text}".' in message
+    assert (REVISE in message) is failure.revise
+    report = out / f"sessions/{session}/report.html"
+    assert message.endswith(f"Session {session}'s report gives each case's attempts: {report}.")
+
+
+@pytest.mark.parametrize("failure", FAILURES.values(), ids=FAILURES.keys())
+def test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_report(
+    cli: Cli, experiments: Builder, failure: Failure
+) -> None:
+    ran, out = fail_holdings(cli, experiments, failure)
+
     record = only_record(out, HOLDINGS)
-    assert record.error is not None and record.error.code == code
+    assert record.error is not None and record.error.code == failure.code
     holdings = plan().cases[HOLDINGS].case_id
     lines = ran.stderr.splitlines()
     # Each case's place among the cases the session sends, and each attempt's ending, the failed
@@ -203,39 +239,32 @@ def test_a_failed_case_shows_its_ending_portfolio123s_message_and_the_sessions_r
     ]
     assert endings[HOLDINGS].startswith(f"Attempt for {holdings} ended failed after ")
     assert endings[HOLDINGS].endswith(
-        f": {code}; possibly charged: yes; attempt record written: yes."
+        f": {failure.code}; possibly charged: yes; attempt record written: yes."
     )
-    text = reply.body.decode()
-    rejected = (
-        "Portfolio123 rejected a setting of `holdings-50`: a repeat sends the same request"
-        " again, so change the setting instead, and revise the plan with --revision-reason."
-    )
-    message = ran.error["message"]
-    assert f'Portfolio123\'s message for `holdings-50`: "{text}".' in message
-    assert (rejected in message) is revise
-    assert message.endswith(
-        f"Session 1's report gives each case's attempts: {out / 'sessions/1/report.html'}."
-    )
-    # The log names the case by its `case_id`, and holds none of Portfolio123's message, the
-    # revision's sentence, and the report's path.
-    log = (out / "logs/trialfolio.log").read_text(encoding="utf-8")
-    assert f"{holdings}, failed ({code})" in log
-    assert text not in log
-    assert "holdings-50" not in log
-    assert "Portfolio123 rejected a setting of" not in log
-    assert "report gives each case's attempts" not in log
+    assert_gives_portfolio123s_message(ran, failure, out, 1)
 
     # A resume reads Portfolio123's message from the attempt record.
     resumed = experiments.run(EXAMPLE, out)
 
     assert resumed.exit_code == 6, resumed.stderr
-    message = resumed.error["message"]
-    assert f'Portfolio123\'s message for `holdings-50`: "{text}".' in message
-    assert (rejected in message) is revise
-    assert message.endswith(
-        f"Session 2's report gives each case's attempts: {out / 'sessions/2/report.html'}."
-    )
+    assert_gives_portfolio123s_message(resumed, failure, out, 2)
     assert not [line for line in resumed.stderr.splitlines() if line.startswith("Case ")]
+
+
+@pytest.mark.parametrize("failure", FAILURES.values(), ids=FAILURES.keys())
+def test_a_failed_cases_log_names_it_by_its_case_id_and_holds_none_of_what_the_message_adds(
+    cli: Cli, experiments: Builder, failure: Failure
+) -> None:
+    _, out = fail_holdings(cli, experiments, failure)
+
+    # The log names the case by its `case_id`, and holds none of Portfolio123's message, the
+    # revision's sentence, and the report's path.
+    log = (out / "logs/trialfolio.log").read_text(encoding="utf-8")
+    assert f"{plan().cases[HOLDINGS].case_id}, failed ({failure.code})" in log
+    assert failure.reply.body.decode() not in log
+    assert "holdings-50" not in log
+    assert "Portfolio123 rejected a setting of" not in log
+    assert "report gives each case's attempts" not in log
 
 
 def test_an_attempt_interrupted_during_its_send_leaves_its_ending_to_the_command(
