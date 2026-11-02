@@ -97,12 +97,14 @@ Schema version 1.0.0, introduced in 0.1.0 (task R01-T03). A screen configuration
 
 Version 1.1.0, from 0.4.0 (R04-T02), adds two [ranking forms](#ranking-forms), a ranking system's definition and a ranking snapshot, and nothing else. A 1.0.0 file reads as it did, and only a 1.1.0 file may use them, so a Trial Folio that can't read them refuses the file by its version, not by a key it doesn't know.
 
+Version 1.2.0, proposed for 0.5.0 (R05-T02), adds the optional `analysis` key, which declares [period splits](#period-splits), and nothing else: a 1.2.0 file has every key of 1.1.0, with the same rules. A 1.0.0 or 1.1.0 file reads as it did, and only a 1.2.0 file may use `analysis`, for the same reason.
+
 **Keys:**
 
 | Key | Type | Required | Rules | Sent as |
 |---|---|---|---|---|
 | `kind` | string | Yes | `screen` | Not sent |
-| `schema_version` | string | Yes | A supported version (`1.0.0`, or `1.1.0` from 0.4.0). Any other value fails with `config.invalid`, and the message names the supported versions. | Not sent |
+| `schema_version` | string | Yes | A supported version (`1.0.0`, `1.1.0` from 0.4.0, or `1.2.0` from 0.5.0). Any other value fails with `config.invalid`, and the message names the supported versions. | Not sent |
 | `title` | string | Yes | 1–200 characters. Used as the report heading. | Not sent |
 | `purpose` | string | No | 1–2,000 characters, not all whitespace. If it's absent, the report says no purpose was declared. | Not sent |
 | `universe` | string | Yes | A non-empty Portfolio123 universe name, written in quotes or as a block scalar ([text sent](#screen-configuration)), for example `'SP500'` | `screen.universe` |
@@ -118,6 +120,7 @@ Version 1.1.0, from 0.4.0 (R04-T02), adds two [ranking forms](#ranking-forms), a
 | `pit_method` | string | Yes | `complete`, Portfolio123's point-in-time method | `pitMethod`: `Complete` |
 | `precision` | integer | Yes | 4: the decimal places in results | `precision` |
 | `data_vendor` | string | No | `FactSet` only ([D-16](spec.md#decisions)). Any other value, including `Compustat`, fails with `config.invalid`. | Never sent, because the endpoint documents no vendor parameter |
+| `analysis` | mapping | No | From 1.2.0 only: the [period splits](#period-splits) | Not sent |
 
 **Verified values.** Following [D-20](spec.md#decisions), the configuration accepts only values a recorded live call has verified. Free-form values, such as universe names, benchmark symbols, formulas, holdings counts, and slippage, are verified by form: R01-T01 sent one of each, and Portfolio123 accepted them.
 
@@ -373,12 +376,14 @@ Schema version 1.0.0, introduced in 0.3.0 (task R03-T02). An experiment configur
 
 Version 1.1.0, from 0.4.0 (R04-T02), adds a baseline ranking given as a [definition](#ranking-definitions) or a [snapshot](#ranking-snapshot-output), and [ranking variants](#ranking-variants). A 1.0.0 file reads as it did, and only a 1.1.0 file may use them.
 
+Version 1.2.0, proposed for 0.5.0 (R05-T02), adds the optional top-level `analysis` key, which declares the experiment's [period splits](#period-splits), and nothing else: a 1.2.0 file has every key of 1.1.0, with the same rules. A 1.0.0 or 1.1.0 file reads as it did, and only a 1.2.0 file may use `analysis`.
+
 **Top-level keys:**
 
 | Key | Type | Required | Rules |
 |---|---|---|---|
 | `kind` | string | Yes | `experiment` |
-| `schema_version` | string | Yes | A supported version (`1.0.0`, or `1.1.0` from 0.4.0). Any other value fails with `config.invalid`, and the message names the supported versions. |
+| `schema_version` | string | Yes | A supported version (`1.0.0`, `1.1.0` from 0.4.0, or `1.2.0` from 0.5.0). Any other value fails with `config.invalid`, and the message names the supported versions. |
 | `experiment_id` | string | Yes | The experiment's [identity](#identity): the same pattern as a review's `label`, with the same reserved names |
 | `title` | string | Yes | 1–200 characters. Used as the report heading. |
 | `purpose` | string | Yes | 1–2,000 characters, not all whitespace: the question the experiment addresses. Unlike a screen's, it's required, because it's part of the research history ([METH-03](methodology.md#meth-03-research-history-and-multiple-testing)). |
@@ -386,8 +391,9 @@ Version 1.1.0, from 0.4.0 (R04-T02), adds a baseline ranking given as a [definit
 | `baseline` | mapping | Yes | The [baseline](#the-baseline) screen's settings |
 | `variants` | mapping | No | The [variants](#variants), by the setting each one changes. If it's absent, the only variant is the [default](#default-variants). |
 | `budget` | mapping | Yes | The [request budget](#the-experiments-budget) |
+| `analysis` | mapping | No | From 1.2.0 only: the [period splits](#period-splits), which apply to every case. Not in `baseline`, since they're the experiment's, not a screen's. |
 
-**Not sent.** `experiment_id`, `title`, `purpose`, `prior_research`, and each variant's `key` and `description` describe the experiment. They're never sent, and they aren't part of any case's settings, so they don't change a `case_id`. They're recorded with `user_supplied` provenance, in [plan 1.1.0](#experiment-plans-and-revisions) and [`experiment.json`](#experimentjson). A change to any of them but `experiment_id` is a plan revision, and keeps every case's `case_id`; another `experiment_id` is another experiment.
+**Not sent.** `experiment_id`, `title`, `purpose`, `prior_research`, `analysis`, and each variant's `key` and `description` describe the experiment. They're never sent, and they aren't part of any case's settings, so they don't change a `case_id`. They're recorded with `user_supplied` provenance, in [plan 1.1.0](#experiment-plans-and-revisions) and [`experiment.json`](#experimentjson), and `analysis` in the plan alone ([plans with period splits](#plans-with-period-splits)). A change to any of them but `experiment_id` and `analysis` is a plan revision, and keeps every case's `case_id`; another `experiment_id` is another experiment; and the experiment's first plan fixes its `analysis`, so a change to it fails ([period splits](#period-splits)).
 
 #### Prior research
 
@@ -676,6 +682,44 @@ schema_version: 1.0.0
 system: 'Value and momentum'
 ```
 
+### Period splits
+
+Proposed for 0.5.0 (R05-T02). A screen configuration 1.2.0, or an experiment configuration 1.2.0, may declare the dates at which [analysis set 1.0.0](methodology.md#analysis-set-100) divides each result's coverage, such as the end of a paper's sample and its publication ([METH-09.9](methodology.md#meth-09-reproducing-published-research)). They're declared before the run, so the plan records them before any result is seen ([METH-09.10](methodology.md#meth-09-reproducing-published-research)). Giving them to `trialfolio report` instead would choose them after the results are seen, so no command takes them.
+
+**Keys.** `analysis` is a mapping with one key:
+
+| Key | Type | Required | Rules |
+|---|---|---|---|
+| `period_splits` | list of mappings | Yes | 1 to 10 splits, each with the two keys below, in the order of their dates |
+
+Each split:
+
+| Key | Type | Required | Rules |
+|---|---|---|---|
+| `date` | date | Yes | `YYYY-MM-DD`. Each split's date is later than the one before it in the list, so the list is in date order, and no two are the same. |
+| `label` | string | Yes | 1–200 characters, not all whitespace, such as `End of the paper's sample`. No two splits have the same label, compared character for character. |
+
+- **Any date.** A date need not fall within the requested dates, or on a weekday: a paper's sample may end before the backtest starts. A date outside a result's coverage is flagged when the analyses are calculated ([segments](methodology.md#segments)), not refused here, since the coverage is known only from the response.
+- **Not sent, not a setting.** The splits describe the analysis. They're never sent, and they aren't part of any case's settings, so they don't change a `case_id`. They're recorded, with `user_supplied` provenance, in the plan, so its hash covers them ([plans with period splits](#plans-with-period-splits)).
+- **An experiment's first plan fixes them.** A plan built again for an experiment's output directory whose `analysis` isn't exactly the current plan's, because the configuration adds, changes, or removes a split, or any date or label, fails with `config.invalid`, exit 3, before anything is sent or written. The message says that an experiment's period splits are fixed by its first plan, and that other splits need a new experiment, in a new output directory; it names no date or label. So no split is declared after any case's result is seen, and an experiment that 0.4.0 began, whose plans have none, keeps none. The alternative, a revision that may change them, would need the report to name the plan that declared each split, label each case whose result came before that plan, and give the revision's reason ([METH-09.10](methodology.md#meth-09-reproducing-published-research)). The owner confirmed this rule on 2026-11-01 ([open questions](releases/0.5.0-return-analytics.md#open-questions)).
+- **None declared.** A configuration without `analysis`, and every configuration releases 0.1.0 to 0.4.0 accept, declares no split. Its results have no split segments, and the report says period splits are unavailable because no dates were declared ([R05-AC08](releases/0.5.0-return-analytics.md#acceptance-criteria)).
+
+Example, in an experiment configuration 1.2.0:
+
+```yaml
+kind: experiment
+schema_version: 1.2.0
+# ...the experiment's other keys, as in 1.1.0
+analysis:
+  period_splits:
+    - date: 2012-12-31
+      label: 'End of the paper''s sample'
+    - date: 2016-06-30
+      label: 'Publication'
+```
+
+A date is read as a screen configuration's `start_date` is: `YYYY-MM-DD`, in quotes or not, and never with a time.
+
 ## Source artifacts
 
 **Requirement (INV-04).** Source files are preserved byte for byte before anything is derived from them. A source artifact record contains:
@@ -780,12 +824,17 @@ The reference response agrees: the standard deviations (rows 7 and 18) reproduce
   | `As Of Dt`, `Rank Dt`, `Tran Dt`, `End Dt` | `YYYY-MM-DD` string | The period's as-of, ranking, transaction, and end dates |
   | `#Pos`, `New Pos`, `Sold Pos` | integer | Positions held, bought, and sold |
   | `Turn` | number | Turnover in percent. It equals `Sold Pos` divided by `#Pos`, times 100, in every reference period. |
-  | `Ret%`, `Bench%`, `Excess%` | number | The period's return in percent for the strategy and the benchmark, and their difference. `Ret%` and `Bench%` reproduce from the `chart` levels. |
-  | `100 USD Investment`, `100 USD in SPY:USA` | number | The value of 100 invested, at the period's end. Reproduced. Their names contain the currency and the benchmark, so they change with those settings. |
+  | `Ret%`, `Bench%`, `Excess%` | number | The period's return in percent for the strategy and the benchmark, and their difference. `Ret%` and `Bench%` reproduce from the `chart` levels at the period's `Tran Dt` and `End Dt`, at the precision or within what the levels' rounding allows, and `Excess%` is `Ret%` minus `Bench%`, exactly or within the three values' rounding, in each of the owner's 74 distinct saved responses ([R05-T01](../reference/return-series/README.md#the-checks)). |
+  | `100 USD Investment`, `100 USD in SPY:USA` | number | The value of 100 invested, at the period's end. It's the `chart` level at the period's `End Dt`, or one unit of the fourth decimal apart from it, never further: in the reference response, 5 of the benchmark's 131 values are one unit apart ([R01-T02's record](../reference/p123api-screen-backtest/README.md#checks-for-r01-t02)), and in the owner's 74 distinct saved responses, 328 of the strategy's 10,870 and 232 of the benchmark's ([R05-T01](../reference/return-series/README.md#the-checks)). Their names contain the currency and the benchmark, so they change with those settings. Trial Folio reads the `chart` levels, not these. |
   | `Costs`, `Cash`, `Min % no slip`, `Max % no slip`, `StdDev` | number | Not verified |
 
 - **`results.average`, `results.upMarkets`, and `results.downMarkets`.** Each is one element shorter than `columns`: element *i* belongs to `columns[i+1]`. Element 0 is `null`. In `upMarkets` and `downMarkets`, element 1, under `Rank Dt`, holds the number of periods in the group. The other non-null elements are means of their column: over all periods, over the periods whose `Bench%` is zero or above, and over the rest. R01-T01's response has no period at zero. R01-T05's weekly response verifies the zero case ([run record](../reference/p123api-screen-backtest-values/README.md)). Its first period, from 2016-01-01, a market holiday, to 2016-01-04, has the same benchmark level in `chart` on both dates and a `Bench%` of `0`, and it's counted in `upMarkets`. The wrapper's `to_pandas=True` conversion appends these arrays as table rows without the offset, which moves each value one column to the left. Trial Folio doesn't use that conversion ([ADR 0001](adrs/0001-python-and-portfolio123-integration.md), decision 4).
 - **`chart`,** five parallel arrays with one entry per weekday from the start date to the end date, including market holidays: `dates`, `screenReturns`, `benchReturns`, `turnoverPct`, and `positionCnt`. Despite their names, `screenReturns` and `benchReturns` are levels of 100 invested, starting at 100, not returns. `turnoverPct` and `positionCnt` hold whole numbers written as decimals, such as `25.0`.
+
+**Read into the series table, proposed for 0.5.0 (R05-T02).** [`series.csv`](#seriescsv) reads, from each response with the required structure, `chart`'s `dates`, `screenReturns`, and `benchReturns`, and each row's `Tran Dt`, `End Dt`, `Ret%`, `Bench%`, and `Excess%`, as R05-T01 found them in each of the owner's 74 distinct saved responses ([run record](../reference/return-series/README.md)). The rest stays preserved but not interpreted, `turnoverPct`, `positionCnt`, and the `100 USD` columns among it.
+
+- **A level's date.** Portfolio123 doesn't document which close a `chart` level stands for. A market closure has an entry of its own, whose level moves from the entry before, and the next weekday's entry repeats it: the benchmark's always, and the strategy's unless a period's `Tran Dt` is the closure. At least two readings fit that: a level is the value at the close of the trading day before its date, or at its own date's close, with a closure's entry valued at the next trading day's close ([market closures](../reference/return-series/README.md#market-closures)). So each level keeps its `chart` date, as the response gives it, and so does every value calculated from it: no date is moved. The owner confirmed this on 2026-11-01 ([open questions](releases/0.5.0-return-analytics.md#open-questions)).
+- **Agreement within rounding.** Portfolio123's period returns and metrics agree with the four-decimal levels, but often only within their rounding, as values calculated before rounding would ([R05-T01](../reference/return-series/README.md#findings-for-r05-t02)). So the series table holds `Excess%` as reported, never calculated again ([D-47](spec.md#decisions)), and a metric the analysis set calculates again is compared with Portfolio123's within the rounding its inputs allow ([D-48](spec.md#decisions), [reconciliation](methodology.md#reconciliation-with-portfolio123s-metrics)).
 
 ### `p123api-rank-update` version 1
 
@@ -824,6 +873,21 @@ Unavailability reason codes:
 | `not_supported` | The parser does not interpret this field yet |
 | `input_unavailable` | A calculated value whose input was unavailable |
 
+**From 0.5.0 (proposed, R05-T02),** the [series table](#seriescsv) and the [analysis table](#analysiscsv) use two more units, and the analysis table five more reason codes. `metrics.csv`, `settings.csv`, and `differences.csv` keep theirs, and their schemas their bytes.
+
+| Unit | Meaning |
+|---|---|
+| `index` | A level of an investment worth 100 at the series' start: `112.5` means the 100 grew to 112.5 ([`series.csv`](#seriescsv)) |
+| `pp` | A difference between two `percent` values, in percentage points, as `differences.csv`'s `difference_unit` gives it |
+
+| Code | Meaning |
+|---|---|
+| `not_daily` | A `chart` that can be read, but isn't one entry per weekday from the request's start date to its end date, as the [verified layout](#p123api-screen-backtest-version-1) records it. Its daily series is unavailable ([D-47](spec.md#decisions)). |
+| `too_few_observations` | Fewer observations than the calculation needs, such as a rolling window longer than the series. The row gives the count it had. |
+| `too_short` | A return over less than a year, which isn't annualized |
+| `outside_coverage` | A split segment that the result's coverage doesn't reach, or, for a segment between two declared dates, reaches only in part, so that it isn't shortened to fit ([segments](methodology.md#segments)) |
+| `not_recovered` | A drawdown whose level never returned to its peak within the segment |
+
 An unavailable metric is never written as zero, blank, or a placeholder number. CSV output writes an empty value together with a reason column. Trial Folio never reports more precision than its inputs: a difference between two values has the smaller of their two decimal counts.
 
 ## Settings and differences
@@ -847,7 +911,7 @@ Metric differences are computed only between comparable values: the same unit, t
 
 ## Normalized tables
 
-Schema version 1.0.0. `metrics.csv` and `settings.csv` are introduced in 0.1.0, and `differences.csv` in 0.2.0. These tables are public contract. The manifest records each table's schema version, because a CSV file can't carry its own. From 0.4.0, `settings.csv` 1.1.0 and `differences.csv` 1.1.0 append one column, `node`, for the [weight rows](#weight-rows) of a ranking given as a definition; a run, case, or review without them writes 1.0.0, as before.
+Schema version 1.0.0. `metrics.csv` and `settings.csv` are introduced in 0.1.0, and `differences.csv` in 0.2.0. These tables are public contract. The manifest records each table's schema version, because a CSV file can't carry its own. From 0.4.0, `settings.csv` 1.1.0 and `differences.csv` 1.1.0 append one column, `node`, for the [weight rows](#weight-rows) of a ranking given as a definition; a run, case, or review without them writes 1.0.0, as before. Proposed for 0.5.0 (R05-T02), [`series.csv`](#seriescsv) 1.0.0 holds each result's dated series, and [`analysis.csv`](#analysiscsv) 1.0.0 its values of the analysis set; R05-T03 specifies where they're written, and the manifests that list them.
 
 **Format rules for every table:**
 
@@ -860,7 +924,7 @@ Schema version 1.0.0. `metrics.csv` and `settings.csv` are introduced in 0.1.0, 
 - **Empty cells.** A cell is empty only where a column allows it. An empty value always comes with a reason in the row's reason column.
 - **Row order.** Results appear in the order the configuration lists them. Within a result, rows follow the layout mapping's order, so the output is deterministic.
 - **Compatibility.** New columns are appended only, and adding one is a schema change under [artifact compatibility](#artifact-compatibility).
-- **Schemas.** `schemas/metrics-row-1.0.0.schema.json`, `schemas/settings-row-1.0.0.schema.json`, and `schemas/differences-row-1.0.0.schema.json` each describe one row, after a CSV adapter step has read its cells: an empty cell is `null`, `critical` and `flagged` are booleans, `source_decimals` and `difference_decimals` are integers, the period dates are dates, and `flags` is an array of codes. A property's position is its column's. From 0.4.0, `schemas/settings-row-1.1.0.schema.json` and `schemas/differences-row-1.1.0.schema.json` describe a 1.1.0 row the same way, with `node` last.
+- **Schemas.** `schemas/metrics-row-1.0.0.schema.json`, `schemas/settings-row-1.0.0.schema.json`, and `schemas/differences-row-1.0.0.schema.json` each describe one row, after a CSV adapter step has read its cells: an empty cell is `null`, `critical` and `flagged` are booleans, `source_decimals` and `difference_decimals` are integers, the period dates are dates, and `flags` is an array of codes. A property's position is its column's. From 0.4.0, `schemas/settings-row-1.1.0.schema.json` and `schemas/differences-row-1.1.0.schema.json` describe a 1.1.0 row the same way, with `node` last. From 0.5.0, `schemas/series-row-1.0.0.schema.json` and `schemas/analysis-row-1.0.0.schema.json` describe a row of the two new tables the same way: their dates are dates, their decimal counts, `window_days`, and `observations` integers, and `inputs` and `flags` arrays.
 
 **Writing and reading them.** The `src/trialfolio/normalization/` package normalizes a saved response, and `src/trialfolio/tables.py` writes the tables and reads them back (R01-T12):
 
@@ -981,6 +1045,110 @@ A metric row is `unavailable`, with `input_unavailable`, when either value is un
 - **Declaring a change.** The weights are part of the ranking, so a result that declares `ranking` in `intended_changes` declares its weight rows too: each weight row that differs is `intended_change`, with `ranking`'s reason in `declared_reason`. A weight row that's the same is `same`, with no declared reason, and isn't flagged `intended_change_not_observed`: the declaration is of the ranking, which its own row shows. A result that doesn't declare `ranking` gets `unexplained_mismatch` on each weight that differs, flagged as critical. The alternative, a declarable setting for each node's weight, would need node paths in the review configuration, and a new version of it, to declare a change the `ranking` row already shows.
 - **The table's version.** A review in which any result has weight rows writes `differences.csv` 1.1.0, with `node`, and records the method's version 2; every other review writes 1.0.0 and version 1, as 0.3.0 does.
 - **Alignment's limit.** A removal shifts the positions of the nodes after the removed one, so a node without a name, or with a sibling's name, may get another canonical path in the result, and be compared with another node, or with `absent`. An experiment's report doesn't depend on paths: it aligns each case's weights by the baseline's nodes ([reports](#reports)).
+
+### `series.csv`
+
+Proposed for 0.5.0 (R05-T02). Schema version 1.0.0. One row for each value of a result's dated series: each daily level its response's `chart` holds, for the strategy and the benchmark, and each rebalance period's return, for the strategy, the benchmark, and their difference ([R05-AC01](releases/0.5.0-return-analytics.md#acceptance-criteria)). It's written from the same decoded response as `metrics.csv`, which must have the [required structure](#p123api-screen-backtest-version-1), and labeled the same way: a response saved undecoded, or without that structure, has neither table. Each value is read from the saved text as a decimal, with the digits it has there, never as a binary float, and none is calculated, filled in, or carried from another row.
+
+| Column | Meaning |
+|---|---|
+| `label` | Result label: the case's `case_id`, as in `metrics.csv` |
+| `series` | `daily`, a `chart` level, or `period`, a rebalance period's return |
+| `subject` | `strategy` or `benchmark`, and on a period row also `excess`, the period's `Excess%` |
+| `date` | A daily row's `chart` date, or a period row's `End Dt`. Empty when the series is unavailable, or the date can't be read. |
+| `period_start` | A period row's `Tran Dt`. Empty on a daily row, and when it can't be read. |
+| `value` | The level, or the return in percent, as a normalized decimal with the digits the saved text has. Empty when unavailable. |
+| `unit` | `index` on a daily row, `percent` on a period row |
+| `source_decimals` | Decimal places as saved, as in `metrics.csv`. Empty when unavailable. |
+| `availability` | `available` or `unavailable` |
+| `unavailable_reason` | Reason code. Empty when available. |
+| `origin` | `reported` |
+| `provenance` | `verified` |
+| `source_label` | `screenReturns` or `benchReturns` on a daily row; `Ret%`, `Bench%`, or `Excess%` on a period row |
+| `source_artifact` | `artifact_id` of the saved response |
+| `source_location` | The value's JSON path in the response: `chart.screenReturns[<i>]` or `chart.benchReturns[<i>]`, where `<i>` is the entry's position, counted from 0, which its date has in `chart.dates`; or `results.rows[<i>][<j>]`, where `<i>` is the row's position and `<j>` its column's in `results.columns`, each counted from 0. Empty when the whole series is unavailable, or the column is missing. |
+
+**Rows.** For each result, its daily rows, then its period rows:
+
+- **Daily rows** follow `chart`'s order, which is its dates': for each date, the strategy's row, then the benchmark's.
+- **Period rows** follow their `Tran Dt`s, earliest first, whatever order `results.rows` gives them in (newest first, in every response the layout records): for each period, the strategy's row, the benchmark's, then the excess. A period whose `Tran Dt` can't be read comes after every period whose can, in the response's order.
+
+**When the daily series can be read.** The levels are read only when `chart` has the verified layout's form. Otherwise the result has two daily rows, the strategy's and the benchmark's, each with its `date`, `value`, `source_decimals`, and `source_location` empty, unavailable for the first of these reasons that applies ([R05-AC02](releases/0.5.0-return-analytics.md#acceptance-criteria)):
+
+1. **No `chart`,** or a `chart` without `dates`, `screenReturns`, or `benchReturns`: `blank_in_source`.
+2. **Arrays that can't be read:** `chart` isn't an object; one of the three isn't an array; they aren't all the same length; a date isn't a `YYYY-MM-DD` calendar date, or isn't later than the one before it; or a level isn't a JSON number greater than 0, or either series' first level isn't 100: `unparseable_in_source`. Levels are values of 100 invested only when they start at 100, as the layout records.
+3. **Not one entry per weekday:** the dates aren't exactly the weekdays, Monday to Friday, from the case's `start_date` setting to its `end_date`, each included when it's a weekday: `not_daily` ([D-47](spec.md#decisions)). So a `chart` with a gap, or with an entry on a weekend, is never read, and no window across a gap is calculated. Neither is the `chart` of the historical fixtures, or of 0.4.0's demo data, which holds 5 dates over ten years ([R05-AC09](releases/0.5.0-return-analytics.md#acceptance-criteria)).
+
+`turnoverPct` and `positionCnt` aren't read, so they aren't checked.
+
+**The period series.** Each row of `results.rows` gives three period rows, which are unavailable as follows:
+
+- **No period:** `results.rows` is empty, or `results.columns` lacks `Tran Dt` or `End Dt`. The result has three period rows, one for each subject, with the cells a value needs empty, unavailable with `blank_in_source`.
+- **A missing column,** `Ret%`, `Bench%`, or `Excess%`: each period's row for that subject is unavailable with `blank_in_source`, and keeps its dates.
+- **A value** that's `null` is unavailable with `blank_in_source`, and one that isn't a JSON number, `NaN` and `Infinity` included, with `unparseable_in_source`, as a metric's is.
+- **A date** that isn't a `YYYY-MM-DD` calendar date leaves that date's cell empty, and makes the period's three values unavailable with `unparseable_in_source`, since they can't be placed in time.
+
+`Excess%` is the response's own, though it can differ from `Ret%` minus `Bench%` within their rounding, as R05-T01 found in 2,804 of 10,870 saved periods ([D-47](spec.md#decisions)).
+
+**Reading it.** A file that isn't a valid `series.csv`, by the rules of [writing and reading them](#normalized-tables), is `input.not_a_run`. So is one with an available value whose `date` is empty, or whose `period_start` is empty on a period row.
+
+### `analysis.csv`
+
+Proposed for 0.5.0 (R05-T02). Schema version 1.0.0. One row for each value of [analysis set 1.0.0](methodology.md#analysis-set-100) for a result, calculated from its `series.csv` alone, by the methods methodology.md defines, and from its settings' `start_date`, `end_date`, `benchmark`, `rebalance_weeks`, and `precision`, its `metrics.csv`'s coverage and reported metrics, and the plan's [period splits](#period-splits). The table's schema version and the analysis set's version are independent: a later analysis set may add rows, with the same columns.
+
+| Column | Meaning |
+|---|---|
+| `label` | Result label, as in `series.csv` |
+| `analysis_set` | The analysis set's version: `1.0.0` |
+| `segment` | `full`, for the whole series, or `split-<n>`, a [split segment](methodology.md#segments): `split-0` before the first declared date, and `split-<n>` from the n-th declared date |
+| `analysis` | The calculation, by its identifier in the analysis set, which names its method there, such as `max_drawdown` |
+| `subject` | `strategy`, `benchmark`, or `excess`: the strategy against the benchmark. Empty on a value about the segment or the windows rather than a series: `period_count`, `spanning_period_count`, `coverage_share`, and the windows' two counts. |
+| `window_days` | A rolling return's window length, in calendar days. Empty otherwise. |
+| `value` | A decimal with exactly `decimals` digits after its point, a whole number, or a date. Empty when unavailable. |
+| `unit` | `percent`, `pp`, `ratio`, `count`, `days`, or `date` |
+| `decimals` | The decimal places of `value`: the result's `precision` setting for `percent`, `pp`, and `ratio`, and 0 for `count` and `days`. Empty for a date, and when unavailable. |
+| `availability` | `available` or `unavailable` |
+| `unavailable_reason` | Reason code ([metrics and missing values](#metrics-and-missing-values)). Empty when available. |
+| `observations` | The number of observations behind the value, or, when there were too few, the number there were: periods, levels, or windows, as the analysis set gives for each. Empty when an input is unavailable, and on `coverage_share`, which is calculated from dates alone. |
+| `period_start`, `period_end` | The dates the value covers: the segment's first and last dates, or, where the analysis set gives them, a period's `Tran Dt` and `End Dt`, a drawdown's peak and trough, or a time below a peak's first and last dates. Empty when unavailable, and where the analysis set gives none. |
+| `reported_value` | On a value the analysis set [reconciles](methodology.md#reconciliation-with-portfolio123s-metrics) with a metric Portfolio123 reported, that metric's `value` in `metrics.csv`, as it's written there. Empty otherwise, and when that metric is unavailable. |
+| `reconciliation` | On a reconciled value: `agrees`, `differs`, or `not_compared` when either value is unavailable. `differs` is the flag [required behavior](releases/0.5.0-return-analytics.md#required-behavior) 5 gives, beyond the range the rounding allows ([D-48](spec.md#decisions)). Empty on every other value. |
+| `flags` | Codes, separated by semicolons, in the order of the table below. Empty when none apply. |
+| `inputs` | The series it's calculated from, as a JSON array of `<series>/<subject>`, such as `["daily/strategy"]` or `["daily/strategy", "daily/benchmark"]` |
+| `origin` | `calculated` |
+| `provenance` | `inferred`: derived by Trial Folio under the documented rule its `analysis` names ([provenance](#provenance)) |
+| `trialfolio_version` | The version that calculated it |
+| `source_artifact` | `artifact_id` of the saved response its series came from, as in `series.csv` |
+
+| Flag | On | Meaning |
+|---|---|---|
+| `descriptive` | `tracking_error`, `information_ratio`, and `excess_t_value` | A descriptive statistic, which ignores serial dependence and the search, and is never a test ([METH-04.6](methodology.md#meth-04-inference-before-any-statistical-badge)) |
+| `overlapping_windows` | Each rolling return's summary, and `rolling_share_beating` | Its windows overlap, so they aren't independent observations ([METH-09.7](methodology.md#meth-09-reproducing-published-research)) |
+| `not_recovered` | `longest_drawdown_days` | The time below a peak runs to the segment's last date without a return to the peak, so it lasted at least that long |
+
+**Rows.** For each result: the `full` segment's rows, then each split segment's, `split-0` first. Within a segment, the rows follow the analysis set's two tables, the period returns' and then the daily levels', in order ([analysis set 1.0.0](methodology.md#analysis-set-100)), with each analysis's subjects in the order strategy, benchmark, excess; `coverage_share` and `spanning_period_count` come in split segments only. Then, in the `full` segment only, the rolling returns, for each window length in turn, shortest first: `rolling_window_count`, `rolling_non_overlapping_count`, `rolling_mean`, `rolling_median`, `rolling_p10`, `rolling_p90`, and `rolling_worst`, each for the strategy and then the benchmark, and `rolling_share_beating`. Every row is written, an unavailable one included, so each result has 94 rows for the `full` segment, and 31 for each split segment.
+
+**Reading it.** As `series.csv`, a file that isn't a valid `analysis.csv` is `input.not_a_run`. So is one whose `value` doesn't have exactly `decimals` digits after its point, or whose `analysis_set` isn't one the reader knows.
+
+#### Comparing a case with the baseline
+
+Proposed for 0.5.0 (R05-T02). An experiment's report shows each case beside the baseline, with the difference of each metric and each analysis value, or the reason it isn't differenced ([R05-AC05](releases/0.5.0-return-analytics.md#acceptance-criteria)). R05-T03 specifies where the report gives them, and whether a table records them. They align as follows:
+
+- **The metrics** of `metrics.csv` are paired by `subject` and `metric_id`, and differenced or not by the rules of a review's [metric rows](#differences-between-screen-runs), so one rule compares two runs' metrics wherever they're compared.
+- **An analysis value** is paired with the baseline's row of the same `segment`, `analysis`, `subject`, and `window_days`. Every case of an experiment has the same rows, since its cases share their period splits.
+- **The daily levels** are compared by date: the charts draw each case's and the baseline's on the same dates, since an experiment's cases share their requested dates, and each value from them is compared over the same dates.
+- **Values from period returns** are each case's own: no case's periods are resampled to another's.
+
+A pair is differenced unless one of these applies, the first of them giving the reason:
+
+| Reason | When |
+|---|---|
+| `input_unavailable` | Either value is unavailable. The case's own row gives its reason. |
+| `different_benchmark` | A value whose `inputs` include the benchmark or the excess, when the two cases' `benchmark` settings differ |
+| `different_period` | A value from the daily levels, when the two daily series' first or last dates differ; or a value from period returns, when the two results' coverage differs |
+| `different_rebalance` | A value from period returns, when the two cases' `rebalance_weeks` settings differ. A weekly case's mean period return is over weeks, and a 4-weekly case's over 4 weeks, so their difference wouldn't compare like with like. Both values are still shown, side by side. |
+
+A difference is the case's value minus the baseline's, in `pp` for `percent` and `pp` values, in calendar days for a date, and otherwise in the value's unit. Its decimals, rounding, and sign follow a review's: the smaller of the two `decimals`, half to even, and a difference of zero written without a sign ([differences between screen runs](#differences-between-screen-runs)). The comparison orders, ranks, and marks no case by a value, and names no case best ([REQ-13](spec.md#enduring-requirements)).
 
 ### Flag codes
 
@@ -1450,6 +1618,26 @@ Without a terminal, and with a matching `--approve`, it still gives only the pla
 The alternatives were the `rank_update`'s params as one JSON object, with `nodes` as an escaped string, which shows the definition, but not line by line, as the display requires; and the budget's credits for a screen alone, without what a case's attempt costs, which the display requires.
 
 **A configuration 1.1.0 ranked another way (R04-T12).** A screen configuration 1.1.0, or an experiment configuration 1.1.0, whose ranking is a formula, a name, or an ID, gives plan 1.0.0, or 1.1.0, as the planner gives it, whichever version the file is (R04-T07). Since `trialfolio run` reads 1.1.0, such a run is sent as before, and its `configuration.yaml`, which its manifest lists with schema version 1.1.0, is read by release 0.4.0's reader wherever Trial Folio reads it again: the executors' check of the configuration, the original values of `settings.csv`, and, in a resume, the records check, which reads a plan 1.1.0's configuration 1.1.0 when no manifest lists it. That reader reads no file there: a configuration of a plan without a ranking definition that names a definition's file, or a snapshot's directory, is a `ValueError` in the core, and a configuration the records check can't read, rather than a file read from outside the output directory. The alternative was to have `run` refuse a configuration 1.1.0 ranked another way, asking for schema version 1.0.0, which would narrow what the planner, which the owner confirmed, accepts.
+
+### Plans with period splits
+
+Proposed for 0.5.0 (R05-T02). A plan built from a configuration that declares [period splits](#period-splits) records them, so its hash covers them before anything is sent. It's a version of its own, so a plan without splits keeps the version and the shape it has in 0.4.0, and a configuration 1.2.0 without `analysis` gives the plan its 1.1.0 form would:
+
+| Without splits | With splits |
+|---|---|
+| 1.0.0, a screen's | 1.4.0 |
+| 1.1.0, an experiment's | 1.5.0 |
+| 1.2.0, a screen's with a ranking definition | 1.6.0 |
+| 1.3.0, an experiment's with a ranking definition | 1.7.0 |
+
+Each plan with splits has every field of the version beside it, with the same meaning, rules, and consistency, and one more:
+
+- **`analysis`,** after `purpose` in 1.4.0, after `prior_research` in 1.5.0, and after `ranking_source` in 1.6.0 and 1.7.0: `{"period_splits": [{"date": …, "label": …}, …]}`, with each split as the configuration gives it, in its order, which is the dates', each `date` a `YYYY-MM-DD` string, and each `label` the configuration's text, with `user_supplied` provenance. The plan is invalid unless the dates increase and the labels are distinct, as the configuration's rules require.
+- **Hashing.** `plan_hash` covers `analysis`, as it covers the research context. No `case_id` does, so the same settings give the same case with splits or without.
+- **Revisions.** A plan 1.5.0 or 1.7.0 is revised as a 1.1.0 or 1.3.0 plan is ([experiment plans and revisions](#experiment-plans-and-revisions)), except that the revision's `analysis` must equal the current plan's, exactly, or the run fails with `config.invalid` ([period splits](#period-splits)). So a revision can turn a 1.5.0 plan into a 1.7.0, or back, with a ranking given another way, but can't turn a plan without splits into one with them, or back. `experiment.json` records no change of `analysis`, since no revision makes one.
+- **The display.** R05-T03 specifies how the plan display shows the splits ([the CLI](releases/0.5.0-return-analytics.md#implementation-tasks-and-dependencies)).
+
+`schemas/plan-1.4.0.schema.json` to `plan-1.7.0.schema.json` will give every field, and `schemas/screen-configuration-1.2.0.schema.json` and `experiment-configuration-1.2.0.schema.json` the configurations'.
 
 ## Artifact storage
 
