@@ -54,7 +54,7 @@ INV-09 requires this history to exist before any statistical correction is imple
 | METH-07 | Multidimensional assessment and permitted conclusions | 0.1.0 onward ("not assessed"); Statistical evaluation (outcomes) | Assessment record per dimension; applicable notice version | Report tests: dimensions separate; no affirmative judgment before its method is Validated | Proposed |
 | METH-08 | Optional LLM research agents | Optional discovery | Proposal log; prompts; model identifiers; outputs; decisions | Contract tests with recorded responses; boundary tests that protected outcomes are never sent | Proposed |
 | METH-09 | Reproducing published research | Partly 0.3.0 (variants the backend supports); later analyses and the Reproduction and sensitivity workflow as mapped in [roadmap.md](roadmap.md#driving-use-case-coverage) | Preregistered protocol; deviation record; fixed analysis-set version | A reproduction fixture study produces every analysis in the fixed set, including failed and inconclusive cases | Proposed |
-| METH-09.7 | Rolling returns | Descriptive return analytics | Dated return series | Needs dated return series; window counts checked by hand on a fixture | Unavailable in 0.1.0; Proposed later |
+| METH-09.7 | Rolling returns | Descriptive return analytics (0.5.0, [analysis set 1.0.0](#analysis-set-100)) | Dated return series (`series.csv`); the analysis set's values (`analysis.csv`) | Needs dated return series; window counts checked by hand on a fixture ([the example](#a-hand-checkable-example)) | Unavailable in 0.1.0; Proposed for 0.5.0 |
 
 ## METH-01 Define the question before measuring success
 
@@ -284,6 +284,141 @@ Each variant runs only where the backend's capability has been verified.
 
 **METH-09.12 Model-drafted setups.** When a model drafts ranking systems or screens from a paper, its first output is preserved unedited (METH-08.4), every formula or function that failed or was invented is recorded with its correction, and the syntax is verified against Portfolio123's documentation. A model never supplies a figure that appears in an assessment (METH-07.7).
 
+## Analysis set 1.0.0
+
+Proposed for release [0.5.0](releases/0.5.0-return-analytics.md) (R05-T02). Status: Proposed. This is the fixed analysis set METH-09.10 requires: the descriptive analyses Trial Folio calculates from each result's dated series, chosen before any result is seen, and applied identically to every case of every run and experiment, saved ones included. Its version is recorded with every value. A change to any calculation, window, minimum, or rule below makes a new version, and a Trial Folio version that changes none of them keeps 1.0.0. [contracts.md](contracts.md) owns its two tables: the series it reads, [`series.csv`](contracts.md#seriescsv), and the values it gives, [`analysis.csv`](contracts.md#analysiscsv). It makes no inference (METH-04): its tracking error, information ratio, and t-value are descriptive (METH-04.6, METH-09.11).
+
+### Inputs
+
+- **Daily levels.** For the strategy and for the benchmark, the levels L₀ to L_N of 100 invested, on the `chart` dates t₀ to t_N: every weekday from the requested start date to the end date, as `series.csv`'s daily rows hold them. L₀ is 100.
+- **Period returns.** For each rebalance period i, from 1 to n, the strategy's `Ret%`, the benchmark's `Bench%`, and the excess, `Excess%`, in percent, each with its `Tran Dt` and `End Dt`, as `series.csv`'s period rows hold them. The periods don't overlap, since each one's `End Dt` is the next one's `Tran Dt`, and the first and last can be shorter than the rebalance frequency ([the verified layout](contracts.md#p123api-screen-backtest-version-1)). The excess is Portfolio123's `Excess%`, never `Ret%` minus `Bench%` calculated again ([D-47](spec.md#decisions)).
+- **A level's date.** Portfolio123 doesn't document which close a level stands for, and at least two readings fit what R05-T01 found ([the verified layout](contracts.md#p123api-screen-backtest-version-1)). So each level keeps its `chart` date, and every value calculated from it is dated by `chart` dates: no date is moved.
+- **Nothing else.** No risk-free series, price, or holding: a measure that needs one, such as a Sharpe ratio Trial Folio would calculate, isn't in the set (METH-01.3).
+
+### Arithmetic and digits
+
+- **Decimals.** Every calculation uses decimal arithmetic, never binary floating point: Python's `decimal`, with 50 significant digits and rounding half to even, as R05-T01's checks did. A square root and a power with a fractional exponent are `decimal`'s own, at that precision, far beyond the digits any value keeps. So the set adds no runtime dependency.
+- **One rounding.** Each value is rounded once, at the end, half to even: a value in percent, in percentage points, or a ratio to the request's `precision`, the decimals its inputs have, which is 4 in every configuration Trial Folio accepts; a count or a number of days is whole; a date is a date. A value that rounds to zero is written without a sign, as a difference is: −0.00004, at 4 decimals, is `0.0000`, never `-0.0000`, though `decimal` keeps the sign. A `…_difference` is the difference of the two values as rounded, so it's exact at their digits. No value has more digits than its inputs (METH-05.10).
+- **Rounded inputs.** Each value is calculated from the response's rounded levels or returns, not from Portfolio123's unrounded series, so it can differ in its last digit from one Portfolio123 calculated before rounding, as R05-T01 found of Portfolio123's own metrics. [Reconciliation](#reconciliation-with-portfolio123s-metrics) allows for that.
+
+### Segments
+
+Every analysis below is calculated over the `full` segment: all of a result's levels, and all its periods. The period-return and daily-level analyses are also calculated over each split segment, when the configuration declares [period splits](contracts.md#period-splits) (METH-09.9). The rolling returns aren't: a window needs the whole series.
+
+- **The split segments.** Declared dates d₁ to d_k, in increasing order, divide the result's coverage, from C₀ to C₁, into k + 1 segments: `split-0`, from C₀ to d₁, or to C₁ when d₁ is after it; `split-n`, for n from 1 to k − 1, from dₙ to dₙ₊₁; and `split-k`, from d_k, or from C₀ when d_k is before it, to C₁. Those are each segment's first and last dates.
+- **The coverage.** C₀ and C₁ are the result's `coverage_start` and `coverage_end`, from its period rows. When either is unavailable, as for a result without period rows, they're its first and last `chart` dates, t₀ and t_N, so such a result keeps its split segments' daily-level analyses, as it keeps its other analyses of its daily levels ([R05-AC02](releases/0.5.0-return-analytics.md#acceptance-criteria)). Its split segments' periods aren't known, though: the coverage is unavailable only when the result has no period, as [`series.csv`](contracts.md#seriescsv) gives it, when a period's `Tran Dt` or `End Dt` can't be read, or when the earliest `Tran Dt` is after the latest `End Dt` ([coverage dates](contracts.md#p123api-screen-backtest-version-1)). So each value an available split segment calculates from its periods, `period_count` and `spanning_period_count` included, is unavailable, with `input_unavailable`, rather than calculated without a period it may hold (METH-05.4). Its `coverage_share`, from dates alone, is calculated as below. When the daily series is unavailable too, every split segment is unavailable, with `input_unavailable`.
+- **Outside the coverage.** A declared date before C₀, or after C₁, is outside the coverage, and the report flags it ([R05-AC08](releases/0.5.0-return-analytics.md#acceptance-criteria)). A segment the coverage doesn't reach is unavailable, with `outside_coverage`: `split-0` when d₁ is before C₀, and `split-k` when d_k is after C₁. A segment between two declared dates is unavailable unless the coverage reaches both, C₀ ≤ dₙ and dₙ₊₁ ≤ C₁, so it's never shortened to the part the coverage reaches (METH-05.4). `split-0` and `split-k` have one declared date each, and hold what the coverage holds on their side of it: "before the paper's sample ended" is every covered date before it.
+- **A date on the coverage's edge,** d₁ on C₀, or d_k on C₁, is within the coverage, and isn't flagged. The segment on its outer side, `split-0` or `split-k`, is that one date, with one level and no period, so each of its values that needs two levels or a period is unavailable as in any segment too short for it, with `too_few_observations`, or, for a value from the periods when they aren't known, with `input_unavailable`, as above. Its `coverage_share` is 0, unless C₀ and C₁ are that same date, as below.
+- **A segment's levels** are those from the latest `chart` date on or before its first date to the latest on or before its last date, both included. So the level that ends one segment begins the next, and the segments' total returns compound to the `full` one's. A segment whose dates the `chart` doesn't reach is unavailable with `outside_coverage`.
+- **A segment's periods** are those wholly within it: `split-0`'s end on or before d₁; `split-n`'s start on or after dₙ and end on or before dₙ₊₁; and `split-k`'s start on or after d_k. A period that starts before a declared date and ends after it is in neither segment beside it, so no return is credited to a side it's only partly on, and each of those segments counts it in `spanning_period_count`.
+- **`coverage_share`,** for each split segment: the calendar days from its first date to its last, divided by those from C₀ to C₁, in percent, the share of the test period METH-09.9 asks for. When C₀ and C₁ are the same date, as for a result without period rows whose `chart` has one date, there are no days to divide by, so each available split segment's `coverage_share` is unavailable, with `not_applicable`.
+- **A summary's dates.** A value over a whole segment gives its inputs' first and last dates, never a declared date they don't have, so it keeps the dates of the levels or periods it's calculated from ([D-48](spec.md#decisions)): a value from the levels, the dates of the segment's first and last levels; one from the periods, the earliest `Tran Dt` and the latest `End Dt` of the segment's periods when they're known, and none when it has none or they aren't. For the `full` segment, those are the first and last `chart` dates, and C₀ and C₁. When the coverage is unavailable, though, its periods' first and last dates aren't known, and C₀ and C₁ are the `chart`'s, so the `full` segment's values from its periods give none, though some, such as `period_count`, can stay available. Only `coverage_share` and `spanning_period_count`, which describe the segment rather than a series, give the segment's own first and last dates.
+
+### Period-return analyses
+
+Over a segment's periods. A value of a subject needs every one of the segment's periods to have that subject's return: when one is unavailable, the value is unavailable, with `input_unavailable`, and no period is left out to calculate it (METH-05.4). Its `observations` is n, the number of the segment's periods. With fewer periods than a value needs, it's unavailable with `too_few_observations`.
+
+| Analysis | Subjects | Unit | Definition | Needs |
+|---|---|---|---|---|
+| `coverage_share` | None | percent | Split segments only, as above | Its segment available, and C₁ after C₀, or it's unavailable with `not_applicable` |
+| `period_count` | None | count | n, the segment's periods | The period series |
+| `spanning_period_count` | None | count | Split segments only: the periods that span one of its declared dates | The period series |
+| `mean_period_return` | strategy, benchmark, excess | percent | The arithmetic mean, (x₁ + … + xₙ) / n | 1 period |
+| `median_period_return` | strategy, benchmark, excess | percent | The middle value of the sorted returns, or the mean of the two middle values when n is even | 1 period |
+| `best_period_return` | strategy, benchmark, excess | percent | The largest return, with its period's `Tran Dt` and `End Dt` as the value's dates; the earliest period on a tie | 1 period |
+| `worst_period_return` | strategy, benchmark, excess | percent | The smallest, in the same way | 1 period |
+| `positive_excess_share` | excess | percent | The share of periods whose excess is above 0, times 100. An excess of 0 isn't positive. | 1 period |
+| `tracking_error` | excess | percent | The sample standard deviation of the excess, √(Σ(eᵢ − ē)² / (n − 1)), per rebalance period, not annualized | 2 periods |
+| `information_ratio` | excess | ratio | The mean excess per unit of tracking error, ē / s, per rebalance period (METH-01.3) | 2 periods, and a tracking error above 0, or it's unavailable with `not_applicable` |
+| `excess_t_value` | excess | ratio | The t-value of the mean excess per period, ē / (s / √n), which is the information ratio times √n. Descriptive, given with n, and never a test (METH-04.6). The rebalance periods don't overlap. | As `information_ratio` |
+
+### Daily-level analyses
+
+Over a segment's levels, L_a to L_b, on the dates t_a to t_b. Its `observations` is the number of levels. When the daily series is unavailable, each value is unavailable with `input_unavailable`, and with fewer levels than a value needs, with `too_few_observations`.
+
+| Analysis | Subjects | Unit | Definition | Needs |
+|---|---|---|---|---|
+| `total_return` | strategy, benchmark | percent | (L_b / L_a − 1) × 100. Over the `full` segment, L_a is 100, so it's L_b − 100, the layout's definition of Portfolio123's `total_return`. | 2 levels |
+| `total_return_difference` | excess | pp | The strategy's `total_return` minus the benchmark's | Both available |
+| `annualized_return` | strategy, benchmark | percent | ((L_b / L_a)^(365.25 / D) − 1) × 100, with D the calendar days from t_a to t_b: the compound annual growth rate, with years of 365.25 days, as the layout defines Portfolio123's | 2 levels, and D of at least 365, or it's unavailable with `too_short`: a return over less than a year isn't stated as an annual rate it never held |
+| `annualized_return_difference` | excess | pp | The strategy's `annualized_return` minus the benchmark's. It isn't risk-adjusted alpha (METH-01.3). | Both available |
+| `max_drawdown` | strategy, benchmark | percent | The largest decline from a running peak, as a negative number: the smallest of (L_j / M_j − 1) × 100, where M_j is the highest level from L_a to L_j; 0 when the level never falls below its running peak. Its dates are the peak, the first date the level reached the peak it fell from, and the trough, the first date of the largest decline; none when it's 0. | 2 levels |
+| `max_drawdown_recovery` | strategy, benchmark | date | The first date after the trough whose level is at least the peak's | A `max_drawdown` below 0, or it's unavailable with `not_applicable`; a level that never returns to the peak within the segment is unavailable with `not_recovered` |
+| `longest_drawdown_days` | strategy, benchmark | days | The longest time below a peak. A time below a peak is a run of dates whose levels are below their running peak, M. It starts on the date before the run, whose level is M, so it never counts an earlier time below the same peak, which ended when the level returned to it; and it ends on the first date after the run, whose level is at least M, or, when the run reaches the segment's last date, on that date, flagged `not_recovered`, since it lasted at least that long. Its value is the calendar days from its start to its end, and those are its dates; the earliest on a tie; 0, with no dates, when the level is never below its running peak. Levels of 100, 90, 100, 90, and 100 on five weekdays in a row have two times below a peak, of 2 days each. | 2 levels |
+
+### Rolling returns
+
+METH-09.7's, over the `full` segment's levels, for each window length w of 7, 30, 90, 180, and 365 calendar days:
+
+- **Windows.** A window ends at each `chart` date t_j, and starts at the latest `chart` date tᵢ on or before t_j − w days. No window ends less than w days after t₀. So no window is shorter than its length, and in a `chart` of every weekday, none is more than 2 days longer: R05-T01 found at most 2 in every saved `chart` ([its run record](../reference/return-series/README.md#rolling-windows)). A `chart` with a gap isn't read ([`series.csv`](contracts.md#seriescsv)), so no window crosses one. A window's return is (L_j / Lᵢ − 1) × 100.
+- **Their summaries,** for the strategy and the benchmark: `rolling_mean`, the arithmetic mean; `rolling_median`, as `median_period_return`; `rolling_worst`, the smallest; and `rolling_p10` and `rolling_p90`, the 10th and 90th percentiles, by linear interpolation between the sorted returns x₍₀₎ to x₍ₘ₋₁₎: with h = (m − 1)p, the percentile is x₍h₎ when h is a whole number, and otherwise x₍⌊h⌋₎ + (h − ⌊h⌋)(x₍⌊h⌋₊₁₎ − x₍⌊h⌋₎), so one window's percentiles are its return. That's Hyndman and Fan's definition 7, which `numpy.percentile`'s default and Python's `statistics.quantiles` with `method="inclusive"` also compute, though Python 3.12's `quantiles` raises an error for a single window, where 3.14's gives its return. Each summary needs 1 window, or it's unavailable with `too_few_observations`, and its `observations` is m, the number of windows.
+- **`rolling_share_beating`,** of the excess: the share of windows in which the strategy's return is above the benchmark's over the same window, times 100, compared before rounding. A tie isn't beating.
+- **The counts,** which every summary gives with it: `rolling_window_count`, m; and `rolling_non_overlapping_count`, the most windows no two of which overlap. It's counted from the earliest: the window that ends first, then each window, in the order of their ends, that starts on or after the end of the last one counted. A window that starts on the date another ends doesn't overlap it.
+- **Not independent.** Overlapping windows aren't independent observations (METH-04.3), so each summary is flagged `overlapping_windows`, and given with both counts. A rolling 4-week return of a weekly run is still the weekly portfolio's (METH-09.7).
+
+### Reconciliation with Portfolio123's metrics
+
+Over the `full` segment, `total_return`, `annualized_return`, and `max_drawdown`, for the strategy and the benchmark, calculate again the metric `metrics.csv` gives with the same `metric_id` and `subject`. The report shows both, and neither replaces the other (INV-08). The recalculated value *agrees* when Portfolio123's value is within the range that the rounding of the recalculated value's inputs allows, widened by the rounding of the reported value, and otherwise *differs*, which the report flags ([D-48](spec.md#decisions)):
+
+- **Rounding.** Each level is read as rounded to half a unit of its last digit: the request's `precision`, since saving drops only trailing zeros, or its own decimals, where it has more ([numbers and precision](contracts.md#p123api-screen-backtest-version-1)). So is the reported value, R. With h for a value's half unit, Portfolio123's value agrees when low − h_R ≤ R ≤ high + h_R.
+- **`total_return`:** from low, L_N − h_N − 100, to high, L_N + h_N − 100. L₀ is 100, as the layout gives it.
+- **`annualized_return`:** those two ends of L_N, each annualized, ((L_N ∓ h_N) / 100)^(365.25 / D) − 1, times 100.
+- **`max_drawdown`:** a range that holds the exact one. Its low is the smallest of ((L_j − h_j) / max(Lᵢ + hᵢ, for i ≤ j) − 1) × 100, every trough as low as its rounding allows against every earlier level as high. Its high is the smaller of 0 and ((L_t + h_t) / (L_p − h_p) − 1) × 100, the recalculated drawdown's own trough, t, and peak, p, the other way.
+- **Not compared.** When either value is unavailable, such as an `annualized_return` over less than a year, the pair is `not_compared`.
+
+These are the ranges R05-T01's script computes. By them, every reconciled metric of the owner's 74 distinct saved responses agrees, though 26 maximum drawdowns and 1 annualized return of the strategy differ by more than half a unit of the reported value's last digit ([its run record](../reference/return-series/README.md#the-checks)).
+
+### What the values may be read as
+
+- **Descriptive, of one backtest.** Each value describes one result's returns over its coverage, as Portfolio123 calculated them. None is an inference, a prediction, or a ranking, and statistical validation and trading readiness stay "Not assessed" (METH-07.3).
+- **Per rebalance period.** The period-return values are per rebalance period, so a weekly result's and a 4-weekly result's don't compare: the comparison with the baseline doesn't difference them ([comparing a case with the baseline](contracts.md#comparing-a-case-with-the-baseline)).
+- **A split's segment** over the paper's sample is retrospective by construction, and the one after publication isn't necessarily unseen by the researcher (METH-09.9).
+- **Rounded inputs.** A recalculated value can differ from Portfolio123's in its last digit, within the rounding, as above.
+
+### A hand-checkable example
+
+A response requested from 2024-01-01 to 2024-01-12, rebalanced every week, at precision 4. Its `chart` has the 10 weekdays, and its two periods are 2024-01-01 to 2024-01-08, with a `Ret%` of 0, a `Bench%` of 1, and an `Excess%` of −1, and 2024-01-08 to 2024-01-12, with 10, 0, and 10:
+
+| Date | 01-01 | 01-02 | 01-03 | 01-04 | 01-05 | 01-08 | 01-09 | 01-10 | 01-11 | 01-12 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Strategy | 100 | 102 | 101 | 104 | 99 | 100 | 103 | 105 | 102 | 110 |
+| Benchmark | 100 | 101 | 101 | 102 | 100 | 101 | 102 | 103 | 102 | 101 |
+
+The `full` segment gives:
+
+| Analysis | Strategy | Benchmark | Excess |
+|---|---|---|---|
+| `period_count` | 2 | | |
+| `mean_period_return`, `median_period_return` | 5.0000 | 0.5000 | 4.5000 |
+| `best_period_return` | 10.0000, the second period | 1.0000, the first | 10.0000, the second |
+| `worst_period_return` | 0.0000, the first | 0.0000, the second | −1.0000, the first |
+| `positive_excess_share` | | | 50.0000 |
+| `tracking_error` | | | 7.7782: √((5.5² + 5.5²) / 1) = √60.5 |
+| `information_ratio` | | | 0.5785: 4.5 / √60.5 |
+| `excess_t_value` | | | 0.8182: 4.5 / (√60.5 / √2) = 4.5 / 5.5, with 2 periods |
+| `total_return` | 10.0000 | 1.0000 | 9.0000 |
+| `annualized_return` | Unavailable, `too_short`: 11 days | Unavailable, `too_short` | Unavailable, `input_unavailable` |
+| `max_drawdown` | −4.8077: 99 / 104 − 1, from 01-04 to 01-05 | −1.9608: 100 / 102 − 1, from 01-04 to 01-05 | |
+| `max_drawdown_recovery` | 2024-01-10, the first level of 104 or more | 2024-01-09 | |
+| `longest_drawdown_days` | 6: 01-04 to 01-10 | 5: 01-04 to 01-09 | |
+
+The 7-day windows are 5, from 01-01 to 01-08 through 01-05 to 01-12, of which 1 doesn't overlap another: each later one starts before 01-08. The strategy's returns are 0, 0.980392…, 3.960396…, −1.923077…, and 11.111111…, so its `rolling_mean` is 2.8258, `rolling_median` 0.9804, `rolling_p10` −1.1538, with h = 0.4, `rolling_p90` 8.2508, with h = 3.6, and `rolling_worst` −1.9231. The benchmark's are 1, 0.990099…, 1.980198…, 0, and 1: 0.9941, 1.0000, 0.3960, 1.5881, and 0.0000. The strategy beats the benchmark in 2 of the 5, the third and the fifth, so `rolling_share_beating` is 40.0000. No window of 30 days or more fits, so each of their summaries is unavailable, with `too_few_observations` and 0 observations, and each count is 0.
+
+**Reconciled.** Had Portfolio123 reported the strategy's maximum drawdown as −4.8078, it would agree: the range is about −4.807786 to −4.807598, widened by 0.00005. As −4.8079, it would differ. A reported `total_return` of 10.0001 agrees with the range from 9.99995 to 10.00005, and one of 10.0002 differs.
+
+**Split.** With one declared date, 2024-01-05, `split-0` runs from 2024-01-01 to 2024-01-05, with a `coverage_share` of 36.3636, 4 days of 11, and `split-1` from 2024-01-05 to 2024-01-12, with 63.6364. The first period spans 2024-01-05, so each segment's `spanning_period_count` is 1. `split-0` has no period, so each of its period-return values is unavailable, with `too_few_observations`. `split-1` has the second period: a mean of 10.0000, 0.0000, and 10.0000, a `positive_excess_share` of 100.0000, and a `tracking_error` unavailable, with 1 observation. Those are dated by its period, 2024-01-08 to 2024-01-12, and its values from the levels by its levels, 2024-01-05 to 2024-01-12. From the levels:
+
+| Analysis | `split-0`, strategy | `split-0`, benchmark | `split-1`, strategy | `split-1`, benchmark |
+|---|---|---|---|---|
+| `total_return` | −1.0000 | 0.0000 | 11.1111: 110 / 99 − 1 | 1.0000 |
+| `max_drawdown` | −4.8077, 01-04 to 01-05 | −1.9608, 01-04 to 01-05 | −2.8571, 01-10 to 01-11 | −1.9417, 01-10 to 01-12 |
+| `max_drawdown_recovery` | `not_recovered` | `not_recovered` | 2024-01-12 | `not_recovered` |
+| `longest_drawdown_days` | 2: 01-02 to 01-04 | 1: 01-04 to 01-05, `not_recovered` | 2: 01-10 to 01-12 | 2: 01-10 to 01-12, `not_recovered` |
+
+The strategy's segments compound to its `full` total: 0.99 × 1.111111… = 1.1.
+
+Declared on Sunday, 2024-01-07, instead, the split gives the same values from the levels and the periods, with the same dates, since `split-0`'s levels still end on 2024-01-05, and the first period still spans the date. Only the segments' own dates change, and with them their `coverage_share`: `split-0` runs to 2024-01-07, with a `coverage_share` of 54.5455, 6 days of 11, and `split-1` from 2024-01-07, with 45.4545.
+
 ## Verification of statistical methods
 
 These requirements apply before any METH-04 or METH-06 method moves from Implemented to Validated.
@@ -310,5 +445,5 @@ Each check traces to a METH requirement and is recorded as actual evidence in th
 | Minimum sample size and minimum economically relevant effect | Whether a study can be informative at all | Stated per study with a power estimate | Study protocol, before evaluation |
 | Risk-free series and return convention for Sharpe | Standalone objective results | Stated per study | Before any standalone assessment |
 | Microcap cutoff and universe-slice rule | Two of the default reproduction variants | Cutoff stated per study; `Mod(StockID,4)` after verifying `StockID` stability | Before those variants run |
-| Rolling-window horizons in calendar or trading days | Window counts and comparability | 7, 30, 90, 180, and 365 calendar days, fixed in the analysis-set version | First analysis-set version |
+| Rolling-window horizons in calendar or trading days | Window counts and comparability | 7, 30, 90, 180, and 365 calendar days, fixed in the analysis-set version | First analysis-set version. [Analysis set 1.0.0](#rolling-returns) gives them as calendar days (R05-T02, 2026-11-02), which the owner confirmed the same day. |
 | Taxes | Net results | Not modeled; stated as a limitation | Per study, as a declared scope choice |
