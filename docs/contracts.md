@@ -1104,7 +1104,7 @@ Proposed for 0.5.0 (R05-T02). Schema version 1.0.0. One row for each value of [a
 | `analysis` | The calculation, by its identifier in the analysis set, which names its method there, such as `max_drawdown` |
 | `subject` | `strategy`, `benchmark`, or `excess`: the strategy against the benchmark. Empty on a value about the segment or the windows rather than a series: `period_count`, `spanning_period_count`, `coverage_share`, and the windows' two counts. |
 | `window_days` | A rolling return's window length, in calendar days. Empty otherwise. |
-| `value` | A decimal with exactly `decimals` digits after its point, a whole number, or a date. Empty when unavailable. |
+| `value` | A decimal with exactly `decimals` digits after its point, a whole number, or a date. A decimal that rounds to zero is written without a sign, as a [difference](#differences-between-screen-runs) is: `0.0000`, never `-0.0000` ([arithmetic and digits](methodology.md#arithmetic-and-digits)). Empty when unavailable. |
 | `unit` | `percent`, `pp`, `ratio`, `count`, `days`, or `date` |
 | `decimals` | The decimal places of `value`: the result's `precision` setting for `percent`, `pp`, and `ratio`, and 0 for `count` and `days`. Empty for a date, and when unavailable. |
 | `availability` | `available` or `unavailable` |
@@ -1114,7 +1114,7 @@ Proposed for 0.5.0 (R05-T02). Schema version 1.0.0. One row for each value of [a
 | `reported_value` | On a value the analysis set [reconciles](methodology.md#reconciliation-with-portfolio123s-metrics) with a metric Portfolio123 reported, that metric's `value` in `metrics.csv`, as it's written there. Empty otherwise, and when that metric is unavailable. |
 | `reconciliation` | On a reconciled value: `agrees`, `differs`, or `not_compared` when either value is unavailable. `differs` is the flag [required behavior](releases/0.5.0-return-analytics.md#required-behavior) 5 gives, beyond the range the rounding allows ([D-48](spec.md#decisions)). Empty on every other value. |
 | `flags` | Codes, separated by semicolons, in the order of the table below. Empty when none apply. |
-| `inputs` | The series it's calculated from, as a JSON array of `<series>/<subject>`, such as `["daily/strategy"]` or `["daily/strategy", "daily/benchmark"]` |
+| `inputs` | The series it's calculated from, as a JSON array of `<series>/<subject>`, such as `["daily/strategy"]` or `["daily/strategy", "daily/benchmark"]`. A value without a subject reads a series' dates, but none of its values, so it names the series alone: `["period"]` on `period_count` and `spanning_period_count`, which count periods, and `["daily"]` on `rolling_window_count` and `rolling_non_overlapping_count`, which count windows of the `chart`'s dates. `coverage_share`, calculated from the coverage and the declared dates alone, has `[]`. |
 | `origin` | `calculated` |
 | `provenance` | `inferred`: derived by Trial Folio under the documented rule its `analysis` names ([provenance](#provenance)) |
 | `trialfolio_version` | The version that calculated it |
