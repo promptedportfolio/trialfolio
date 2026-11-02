@@ -445,5 +445,5 @@ Each check traces to a METH requirement and is recorded as actual evidence in th
 | Minimum sample size and minimum economically relevant effect | Whether a study can be informative at all | Stated per study with a power estimate | Study protocol, before evaluation |
 | Risk-free series and return convention for Sharpe | Standalone objective results | Stated per study | Before any standalone assessment |
 | Microcap cutoff and universe-slice rule | Two of the default reproduction variants | Cutoff stated per study; `Mod(StockID,4)` after verifying `StockID` stability | Before those variants run |
-| Rolling-window horizons in calendar or trading days | Window counts and comparability | 7, 30, 90, 180, and 365 calendar days, fixed in the analysis-set version | First analysis-set version. [Analysis set 1.0.0](#rolling-returns) gives them as calendar days (R05-T02, 2026-11-02), awaiting the owner's confirmation. |
+| Rolling-window horizons in calendar or trading days | Window counts and comparability | 7, 30, 90, 180, and 365 calendar days, fixed in the analysis-set version | First analysis-set version. [Analysis set 1.0.0](#rolling-returns) gives them as calendar days (R05-T02, 2026-11-02), which the owner confirmed the same day. |
 | Taxes | Net results | Not modeled; stated as a limitation | Per study, as a declared scope choice |
