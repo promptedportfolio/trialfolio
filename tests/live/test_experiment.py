@@ -64,7 +64,7 @@ BUDGET_VARIABLE = "TRIALFOLIO_LIVE_BUDGET_CREDITS"
 BACKTEST_REQUEST = "POST /screen/backtest"
 
 
-def test_a_real_experiment_authenticates_once_within_its_budget_and_resumes_offline(
+def test_a_real_experiment_authenticates_once_within_its_budget_and_resumes_offline(  # noqa: PLR0915 - one scenario; its extraction waits for a live run the owner approves.
     request: pytest.FixtureRequest,
 ) -> None:
     # Before anything else, the test refuses to start without what it needs.
