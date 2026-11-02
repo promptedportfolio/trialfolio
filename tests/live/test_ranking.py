@@ -184,7 +184,7 @@ def events(log: Path) -> list[str]:
     return [str(json.loads(line)["event"]) for line in log.read_text("utf-8").splitlines()]
 
 
-def test_a_live_weight_variant_changes_a_metric_and_the_baselines_definition_restores_it(
+def test_a_live_weight_variant_changes_a_metric_and_the_baselines_definition_restores_it(  # noqa: PLR0915 - one scenario; its extraction waits for a live run the owner approves.
     request: pytest.FixtureRequest,
 ) -> None:
     # Before anything else, the test refuses to start without what it needs.

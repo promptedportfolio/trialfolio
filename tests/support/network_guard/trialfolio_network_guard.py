@@ -352,7 +352,7 @@ def _clears_environment(args: list[str]) -> bool:
     return False
 
 
-def _check_python_options(kind: str, args: list[str]) -> None:
+def _check_python_options(kind: str, args: list[str]) -> None:  # noqa: C901 - shortening it waits for tests of the guard's untested branches.
     """Refuse to start Python with an option that skips sitecustomize. args follow the program."""
     rest = iter(args)
     for arg in rest:
@@ -376,9 +376,9 @@ def _check_python_options(kind: str, args: list[str]) -> None:
                 break  # Its value is the rest of this one.
 
 
-def _guard_popen(attribute: str, original: Callable[..., None]) -> Callable[..., None]:
+def _guard_popen(attribute: str, original: Callable[..., None]) -> Callable[..., None]:  # noqa: C901 - shortening it waits for tests of the guard's untested branches.
     @functools.wraps(original)
-    def __init__(self: subprocess.Popen[Any], *args: Any, **kwargs: Any) -> None:
+    def __init__(self: subprocess.Popen[Any], *args: Any, **kwargs: Any) -> None:  # noqa: C901 - shortening it waits for tests of the guard's untested branches.
         positional = list(args)
 
         def get(parameter: str) -> Any:
