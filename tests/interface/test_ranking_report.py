@@ -83,6 +83,7 @@ from tests.support.synthetic_experiment import (
     SYNTHETIC_RUN_WITH_DEFINITION,
     write_synthetic_ranking_experiment,
 )
+from trialfolio.planning import installed_versions
 
 SCREEN: Final = SCREEN_CONFIGS / "definition.yaml"
 EXAMPLE: Final = experiment_config("ranking-example.yaml")
@@ -173,6 +174,9 @@ class Shown:
     rendered again elsewhere."""
     manifest_path: Path | None = None
     """The manifest of what the report shows, when it isn't beside the report."""
+    rendered_by: str | None = None
+    """The version of Trial Folio that rendered the report, when it isn't the one the manifest
+    records: the installed one, for a report `trialfolio report` rendered again."""
 
     @property
     def document(self) -> Document:
@@ -187,6 +191,11 @@ class Shown:
         """The manifest beside the report, as JSON."""
         loaded = json.loads(self.listed.read_bytes())
         return cast("dict[str, object]", loaded)
+
+    @property
+    def version(self) -> str:
+        """The version of Trial Folio that rendered the report, whose LICENSE it links (D-21)."""
+        return self.rendered_by or cast("str", self.manifest["trialfolio_version"])
 
     @property
     def listed(self) -> Path:
@@ -273,7 +282,7 @@ def _rendered(cli: Cli, directory: Path) -> list[Shown]:
     out = directory / "report"
     outcome = cli("report", run, "--out", out)
     assert outcome.exit_code == 0, outcome.stderr
-    return [Shown(run, out / "report.html", run / "manifest.json")]
+    return [Shown(run, out / "report.html", run / "manifest.json", installed_versions().trialfolio)]
 
 
 def _written_again(cli: Cli, directory: Path) -> list[Shown]:
@@ -664,7 +673,7 @@ def test_the_concise_notice_comes_first_and_links_to_the_full_notice_with_the_li
 ) -> None:
     for shown in reports(name):
         assert_concise_notice_first(shown.document)
-        assert_full_notice(shown.document, cast("str", shown.manifest["trialfolio_version"]))
+        assert_full_notice(shown.document, shown.version)
 
 
 @pytest.mark.parametrize("name", EVERY)
@@ -680,7 +689,7 @@ def test_its_only_outside_links_are_the_license_and_portfolio123s_terms(
     reports: Reports, name: str
 ) -> None:
     for shown in reports(name):
-        version = cast("str", shown.manifest["trialfolio_version"])
+        version = shown.version
         manifest = shown.listed.relative_to(shown.out).as_posix()
 
         # Each file the manifest lists is linked, the definition's copy among them.
