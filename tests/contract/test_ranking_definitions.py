@@ -1024,8 +1024,11 @@ one problem its message gives: its own rule's."""
 
 
 def test_every_variant_case_is_in_the_invalid_configurations_readme() -> None:
+    """The section runs to the next of the README's sections, the period splits', which release
+    0.5.0's R05-T05 added after it."""
     readme = (INVALID_CONFIGURATIONS / "README.md").read_text(encoding="utf-8")
     section = readme[readme.index("### What a ranking variant's paths name") :]
+    section = section[: section.index("\n## ")]
 
     assert set(re.findall(r"^\| `([a-z0-9-]+)\.yaml` \|", section, re.MULTILINE)) == set(
         VARIANT_PROBLEMS

@@ -37,30 +37,43 @@ from trialfolio.contracts.attempt import (
 from trialfolio.contracts.experiment_configuration import (
     ExperimentConfiguration,
     ExperimentConfigurationV1_1,
+    ExperimentConfigurationV1_2,
 )
-from trialfolio.contracts.experiment_manifest import ExperimentManifest, ExperimentManifestV1_1
-from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3
+from trialfolio.contracts.experiment_manifest import (
+    ExperimentManifest,
+    ExperimentManifestV1_1,
+    ExperimentManifestV1_2,
+)
+from trialfolio.contracts.experiment_plan import PlanV1_1, PlanV1_3, PlanV1_5, PlanV1_7
 from trialfolio.contracts.experiment_record import (
     ExperimentRecord,
     ExperimentRecordV1_1,
     SessionRecord,
 )
-from trialfolio.contracts.manifest import RunManifest, RunManifestV1_1
-from trialfolio.contracts.plan import Plan, PlanV1_2
+from trialfolio.contracts.manifest import RunManifest, RunManifestV1_1, RunManifestV1_2
+from trialfolio.contracts.plan import Plan, PlanV1_2, PlanV1_4, PlanV1_6
 from trialfolio.contracts.ranking_snapshot import (
     RankingSnapshotManifest,
     RankingSnapshotPlan,
     RankingSnapshotRecord,
 )
 from trialfolio.contracts.ranking_snapshot_configuration import RankingSnapshotConfiguration
+from trialfolio.contracts.report_manifest import ReportManifest
 from trialfolio.contracts.review_configuration import ReviewConfiguration
 from trialfolio.contracts.review_manifest import ReviewManifest
-from trialfolio.contracts.screen_configuration import ScreenConfiguration, ScreenConfigurationV1_1
+from trialfolio.contracts.screen_configuration import (
+    ScreenConfiguration,
+    ScreenConfigurationV1_1,
+    ScreenConfigurationV1_2,
+)
 from trialfolio.contracts.summary import JsonSummary, JsonSummaryV1_1, JsonSummaryV1_2
 from trialfolio.contracts.tables import (
+    AnalysisRow,
+    ComparisonRow,
     DifferencesRow,
     DifferencesRowV1_1,
     MetricsRow,
+    SeriesRow,
     SettingsRow,
     SettingsRowV1_1,
 )
@@ -133,6 +146,23 @@ SCHEMA_FILES: Final = (
     SchemaFile("ranking-snapshot-record-1.0.0.schema.json", RankingSnapshotRecord, "serialization"),
     SchemaFile("settings-row-1.1.0.schema.json", SettingsRowV1_1, "serialization"),
     SchemaFile("differences-row-1.1.0.schema.json", DifferencesRowV1_1, "serialization"),
+    # Release 0.5.0's, for period splits and the return analytics. Each file above keeps the
+    # bytes v0.4.0 committed: every run and session 0.5.0 writes has a new manifest, while a plan
+    # without period splits keeps its 0.4.0 version.
+    SchemaFile("screen-configuration-1.2.0.schema.json", ScreenConfigurationV1_2, "validation"),
+    SchemaFile(
+        "experiment-configuration-1.2.0.schema.json", ExperimentConfigurationV1_2, "validation"
+    ),
+    SchemaFile("plan-1.4.0.schema.json", PlanV1_4, "serialization"),
+    SchemaFile("plan-1.5.0.schema.json", PlanV1_5, "serialization"),
+    SchemaFile("plan-1.6.0.schema.json", PlanV1_6, "serialization"),
+    SchemaFile("plan-1.7.0.schema.json", PlanV1_7, "serialization"),
+    SchemaFile("run-manifest-1.2.0.schema.json", RunManifestV1_2, "serialization"),
+    SchemaFile("experiment-manifest-1.2.0.schema.json", ExperimentManifestV1_2, "serialization"),
+    SchemaFile("report-manifest-1.0.0.schema.json", ReportManifest, "serialization"),
+    SchemaFile("series-row-1.0.0.schema.json", SeriesRow, "serialization"),
+    SchemaFile("analysis-row-1.0.0.schema.json", AnalysisRow, "serialization"),
+    SchemaFile("comparison-row-1.0.0.schema.json", ComparisonRow, "serialization"),
 )
 """Every published schema: one for each contract and each schema version that has a reader."""
 

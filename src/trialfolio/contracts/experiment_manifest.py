@@ -6,6 +6,12 @@ the session, the plan, and the experiment's counts.
 Version 1.1.0, `ExperimentManifestV1_1`, is written by each session of an experiment any of whose
 plans is plan 1.3.0: 1.0.0's fields, with the roles and source records of the files a ranking
 definition adds, each at its place in the layout.
+
+Version 1.2.0, `ExperimentManifestV1_2`, from release 0.5.0, is written by each session 0.5.0
+runs, of any experiment, one an earlier version began included: 1.1.0's fields, with the roles
+`series` and `analysis`, each a case's table, and `comparison`, the session's `comparison.csv`; a
+`return_series` that may be `normalized`; and `methods`, after `parsers`. A case it lists the
+tables of has all four, and it always lists its session's `comparison.csv`.
 """
 
 import re
@@ -37,12 +43,16 @@ from trialfolio.contracts.common import (
 from trialfolio.contracts.manifest_parts import (
     SOURCE_ROLES,
     SOURCE_ROLES_V1_1,
+    TABLE_FILES,
+    AnalyticsMethod,
     AttemptCounts,
     Capabilities,
+    CapabilitiesV1_2,
     ParserVersion,
     Reproducibility,
     SourceRecord,
     SourceRecordV1_1,
+    check_methods,
     check_ranking_artifact,
 )
 
@@ -115,7 +125,7 @@ class ExperimentArtifact(ContractModel):
 
 
 def _check_artifact(
-    artifact: "ExperimentArtifact | ExperimentArtifactV1_1",
+    artifact: "ExperimentArtifact | ExperimentArtifactV1_1 | ExperimentArtifactV1_2",
     source_roles: frozenset[str],
     role_paths: dict[str, re.Pattern[str]],
 ) -> None:
@@ -274,7 +284,8 @@ class ExperimentManifest(ContractModel):
 
 
 def _check_manifest(
-    manifest: "ExperimentManifest | ExperimentManifestV1_1", role_paths: dict[str, re.Pattern[str]]
+    manifest: "ExperimentManifest | ExperimentManifestV1_1 | ExperimentManifestV1_2",
+    role_paths: dict[str, re.Pattern[str]],
 ) -> None:
     """Raises `ValueError` unless the manifest's outcome, approval, command, paths, and parsers
     are consistent, and its files are the experiment's records' layout."""
@@ -299,11 +310,13 @@ def _check_manifest(
 
 
 def _check_layout(
-    manifest: "ExperimentManifest | ExperimentManifestV1_1", role_paths: dict[str, re.Pattern[str]]
+    manifest: "ExperimentManifest | ExperimentManifestV1_1 | ExperimentManifestV1_2",
+    role_paths: dict[str, re.Pattern[str]],
 ) -> None:
     """Raises `ValueError` unless the files listed are the layout of the experiment's records:
     each plan's files, the first and the current one's included, this session's record and
-    report, and each case's two tables."""
+    report, and from 1.2.0 its `comparison.csv`, and each case's two tables, or from 1.2.0 its
+    four."""
     plans, sessions, tables = _placed(manifest, role_paths)
     # The first plan is always recorded: a directory without it can't be resumed.
     numbers = {number for number, _ in plans} | {"1", str(manifest.plan)}
@@ -315,15 +328,31 @@ def _check_layout(
     for number in numbers:
         if plans[(number, "ranking_snapshot_record")] > plans[(number, "ranking_definition")]:
             raise ValueError("a plan's snapshot record is listed only beside its definition's copy")
+    _check_session_and_tables(isinstance(manifest, ExperimentManifestV1_2), sessions, tables)
+
+
+def _check_session_and_tables(
+    analytics: bool, sessions: Counter[str], tables: Counter[tuple[str, str]]
+) -> None:
+    """Raises `ValueError` unless the manifest lists its session's record and report, and each
+    case's two tables or none; or, from 1.2.0, with `analytics`, also its session's
+    `comparison.csv`, and each case's four tables or none."""
+    cases = {case for case, _ in tables}
+    if analytics:
+        if sessions != Counter({"session_record": 1, "comparison": 1, "report": 1}):
+            raise ValueError("the manifest lists its session's record, comparison.csv, and report")
+        if any(tables[(case, role)] != 1 for case in cases for role in TABLE_FILES):
+            raise ValueError("a case has its four normalized tables, or none")
+        return
     if sessions != Counter({"session_record": 1, "report": 1}):
         raise ValueError("the manifest lists its session's record and report")
-    cases = {case for case, _ in tables}
     if any(tables[(case, role)] != 1 for case in cases for role in ("metrics", "settings")):
         raise ValueError("a case has both of its normalized tables, or neither")
 
 
 def _placed(
-    manifest: "ExperimentManifest | ExperimentManifestV1_1", role_paths: dict[str, re.Pattern[str]]
+    manifest: "ExperimentManifest | ExperimentManifestV1_1 | ExperimentManifestV1_2",
+    role_paths: dict[str, re.Pattern[str]],
 ) -> tuple[Counter[tuple[str, str]], Counter[str], Counter[tuple[str, str]]]:
     """The files listed, counted by where the layout places them: by plan and role, by role in
     the session, and by case and role. Raises `ValueError` for a file of a plan newer than the
@@ -451,4 +480,123 @@ class ExperimentManifestV1_1(ContractModel):
     @model_validator(mode="after")
     def _consistent(self) -> Self:
         _check_manifest(self, ROLE_PATHS_V1_1)
+        return self
+
+
+# Version 1.2.0: every session 0.5.0 runs, with each case's series and analysis set's values, and
+# the session's comparison with the baseline.
+
+ExperimentArtifactRoleV1_2 = Literal[
+    "configuration",
+    "plan",
+    "experiment_record",
+    "ranking_definition",
+    "ranking_snapshot_record",
+    "authentication_record",
+    "update_record",
+    "start_record",
+    "attempt_record",
+    "rank_update_request",
+    "rank_update_response",
+    "rank_update_response_undecoded",
+    "provider_request",
+    "provider_response",
+    "provider_response_undecoded",
+    "metrics",
+    "settings",
+    "series",
+    "analysis",
+    "session_record",
+    "comparison",
+    "report",
+]
+"""1.1.0's roles, with a case's two tables 0.5.0 adds, `series.csv` and `analysis.csv`, and the
+session's `comparison.csv`."""
+
+ROLE_PATHS_V1_2: Final[dict[str, re.Pattern[str]]] = {
+    **ROLE_PATHS_V1_1,
+    "series": re.compile(rf"{_TABLES}series\.csv"),
+    "analysis": re.compile(rf"{_TABLES}analysis\.csv"),
+    "comparison": re.compile(rf"{_SESSION}normalized/comparison\.csv"),
+}
+"""Where the file of each role is, with the tables 0.5.0 adds (experiment output)."""
+
+_TABLE_ROLES_V1_2: Final = frozenset({*TABLE_FILES, "comparison"})
+
+
+class ExperimentArtifactV1_2(ContractModel):
+    """One file of the records of an experiment a session of 0.5.0 runs, by path, content
+    address, and role."""
+
+    path: RelativePath
+    artifact_id: Sha256Digest
+    size: Count
+    role: ExperimentArtifactRoleV1_2
+    schema_version: SemanticVersion | None
+    """The file's schema version, for files that have one, such as the records and tables."""
+    source: SourceRecordV1_1 | None
+    """Given exactly for source artifacts."""
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        _check_artifact(self, SOURCE_ROLES_V1_1, ROLE_PATHS_V1_2)
+        check_ranking_artifact(self.role, self.path, self.schema_version, self.source)
+        if self.role in _TABLE_ROLES_V1_2 and self.schema_version is None:
+            raise ValueError("a table gives its schema version")
+        return self
+
+
+class ExperimentManifestV1_2(ContractModel):
+    """The manifest a session 0.5.0 runs writes last: 1.1.0's, with each case's series and
+    analysis set's values among its tables, the session's comparison with the baseline, and the
+    methods that calculated them. Its counts' `provider_requests` count both kinds of request, and
+    `cost` sums the costs reported for both."""
+
+    schema_version: Literal["1.2.0"]
+    artifact_type: Literal["experiment"]
+    trialfolio_version: SemanticVersion
+    created_at: UtcDatetime
+    experiment_id: ExperimentKey
+    session: Ordinal
+    """The number of the session that wrote it, in whose directory it is."""
+    command: ExperimentCommandRecord | None
+    """Null when no `trialfolio` command ran the session, as when the core runs it for another
+    interface, or writes a synthetic experiment."""
+    synthetic: bool
+    """True exactly for an experiment executed with the demo's client, which sends nothing. Its
+    values, attempts, and counts are invented."""
+    plan: Ordinal
+    """The current plan's number."""
+    plan_hash: Sha256Digest
+    approval: Approval
+    """How this run approved the current plan: `not_required` exactly for a synthetic
+    experiment."""
+    outcome: Literal["completed", "partial"]
+    """`completed` when every planned case succeeded, and `partial` otherwise."""
+    error: ErrorDetail | None
+    """Null when completed, and `execution.partial` when partial."""
+    artifacts: tuple[ExperimentArtifactV1_2, ...]
+    """Every file of the experiment's records: each plan's files, each attempt's files, each
+    case's four tables, and this session's record, `comparison.csv`, and report."""
+    parsers: Annotated[tuple[ParserVersion, ...], Field(min_length=1)]
+    """Each parser version that normalized a case's response, or the installed one's when none
+    did."""
+    methods: tuple[AnalyticsMethod, ...]
+    """`analysis-set`, with each version the cases' `analysis.csv` give, when any case has one;
+    then `baseline-comparison`, version 1, since every session writes its comparison."""
+    license_id: LicenseId
+    notice_version: NonEmptyText
+    capabilities: CapabilitiesV1_2
+    """`return_series` is `normalized` exactly when a case has its tables."""
+    reproducibility: Reproducibility
+    """Over the current plan's cases."""
+    counts: ExperimentManifestCounts
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        _check_manifest(self, ROLE_PATHS_V1_2)
+        tables = any(artifact.role == "series" for artifact in self.artifacts)
+        if (self.capabilities.return_series == "normalized") != tables:
+            raise ValueError("return_series is normalized exactly when a case has its tables")
+        check_methods(self.methods, analyses=tables, comparison=True)
         return self

@@ -9,7 +9,9 @@ settled (D-33): 1.1.0's schema keeps v0.2.0's bytes, and a 1.1.0 summary of each
 its version changed, is a valid 1.2.0 summary. R03-T06 wrote 1.2.0's checks, ahead of R03-T11.
 And to release 0.4.0's other checks in the default suite: every schema file `v0.3.0` committed
 keeps its bytes, and the new ones are generated from the models. R04-T05 wrote that check, with
-the new schemas, ahead of R04-T13.
+the new schemas, ahead of R04-T13. And to R05-AC10, as release 0.5.0's test pairing gives it for
+this module: every schema file `v0.4.0` committed keeps its bytes, and the 12 new ones are
+generated from the models. R05-T05 wrote that check, with the new schemas, ahead of R05-T12.
 """
 
 import hashlib
@@ -483,6 +485,90 @@ def test_each_schema_v0_3_0_committed_keeps_its_bytes(name: str) -> None:
     assert hashlib.sha256(committed).hexdigest() == V0_3_0_SCHEMAS[name]
 
 
-def test_release_0_4_0_adds_its_schemas_and_removes_none() -> None:
-    assert set(generate()) == set(V0_3_0_SCHEMAS) | set(RELEASE_0_4_0_SCHEMAS)
-    assert len(V0_3_0_SCHEMAS) + len(RELEASE_0_4_0_SCHEMAS) == len(SCHEMA_FILES)
+def test_release_0_4_0_added_its_schemas_and_removed_none() -> None:
+    """v0.4.0's schemas are v0.3.0's and the 17 its verification commands name. Until release
+    0.5.0's R05-T05, this test checked the generated schemas against them; since, the test below
+    checks them against v0.4.0's and 0.5.0's, since 0.5.0 adds 12."""
+    assert set(V0_4_0_SCHEMAS) == set(V0_3_0_SCHEMAS) | set(RELEASE_0_4_0_SCHEMAS)
+    assert len(V0_3_0_SCHEMAS) + len(RELEASE_0_4_0_SCHEMAS) == len(V0_4_0_SCHEMAS)
+    for name, digest in V0_3_0_SCHEMAS.items():
+        assert V0_4_0_SCHEMAS[name] == digest
+
+
+V0_4_0_SCHEMAS = {
+    "attempt-record-1.0.0.schema.json": "b2d3a2141b9fd73d7e385510b9b0a3ae67ab13c2563221560d0a0782543475b6",
+    "attempt-record-1.1.0.schema.json": "74cf70c9b0fa11d58a011c61ce99bd99cf36fb4ca475c55e5430b668408aafca",
+    "attempt-record-1.2.0.schema.json": "5a428ff0580a9d3080f78d9c5c716fc5de9ce33f3bc1bc8c5df7f26f1596f956",
+    "attempt-record-1.3.0.schema.json": "1727f96541212cea8673a54f4bb57b1d433b245bada9475c97dc01841fe962a7",
+    "authentication-record-1.0.0.schema.json": "789fe5b3e4406b16c6e67b747131d2be8ada445bd3c78f214d496f5c4b507c1e",
+    "differences-row-1.0.0.schema.json": "5d3caa06a37bd230c5e55309016dfea0d40fba54b4dc6d672b6225cabd01790c",
+    "differences-row-1.1.0.schema.json": "f5c343f41e7c5885cb95e172aefa5bf39bbe129519c40b38101c7377605ec8c2",
+    "experiment-configuration-1.0.0.schema.json": "ab17dc08167f45285a5fcf61e81644fb48ea7f691274a451424bde310ebfd5c5",
+    "experiment-configuration-1.1.0.schema.json": "d2a29299366082175392e9640c50d4adfa309834541108016096287275300196",
+    "experiment-manifest-1.0.0.schema.json": "4b234f7512f35d1230d7fda45f926e2d647ea03787bb8de6694afa9fcb187430",
+    "experiment-manifest-1.1.0.schema.json": "c4e7e71def2b9b75c634b6b8714c987ec4ab96e3c70c83ad4e7be306c33ed6e1",
+    "experiment-record-1.0.0.schema.json": "d832ea97dc50ae8bf778424c5ee541384d1f52027cb6fea8369e7a8a6e7b5741",
+    "experiment-record-1.1.0.schema.json": "f3c6899786e34cdcaca9b1a0714e9e5cafe669aa41f6606cb0a4dfdb1d28f4ae",
+    "json-summary-1.0.0.schema.json": "0ce25e981d49a06d433fd68dd15bc15e50d929ca37604a7af79f5b51bcfdb67d",
+    "json-summary-1.1.0.schema.json": "e0892988444d87e6ff8a0cb02fd72cec990ce3c354193308093fe75d4a3918e6",
+    "json-summary-1.2.0.schema.json": "1a552660d7eafd648087df1622411c1a88e9062d885f86ae6e415b3d841a9a9b",
+    "license-acknowledgment.schema.json": "1c284b5e99d6f6ff74ebd5e92c763b3c57213702f111b4e7c81e43c65a3001f2",
+    "metrics-row-1.0.0.schema.json": "ea82a9b2d2a298d9f8830963664ec627ea6d9fc5e97d27870c00131ce5f69487",
+    "plan-1.0.0.schema.json": "5d30065e163f69154bb850fbe85e7f605e46cb3b4616b10976edc9ed4136cd74",
+    "plan-1.1.0.schema.json": "d9f02471292ece14584344c35f1d428db1e785d9ca3d9a9526f1e828bbe0d1e9",
+    "plan-1.2.0.schema.json": "8b3b863ec6fce678d41572e4560a83349ada125363bfb48fdfcaeadc5049abc7",
+    "plan-1.3.0.schema.json": "bdbc00e3fc18a3f4d1df64e2e3b7feb6096144a01f5169690aed681b6923ac5c",
+    "ranking-snapshot-configuration-1.0.0.schema.json": "d843e251cd8bd48d8b37884133d5a8a32d66a4d28e8a8ce87b3ccd14ad30b5f5",
+    "ranking-snapshot-manifest-1.0.0.schema.json": "659b54598ab906b53fdd75ace0506905eec194559d1757309150c2f07b610dbf",
+    "ranking-snapshot-plan-1.0.0.schema.json": "c33e8ae9571947f505c70d74fade74cb0b2ccea5d25bad6d183520b346f598a5",
+    "ranking-snapshot-record-1.0.0.schema.json": "4b2875e2ef7e4777beaae039e2e832006184de12d24984156fa0c94d7ebfc37d",
+    "review-configuration-1.0.0.schema.json": "0acf4b5083adfc7f3fcbf0793416fd753e9af3a1366c79ef57fb58ad6dd92d17",
+    "review-manifest-1.0.0.schema.json": "96b560a9f0a6b38bff224dc20e5c6315013a76fb96767f328d9476f7b5358fcd",
+    "run-manifest-1.0.0.schema.json": "3f7b214594b10c7806379bf8751e1864645626f6e7be732810245cd30bd5f097",
+    "run-manifest-1.1.0.schema.json": "16a66ae42dde8eea0aeaf092583ce6b4cf80d1eaa15cfb96e14dafd1a5c90246",
+    "screen-configuration-1.0.0.schema.json": "1faf093849fce03fc3708578dcc3cdc82b88c118bbb4cf7e61824d1173127828",
+    "screen-configuration-1.1.0.schema.json": "ab0fb0fa3f0e8a394b9f9673faee871a107075cc4dbfb29b5e9992c5536581a5",
+    "session-record-1.0.0.schema.json": "064386e478e6c367ca0a4f1a70356a6368709fef212eb2ae362157e21d15f97a",
+    "settings-row-1.0.0.schema.json": "799cc89bbc588a012ca7a08f329f40e2268bbabd0c1046455f0eebf5892076c8",
+    "settings-row-1.1.0.schema.json": "f43b3436d99017fee9484bbb6f7a910359f780a99ea0df37224b94c846e4345f",
+    "start-record-1.0.0.schema.json": "676038952e12eb2286886a670816084a35720ba744694743fe0975f8c57c34e3",
+    "start-record-1.1.0.schema.json": "879dc9e4db665d09cdcdf3263411bdb2cba342bcd898c6b6c3fbc1b967b4ef78",
+    "start-record-1.2.0.schema.json": "a4ea11167d0212126c548c8ab9f664f8f64820eeefc264012fb75be0ec320417",
+    "start-record-1.3.0.schema.json": "b2e75cab92916574f1eeae77037a9f4d561a6285f2c6d81e6a1094d469d97595",
+}
+"""The SHA-256 of each schema file at the tag v0.4.0, written by hand, as `V0_3_0_SCHEMAS` was:
+for each file of `git ls-tree --name-only v0.4.0 schemas/`, `git show v0.4.0:<file> | shasum -a
+256`."""
+
+RELEASE_0_5_0_SCHEMAS = (
+    "screen-configuration-1.2.0.schema.json",
+    "experiment-configuration-1.2.0.schema.json",
+    "plan-1.4.0.schema.json",
+    "plan-1.5.0.schema.json",
+    "plan-1.6.0.schema.json",
+    "plan-1.7.0.schema.json",
+    "run-manifest-1.2.0.schema.json",
+    "experiment-manifest-1.2.0.schema.json",
+    "report-manifest-1.0.0.schema.json",
+    "series-row-1.0.0.schema.json",
+    "analysis-row-1.0.0.schema.json",
+    "comparison-row-1.0.0.schema.json",
+)
+"""The 12 schemas release 0.5.0's verification commands name for `scripts/schemas --check`."""
+
+
+@pytest.mark.parametrize("name", sorted(V0_4_0_SCHEMAS))
+def test_each_schema_v0_4_0_committed_keeps_its_bytes(name: str) -> None:
+    """Every artifact releases 0.1.0 to 0.4.0 wrote stays readable, and each schema v0.4.0
+    committed keeps its bytes (R05-AC10). R05-T05 wrote this check ahead of R05-T12, which the
+    test pairing gives it."""
+    committed = (ROOT / "schemas" / name).read_bytes()
+
+    assert hashlib.sha256(generate()[name]).hexdigest() == V0_4_0_SCHEMAS[name]
+    assert hashlib.sha256(committed).hexdigest() == V0_4_0_SCHEMAS[name]
+
+
+def test_release_0_5_0_adds_its_schemas_and_removes_none() -> None:
+    """The 12 new schemas are generated from the models, beside v0.4.0's (R05-AC10)."""
+    assert set(generate()) == set(V0_4_0_SCHEMAS) | set(RELEASE_0_5_0_SCHEMAS)
+    assert len(V0_4_0_SCHEMAS) + len(RELEASE_0_5_0_SCHEMAS) == len(SCHEMA_FILES)

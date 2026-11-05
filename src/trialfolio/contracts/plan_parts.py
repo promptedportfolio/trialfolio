@@ -2,7 +2,8 @@
 (docs/contracts.md, plan contents, budget and retries, data sent, and plans with a ranking
 definition): each resolved setting, with a ranking definition's weight rows; the checks that a
 case's requests are what its settings send; the budget, its documented costs, and the retry
-policy; the data sent; and where a ranking definition came from.
+policy; the data sent; where a ranking definition came from; and, from plans 1.4.0 to 1.7.0, the
+period splits the configuration declares (plans with period splits).
 
 A case's definition is read by the rules of `trialfolio.ranking_definitions`.
 """
@@ -17,6 +18,7 @@ from trialfolio.contracts.common import (
     MAX_SAFE_INTEGER,
     RANKING_METHOD_NUMBERS,
     ContractModel,
+    DateText,
     IntegerOnly,
     Interpretation,
     NodePathText,
@@ -26,6 +28,7 @@ from trialfolio.contracts.common import (
     SettingName,
     SettingUnit,
     Sha256Digest,
+    Title,
     require_unique,
 )
 from trialfolio.contracts.plan_requests import (
@@ -33,7 +36,13 @@ from trialfolio.contracts.plan_requests import (
     RankUpdateRequest,
     screen_backtest_params,
 )
-from trialfolio.contracts.screen_configuration import FormulaRanking, IdRanking, NameRanking
+from trialfolio.contracts.screen_configuration import (
+    MAX_PERIOD_SPLITS,
+    FormulaRanking,
+    IdRanking,
+    NameRanking,
+    check_period_splits,
+)
 from trialfolio.contracts.screen_settings import (
     RANKING_WEIGHT,
     SCREEN_SETTINGS,
@@ -415,3 +424,28 @@ def check_ranking_source(source: RankingSource, baseline: tuple[PlanSettingV1_2,
     names by hash (plans with a ranking definition)."""
     if source.definition != _definition_setting(baseline).definition:
         raise ValueError("ranking_source's definition is the hash of the baseline's definition")
+
+
+class DeclaredPeriodSplit(ContractModel):
+    """One period split as the configuration gives it, with `user_supplied` provenance: its date,
+    as `YYYY-MM-DD` text, and its label, the configuration's text (plans with period splits)."""
+
+    date: DateText
+    label: Title
+
+
+class DeclaredAnalysis(ContractModel):
+    """A plan's `analysis`, from plans 1.4.0 to 1.7.0: the configuration's period splits, in its
+    order, which is their dates', with `user_supplied` provenance. The plan hash covers it, and no
+    `case_id` does (plans with period splits)."""
+
+    period_splits: Annotated[
+        tuple[DeclaredPeriodSplit, ...], Field(min_length=1, max_length=MAX_PERIOD_SPLITS)
+    ]
+    """1 to 10 splits, in the order of their dates, with distinct labels."""
+
+    @model_validator(mode="after")
+    def _in_order(self) -> Self:
+        splits = self.period_splits
+        check_period_splits([split.date for split in splits], [split.label for split in splits])
+        return self

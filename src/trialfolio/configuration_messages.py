@@ -45,12 +45,13 @@ def model_problems(
     variant_settings: tuple[str, ...] = VARIANT_SETTINGS,
     *,
     later_versions: bool = False,
+    splits: bool = False,
 ) -> list[str]:
     """A problem for each error the model found in `document`, as `describe` gives it, apart
     from a list's that's too short only because its items failed."""
     details = error.errors(include_input=False)
     return [
-        describe(detail, document, variant_settings, later_versions=later_versions)
+        describe(detail, document, variant_settings, later_versions=later_versions, splits=splits)
         for detail in details
         if not _follows(detail, details)
     ]
@@ -62,11 +63,15 @@ def describe(
     variant_settings: tuple[str, ...] = VARIANT_SETTINGS,
     *,
     later_versions: bool = False,
+    splits: bool = False,
 ) -> str:
     """The problem a model's error gives, naming its key, with a ranking variant's `set` entry
     named by its place in `document`. `variant_settings` are the settings the file's version lets
     a variant change. With `later_versions`, as 0.4.0's readers read a 1.0.0 file, a key that only
-    1.1.0 allows is told it needs that version; without it, the messages are 0.3.0's."""
+    1.1.0 allows is told it needs that version; without it, the messages are 0.3.0's. With
+    `splits`, as 0.5.0's readers read a file of any version, `analysis` is told it needs 1.2.0,
+    and an experiment's `baseline.analysis` that its splits are the experiment's; without it,
+    the messages are 0.4.0's."""
     location = _placed(detail["loc"], document)
     key = format_path(location)
     message = detail["msg"].removeprefix("Value error, ").rstrip(".")
@@ -75,14 +80,21 @@ def describe(
     if detail["type"] == "missing":
         return f"`{key}` is required."
     if detail["type"] == "extra_forbidden":
-        return _not_accepted(location, key, variant_settings, later_versions=later_versions)
+        return _not_accepted(
+            location, key, variant_settings, later_versions=later_versions, splits=splits
+        )
     return _particular(detail, location, key, message) or (
         f"`{key}` {message[0].lower()}{message[1:]}."
     )
 
 
 def _not_accepted(
-    location: KeyPath, key: str, variant_settings: tuple[str, ...], *, later_versions: bool
+    location: KeyPath,
+    key: str,
+    variant_settings: tuple[str, ...],
+    *,
+    later_versions: bool,
+    splits: bool,
 ) -> str:
     """The problem of a key the model doesn't accept, at `location`."""
     settings = f"{', '.join(variant_settings[:-1])}, or {variant_settings[-1]}"
@@ -90,6 +102,13 @@ def _not_accepted(
         return (
             f"`{key}` needs schema_version 1.1.0, with a baseline ranked by a definition or a "
             f"snapshot. In 1.0.0, a variant may change {settings}."
+        )
+    if splits and location == ("analysis",):
+        return f"`{key}` needs schema_version 1.2.0, the first that declares period splits."
+    if splits and location == ("baseline", "analysis"):
+        return (
+            f"`{key}` isn't a key of the baseline: an experiment's period splits apply to every "
+            "case, so `analysis` is written at the top level."
         )
     if location[:1] == ("variants",) and len(location) == 2:
         return f"`{key}` isn't a setting a variant may change. A variant may change {settings}."
@@ -103,8 +122,8 @@ def _not_accepted(
 
 def _particular(detail: ErrorDetails, location: KeyPath, key: str, message: str) -> str | None:
     """The problem of an error that has words of its own: a blank text, a label, a rule that
-    spans a mapping's keys, and a list that's too short. None for any other, which gives the
-    model's message after the key."""
+    spans a mapping's keys, and a list that's too short or too long. None for any other, which
+    gives the model's message after the key."""
     kind = detail["type"]
     context = detail.get("ctx", {})
     if kind == "string_pattern_mismatch" and context.get("pattern") == NOT_BLANK:
@@ -124,6 +143,9 @@ def _particular(detail: ErrorDetails, location: KeyPath, key: str, message: str)
     if kind == "too_short":
         least = context.get("min_length")
         return f"`{key}` must hold at least {least} item{'' if least == 1 else 's'}."
+    if kind == "too_long":
+        # Only period splits have a most, from 1.2.0 (period splits).
+        return f"`{key}` must hold at most {context.get('max_length')} items."
     return None
 
 
