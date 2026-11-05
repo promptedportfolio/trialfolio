@@ -286,7 +286,7 @@ Each variant runs only where the backend's capability has been verified.
 
 ## Analysis set 1.0.0
 
-Proposed for release [0.5.0](releases/0.5.0-return-analytics.md) (R05-T02). Status: Proposed. This is the fixed analysis set METH-09.10 requires: the descriptive analyses Trial Folio calculates from each result's dated series, chosen before any result is seen, and applied identically to every case of every run and experiment, saved ones included. Its version is recorded with every value. A change to any calculation, window, minimum, or rule below makes a new version, and a Trial Folio version that changes none of them keeps 1.0.0. [contracts.md](contracts.md) owns its two tables: the series it reads, [`series.csv`](contracts.md#seriescsv), and the values it gives, [`analysis.csv`](contracts.md#analysiscsv). It makes no inference (METH-04): its tracking error, information ratio, and t-value are descriptive (METH-04.6, METH-09.11).
+Proposed for release [0.5.0](releases/0.5.0-return-analytics.md) (R05-T02). Status: Proposed. This is the fixed analysis set METH-09.10 requires: the descriptive analyses Trial Folio calculates from each result's dated series, and, from R05-T03, the [charts](#charts) it draws of them, chosen before any result is seen, and applied identically to every case of every run and experiment, saved ones included. Its version is recorded with every value. A change to any calculation, window, minimum, or rule below makes a new version, and a Trial Folio version that changes none of them keeps 1.0.0. [contracts.md](contracts.md) owns its two tables: the series it reads, [`series.csv`](contracts.md#seriescsv), and the values it gives, [`analysis.csv`](contracts.md#analysiscsv). It makes no inference (METH-04): its tracking error, information ratio, and t-value are descriptive (METH-04.6, METH-09.11).
 
 ### Inputs
 
@@ -356,6 +356,17 @@ METH-09.7's, over the `full` segment's levels, for each window length w of 7, 30
 - **The counts,** which every summary gives with it: `rolling_window_count`, m; and `rolling_non_overlapping_count`, the most windows no two of which overlap. It's counted from the earliest: the window that ends first, then each window, in the order of their ends, that starts on or after the end of the last one counted. A window that starts on the date another ends doesn't overlap it.
 - **Not independent.** Overlapping windows aren't independent observations (METH-04.3), so each summary is flagged `overlapping_windows`, and given with both counts. A rolling 4-week return of a weekly run is still the weekly portfolio's (METH-09.7).
 
+### Charts
+
+METH-09.10's charts, which belong to the set as its values do, so a change to what they draw makes a new version (R05-T03). For each result with usable daily levels, over the `full` segment's levels; [contracts.md](contracts.md#reports) gives their structure:
+
+- **The equity chart:** each level L_j of the strategy and of the benchmark, against its `chart` date t_j, on a logarithmic scale, so that equal returns rise equal heights at any level.
+- **The drawdown chart:** at each date t_j, the decline below the running peak, (L_j / M_j − 1) × 100, with M_j the highest level from L₀ to L_j, as `max_drawdown` defines it, so its lowest point is the `full` segment's `max_drawdown`.
+- **Every level, and nothing else.** Each line has a point for each `chart` date, joined by straight lines, with none smoothed, interpolated, or left out, so a chart shows what `series.csv` holds, and no more.
+- **In an experiment,** each case's charts also draw the baseline's strategy, over the same dates, which an experiment's cases share; and every case's charts have the same axes, so a line's height means the same in each.
+- **Split dates,** where declared and within the chart's dates, are marked on each chart, so its segments can be seen; the segments' values are in `analysis.csv`.
+- **Unavailable** without usable daily levels: a result whose daily series is unavailable, with its reason, has no chart, and nothing is drawn from its period returns or its summary statistics instead (METH-05.10).
+
 ### Reconciliation with Portfolio123's metrics
 
 Over the `full` segment, `total_return`, `annualized_return`, and `max_drawdown`, for the strategy and the benchmark, calculate again the metric `metrics.csv` gives with the same `metric_id` and `subject`. The report shows both, and neither replaces the other (INV-08). The recalculated value *agrees* when Portfolio123's value is within the range that the rounding of the recalculated value's inputs allows, widened by the rounding of the reported value, and otherwise *differs*, which the report flags ([D-48](spec.md#decisions)):
@@ -370,7 +381,7 @@ These are the ranges R05-T01's script computes. By them, every reconciled metric
 
 ### What the values may be read as
 
-- **Descriptive, of one backtest.** Each value describes one result's returns over its coverage, as Portfolio123 calculated them. None is an inference, a prediction, or a ranking, and statistical validation and trading readiness stay "Not assessed" (METH-07.3).
+- **Descriptive, of one backtest.** Each value describes one result's returns over its coverage, as Portfolio123 calculated them. None is an inference, a prediction, or a ranking, and statistical validation and trading readiness stay "Not assessed" (METH-07.3). Each chart is descriptive too, and so is each difference from the baseline: a case's value minus the baseline's, never a test.
 - **Per rebalance period.** The period-return values are per rebalance period, so a weekly result's and a 4-weekly result's don't compare: the comparison with the baseline doesn't difference them ([comparing a case with the baseline](contracts.md#comparing-a-case-with-the-baseline)).
 - **A split's segment** over the paper's sample is retrospective by construction, and the one after publication isn't necessarily unseen by the researcher (METH-09.9).
 - **Rounded inputs.** A recalculated value can differ from Portfolio123's in its last digit, within the rounding, as above.
