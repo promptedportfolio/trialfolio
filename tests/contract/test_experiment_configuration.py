@@ -20,6 +20,11 @@ variants' cases that depend on the definition too. Experiment configuration 1.1.
 tests/contract/test_ranking_configuration.py's, which TS-T07 separated from this module
 (docs/test-refactoring.md, modules to separate), and the documented example, with the readers both
 modules give it, is tests/support/experiment_configs.py's.
+
+Since release 0.5.0's R05-T05, the invalid files' test reads each file with the reader of every
+version, `read_experiment_configuration_v1_2`, which reads 1.0.0 and 1.1.0 as the reader of both
+versions does, and 1.2.0, so it also reads the invalid split cases, which R05-AC12 gives. Their
+other tests, and experiment configuration 1.2.0's, are tests/contract/test_period_splits.py's.
 """
 
 import json
@@ -44,7 +49,7 @@ from tests.support.experiment_configs import (
 from tests.support.paths import EXPERIMENT_CONFIGS, SCREEN_CONFIGS
 from trialfolio.configuration import (
     read_experiment_configuration,
-    read_experiment_configuration_v1_1,
+    read_experiment_configuration_v1_2,
     read_screen_configuration,
 )
 from trialfolio.contracts.common import WINDOWS_DEVICE_NAMES
@@ -144,7 +149,7 @@ def test_invalid_configuration_is_rejected_naming_its_key_never_its_value(path: 
     message = rejection(
         path.read_bytes(),
         path.name,
-        lambda content, name: read_experiment_configuration_v1_1(content, name, path),
+        lambda content, name: read_experiment_configuration_v1_2(content, name, path),
     )
 
     assert_names_its_key_never_its_value(path, message)

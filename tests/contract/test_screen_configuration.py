@@ -17,6 +17,11 @@ The 1.0.0 reader's message for such a file stays 0.3.0's, as the R04-T05 details
 both versions, so its message is that reader's. Since R04-T06, the reader of both versions reads a definition's file too, from
 the configuration's directory, so it's given the configuration's path; what it reads there is
 tested in tests/contract/test_ranking_definitions.py.
+
+Since release 0.5.0's R05-T05, the invalid files' test reads each file with the reader of every
+version, `read_screen_configuration_v1_2`, which reads 1.0.0 and 1.1.0 as the reader of both
+versions does, and 1.2.0, so it also reads the invalid split cases, which R05-AC12 gives. Their
+other tests, and screen configuration 1.2.0's, are tests/contract/test_period_splits.py's.
 """
 
 import json
@@ -36,6 +41,7 @@ from trialfolio.configuration import (
     read_run_configuration,
     read_screen_configuration,
     read_screen_configuration_v1_1,
+    read_screen_configuration_v1_2,
 )
 from trialfolio.contracts.screen_configuration import (
     RANKING_FORMS_MESSAGE_V1_1,
@@ -139,7 +145,7 @@ def test_invalid_configuration_is_rejected_naming_its_key(path: Path) -> None:
     message = rejection(
         path.read_bytes(),
         path.name,
-        lambda content, name: read_screen_configuration_v1_1(content, name, path),
+        lambda content, name: read_screen_configuration_v1_2(content, name, path),
     )
 
     assert_names_its_key_never_its_value(path, message)

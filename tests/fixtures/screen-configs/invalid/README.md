@@ -1,11 +1,11 @@
 # Invalid screen configurations
 
-Each file breaks exactly one rule of the [screen configuration](../../../../docs/contracts.md#screen-configuration), and is otherwise the [documented example](../../../../docs/contracts.md#example), which `../formula.yaml` copies, or, for the [ranking forms](#ranking-forms-from-110) of version 1.1.0, the example as version 1.1.0, ranked as its row says. `tests/contract/test_screen_configuration.py` reads each one with the reader of both versions, expects `config.invalid`, and expects the message to name the key on the file's `# Key:` line, where `-` means the file as a whole. The message never holds the offending value, given on the file's `# Value:` line, which TS-T06 added. `-` on the `# Value:` line means there's no value to look for: the key is missing, the value is empty or blank, the problem is the file as a whole, as for a ranking form that needs version 1.1.0, or the value is one the rule itself names, as `slippage-string.yaml`'s `0.25` is its message's example. A value longer than 80 characters is `-` there too: the test also checks that no value of 20 characters or more in the file appears in the message.
+Each file breaks exactly one rule of the [screen configuration](../../../../docs/contracts.md#screen-configuration), and is otherwise the [documented example](../../../../docs/contracts.md#example), which `../formula.yaml` copies, or, for the [ranking forms](#ranking-forms-from-110) of version 1.1.0, the example as version 1.1.0, ranked as its row says, or, for the [period splits](#period-splits-from-120) of version 1.2.0, `../hand-checkable-split.yaml`. `tests/contract/test_screen_configuration.py` reads each one with the reader of every version, `read_screen_configuration_v1_2`, expects `config.invalid`, and expects the message to name the key on the file's `# Key:` line, where `-` means the file as a whole. The message never holds the offending value, given on the file's `# Value:` line, which TS-T06 added. `-` on the `# Value:` line means there's no value to look for: the key is missing, the value is empty or blank, the problem is the file as a whole, as for a ranking form that needs version 1.1.0, or the value is one the rule itself names, as `slippage-string.yaml`'s `0.25` is its message's example. A value longer than 80 characters is `-` there too: the test also checks that no value of 20 characters or more in the file appears in the message.
 
 - **Origin:** written for Trial Folio's tests. Synthetic: no value comes from Portfolio123.
-- **Schema version:** screen configuration 1.0.0, and 1.1.0 for the ranking forms' files.
+- **Schema version:** screen configuration 1.0.0, 1.1.0 for the ranking forms' files, and 1.2.0 for the period splits' but `analysis-in-1.1.0.yaml`.
 - **Redistribution:** synthetic, so it may be committed and shared.
-- **Criteria:** R01-AC02, R01-AC09, and R01-AC11 ([0.1.0's test pairing](../../../../docs/releases/0.1.0-api-execution.md#test-pairing)); the ranking forms', R04-AC02 ([0.4.0's invalid ranking cases](../../../../docs/releases/0.4.0-ranking-weights.md#invalid-ranking-cases)).
+- **Criteria:** R01-AC02, R01-AC09, and R01-AC11 ([0.1.0's test pairing](../../../../docs/releases/0.1.0-api-execution.md#test-pairing)); the ranking forms', R04-AC02 ([0.4.0's invalid ranking cases](../../../../docs/releases/0.4.0-ranking-weights.md#invalid-ranking-cases)); and the period splits', R05-AC12 ([0.5.0's invalid split cases](../../../../docs/releases/0.5.0-return-analytics.md#invalid-split-cases)).
 
 A new rule needs a new file, and a row here. The test checks that this table and the directory list the same files.
 
@@ -154,3 +154,31 @@ R04-T06 wrote this one, which reads the file a definition names, from the config
 | `integer-sign.yaml` | Integers have no sign | `max_holdings` |
 | `integer-hex.yaml` | Integers have no base prefix | `max_holdings` |
 | `boolean-holdings.yaml` | A boolean is never a number | `max_holdings` |
+
+## Period splits, from 1.2.0
+
+R05-T05 wrote these, the screen configurations of release 0.5.0's [invalid split cases](../../../../docs/releases/0.5.0-return-analytics.md#invalid-split-cases). Each is [`../hand-checkable-split.yaml`](../README.md), schema version 1.2.0, with its one split, changed one way, and fails by the rules of [period splits](../../../../docs/contracts.md#period-splits). `tests/contract/test_period_splits.py` checks too that each message names the key by its place, and the rule, never the label (R05-AC12).
+
+| File | Rule it breaks | Key |
+|---|---|---|
+| `analysis-in-1.1.0.yaml` | `analysis` needs `schema_version` 1.2.0 | `analysis` |
+| `analysis-not-a-mapping.yaml` | `analysis` is a mapping, which holds `period_splits`: a list in its place | `analysis` |
+| `analysis-unknown-key.yaml` | Unknown keys in `analysis` are rejected | `analysis.windows` |
+| `period-splits-missing.yaml` | `analysis` holds `period_splits` | `analysis.period_splits` |
+| `period-splits-not-a-list.yaml` | `period_splits` is a list: a mapping in its place | `analysis.period_splits` |
+| `period-splits-empty.yaml` | `period_splits` holds at least one split | `analysis.period_splits` |
+| `period-splits-eleven.yaml` | `period_splits` holds at most 10 splits | `analysis.period_splits` |
+| `split-not-a-mapping.yaml` | A split is a mapping of its `date` and its `label`: a date in its place | `analysis.period_splits[0]` |
+| `split-unknown-key.yaml` | Unknown keys in a split are rejected | `analysis.period_splits[0].description` |
+| `split-date-missing.yaml` | A split has its `date` | `analysis.period_splits[0].date` |
+| `split-label-missing.yaml` | A split has its `label` | `analysis.period_splits[0].label` |
+| `split-date-not-a-date.yaml` | A split's date is a calendar date: `2024-02-30` | `analysis.period_splits[0].date` |
+| `split-date-with-time.yaml` | A split's date has no time part | `analysis.period_splits[0].date` |
+| `split-date-number.yaml` | A number is never a split's date: `20240105` | `analysis.period_splits[0].date` |
+| `split-dates-decreasing.yaml` | The splits are listed in the order of their dates | `analysis.period_splits[1].date` |
+| `split-dates-equal.yaml` | No two splits have the same date | `analysis.period_splits[1].date` |
+| `split-label-empty.yaml` | A split's label is 1 to 200 characters: none | `analysis.period_splits[0].label` |
+| `split-label-whitespace.yaml` | A split's label isn't only whitespace | `analysis.period_splits[0].label` |
+| `split-label-too-long.yaml` | A split's label is 1 to 200 characters: 201 | `analysis.period_splits[0].label` |
+| `split-label-number.yaml` | A split's label is text: a number | `analysis.period_splits[0].label` |
+| `split-labels-equal.yaml` | No two splits have the same label, compared character for character | `analysis.period_splits[1].label` |

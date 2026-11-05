@@ -1,4 +1,4 @@
-"""The experiment configuration, `kind: experiment`, schema versions 1.0.0 and 1.1.0
+"""The experiment configuration, `kind: experiment`, schema versions 1.0.0, 1.1.0, and 1.2.0
 (docs/contracts.md, experiment configuration).
 
 `trialfolio.configuration` reads it from YAML, applying the rules for every configuration file,
@@ -17,6 +17,11 @@ snapshot, and ranking variants, which change its definition's weights or remove 
 (ranking variants); its budget is then at least two requests a case. `configured_variants_v1_1`
 gives its variants. A ranking variant's paths name nodes of the baseline's definition, so what
 they name, and the case's definition, are read with the definition, not here.
+
+Version 1.2.0, `ExperimentConfigurationV1_2`, from release 0.5.0, adds the optional top-level
+`analysis` key, which declares the experiment's period splits, as a screen configuration 1.2.0
+declares its own, and nothing else. They apply to every case, so they aren't in `baseline`, and
+no variant changes them (period splits). `configured_variants_v1_1` gives its variants too.
 """
 
 from collections.abc import Iterator, Sequence
@@ -42,6 +47,7 @@ from trialfolio.contracts.common import (
 )
 from trialfolio.contracts.plan_parts import CREDITS_PER_REQUEST
 from trialfolio.contracts.screen_configuration import (
+    Analysis,
     ConfigDecimal,
     ConfigWeight,
     DefinitionRanking,
@@ -61,6 +67,10 @@ release 0.4.0's reader from R04-T12, which reads 1.1.0 too."""
 EXPERIMENT_SCHEMA_VERSIONS_V1_1: Final = ("1.0.0", "1.1.0")
 """The experiment configuration versions 0.4.0's readers read: 1.0.0, and 1.1.0, which adds a
 baseline ranked by a definition or a snapshot, and ranking variants."""
+
+EXPERIMENT_SCHEMA_VERSIONS_V1_2: Final = ("1.0.0", "1.1.0", "1.2.0")
+"""The experiment configuration versions 0.5.0's readers read: 0.4.0's, and 1.2.0, which adds
+period splits."""
 
 VariantSetting = Literal["rules", "max_holdings", "rebalance_weeks", "slippage_percent"]
 """A setting a variant may change: the types R03-T01 verified."""
@@ -305,11 +315,51 @@ class ExperimentConfigurationV1_1(ContractModel):
 
     @model_validator(mode="after")
     def _cases(self) -> Self:
-        cases = 1 + len(configured_variants_v1_1(self))
-        ranked = isinstance(self.baseline.ranking, DefinitionRanking | SnapshotRanking)
-        _check_budget(
-            self.variants, cases, self.budget.provider_requests, per_case=2 if ranked else 1
-        )
+        _check_cases_v1_1(self)
+        return self
+
+
+def _check_cases_v1_1(
+    configuration: "ExperimentConfigurationV1_1 | ExperimentConfigurationV1_2",
+) -> None:
+    """Raises `ValueError` as `_check_budget` does, for an experiment configuration 1.1.0's or
+    1.2.0's cases: with a ranking definition, each case needs two requests."""
+    cases = 1 + len(configured_variants_v1_1(configuration))
+    ranked = isinstance(configuration.baseline.ranking, DefinitionRanking | SnapshotRanking)
+    _check_budget(
+        configuration.variants,
+        cases,
+        configuration.budget.provider_requests,
+        per_case=2 if ranked else 1,
+    )
+
+
+class ExperimentConfigurationV1_2(ContractModel):
+    """An experiment configuration 1.2.0, `kind: experiment`: 1.1.0's, which may also declare the
+    dates of period splits, at which analysis set 1.0.0 divides each case's coverage
+    (docs/contracts.md, experiment configuration, period splits)."""
+
+    kind: Literal["experiment"]
+    schema_version: Literal["1.2.0"]
+    experiment_id: ExperimentKey
+    """The experiment's identity."""
+    title: Title
+    purpose: Purpose
+    """The question the experiment addresses. Required: it's part of the research history."""
+    prior_research: PriorResearch
+    baseline: ScreenFieldsV1_1
+    variants: OptionalKey[VariantsV1_1] = None
+    """When it's absent, the only variant is the default."""
+    budget: ExperimentBudget
+    """With a ranking definition, at least two requests a case: its `rank_update` and its
+    backtest."""
+    analysis: OptionalKey[Analysis] = None
+    """The period splits, which apply to every case. When it's absent, the experiment declares
+    none. Its first plan fixes them: a revision can't add, change, or remove one."""
+
+    @model_validator(mode="after")
+    def _cases(self) -> Self:
+        _check_cases_v1_1(self)
         return self
 
 
@@ -466,12 +516,13 @@ def configured_variants(configuration: ExperimentConfiguration) -> tuple[Configu
 
 
 def configured_variants_v1_1(
-    configuration: ExperimentConfigurationV1_1,
+    configuration: ExperimentConfigurationV1_1 | ExperimentConfigurationV1_2,
 ) -> tuple[ConfiguredVariantV1_1, ...]:
-    """An experiment configuration 1.1.0's variants, in the order of its cases, after the
-    baseline's: those of `rules`, `ranking`, `max_holdings`, `rebalance_weeks`, and
-    `slippage_percent`, each list in its order, with P-13's default in `rebalance_weeks`' place,
-    as `configured_variants` gives 1.0.0's (docs/contracts.md, cases and their order).
+    """An experiment configuration 1.1.0's variants, or 1.2.0's, which are the same, in the order
+    of its cases, after the baseline's: those of `rules`, `ranking`, `max_holdings`,
+    `rebalance_weeks`, and `slippage_percent`, each list in its order, with P-13's default in
+    `rebalance_weeks`' place, as `configured_variants` gives 1.0.0's (docs/contracts.md, cases and
+    their order).
 
     Raises `ValueError` as `configured_variants` does, and when `variants` lists ranking variants
     and the baseline's ranking isn't a definition or a snapshot. A ranking variant's case has no

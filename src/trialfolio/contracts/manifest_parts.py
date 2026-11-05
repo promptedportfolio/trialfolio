@@ -3,8 +3,14 @@ share (docs/contracts.md, artifact storage): a source artifact's source record, 
 source artifacts, the parser versions, the capabilities, the reproducibility, the attempts by
 outcome, and the check of a file of a role a ranking definition adds, with the formats of the
 `rank_update`'s files, which the manifests' writers give too (`trialfolio.manifests`).
+
+From release 0.5.0, the parts a run manifest 1.2.0, an experiment manifest 1.2.0, and the report
+manifest share: the capabilities, whose `return_series` may be `normalized`; the analytical
+methods, `analysis-set` and `baseline-comparison`, each with its version; and the files of the
+tables, by role (a run 0.5.0 writes, the experiment manifest, the report manifest).
 """
 
+from collections.abc import Sequence
 from typing import Annotated, Final, Literal, Self
 
 from pydantic import Field, model_validator
@@ -15,8 +21,10 @@ from trialfolio.contracts.common import (
     NonEmptyText,
     NotAssessed,
     Provenance,
+    SemanticVersion,
     SettingName,
     UtcDatetime,
+    require_unique,
 )
 
 SOURCE_ROLES: Final[frozenset[str]] = frozenset(
@@ -84,6 +92,81 @@ class Capabilities(ContractModel):
     normalized, charted, or analyzed. `absent`: no saved response holds any."""
     statistical_validation: NotAssessed
     trading_readiness: NotAssessed
+
+
+class CapabilitiesV1_2(ContractModel):
+    """What a run or an experiment 0.5.0 writes does and doesn't contain: 1.0.0's capabilities,
+    whose `return_series` may also be `normalized` (a run 0.5.0 writes)."""
+
+    return_series: Literal["normalized", "source_only", "absent"]
+    """`normalized`: `series.csv` holds the series the saved response has, whatever their
+    availability, and `analysis.csv` the analysis set's values of them. `source_only` and
+    `absent`, for a run or an experiment without tables, as before."""
+    statistical_validation: NotAssessed
+    trading_readiness: NotAssessed
+
+
+ANALYSIS_SET: Final = "analysis-set"
+"""The method of `analysis.csv`'s values, by the analysis set's version (analysis set 1.0.0)."""
+
+BASELINE_COMPARISON: Final = "baseline-comparison"
+"""The method of `comparison.csv`'s rows: comparing a case with the baseline."""
+
+
+class AnalysisSetMethod(ContractModel):
+    """The analysis set a manifest's `analysis.csv` holds the values of, by its version, a string,
+    as `analysis.csv`'s `analysis_set` gives it."""
+
+    name: Literal["analysis-set"]
+    version: SemanticVersion
+
+
+class BaselineComparisonMethod(ContractModel):
+    """`baseline-comparison`, the rules of comparing a case with the baseline, by its version, an
+    integer, as a review's method's is. A change to them that could change a row of
+    `comparison.csv` makes a new version."""
+
+    name: Literal["baseline-comparison"]
+    version: Annotated[int, Field(ge=1)]
+
+
+type AnalyticsMethod = AnalysisSetMethod | BaselineComparisonMethod
+"""An analytical method a manifest records, with its version."""
+
+
+def check_methods(
+    methods: Sequence[AnalysisSetMethod | BaselineComparisonMethod],
+    *,
+    analyses: bool | None,
+    comparison: bool,
+) -> None:
+    """Raises `ValueError` unless `methods` lists the analysis set exactly when `analyses`, or
+    when the manifest's own files can't tell, with `analyses` None, as the report manifest's,
+    which also shows its input's tables; by each version once, in increasing order; then
+    `baseline-comparison`, once, exactly when `comparison`: so the same tables give the same
+    list."""
+    require_unique(tuple((method.name, method.version) for method in methods), "methods")
+    sets = [method for method in methods if isinstance(method, AnalysisSetMethod)]
+    comparisons = [method for method in methods if isinstance(method, BaselineComparisonMethod)]
+    if analyses is not None and bool(sets) != analyses:
+        raise ValueError("methods lists the analysis set exactly when an analysis.csv is listed")
+    if len(comparisons) != int(comparison):
+        raise ValueError("methods lists baseline-comparison once exactly when the comparison is")
+    if list(methods) != [*sets, *comparisons]:
+        raise ValueError("methods lists the analysis set's versions, then baseline-comparison")
+    versions = [tuple(int(part) for part in method.version.split(".")) for method in sets]
+    if versions != sorted(versions):
+        raise ValueError("methods lists the analysis set's versions in increasing order")
+
+
+TABLE_FILES: Final[dict[str, str]] = {
+    "metrics": "metrics.csv",
+    "settings": "settings.csv",
+    "series": "series.csv",
+    "analysis": "analysis.csv",
+}
+"""The file each role of a result's tables names, in the order they're written (where the return
+analytics are written)."""
 
 
 class ExternalReference(ContractModel):

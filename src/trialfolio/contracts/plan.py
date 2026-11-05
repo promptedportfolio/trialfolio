@@ -1,5 +1,6 @@
-"""The plan, `plan.json`, schema version 1.0.0 (docs/contracts.md, plans and approval), and
-version 1.2.0, a screen's whose ranking is a definition (plans with a ranking definition).
+"""The plan, `plan.json`, schema version 1.0.0 (docs/contracts.md, plans and approval); version
+1.2.0, a screen's whose ranking is a definition (plans with a ranking definition); and versions
+1.4.0 and 1.6.0, each with period splits (plans with period splits).
 
 The model describes a plan. Building one, and computing `case_id` and `plan_hash`, is the
 planner's job (R01-T10); the model doesn't recompute either.
@@ -13,9 +14,14 @@ definition's nodes and weights; its backtest ranks by `ApiRankingSystem`, and is
 its settings send; `ranking_source` gives the baseline's definition; and the budget's credits are
 what its costs give. A case's definition is read by the rules of `trialfolio.ranking_definitions`.
 
+Versions 1.4.0 and 1.6.0, from release 0.5.0, are 1.0.0 and 1.2.0 for a configuration that
+declares period splits: each with every field of its version, with the same rules and
+consistency, and `analysis`, the splits, which the plan hash covers and no `case_id` does (plans
+with period splits). A plan without splits keeps its 0.4.0 version.
+
 The parts a screen's plans share with an experiment's and a ranking snapshot's are in
 `trialfolio.contracts.plan_requests`, the requests, and `trialfolio.contracts.plan_parts`, the
-rest, such as each resolved setting, the budget, and the data sent.
+rest, such as each resolved setting, the budget, the data sent, and the period splits.
 """
 
 from typing import Annotated, Literal, Self
@@ -38,6 +44,7 @@ from trialfolio.contracts.plan_parts import (
     Budget,
     DataSent,
     DataSentV1_2,
+    DeclaredAnalysis,
     OperationCost,
     PlanSetting,
     PlanSettingV1_2,
@@ -76,6 +83,32 @@ class Plan(ContractModel):
     transport: TransportVersions
     title: Title
     purpose: Purpose | None
+    cases: tuple[PlanCase]
+    budget: Budget
+    retry_policy: RetryPolicy
+    data_sent: Annotated[tuple[DataSent, ...], Field(min_length=3, max_length=3)]
+    plan_hash: Sha256Digest
+
+    @model_validator(mode="after")
+    def _unique_categories(self) -> Self:
+        require_unique(tuple(entry.category for entry in self.data_sent), "data_sent categories")
+        return self
+
+
+class PlanV1_4(ContractModel):
+    """A screen's plan whose configuration declares period splits: plan 1.0.0's fields, with the
+    same rules, and `analysis` after `purpose` (plans with period splits)."""
+
+    schema_version: Literal["1.4.0"]
+    trialfolio_version: SemanticVersion
+    canonicalization_version: Annotated[Literal[1], IntegerOnly]
+    provider_wrapper: WrapperVersions
+    transport: TransportVersions
+    title: Title
+    purpose: Purpose | None
+    analysis: DeclaredAnalysis
+    """The period splits, as the configuration declares them, which the plan hash covers. Never
+    sent, and in no `case_id`."""
     cases: tuple[PlanCase]
     budget: Budget
     retry_policy: RetryPolicy
@@ -138,6 +171,35 @@ class PlanV1_2(ContractModel):
     title: Title
     purpose: Purpose | None
     ranking_source: RankingSource
+    cases: tuple[PlanCaseV1_2]
+    budget: PlanBudgetV1_2
+    retry_policy: RetryPolicy
+    data_sent: Annotated[tuple[DataSentV1_2, ...], Field(min_length=3, max_length=3)]
+    plan_hash: Sha256Digest
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        require_unique(tuple(entry.category for entry in self.data_sent), "data_sent categories")
+        check_ranking_source(self.ranking_source, self.cases[0].settings)
+        return self
+
+
+class PlanV1_6(ContractModel):
+    """A screen's plan whose ranking is a definition, and whose configuration declares period
+    splits: plan 1.2.0's fields, with the same rules and consistency, and `analysis` after
+    `ranking_source` (plans with period splits)."""
+
+    schema_version: Literal["1.6.0"]
+    trialfolio_version: SemanticVersion
+    canonicalization_version: Annotated[Literal[1], IntegerOnly]
+    provider_wrapper: WrapperVersions
+    transport: TransportVersions
+    title: Title
+    purpose: Purpose | None
+    ranking_source: RankingSource
+    analysis: DeclaredAnalysis
+    """The period splits, as the configuration declares them, which the plan hash covers. Never
+    sent, and in no `case_id`."""
     cases: tuple[PlanCaseV1_2]
     budget: PlanBudgetV1_2
     retry_policy: RetryPolicy

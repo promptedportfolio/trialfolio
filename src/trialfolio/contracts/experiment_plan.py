@@ -1,6 +1,7 @@
 """An experiment's plan, `plan.json`, schema version 1.1.0 (docs/contracts.md, experiment plans
-and revisions), and version 1.3.0, an experiment's whose ranking is a definition (plans with a
-ranking definition).
+and revisions); version 1.3.0, an experiment's whose ranking is a definition (plans with a
+ranking definition); and versions 1.5.0 and 1.7.0, each with period splits (plans with period
+splits).
 
 A 1.1.0 plan has a 1.0.0 plan's fields, with the experiment's research context, every case with
 its `case_key`, `description`, and `variant`, and `revises`, the hash of the plan it revises. A
@@ -15,6 +16,12 @@ baseline's (release 0.4.0's R04-T07): its definition is the baseline's with exac
 made by the rules of ranking variants, its `set` and `remove` name nodes by their canonical paths
 in the baseline's definition, and it changes the `ranking` row's definition and the weight rows,
 and nothing else. The budget is at least two requests a case.
+
+Versions 1.5.0 and 1.7.0, from release 0.5.0, are 1.1.0 and 1.3.0 for a configuration that
+declares period splits: each with every field of its version, with the same rules and
+consistency, and `analysis`, the splits, after `prior_research` in 1.5.0 and after
+`ranking_source` in 1.7.0. A revision's `analysis` must be exactly the current plan's, which the
+revision rules check, not a plan's model (plans with period splits).
 """
 
 import json
@@ -59,6 +66,7 @@ from trialfolio.contracts.experiment_configuration import (
 from trialfolio.contracts.plan_parts import (
     DataSent,
     DataSentV1_2,
+    DeclaredAnalysis,
     DocumentedSource,
     OperationCost,
     PlanSetting,
@@ -296,20 +304,63 @@ class PlanV1_1(ContractModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        _check_plan(self)
-        baseline, *variants = self.cases
-        changes = [_check_variant(baseline, case) for case in variants]
-        settings = [case.variant.setting for case in variants if case.variant is not None]
-        require_unique(tuple(zip(settings, changes, strict=True)), "the cases' settings")
-        _check_order(variants, settings, VARIANT_SETTINGS)
-        if self.budget.provider_requests < len(self.cases):
-            raise ValueError("the budget's provider_requests is at least the number of cases")
+        _check_plan_v1_1(self)
         return self
 
 
-def _check_plan(plan: "PlanV1_1 | PlanV1_3") -> None:
-    """Raises `ValueError` unless a plan 1.1.0 or 1.3.0 gives each category of data sent once,
-    doesn't revise itself, and gives the baseline first, and each case's key and ID once."""
+class PlanV1_5(ContractModel):
+    """An experiment's plan whose configuration declares period splits: plan 1.1.0's fields,
+    with the same rules and consistency, and `analysis` after `prior_research` (plans with period
+    splits)."""
+
+    schema_version: Literal["1.5.0"]
+    trialfolio_version: SemanticVersion
+    canonicalization_version: Annotated[Literal[1], IntegerOnly]
+    provider_wrapper: WrapperVersions
+    transport: TransportVersions
+    experiment_id: ExperimentKey
+    title: Title
+    purpose: Purpose
+    """An experiment's purpose is required, so it's never null."""
+    prior_research: DeclaredPriorResearch
+    analysis: DeclaredAnalysis
+    """The period splits, as the configuration declares them, which apply to every case and which
+    the plan hash covers. Never sent, and in no `case_id`."""
+    revises: Sha256Digest | None
+    """The `plan_hash` of the plan this one revises; null for the experiment's first plan."""
+    cases: Annotated[tuple[ExperimentPlanCase, ...], Field(min_length=2)]
+    """Every case, in the order of cases: the baseline first, then the variants of `rules`,
+    `max_holdings`, `rebalance_weeks`, and `slippage_percent`."""
+    budget: PlanBudgetV1_1
+    retry_policy: RetryPolicy
+    data_sent: Annotated[tuple[DataSent, ...], Field(min_length=3, max_length=3)]
+    plan_hash: Sha256Digest
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        _check_plan_v1_1(self)
+        return self
+
+
+def _check_plan_v1_1(plan: "PlanV1_1 | PlanV1_5") -> None:
+    """Raises `ValueError` unless a plan 1.1.0's or 1.5.0's cases follow 1.1.0's rules: each
+    variant is one change of the baseline, as its setting's rule gives it; no two variants make
+    the same change; the variants come in the order of their settings; and the budget can send
+    each case once."""
+    _check_plan(plan)
+    baseline, *variants = plan.cases
+    changes = [_check_variant(baseline, case) for case in variants]
+    settings = [case.variant.setting for case in variants if case.variant is not None]
+    require_unique(tuple(zip(settings, changes, strict=True)), "the cases' settings")
+    _check_order(variants, settings, VARIANT_SETTINGS)
+    if plan.budget.provider_requests < len(plan.cases):
+        raise ValueError("the budget's provider_requests is at least the number of cases")
+
+
+def _check_plan(plan: "PlanV1_1 | PlanV1_3 | PlanV1_5 | PlanV1_7") -> None:
+    """Raises `ValueError` unless a plan 1.1.0, 1.3.0, 1.5.0, or 1.7.0 gives each category of
+    data sent once, doesn't revise itself, and gives the baseline first, and each case's key and
+    ID once."""
     require_unique(tuple(entry.category for entry in plan.data_sent), "data_sent categories")
     check_revises(plan.revises, plan.plan_hash)
     if plan.cases[0].variant is not None:
@@ -466,30 +517,74 @@ class PlanV1_3(ContractModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        _check_plan(self)
-        baseline, *variants = self.cases
-        check_ranking_source(self.ranking_source, baseline.settings)
-        definition = read_nodes(baseline.requests[0].params.nodes)
-        # A ranking variant's case is its definition, which its change of the baseline's gives.
-        changes = [
-            (
-                case.variant.setting,
-                _check_ranking_variant(definition, baseline, case, number)
-                if case.variant.setting == "ranking"
-                else _check_variant(baseline, case),
-            )
-            for number, case in enumerate(variants, start=1)
-            if case.variant is not None
-        ]
-        require_unique(tuple(changes), "the cases' settings")
-        settings = [case.variant.setting for case in variants if case.variant is not None]
-        _check_order(variants, settings, VARIANT_SETTINGS_V1_1)
-        if self.budget.provider_requests < 2 * len(self.cases):
-            raise ValueError(
-                "the budget's provider_requests is at least twice the number of cases: each "
-                "case sends a rank_update and a backtest"
-            )
+        _check_plan_v1_3(self)
         return self
+
+
+class PlanV1_7(ContractModel):
+    """An experiment's plan whose ranking is a definition, and whose configuration declares
+    period splits: plan 1.3.0's fields, with the same rules and consistency, and `analysis` after
+    `ranking_source` (plans with period splits)."""
+
+    schema_version: Literal["1.7.0"]
+    trialfolio_version: SemanticVersion
+    canonicalization_version: Annotated[Literal[1], IntegerOnly]
+    provider_wrapper: WrapperVersions
+    transport: TransportVersions
+    experiment_id: ExperimentKey
+    title: Title
+    purpose: Purpose
+    """An experiment's purpose is required, so it's never null."""
+    prior_research: DeclaredPriorResearch
+    ranking_source: RankingSource
+    """The baseline's definition's source: every case's definition is the baseline's, or a
+    ranking variant's change of it."""
+    analysis: DeclaredAnalysis
+    """The period splits, as the configuration declares them, which apply to every case and which
+    the plan hash covers. Never sent, and in no `case_id`."""
+    revises: Sha256Digest | None
+    """The `plan_hash` of the plan this one revises; null for the experiment's first plan."""
+    cases: Annotated[tuple[ExperimentPlanCaseV1_3, ...], Field(min_length=2)]
+    """Every case, in the order of cases: the baseline first, then the variants of `rules`,
+    `ranking`, `max_holdings`, `rebalance_weeks`, and `slippage_percent`."""
+    budget: PlanBudgetV1_3
+    retry_policy: RetryPolicy
+    data_sent: Annotated[tuple[DataSentV1_2, ...], Field(min_length=3, max_length=3)]
+    plan_hash: Sha256Digest
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        _check_plan_v1_3(self)
+        return self
+
+
+def _check_plan_v1_3(plan: "PlanV1_3 | PlanV1_7") -> None:
+    """Raises `ValueError` unless a plan 1.3.0's or 1.7.0's cases follow 1.3.0's rules: 1.1.0's,
+    with each ranking variant's case checked against the baseline's definition, `ranking_source`
+    giving the baseline's definition, and a budget of two requests a case."""
+    _check_plan(plan)
+    baseline, *variants = plan.cases
+    check_ranking_source(plan.ranking_source, baseline.settings)
+    definition = read_nodes(baseline.requests[0].params.nodes)
+    # A ranking variant's case is its definition, which its change of the baseline's gives.
+    changes = [
+        (
+            case.variant.setting,
+            _check_ranking_variant(definition, baseline, case, number)
+            if case.variant.setting == "ranking"
+            else _check_variant(baseline, case),
+        )
+        for number, case in enumerate(variants, start=1)
+        if case.variant is not None
+    ]
+    require_unique(tuple(changes), "the cases' settings")
+    settings = [case.variant.setting for case in variants if case.variant is not None]
+    _check_order(variants, settings, VARIANT_SETTINGS_V1_1)
+    if plan.budget.provider_requests < 2 * len(plan.cases):
+        raise ValueError(
+            "the budget's provider_requests is at least twice the number of cases: each "
+            "case sends a rank_update and a backtest"
+        )
 
 
 def _check_ranking_variant(

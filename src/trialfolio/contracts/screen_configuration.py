@@ -1,5 +1,5 @@
-"""The screen configuration, `kind: screen`, schema versions 1.0.0 and 1.1.0 (docs/contracts.md,
-screen configuration).
+"""The screen configuration, `kind: screen`, schema versions 1.0.0, 1.1.0, and 1.2.0
+(docs/contracts.md, screen configuration).
 
 `trialfolio.configuration` reads it from YAML. The rules about how a value is written, such as
 `010` or `2.5e-1`, apply to the YAML text, so the reader applies them. This model applies the
@@ -9,8 +9,14 @@ Version 1.1.0, `ScreenConfigurationV1_1`, adds two ranking forms, a ranking syst
 and a ranking snapshot, and nothing else (ranking forms). Its settings, `ScreenFieldsV1_1`, are
 1.0.0's, from the same bases, with the wider ranking. The definition's file, and the snapshot's
 directory, are named here by their paths; reading them is the reader's (ranking definitions).
+
+Version 1.2.0, `ScreenConfigurationV1_2`, from release 0.5.0, adds the optional `analysis` key,
+which declares period splits, `Analysis`, and nothing else: its settings are 1.1.0's. An
+experiment configuration 1.2.0 declares its splits with the same model, and a plan records them
+by the same rules, `check_period_splits` (period splits).
 """
 
+from collections.abc import Sequence
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Final, Literal, Self, cast, get_args
@@ -19,6 +25,7 @@ from pydantic import (
     AfterValidator,
     BeforeValidator,
     Field,
+    Strict,
     ValidationInfo,
     WithJsonSchema,
     field_validator,
@@ -35,6 +42,7 @@ from trialfolio.contracts.common import (
     RankingMethod,
     Title,
     optional_key,
+    ordered,
     present,
     valid_date_text,
 )
@@ -48,6 +56,14 @@ SCREEN_SCHEMA_VERSIONS: Final = get_args(ScreenSchemaVersion)
 SCREEN_SCHEMA_VERSIONS_V1_1: Final = ("1.0.0", "1.1.0")
 """The screen configuration versions 0.4.0's readers read: 1.0.0, and 1.1.0, which adds a
 ranking given as a definition or a snapshot."""
+
+SCREEN_SCHEMA_VERSIONS_V1_2: Final = ("1.0.0", "1.1.0", "1.2.0")
+"""The screen configuration versions 0.5.0's readers read: 0.4.0's, and 1.2.0, which adds period
+splits."""
+
+MAX_PERIOD_SPLITS: Final = 10
+"""The most period splits a configuration declares, which keeps the report's tables finite
+(period splits)."""
 
 RANKING_FORMS: Final = ("formula", "name", "id")
 """The key that identifies each ranking form."""
@@ -413,3 +429,94 @@ class ScreenConfigurationV1_1(ScreenFieldsV1_1, _ScreenHeaderV1_1):
     ranking may also be a ranking system's definition or a ranking snapshot, which each case
     writes into `ApiRankingSystem` before its backtest (docs/contracts.md, screen configuration).
     """
+
+
+# Version 1.2.0: period splits.
+
+
+def check_period_splits[D: (date, str)](dates: Sequence[D], labels: Sequence[str]) -> None:
+    """Raises `ValueError` unless each split's date is later than the one before it, so the
+    splits are in the order of their dates and no two have the same date, and no two labels are
+    the same, compared character for character (period splits). A configuration gives its dates
+    as dates, and a plan as `YYYY-MM-DD` text, which sorts as the dates do. A message names a
+    split by its place in `period_splits`, counted from 0, never by its date or its label."""
+    for place in range(1, len(dates)):
+        if dates[place] == dates[place - 1]:
+            raise ValueError(
+                f"`period_splits[{place}].date` is the same as the date before it. No two "
+                "splits have the same date"
+            )
+        if dates[place] < dates[place - 1]:
+            raise ValueError(
+                f"`period_splits[{place}].date` is earlier than the date before it. The splits "
+                "are listed in the order of their dates"
+            )
+    seen: set[str] = set()
+    for place, label in enumerate(labels):
+        if label in seen:
+            raise ValueError(
+                f"`period_splits[{place}].label` is the same as an earlier split's label. Each "
+                "split's label is distinct, compared character for character"
+            )
+        seen.add(label)
+
+
+class PeriodSplit(ContractModel):
+    """One period split, from 1.2.0: a date at which analysis set 1.0.0 divides each result's
+    coverage, such as the end of a paper's sample, and its label (period splits). Neither is
+    sent."""
+
+    date: ConfigDate
+    """`YYYY-MM-DD`, with no time. Any date: one outside a result's coverage is flagged when the
+    analyses are calculated, not refused here, since the coverage is known only from the
+    response."""
+    label: Title
+    """1 to 200 characters, not all whitespace, such as `End of the paper's sample`."""
+
+
+PeriodSplits = Annotated[
+    tuple[PeriodSplit, ...],
+    Field(min_length=1, max_length=MAX_PERIOD_SPLITS),
+    Strict(False),
+    BeforeValidator(ordered),
+]
+"""1 to 10 splits, an ordered list kept as a tuple. The lengths come before the validators, as
+`NonEmptyOrderedList` gives its own."""
+
+
+class Analysis(ContractModel):
+    """A configuration's `analysis`, from 1.2.0: the period splits, declared before the run, so
+    the plan records them, and its hash covers them, before any result is seen (period splits).
+    They're never sent, and they aren't settings, so they change no `case_id`."""
+
+    period_splits: PeriodSplits
+    """1 to 10 splits, in the order of their dates, with distinct labels."""
+
+    @model_validator(mode="after")
+    def _in_order(self) -> Self:
+        splits = self.period_splits
+        check_period_splits([split.date for split in splits], [split.label for split in splits])
+        return self
+
+
+class _ScreenHeaderV1_2(ContractModel):
+    """The keys a screen configuration 1.2.0 has before its settings."""
+
+    kind: Literal["screen"]
+    schema_version: Literal["1.2.0"]
+    title: Title
+    purpose: OptionalKey[Purpose] = None
+
+
+class _ScreenAnalysis(ContractModel):
+    """The key a screen configuration 1.2.0 has after its settings: its period splits."""
+
+    analysis: OptionalKey[Analysis] = None
+    """The period splits. When it's absent, the configuration declares none, and gives the plan
+    its 1.1.0 form would."""
+
+
+class ScreenConfigurationV1_2(_ScreenAnalysis, ScreenFieldsV1_1, _ScreenHeaderV1_2):
+    """A screen configuration 1.2.0, `kind: screen`: a screen configuration 1.1.0, which may also
+    declare the dates of period splits, at which analysis set 1.0.0 divides the result's coverage
+    (docs/contracts.md, screen configuration, period splits)."""
