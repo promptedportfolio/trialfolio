@@ -1156,6 +1156,7 @@ Whether the table is exactly what its analysis set gives is the records check's.
 - **Observations.** `spanning_period_count`'s are the result's periods, each of which is checked for whether it spans a declared date; a rolling count's are the windows; and a value unavailable with `too_short`, `not_applicable`, or `not_recovered` gives the levels or periods behind it, as an available one does, apart from `coverage_share`, which has none.
 - **Dates.** `max_drawdown_recovery` is dated by its segment's first and last levels, as a value over a whole segment is, while `max_drawdown` gives its peak and trough. Each rolling value is dated by its first window's start and its last window's end; with no window, each count is 0, without dates. A value whose dates would run backwards, from a period whose `Tran Dt` is after its `End Dt`, gives none, since `period_start` is never after `period_end`.
 
+#### Comparing a case with the baseline
 
 Proposed for 0.5.0 (R05-T02). An experiment's report shows each case beside the baseline, with the difference of each metric and each analysis value, or the reason it isn't differenced ([R05-AC05](releases/0.5.0-return-analytics.md#acceptance-criteria)). Each session records them in [`comparison.csv`](#comparisoncsv), and its report shows them as that table holds them ([return analytics in a report](#reports)) (R05-T03). They align as follows:
 
