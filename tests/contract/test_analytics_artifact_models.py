@@ -23,13 +23,14 @@ rejected document is a valid one changed one way, so it fails for that rule alon
 import json
 import re
 from copy import deepcopy
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from pydantic import BaseModel
 
 from tests.support.contract_checks import Change, Document, accepts, changed, digest, rejects
 from tests.support.paths import FIXTURES, ROOT
+from trialfolio.contracts.common import AnalysisUnavailableReason
 from trialfolio.contracts.experiment_manifest import (
     ExperimentManifestV1_1,
     ExperimentManifestV1_2,
@@ -978,6 +979,20 @@ VALID_ANALYSIS_ROWS: dict[str, Document] = {
         unavailable_reason="not_recovered",
         observations=5,
     ),
+    "a recovery without a drawdown": analysis_row(
+        **UNAVAILABLE,
+        **NOT_RECONCILED,
+        analysis="max_drawdown_recovery",
+        unit="date",
+        unavailable_reason="not_applicable",
+    ),
+    "a split segment outside the coverage": analysis_row(
+        **UNAVAILABLE,
+        **NOT_RECONCILED,
+        segment="split-1",
+        unavailable_reason="outside_coverage",
+        observations=None,
+    ),
     "a time below a peak to the segment's end": analysis_row(
         **NOT_RECONCILED,
         segment="split-0",
@@ -1078,6 +1093,21 @@ INVALID_ANALYSIS_ROWS: dict[str, Document] = {
     ),
     "a source's reason": VALID_ANALYSIS_ROWS["a window too long for the series"]
     | {"unavailable_reason": "not_daily"},
+    # A reason the analysis set gives some analyses or segments alone, on another's row.
+    "a drawdown too short": analysis_row(
+        **UNAVAILABLE, unavailable_reason="too_short", reconciliation="not_compared"
+    ),
+    "a difference too short": VALID_ANALYSIS_ROWS["a difference whose input is unavailable"]
+    | {"unavailable_reason": "too_short"},
+    "a drawdown that isn't applicable": analysis_row(
+        **UNAVAILABLE, unavailable_reason="not_applicable", reconciliation="not_compared"
+    ),
+    "a drawdown that doesn't recover": analysis_row(
+        **UNAVAILABLE, unavailable_reason="not_recovered", reconciliation="not_compared"
+    ),
+    "the full segment outside the coverage": analysis_row(
+        **UNAVAILABLE, unavailable_reason="outside_coverage", reconciliation="not_compared"
+    ),
     "a value without its observations": analysis_row(observations=None),
     "too few without how many": VALID_ANALYSIS_ROWS["a window too long for the series"]
     | {"observations": None},
@@ -1201,6 +1231,42 @@ def test_analysis_set_1_0_0_flags_and_reconciles_what_the_documents_give() -> No
     assert ANALYSIS_SETS["1.0.0"].reconciled == set(re.findall(r"`([a-z_]+)`", reconciled))
 
 
+def methodology_rows() -> dict[str, tuple[str, list[str]]]:
+    """Each analysis of methodology.md's two tables, by identifier: the series its section's
+    analyses read, `period` or `daily`, and its row's cells, the analysis, its subjects, its
+    unit, its definition, and what it needs."""
+    text = (ROOT / "docs" / "methodology.md").read_text(encoding="utf-8")
+    rows: dict[str, tuple[str, list[str]]] = {}
+    for heading, series in (
+        ("### Period-return analyses", "period"),
+        ("### Daily-level analyses", "daily"),
+    ):
+        section = text[text.index(heading) :]
+        section = section[: section.index("\n### ")]
+        for line in re.findall(r"^\| `[a-z_]+` \|.*\|$", section, re.MULTILINE):
+            cells = [cell.strip() for cell in line.strip("|").split(" | ")]
+            assert len(cells) == 5, line
+            rows[cells[0].strip("`")] = (series, cells)
+    return rows
+
+
+def test_analysis_set_1_0_0_gives_each_analysis_the_reasons_methodology_names_for_it() -> None:
+    """The reasons a row is refused on another analysis's: those its row's "Needs" names, or
+    the row's it needs as, such as `excess_t_value`'s "As `information_ratio`". The rolling
+    returns name none."""
+    needs = {name: cells[4] for name, (_, cells) in methodology_rows().items()}
+    codes = set(get_args(AnalysisUnavailableReason))
+    named: dict[str, set[str]] = {}
+    for name, text in needs.items():
+        same = re.fullmatch(r"As `([a-z_]+)`", text)
+        named[name] = set(re.findall(r"`([a-z_]+)`", needs[same.group(1)] if same else text))
+        named[name] &= codes
+
+    for name, definition in ANALYSIS_SET_1_0_0.items():
+        assert set(definition.reasons) == named.get(name, set()), name
+    assert {"not_applicable", "too_short", "not_recovered"} == set().union(*named.values())
+
+
 # comparison.csv
 
 BASELINE = "case-0492159b4461ceff"
@@ -1252,6 +1318,37 @@ def analysis_pair(**fields: object) -> Document:
     return {**row, **fields}
 
 
+def not_comparable(reason: str, **fields: object) -> Document:
+    """An analysis pair that isn't differenced, for `reason`: by default, the recoveries'."""
+    return analysis_pair(
+        **NOT_DIFFERENCED, classification="not_comparable", reason=reason, **fields
+    )
+
+
+MEAN_PERIOD_RETURNS: Document = {
+    "name": "mean_period_return",
+    "baseline_value": "5.0000",
+    "value": "10.0000",
+    "unit": "percent",
+}
+"""The strategy's mean period returns, a value from period returns."""
+TOTAL_RETURNS: Document = {
+    "name": "total_return",
+    "baseline_value": "10.0000",
+    "value": "12.5000",
+    "unit": "percent",
+}
+"""The strategy's total returns, a value from its daily levels alone."""
+PERIOD_COUNTS: Document = {
+    "name": "period_count",
+    "subject": None,
+    "baseline_value": "2",
+    "value": "1",
+    "unit": "count",
+}
+"""The counts of periods, which read the periods' dates and none of their values."""
+
+
 VALID_COMPARISON_ROWS: dict[str, Document] = {
     "a metric differenced": metric_row(),
     "a metric over another benchmark": metric_row(
@@ -1298,14 +1395,24 @@ VALID_COMPARISON_ROWS: dict[str, Document] = {
         difference_unit="pp",
         difference_decimals=4,
     ),
-    "a value of another rebalance": analysis_pair(
-        **NOT_DIFFERENCED,
-        name="mean_period_return",
-        baseline_value="5.0000",
-        value="10.0000",
-        unit="percent",
-        classification="not_comparable",
-        reason="different_rebalance",
+    "a value of another rebalance": not_comparable("different_rebalance", **MEAN_PERIOD_RETURNS),
+    "a value from periods of an unknown period": not_comparable(
+        "unknown_period", **MEAN_PERIOD_RETURNS
+    ),
+    "a count of periods of an unknown period": not_comparable("unknown_period", **PERIOD_COUNTS),
+    "a value from daily levels of another period": not_comparable(
+        "different_period", segment="split-1"
+    ),
+    "the benchmark's value over another benchmark": not_comparable(
+        "different_benchmark", subject="benchmark"
+    ),
+    "an excess of the daily levels over another benchmark": not_comparable(
+        "different_benchmark",
+        name="total_return_difference",
+        subject="excess",
+        baseline_value="10.1111",
+        value="9.1111",
+        unit="pp",
     ),
     "a rolling value": analysis_pair(
         name="rolling_mean",
@@ -1342,6 +1449,24 @@ INVALID_COMPARISON_ROWS: dict[str, Document] = {
         unit="days", baseline_value="6", value="5", difference="-1"
     ),
     "an analysis with a window it doesn't have": analysis_pair(window_days=7),
+    # A reason that doesn't apply to the pair's analysis (comparing a case with the baseline).
+    "a rolling value of another rebalance": VALID_COMPARISON_ROWS["a rolling value"]
+    | NOT_DIFFERENCED
+    | {"classification": "not_comparable", "reason": "different_rebalance"},
+    "a value from daily levels of another rebalance": not_comparable("different_rebalance"),
+    "a value from daily levels of an unknown period": not_comparable(
+        "unknown_period", **TOTAL_RETURNS
+    ),
+    "the strategy's value from daily levels over another benchmark": not_comparable(
+        "different_benchmark", **TOTAL_RETURNS
+    ),
+    "the strategy's value from periods over another benchmark": not_comparable(
+        "different_benchmark", **MEAN_PERIOD_RETURNS
+    ),
+    "a count of periods over another benchmark": not_comparable(
+        "different_benchmark", **PERIOD_COUNTS
+    ),
+    "an analysis in two units": not_comparable("different_unit"),
     "a difference with other decimals": metric_row(difference="2.50", difference_decimals=2),
     "a difference in another unit": metric_row(difference_unit="percent"),
     "a zero with a sign": VALID_COMPARISON_ROWS["a percent's difference in pp"]

@@ -711,12 +711,20 @@ Segment = Annotated[str, StringConstraints(pattern=r"^(full|split-([0-9]|10))$")
 """`full`, the whole series, or a split segment, `split-0` to `split-10`, since a configuration
 declares at most 10 splits (segments)."""
 
+NamedReason = Literal["not_applicable", "too_short", "not_recovered"]
+"""A reason the analysis set gives only the analyses whose definition names it, when what they
+need doesn't hold (analysis.csv, a row's rules)."""
+
+NAMED_REASONS: Final[tuple[NamedReason, ...]] = ("not_applicable", "too_short", "not_recovered")
+"""Each named reason."""
+
 
 @dataclass(frozen=True)
 class AnalysisDefinition:
     """One analysis of an analysis set, as `analysis.csv`'s rows give it: its unit, the subjects
     it has a row for, in their order, or None for a value about the segment or the windows, the
-    series it reads, where it's calculated, and the flag each of its rows carries."""
+    series it reads, where it's calculated, the flag each of its rows carries, and the reasons
+    its definition names."""
 
     unit: AnalysisUnit
     subjects: tuple[AnalysisSubject | None, ...]
@@ -727,6 +735,9 @@ class AnalysisDefinition:
     """The flag every row of it carries, whatever its availability."""
     windows: bool = False
     """A rolling return's, with a row for each window length."""
+    reasons: tuple[NamedReason, ...] = ()
+    """The named reasons it may be unavailable with: an analysis whose definition names none is
+    never unavailable with one."""
 
     def inputs(self, name: str, subject: AnalysisSubject | None) -> tuple[InputSeries, ...]:
         """The `inputs` of its row for `subject`: none for `coverage_share`, from dates alone;
@@ -745,10 +756,13 @@ _SBE: Final[tuple[AnalysisSubject, ...]] = ("strategy", "benchmark", "excess")
 _SB: Final[tuple[AnalysisSubject, ...]] = ("strategy", "benchmark")
 _E: Final[tuple[AnalysisSubject, ...]] = ("excess",)
 _NONE: Final[tuple[None]] = (None,)
+_NOT_APPLICABLE: Final[tuple[NamedReason, ...]] = ("not_applicable",)
 
 ANALYSIS_SET_1_0_0: Final[dict[str, AnalysisDefinition]] = {
     # The period-return analyses (methodology.md, period-return analyses).
-    "coverage_share": AnalysisDefinition("percent", _NONE, "period", "split"),
+    "coverage_share": AnalysisDefinition(
+        "percent", _NONE, "period", "split", reasons=_NOT_APPLICABLE
+    ),
     "period_count": AnalysisDefinition("count", _NONE, "period", "any"),
     "spanning_period_count": AnalysisDefinition("count", _NONE, "period", "split"),
     "mean_period_return": AnalysisDefinition("percent", _SBE, "period", "any"),
@@ -757,15 +771,21 @@ ANALYSIS_SET_1_0_0: Final[dict[str, AnalysisDefinition]] = {
     "worst_period_return": AnalysisDefinition("percent", _SBE, "period", "any"),
     "positive_excess_share": AnalysisDefinition("percent", _E, "period", "any"),
     "tracking_error": AnalysisDefinition("percent", _E, "period", "any", "descriptive"),
-    "information_ratio": AnalysisDefinition("ratio", _E, "period", "any", "descriptive"),
-    "excess_t_value": AnalysisDefinition("ratio", _E, "period", "any", "descriptive"),
+    "information_ratio": AnalysisDefinition(
+        "ratio", _E, "period", "any", "descriptive", reasons=_NOT_APPLICABLE
+    ),
+    "excess_t_value": AnalysisDefinition(
+        "ratio", _E, "period", "any", "descriptive", reasons=_NOT_APPLICABLE
+    ),
     # The daily-level analyses (methodology.md, daily-level analyses).
     "total_return": AnalysisDefinition("percent", _SB, "daily", "any"),
     "total_return_difference": AnalysisDefinition("pp", _E, "daily", "any"),
-    "annualized_return": AnalysisDefinition("percent", _SB, "daily", "any"),
+    "annualized_return": AnalysisDefinition("percent", _SB, "daily", "any", reasons=("too_short",)),
     "annualized_return_difference": AnalysisDefinition("pp", _E, "daily", "any"),
     "max_drawdown": AnalysisDefinition("percent", _SB, "daily", "any"),
-    "max_drawdown_recovery": AnalysisDefinition("date", _SB, "daily", "any"),
+    "max_drawdown_recovery": AnalysisDefinition(
+        "date", _SB, "daily", "any", reasons=("not_applicable", "not_recovered")
+    ),
     "longest_drawdown_days": AnalysisDefinition("days", _SB, "daily", "any"),
     # The rolling returns, for each window length (methodology.md, rolling returns).
     "rolling_window_count": AnalysisDefinition("count", _NONE, "daily", "full", windows=True),
@@ -892,6 +912,7 @@ class AnalysisRow(ContractModel):
             raise ValueError(f"{self.analysis}'s inputs are the series it's calculated from")
         self._check_flags(definition)
         self._check_value()
+        self._check_reason(definition)
         self._check_dates()
         # A reconciled analysis's subjects are the strategy and the benchmark, each a metric's.
         reconciled = self.segment == "full" and self.analysis in analysis_set.reconciled
@@ -933,6 +954,15 @@ class AnalysisRow(ContractModel):
                 raise ValueError("decimals must be null for an unavailable value")
             return
         _check_analysis_value(self.value, self.unit, self.decimals)
+
+    def _check_reason(self, definition: AnalysisDefinition) -> None:
+        """A named reason only on an analysis whose definition names it, and `outside_coverage`
+        only on a split segment, which the coverage may not reach."""
+        reason = self.unavailable_reason
+        if reason in NAMED_REASONS and reason not in definition.reasons:
+            raise ValueError(f"{reason} isn't a reason {self.analysis}'s definition gives")
+        if reason == "outside_coverage" and self.segment == "full":
+            raise ValueError("outside_coverage is a split segment's reason")
 
     def _check_dates(self) -> None:
         start, end = self.period_start, self.period_end
@@ -997,6 +1027,34 @@ ComparisonReason = Literal[
 value from period returns of two cases whose `rebalance_weeks` differ (comparing a case with the
 baseline)."""
 
+_PAIR_REASON_RULES: Final = {
+    "different_unit": "an analysis row's two values are in its analysis's unit, so they're never "
+    "different_unit",
+    "different_benchmark": "different_benchmark is a reason of a value whose inputs include the "
+    "benchmark or the excess",
+    "unknown_period": "unknown_period is a reason of a value from period returns",
+    "different_rebalance": "different_rebalance is a reason of a value from period returns",
+}
+"""Each reason only some analysis values' pairs give, with its rule (comparing a case with the
+baseline)."""
+
+
+def _pair_reasons(
+    definition: AnalysisDefinition, name: str, subject: AnalysisSubject | None
+) -> set[str]:
+    """The reasons a pair of the analysis's values may give: `input_unavailable` and
+    `different_period` for any; `different_benchmark` for a value whose inputs include the
+    benchmark or the excess; and `unknown_period` and `different_rebalance` for a value from
+    period returns. Never `different_unit`, since both are in the analysis's unit."""
+    reasons = {"input_unavailable", "different_period"}
+    if any(
+        series.endswith(("/benchmark", "/excess")) for series in definition.inputs(name, subject)
+    ):
+        reasons.add("different_benchmark")
+    if definition.series == "period":
+        reasons |= {"unknown_period", "different_rebalance"}
+    return reasons
+
 
 class ComparisonRow(ContractModel):
     """One row of `comparison.csv`: one metric or one analysis value of a case, compared with the
@@ -1060,6 +1118,7 @@ class ComparisonRow(ContractModel):
         if self.segment is None:
             raise ValueError("an analysis row gives its segment")
         # The table doesn't hold the analysis set's version, so the row is one of any set's.
+        definitions: list[AnalysisDefinition] = []
         for analysis_set in ANALYSIS_SETS.values():
             try:
                 definition = _analysis_definition(
@@ -1068,8 +1127,15 @@ class ComparisonRow(ContractModel):
             except ValueError:
                 continue
             if self.unit == definition.unit:
-                return
-        raise ValueError("an analysis row is a row of an analysis set, with its unit")
+                definitions.append(definition)
+        if not definitions:
+            raise ValueError("an analysis row is a row of an analysis set, with its unit")
+        reason = self.reason
+        if reason is not None and not any(
+            reason in _pair_reasons(definition, self.name, self.subject)
+            for definition in definitions
+        ):
+            raise ValueError(_PAIR_REASON_RULES[reason])
 
 
 def _check_compared_value(text: str, unit: str) -> None:
