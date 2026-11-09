@@ -3,8 +3,8 @@ the example's values as the test writes them, and `four-years.json`'s annualized
 their difference; and it agrees with Trial Folio's: exactly, at each value's digits, on the
 hand-checkable example, on those annualized returns, and on every other hand-checkable fixture,
 and on the long response within one unit of each value's last digit, 0.0001 at the precision of
-4, while counts, days, dates, observations, availability, and reason codes agree exactly
-everywhere.
+4, while counts, days, dates, observations, availability, reason codes, and the `not_recovered`
+flag agree exactly everywhere.
 
 Traces, at the core, to R05-AC03 (each value agrees with an independent reference calculation)
 and to the open question of how closely they must agree, whose default the owner confirmed at the
@@ -112,8 +112,9 @@ def agreement(
     exactly: bool,
 ) -> list[str]:
     """Each disagreement between Trial Folio's rows and the reference's: a row the other hasn't,
-    or a value, a reason, observations, or dates that differ. A decimal value agrees exactly, at
-    its digits, when `exactly`, and otherwise within one unit of its last digit."""
+    or a value, a reason, observations, dates, or a `not_recovered` flag that differ. A decimal
+    value agrees exactly, at its digits, when `exactly`, and otherwise within one unit of its last
+    digit."""
     problems: list[str] = []
     keys = {(row.segment, row.analysis, row.subject, row.window_days) for row in rows}
     if keys != set(refs):
@@ -132,6 +133,8 @@ def agreement(
         )
         if dates != (expected.start, expected.end):
             problems.append(f"{key}: dates {dates}")
+        if tuple(flag for flag in row.flags if flag == "not_recovered") != expected.flags:
+            problems.append(f"{key}: flags {row.flags}")
         if not _same_value(row, ref, expected, exactly=exactly):
             problems.append(f"{key}: {row.value} against {ref.value}")
     return problems
