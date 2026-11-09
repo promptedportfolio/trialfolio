@@ -6,11 +6,14 @@ as `analysis.period_splits[1].date`, and the rule, never the label; a configurat
 `analysis` reads as its 1.1.0 form; and the contracts example reads. The other tests trace to the
 keys' rules in docs/contracts.md's period splits: any date, ten splits at most, labels compared
 character for character, and splits that are no case's settings; and to R05-AC10, which keeps
-every configuration releases 0.1.0 to 0.4.0 accept reading as it did. R05-T05 wrote them, with
-0.5.0's readers, `read_screen_configuration_v1_2` and `read_experiment_configuration_v1_2`, which
-`trialfolio run` reads with from R05-T08. Until then, `run` reads with 0.4.0's readers, whose
-messages stay 0.4.0's, which the last tests check, as R05-T05's details give them (release 0.5.0's
-changes after sign-off). The fixtures are tests/fixtures/screen-configs/hand-checkable-split.yaml,
+every configuration releases 0.1.0 to 0.4.0 accept reading as it did, and to docs/contracts.md's
+readers: 0.5.0's refuse each invalid file of 1.0.0 or 1.1.0 with 0.4.0's message, and a 1.2.0 file
+by its 1.1.0 form's rules, an experiment's budget and ranking variants included, which the review
+of R05-T05's pull request found no test checked. R05-T05 wrote them, with 0.5.0's readers,
+`read_screen_configuration_v1_2` and `read_experiment_configuration_v1_2`, which `trialfolio run`
+reads with from R05-T08. Until then, `run` reads with 0.4.0's readers, whose messages stay
+0.4.0's, which the last tests check, as R05-T05's details give them (release 0.5.0's changes after
+sign-off). The fixtures are tests/fixtures/screen-configs/hand-checkable-split.yaml,
 tests/fixtures/experiment-configs/hand-checkable.yaml, and the invalid split cases beside each.
 """
 
@@ -352,6 +355,72 @@ type Reader = Callable[[bytes, str, Path], object]
 
 def rejected_by(reader: Reader, path: Path, content: bytes) -> str:
     return Rejection(lambda content, name: reader(content, name, path), path.name)(content)
+
+
+READERS: dict[Path, tuple[Reader, Reader]] = {
+    SCREEN_CONFIGS: (read_screen_configuration_v1_2, read_screen_configuration_v1_1),
+    EXPERIMENT_CONFIGS: (read_experiment_configuration_v1_2, read_experiment_configuration_v1_1),
+}
+"""0.5.0's reader of each kind of configuration, and 0.4.0's, by the directory of its files."""
+EARLIER_VERSION = re.compile(rb"^schema_version: (1\.0\.0|1\.1\.0)$", re.MULTILINE)
+
+
+def invalid_earlier_versions() -> list[Path]:
+    """The invalid configurations of version 1.0.0 or 1.1.0 that give no `analysis`, which only
+    0.5.0's readers tell needs 1.2.0."""
+    return [
+        path
+        for directory in READERS
+        for path in sorted((directory / "invalid").glob("*.yaml"))
+        if EARLIER_VERSION.search(path.read_bytes())
+        and not re.search(rb"^analysis:", path.read_bytes(), re.MULTILINE)
+    ]
+
+
+def invalid_id(path: Path) -> str:
+    return f"{path.parent.parent.name}/{path.stem}"
+
+
+@pytest.mark.parametrize("path", invalid_earlier_versions(), ids=invalid_id)
+def test_each_invalid_earlier_version_is_refused_as_0_4_0_s_readers_refuse_it(path: Path) -> None:
+    """0.5.0's readers read 1.0.0 and 1.1.0 as 0.4.0's do (the readers), so each rule's message
+    is 0.4.0's, a 1.0.0 file's form that needs 1.1.0 included."""
+    reader, earlier = READERS[path.parent.parent]
+    content = path.read_bytes()
+
+    assert rejected_by(reader, path, content) == rejected_by(earlier, path, content)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [path for path in invalid_earlier_versions() if not path.stem.endswith("-in-1.0.0")],
+    ids=invalid_id,
+)
+def test_each_invalid_file_as_1_2_0_is_refused_as_its_1_1_0_form_is(path: Path) -> None:
+    """Version 1.2.0 has 1.1.0's keys and rules, its rules across keys included: an experiment's
+    budget sends each case once, twice with a ranking definition, and its ranking variants need a
+    baseline ranked by a definition or a snapshot; and a variant may change the ranking. Each
+    file is read as each version, but those invalid in 1.0.0 alone, for a form that needs 1.1.0:
+    the other 1.0.0 files' rules hold in 1.1.0 too."""
+    reader, earlier = READERS[path.parent.parent]
+    content = path.read_bytes()
+
+    assert rejected_by(reader, path, EARLIER_VERSION.sub(b"schema_version: 1.2.0", content)) == (
+        rejected_by(earlier, path, EARLIER_VERSION.sub(b"schema_version: 1.1.0", content))
+    )
+
+
+def test_an_experiment_with_splits_has_a_budget_for_its_cases() -> None:
+    message = experiment_rejection(
+        replaced(SPLIT_EXPERIMENT, "provider_requests: 3", "provider_requests: 2")
+    )
+
+    assert message.splitlines()[1:] == [
+        (
+            "- `budget.provider_requests` is less than the experiment's 3 cases. It must be at "
+            "least the number of cases, so that each can be sent once."
+        )
+    ]
 
 
 @pytest.mark.parametrize(
