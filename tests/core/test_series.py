@@ -208,6 +208,36 @@ def test_a_strategy_that_doesnt_start_at_100_isnt_read() -> None:
     )
 
 
+def _chart(**arrays: object) -> dict[str, object]:
+    """The example's `chart`, with `arrays` in place of its own."""
+    return {**json.loads(EXAMPLE)["chart"], **arrays}
+
+
+NULL_OR_EMPTY = {
+    "chart-null": (None, "blank_in_source"),
+    "dates-null": (_chart(dates=None), "blank_in_source"),
+    "screen-returns-null": (_chart(screenReturns=None), "blank_in_source"),
+    "bench-returns-null": (_chart(benchReturns=None), "blank_in_source"),
+    "arrays-empty": (
+        _chart(dates=[], screenReturns=[], benchReturns=[]),
+        "unparseable_in_source",
+    ),
+}
+"""Each `chart` that's `null`, or whose `dates`, `screenReturns`, or `benchReturns` is, and one
+whose three arrays are empty, with the reason its rule gives: `null` is missing, as a metric's
+`null` is, and three empty arrays, though the same length, have no first level of 100
+(docs/contracts.md, series.csv, reading the response)."""
+
+
+@pytest.mark.parametrize(("chart", "reason"), NULL_OR_EMPTY.values(), ids=NULL_OR_EMPTY)
+def test_a_null_array_is_missing_and_empty_ones_cant_be_read(chart: object, reason: str) -> None:
+    response = json.loads(EXAMPLE)
+    response["chart"] = chart
+    rows = tables_of(json.dumps(response).encode()).series
+
+    assert tuple(cells(row) for row in rows) == (*unavailable_levels(reason), *EXAMPLE_PERIODS)
+
+
 def _no_period() -> tuple[Cells, ...]:
     return tuple(
         Cells("period", subject, None, None, None, "percent", None, "blank_in_source", label, None)
