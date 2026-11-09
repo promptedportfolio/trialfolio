@@ -102,6 +102,26 @@ def test_an_annualized_return_over_four_years_is_reconciled() -> None:
     assert values[("max_drawdown", "strategy")] == ("0.0000", "0.0", "agrees")
 
 
+@pytest.mark.parametrize(
+    ("reported", "agreement"),
+    [(10.00001, "agrees"), (10.00002, "differs"), (9.99999, "agrees"), (9.99998, "differs")],
+)
+def test_an_annualized_return_agrees_exactly_within_its_range(
+    reported: float, agreement: str
+) -> None:
+    """Over 1,461 days, 365.25 / D is 1/4, so the range runs from each end of the last level's
+    rounding, ((146.41 ∓ 0.00005) / 100)^(1/4) − 1, times 100: 10 ∓ 0.0000094, since the fourth
+    root's slope at 1.4641 is 1 / (4 × 1.1³). Widened by half a unit of a reported value with 5
+    decimals, 0.000005, it runs from about 9.9999856 to 10.0000144, so 10.00001 and 9.99999 agree,
+    and 10.00002 and 9.99998 differ; a range of the recalculated 10 alone would have 10.00001
+    differ too."""
+    response = json.loads((RESPONSES / "four-years.json").read_bytes())
+    response["stats"]["port"]["annualized_return"] = reported
+
+    values = reconciled(analysed(json.dumps(response).encode(), "four-years.yaml"))
+    assert values[("annualized_return", "strategy")] == ("10.0000", str(reported), agreement)
+
+
 def test_the_reported_value_is_the_metric_as_metrics_csv_writes_it() -> None:
     tables = tables_of("hand-checkable.json")
     metrics = {
