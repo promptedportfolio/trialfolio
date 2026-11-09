@@ -318,11 +318,32 @@ UnavailableReason = Literal[
     "input_unavailable",
 ]
 
+SeriesUnavailableReason = Literal["blank_in_source", "unparseable_in_source", "not_daily"]
+"""Why a value of `series.csv` is unavailable, from release 0.5.0: a source's reasons, and
+`not_daily`, a `chart` that isn't one entry per weekday, on a daily row only (series.csv)."""
+
+AnalysisUnavailableReason = Literal[
+    "input_unavailable",
+    "not_applicable",
+    "too_few_observations",
+    "too_short",
+    "outside_coverage",
+    "not_recovered",
+]
+"""Why a value of `analysis.csv` is unavailable, from release 0.5.0: a calculated value's
+reasons, `input_unavailable` and `not_applicable`, and the four the analysis set adds (metrics and
+missing values). A value whose daily series is unavailable is `input_unavailable`, never
+`not_daily`."""
+
 METRIC_UNIT_PATTERN: Final = r"percent|ratio|count|days|date|currency:[A-Z]{3}"
 """A metric's unit, the whole text matched (metrics and missing values)."""
 
 MetricUnit = Annotated[str, StringConstraints(pattern=rf"^({METRIC_UNIT_PATTERN})$")]
 """A metric's unit (metrics and missing values)."""
+
+AnalysisUnit = Literal["percent", "pp", "ratio", "count", "days", "date"]
+"""A unit of `analysis.csv`, from release 0.5.0: `pp`, a difference of two percents, besides a
+metric's units, and no currency (metrics and missing values)."""
 
 SettingUnit = Literal["count", "weeks", "percent"]
 """The units the screen settings use."""

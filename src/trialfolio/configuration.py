@@ -15,6 +15,16 @@ too, and tells a 1.0.0 file that a key it gives needs 1.1.0; and a ranking snaps
 configuration from R04-T10. 0.3.0's readers, which read 1.0.0 only, give 0.3.0's messages, and
 only 0.4.0's readers read a ranking variant's node paths, below.
 
+Release 0.5.0's readers, `read_screen_configuration_v1_2` and `read_experiment_configuration_v1_2`,
+read 1.2.0 too, which adds `analysis`, the period splits, and nothing else (period splits). They
+read each version as 0.4.0's do, and tell a 1.0.0 or 1.1.0 file that gives `analysis` that it
+needs 1.2.0. A message names a split's key by its place, such as `analysis.period_splits[1].date`,
+never its date or its label. They give `ScreenConfigurationReadV1_2` and
+`ExperimentConfigurationReadV1_2`, whose model may also be a 1.2.0's, so 0.4.0's readers' results,
+which their callers take, don't change. `trialfolio run` still reads with 0.4.0's readers, so it
+refuses a 1.2.0 file by its version, until release 0.5.0's R05-T08 builds its plans with the
+splits.
+
 0.4.0's readers of a screen and an experiment take the configuration file's path too, and read
 the definition file its `ranking.definition`, or its baseline's, names, from the configuration's
 directory, once, in step 2, by the rules of `trialfolio.ranking_definitions` (docs/contracts.md,
@@ -90,11 +100,13 @@ from trialfolio.contracts.common import BASELINE_CASE_KEY
 from trialfolio.contracts.experiment_configuration import (
     EXPERIMENT_SCHEMA_VERSIONS,
     EXPERIMENT_SCHEMA_VERSIONS_V1_1,
+    EXPERIMENT_SCHEMA_VERSIONS_V1_2,
     VARIANT_SETTINGS,
     VARIANT_SETTINGS_V1_1,
     ConfiguredVariantV1_1,
     ExperimentConfiguration,
     ExperimentConfigurationV1_1,
+    ExperimentConfigurationV1_2,
     RankingVariant,
     RuleVariant,
     configured_variants,
@@ -109,10 +121,12 @@ from trialfolio.contracts.screen_configuration import (
     LATER_VERSIONS,
     SCREEN_SCHEMA_VERSIONS,
     SCREEN_SCHEMA_VERSIONS_V1_1,
+    SCREEN_SCHEMA_VERSIONS_V1_2,
     DefinitionRanking,
     RankingV1_1,
     ScreenConfiguration,
     ScreenConfigurationV1_1,
+    ScreenConfigurationV1_2,
     SnapshotRanking,
 )
 from trialfolio.contracts.screen_settings import SCREEN_SETTINGS
@@ -152,8 +166,10 @@ __all__ = [
     "MAX_DEPTH",
     "MAX_DIGITS",
     "ExperimentConfigurationRead",
+    "ExperimentConfigurationReadV1_2",
     "KeyPath",
     "ScreenConfigurationRead",
+    "ScreenConfigurationReadV1_2",
     "WeightOriginal",
     "experiment_original_values",
     "experiment_original_values_v1_1",
@@ -161,11 +177,13 @@ __all__ = [
     "original_values",
     "read_experiment_configuration",
     "read_experiment_configuration_v1_1",
+    "read_experiment_configuration_v1_2",
     "read_ranking_snapshot_configuration",
     "read_review_configuration",
     "read_run_configuration",
     "read_screen_configuration",
     "read_screen_configuration_v1_1",
+    "read_screen_configuration_v1_2",
     "screen_original_values_v1_1",
 ]
 
@@ -215,6 +233,34 @@ class ExperimentConfigurationRead:
     gives a screen's."""
 
 
+@dataclass(frozen=True)
+class ScreenConfigurationReadV1_2:
+    """A screen configuration, as 0.5.0's reader reads it in step 2: `ScreenConfigurationRead`'s
+    fields, whose model may also be a 1.2.0's."""
+
+    configuration: ScreenConfiguration | ScreenConfigurationV1_1 | ScreenConfigurationV1_2
+    definition: RankingDefinition | None
+    """As `ScreenConfigurationRead.definition` gives it."""
+    snapshot: SnapshotRead | None = None
+    """As `ScreenConfigurationRead.snapshot` gives it."""
+
+
+@dataclass(frozen=True)
+class ExperimentConfigurationReadV1_2:
+    """An experiment configuration, as 0.5.0's reader reads it in step 2:
+    `ExperimentConfigurationRead`'s fields, whose model may also be a 1.2.0's."""
+
+    configuration: (
+        ExperimentConfiguration | ExperimentConfigurationV1_1 | ExperimentConfigurationV1_2
+    )
+    definition: RankingDefinition | None
+    """As `ExperimentConfigurationRead.definition` gives it."""
+    ranking_cases: tuple[RankingCase, ...]
+    """As `ExperimentConfigurationRead.ranking_cases` gives them."""
+    snapshot: SnapshotRead | None = None
+    """As `ExperimentConfigurationRead.snapshot` gives it."""
+
+
 def read_screen_configuration_v1_1(
     content: bytes,
     source_name: str,
@@ -260,6 +306,51 @@ def read_screen_configuration_v1_1(
     _no_files(read.ranking, files, definition, snapshot)
     ranking = _ranking_read(read.ranking, "ranking", source_name, path, definition, snapshot)
     return ScreenConfigurationRead(read, *ranking)
+
+
+def read_screen_configuration_v1_2(
+    content: bytes,
+    source_name: str,
+    path: str | os.PathLike[str],
+    *,
+    definition: bytes | None = None,
+    snapshot: SnapshotFiles | None = None,
+    files: bool = True,
+) -> ScreenConfigurationReadV1_2:
+    """Reads a screen configuration of a version release 0.5.0 reads, 1.0.0, 1.1.0, or 1.2.0, by
+    its `schema_version`, as `read_screen_configuration_v1_1` reads 1.0.0 and 1.1.0, with the same
+    arguments. Version 1.2.0 has 1.1.0's keys, and may also declare period splits in `analysis`,
+    which it checks by the rules of period splits.
+
+    Raises `TrialFolioError` as `read_screen_configuration_v1_1` does, and with `config.invalid`
+    for splits that break a rule, each named by its place, such as `analysis.period_splits[1]`,
+    never by its date or its label. A 1.0.0 or 1.1.0 file that gives `analysis` is told it needs
+    `schema_version` 1.2.0.
+    """
+    document, plain = _read_document(
+        content, source_name, "screen", SCREEN_SCHEMA_VERSIONS_V1_2, node_paths=True
+    )
+    unquoted = _unquoted(plain, _is_sent_text)
+    if document["schema_version"] == "1.0.0":
+        configuration = _validated(
+            ScreenConfiguration,
+            document,
+            source_name,
+            unquoted,
+            later_versions=True,
+            splits=True,
+        )
+        _no_definition_given(definition, snapshot)
+        return ScreenConfigurationReadV1_2(configuration, None)
+    model = (
+        ScreenConfigurationV1_1
+        if document["schema_version"] == "1.1.0"
+        else ScreenConfigurationV1_2
+    )
+    read = _validated(model, document, source_name, unquoted, splits=True)
+    _no_files(read.ranking, files, definition, snapshot)
+    ranking = _ranking_read(read.ranking, "ranking", source_name, path, definition, snapshot)
+    return ScreenConfigurationReadV1_2(read, *ranking)
 
 
 def read_review_configuration(content: bytes, source_name: str) -> ReviewConfiguration:
@@ -343,6 +434,64 @@ def read_experiment_configuration_v1_1(
         read.baseline.ranking, "baseline.ranking", source_name, path, definition, snapshot
     )
     return ExperimentConfigurationRead(
+        read, baseline, _ranking_cases(read, baseline, source_name), read_snapshot
+    )
+
+
+def read_experiment_configuration_v1_2(
+    content: bytes,
+    source_name: str,
+    path: str | os.PathLike[str],
+    *,
+    definition: bytes | None = None,
+    snapshot: SnapshotFiles | None = None,
+    files: bool = True,
+) -> ExperimentConfigurationReadV1_2:
+    """Reads an experiment configuration of a version release 0.5.0 reads, 1.0.0, 1.1.0, or
+    1.2.0, by its `schema_version`, as `read_experiment_configuration_v1_1` reads 1.0.0 and
+    1.1.0, with the same arguments. Version 1.2.0 has 1.1.0's keys, and may also declare the
+    experiment's period splits in its top-level `analysis`, which it checks by the rules of
+    period splits.
+
+    Raises `TrialFolioError` as `read_experiment_configuration_v1_1` does, and with
+    `config.invalid` for splits that break a rule, each named by its place, such as
+    `analysis.period_splits[1]`, never by its date or its label. A 1.0.0 or 1.1.0 file that gives
+    `analysis` is told it needs `schema_version` 1.2.0, and a `baseline.analysis` that an
+    experiment's splits are written at the top level.
+    """
+    document, plain = _read_document(
+        content, source_name, "experiment", EXPERIMENT_SCHEMA_VERSIONS_V1_2, node_paths=True
+    )
+    unquoted = _unquoted(plain, _is_sent_experiment_text_v1_1)
+    if document["schema_version"] == "1.0.0":
+        configuration = _validated(
+            ExperimentConfiguration,
+            document,
+            source_name,
+            unquoted,
+            later_versions=True,
+            splits=True,
+        )
+        _no_definition_given(definition, snapshot)
+        return ExperimentConfigurationReadV1_2(configuration, None, ())
+    model = (
+        ExperimentConfigurationV1_1
+        if document["schema_version"] == "1.1.0"
+        else ExperimentConfigurationV1_2
+    )
+    read = _validated(
+        model,
+        document,
+        source_name,
+        unquoted,
+        variant_settings=VARIANT_SETTINGS_V1_1,
+        splits=True,
+    )
+    _no_files(read.baseline.ranking, files, definition, snapshot)
+    baseline, read_snapshot = _ranking_read(
+        read.baseline.ranking, "baseline.ranking", source_name, path, definition, snapshot
+    )
+    return ExperimentConfigurationReadV1_2(
         read, baseline, _ranking_cases(read, baseline, source_name), read_snapshot
     )
 
@@ -509,7 +658,7 @@ def _unreadable(source_name: str, where: str, given: str, error: OSError) -> Tri
 
 
 def _ranking_cases(
-    configuration: ExperimentConfigurationV1_1,
+    configuration: ExperimentConfigurationV1_1 | ExperimentConfigurationV1_2,
     definition: RankingDefinition | None,
     source_name: str,
 ) -> tuple[RankingCase, ...]:
@@ -592,17 +741,21 @@ def _validated[M: BaseModel](
     *,
     variant_settings: tuple[str, ...] = VARIANT_SETTINGS,
     later_versions: bool = False,
+    splits: bool = False,
 ) -> M:
     """`document` validated as `model`. Raises `TrialFolioError` with `config.invalid`, listing
     each problem the model finds, then each text written without quotes. `variant_settings` are
     the settings the file's version lets a variant change. With `later_versions`, as 0.4.0's
     readers read a 1.0.0 file, a key that only 1.1.0 allows is told it needs that version;
-    without it, the messages are 0.3.0's."""
+    without it, the messages are 0.3.0's. With `splits`, as 0.5.0's readers read, `analysis` in a
+    version before 1.2.0 is told it needs 1.2.0 (`trialfolio.configuration_messages.describe`)."""
     context = {LATER_VERSIONS: True} if later_versions else None
     try:
         configuration = model.model_validate(document, context=context)
     except ValidationError as error:
-        problems = model_problems(error, document, variant_settings, later_versions=later_versions)
+        problems = model_problems(
+            error, document, variant_settings, later_versions=later_versions, splits=splits
+        )
         fail(source_name, problems + unquoted)
     if unquoted:
         fail(source_name, unquoted)

@@ -1,0 +1,46 @@
+# Invalid: `period_splits` holds at most 10 splits.
+# Key: analysis.period_splits
+# Value: -
+kind: screen
+schema_version: 1.2.0
+title: The hand-checkable example, split
+purpose: The settings of the hand-checkable example of analysis set 1.0.0, in docs/methodology.md.
+universe: 'SP500'
+rules:
+  - 'AvgDailyTot(30) > 1000000'
+ranking:
+  formula: 'EarnYield'
+  lower_is_better: false
+max_holdings: 25
+benchmark: 'SPY'
+start_date: 2024-01-01
+end_date: 2024-01-12
+rebalance_weeks: 1
+transaction_price: open
+slippage_percent: 0.25
+pit_method: complete
+precision: 4
+analysis:
+  period_splits:
+    - date: 2024-01-01
+      label: 'Split 1'
+    - date: 2024-01-02
+      label: 'Split 2'
+    - date: 2024-01-03
+      label: 'Split 3'
+    - date: 2024-01-04
+      label: 'Split 4'
+    - date: 2024-01-05
+      label: 'Split 5'
+    - date: 2024-01-06
+      label: 'Split 6'
+    - date: 2024-01-07
+      label: 'Split 7'
+    - date: 2024-01-08
+      label: 'Split 8'
+    - date: 2024-01-09
+      label: 'Split 9'
+    - date: 2024-01-10
+      label: 'Split 10'
+    - date: 2024-01-11
+      label: 'Split 11'

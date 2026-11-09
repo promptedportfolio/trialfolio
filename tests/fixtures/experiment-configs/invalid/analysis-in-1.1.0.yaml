@@ -1,0 +1,37 @@
+# Invalid: `analysis` needs `schema_version` 1.2.0, the first that declares period splits.
+# Key: analysis
+# Value: -
+kind: experiment
+schema_version: 1.1.0
+experiment_id: hand-checkable
+title: The hand-checkable example's experiment
+purpose: How do a holdings variant and the default rebalance variant compare with the hand-checkable example?
+prior_research:
+  status: complete
+  description: No earlier work informed this experiment. Its values are invented, for Trial Folio's tests.
+baseline:
+  universe: 'SP500'
+  rules:
+    - 'AvgDailyTot(30) > 1000000'
+  ranking:
+    formula: 'EarnYield'
+    lower_is_better: false
+  max_holdings: 25
+  benchmark: 'SPY'
+  start_date: 2024-01-01
+  end_date: 2024-01-12
+  rebalance_weeks: 1
+  transaction_price: open
+  slippage_percent: 0.25
+  pit_method: complete
+  precision: 4
+variants:
+  max_holdings:
+    - key: holdings-50
+      value: 50
+budget:
+  provider_requests: 3
+analysis:
+  period_splits:
+    - date: 2024-01-05
+      label: 'End of the example''s first week'
