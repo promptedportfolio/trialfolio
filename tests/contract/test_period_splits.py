@@ -120,19 +120,39 @@ experiment_rejection = Rejection(
 )
 
 
+def named_cases(text: str) -> set[str]:
+    """The cases `text` names in backticks, without the file each changes, or a value in
+    parentheses, such as `2024-02-30`."""
+    return {
+        name
+        for name in re.findall(r"`([a-z0-9.-]+)`", text)
+        if name[0].isalpha() and not name.endswith(".yaml")
+    }
+
+
+def readme_split_cases(directory: Path) -> set[str]:
+    """The files the table of the period splits' section of `directory`'s README lists."""
+    readme = (directory / "invalid" / "README.md").read_text(encoding="utf-8")
+    section = readme.split("\n## Period splits, from 1.2.0", 1)[1].split("\n## ", 1)[0]
+    return set(re.findall(r"^\| `([a-z0-9.-]+)\.yaml` \|", section, re.MULTILINE))
+
+
 def test_the_fixtures_are_the_invalid_split_cases_the_test_pairing_names() -> None:
-    """Release 0.5.0's invalid split cases, by group: the screen's 21, and the experiment's 5."""
+    """Release 0.5.0's invalid split cases, by group: the screen's 21, and the experiment's 5.
+    Each case the pairing names has its fixture and its rule here, and so does each file the
+    READMEs' tables of the period splits list."""
     pairing = (ROOT / "docs" / "releases" / "0.5.0-return-analytics.md").read_text(encoding="utf-8")
     section = pairing[pairing.index("#### Invalid split cases") :]
     screen, experiment = section.split("\n- **Experiment configurations,**", 1)
     experiment = experiment[: experiment.index("\n\n")]
+    screen = screen[screen.index("\n- **Screen configurations,**") :]
 
-    def named(text: str) -> set[str]:
-        return set(re.findall(r"`([a-z0-9.-]+)`", text)) & set(RULES)
-
-    assert {path.stem for path in SCREEN_CASES} == named(screen) and len(SCREEN_CASES) == 21
-    assert {path.stem for path in EXPERIMENT_CASES} == named(experiment)
-    assert len(EXPERIMENT_CASES) == 5
+    assert {path.stem for path in SCREEN_CASES} == named_cases(screen)
+    assert {path.stem for path in EXPERIMENT_CASES} == named_cases(experiment)
+    assert named_cases(screen) | named_cases(experiment) == set(RULES)
+    assert readme_split_cases(SCREEN_CONFIGS) == named_cases(screen)
+    assert readme_split_cases(EXPERIMENT_CONFIGS) == named_cases(experiment)
+    assert (len(SCREEN_CASES), len(EXPERIMENT_CASES)) == (21, 5)
 
 
 @pytest.mark.parametrize(
