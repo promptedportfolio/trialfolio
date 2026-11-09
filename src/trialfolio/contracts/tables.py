@@ -1032,8 +1032,10 @@ _PAIR_REASON_RULES: Final = {
     "different_unit",
     "different_benchmark": "different_benchmark is a reason of a value whose inputs include the "
     "benchmark or the excess",
-    "unknown_period": "unknown_period is a reason of a value from period returns",
-    "different_rebalance": "different_rebalance is a reason of a value from period returns",
+    "unknown_period": "unknown_period is a reason of a value from period returns, whose inputs "
+    "name the period series",
+    "different_rebalance": "different_rebalance is a reason of a value from period returns, "
+    "whose inputs name the period series",
 }
 """Each reason only some analysis values' pairs give, with its rule (comparing a case with the
 baseline)."""
@@ -1045,13 +1047,14 @@ def _pair_reasons(
     """The reasons a pair of the analysis's values may give: `input_unavailable` and
     `different_period` for any; `different_benchmark` for a value whose inputs include the
     benchmark or the excess; and `unknown_period` and `different_rebalance` for a value from
-    period returns. Never `different_unit`, since both are in the analysis's unit."""
+    period returns, whose inputs name the period series, so not `coverage_share`, from the
+    coverage and the declared dates alone. Never `different_unit`, since both are in the
+    analysis's unit."""
+    inputs = definition.inputs(name, subject)
     reasons = {"input_unavailable", "different_period"}
-    if any(
-        series.endswith(("/benchmark", "/excess")) for series in definition.inputs(name, subject)
-    ):
+    if any(series.endswith(("/benchmark", "/excess")) for series in inputs):
         reasons.add("different_benchmark")
-    if definition.series == "period":
+    if any(series.partition("/")[0] == "period" for series in inputs):
         reasons |= {"unknown_period", "different_rebalance"}
     return reasons
 

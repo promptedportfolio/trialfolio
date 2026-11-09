@@ -1365,6 +1365,16 @@ PERIOD_COUNTS: Document = {
     "unit": "count",
 }
 """The counts of periods, which read the periods' dates and none of their values."""
+COVERAGE_SHARES: Document = {
+    "segment": "split-0",
+    "name": "coverage_share",
+    "subject": None,
+    "baseline_value": "36.3636",
+    "value": "36.3636",
+    "unit": "percent",
+}
+"""The two cases' `split-0` coverage shares, from the coverage and the declared dates alone, as
+in methodology.md's example: a value whose `inputs` name no series."""
 
 
 VALID_COMPARISON_ROWS: dict[str, Document] = {
@@ -1420,6 +1430,9 @@ VALID_COMPARISON_ROWS: dict[str, Document] = {
     "a count of periods of an unknown period": not_comparable("unknown_period", **PERIOD_COUNTS),
     "a value from daily levels of another period": not_comparable(
         "different_period", segment="split-1"
+    ),
+    "a coverage share differenced": analysis_pair(
+        **COVERAGE_SHARES, difference="0.0000", difference_unit="pp", difference_decimals=4
     ),
     "the benchmark's value over another benchmark": not_comparable(
         "different_benchmark", subject="benchmark"
@@ -1484,6 +1497,10 @@ INVALID_COMPARISON_ROWS: dict[str, Document] = {
     "a count of periods over another benchmark": not_comparable(
         "different_benchmark", **PERIOD_COUNTS
     ),
+    "a coverage share of another rebalance": not_comparable(
+        "different_rebalance", **COVERAGE_SHARES
+    ),
+    "a coverage share of an unknown period": not_comparable("unknown_period", **COVERAGE_SHARES),
     "an analysis in two units": not_comparable("different_unit"),
     "a difference with other decimals": metric_row(difference="2.50", difference_decimals=2),
     "a difference in another unit": metric_row(difference_unit="percent"),
