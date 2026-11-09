@@ -10,6 +10,7 @@ read as the core reads a saved `response.json`, with `hand-checkable.yaml`'s dat
 """
 
 import json
+import math
 from dataclasses import dataclass, replace
 from datetime import date
 
@@ -178,15 +179,33 @@ DAILY_CHANGES = {
 `chart-faults` lacks `benchReturns` and has a date that can't be read."""
 
 
+def unavailable_levels(reason: str) -> tuple[Cells, ...]:
+    """The two daily rows of a `chart` that can't be read, the strategy's and the benchmark's."""
+    return tuple(
+        Cells("daily", subject, None, None, None, "index", None, reason, source, None)
+        for subject, source in (("strategy", "screenReturns"), ("benchmark", "benchReturns"))
+    )
+
+
 @pytest.mark.parametrize(("change", "reason"), DAILY_CHANGES.items(), ids=DAILY_CHANGES)
 def test_a_chart_that_cant_be_read_gives_two_unavailable_rows(change: str, reason: str) -> None:
     rows = series_of(f"hand-checkable-{change}.json")
 
-    unavailable = tuple(
-        Cells("daily", subject, None, None, None, "index", None, reason, source, None)
-        for subject, source in (("strategy", "screenReturns"), ("benchmark", "benchReturns"))
+    assert tuple(cells(row) for row in rows) == (*unavailable_levels(reason), *EXAMPLE_PERIODS)
+
+
+def test_a_strategy_that_doesnt_start_at_100_isnt_read() -> None:
+    """The strategy's first level is 100.5, and the benchmark's 100: either series' first level
+    that isn't 100 makes the `chart`'s arrays unreadable, as `chart-not-at-100`'s benchmark
+    does."""
+    response = json.loads(EXAMPLE)
+    response["chart"]["screenReturns"][0] = 100.5
+    rows = tables_of(json.dumps(response).encode()).series
+
+    assert tuple(cells(row) for row in rows) == (
+        *unavailable_levels("unparseable_in_source"),
+        *EXAMPLE_PERIODS,
     )
-    assert tuple(cells(row) for row in rows) == (*unavailable, *EXAMPLE_PERIODS)
 
 
 def _no_period() -> tuple[Cells, ...]:
@@ -219,6 +238,15 @@ def _unplaced(period: tuple[Cells, ...]) -> tuple[Cells, ...]:
         replace(
             row, period_start=None, value=None, source_decimals=None, reason="unparseable_in_source"
         )
+        for row in period
+    )
+
+
+def _unended(period: tuple[Cells, ...]) -> tuple[Cells, ...]:
+    """A period whose `End Dt` can't be read: its `date` empty, its `period_start` kept, and its
+    three values `unparseable_in_source`, since they can't be placed in time."""
+    return tuple(
+        replace(row, date=None, value=None, source_decimals=None, reason="unparseable_in_source")
         for row in period
     )
 
@@ -297,8 +325,47 @@ def test_a_period_whose_end_cant_be_read_keeps_its_start() -> None:
     response["results"]["rows"][1][4] = "2024-01-32"
     rows = tables_of(json.dumps(response).encode()).series
 
-    first = tuple(
-        replace(row, date=None, value=None, source_decimals=None, reason="unparseable_in_source")
-        for row in FIRST_PERIOD
+    assert tuple(cells(row) for row in rows) == (
+        *EXAMPLE_LEVELS,
+        *_unended(FIRST_PERIOD),
+        *SECOND_PERIOD,
     )
-    assert tuple(cells(row) for row in rows) == (*EXAMPLE_LEVELS, *first, *SECOND_PERIOD)
+
+
+def test_a_date_that_cant_be_read_comes_before_a_values_own_reason() -> None:
+    """The first period's `Tran Dt` is 2024-01-00, its `Ret%` `null`, and its `Bench%` `NaN`:
+    the date is the first reason that applies, so its three values are `unparseable_in_source`,
+    each at its location, the `null` included, and the period comes after the second."""
+    response = json.loads(EXAMPLE)
+    first = response["results"]["rows"][1]
+    first[3], first[9], first[10] = "2024-01-00", None, math.nan
+    content = json.dumps(response).encode()
+    assert content.count(b"NaN") == 1
+    rows = tables_of(content).series
+
+    assert tuple(cells(row) for row in rows) == (
+        *EXAMPLE_LEVELS,
+        *SECOND_PERIOD,
+        *_unplaced(FIRST_PERIOD),
+    )
+
+
+def test_a_missing_column_comes_before_a_date_that_cant_be_read() -> None:
+    """Without `Excess%` among the columns, and with the first period's `End Dt` 2024-01-32, the
+    missing column is the first reason that applies to the first period's excess: it's
+    `blank_in_source`, without a location, and keeps the `Tran Dt` that can be read; its other two
+    values are `unparseable_in_source`, each at its location."""
+    response = json.loads(EXAMPLE)
+    results = response["results"]
+    excess = results["columns"].index("Excess%")
+    del results["columns"][excess]
+    for row in results["rows"]:
+        del row[excess]
+    results["rows"][1][4] = "2024-01-32"
+    rows = tables_of(json.dumps(response).encode()).series
+
+    assert tuple(cells(row) for row in rows) == (
+        *EXAMPLE_LEVELS,
+        *_without_column(_unended(FIRST_PERIOD)),
+        *_without_column(SECOND_PERIOD),
+    )
