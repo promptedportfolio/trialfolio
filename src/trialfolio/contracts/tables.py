@@ -592,6 +592,10 @@ def _check_decimal(value: str, decimals: int | None, what: str) -> Decimal:
     return Decimal(value)
 
 
+CalendarDate = date
+"""`date`, by a name `SeriesRow`'s field `date` doesn't hide from the fields after it."""
+
+
 class SeriesRow(ContractModel):
     """One row of `series.csv`: a `chart` level of the strategy or the benchmark, or a rebalance
     period's return of the strategy, the benchmark, or the excess, as the saved response gives
@@ -602,10 +606,10 @@ class SeriesRow(ContractModel):
     series: Literal["daily", "period"]
     subject: Literal["strategy", "benchmark", "excess"]
     """`excess`, the period's `Excess%`, on a period row only."""
-    date: date | None
+    date: CalendarDate | None
     """A daily row's `chart` date, or a period row's `End Dt`. Null when the series is
     unavailable, or the date can't be read."""
-    period_start: date | None
+    period_start: CalendarDate | None
     """A period row's `Tran Dt`. Null on a daily row, and when it can't be read."""
     value: NonEmptyText | None
     """The level, or the return in percent, as a normalized decimal with the digits the saved text
