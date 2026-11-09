@@ -1267,6 +1267,24 @@ def test_analysis_set_1_0_0_gives_each_analysis_the_reasons_methodology_names_fo
     assert {"not_applicable", "too_short", "not_recovered"} == set().union(*named.values())
 
 
+def test_analysis_set_1_0_0_reads_methodology_s_series_over_its_segments() -> None:
+    """A row's series gives its `inputs`, and which of the comparison's reasons apply to it; its
+    segments, where it has rows. A period-return analysis reads the periods, and a daily-level
+    analysis or a rolling return the daily levels; one "Split segments only" has no `full` row,
+    and the rolling returns have the `full` segment's alone (methodology.md, segments)."""
+    documented = {
+        name: (series, "split" if cells[3].startswith("Split segments only") else "any")
+        for name, (series, cells) in methodology_rows().items()
+    } | dict.fromkeys(ROLLING_UNITS, ("daily", "full"))
+
+    for name, definition in ANALYSIS_SET_1_0_0.items():
+        assert (definition.series, definition.segments) == documented[name], name
+    assert {name for name, (_, segments) in documented.items() if segments == "split"} == {
+        "coverage_share",
+        "spanning_period_count",
+    }
+
+
 # comparison.csv
 
 BASELINE = "case-0492159b4461ceff"
