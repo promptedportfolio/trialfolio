@@ -15,10 +15,17 @@ so an empty cell is `None`, `critical` and `flagged` booleans, `source_decimals`
 `difference_decimals` integers, the period dates dates, and `flags` a tuple of codes, and then
 validates each row with its model. A row that isn't valid is refused naming its fields that aren't,
 as a record that isn't is (`trialfolio.file_checks`).
+
+From 0.5.0, `series.csv` and `analysis.csv` are written and read the same way (R05-T06):
+`series.csv`'s `date` is a date, and `analysis.csv`'s `decimals`, `window_days`, and
+`observations` integers, and its `inputs` a JSON array of series in one cell, such as
+`["daily/strategy", "daily/benchmark"]`, while its `flags` are codes separated by semicolons, as
+every table's are (normalized tables, series.csv, analysis.csv).
 """
 
 import csv
 import io
+import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date
@@ -28,14 +35,18 @@ from pydantic import BaseModel, ValidationError
 
 from trialfolio.contracts.common import INTEGER_PATTERN, valid_date_text
 from trialfolio.contracts.tables import (
+    ANALYSIS_COLUMNS,
     DIFFERENCES_COLUMNS,
     DIFFERENCES_COLUMNS_V1_1,
     METRICS_COLUMNS,
+    SERIES_COLUMNS,
     SETTINGS_COLUMNS,
     SETTINGS_COLUMNS_V1_1,
+    AnalysisRow,
     DifferencesRow,
     DifferencesRowV1_1,
     MetricsRow,
+    SeriesRow,
     SettingsRow,
     SettingsRowV1_1,
 )
@@ -79,13 +90,34 @@ def differences_csv_v1_1(rows: Sequence[DifferencesRowV1_1]) -> bytes:
     return _write(DIFFERENCES_COLUMNS_V1_1, rows)
 
 
-def _write(columns: tuple[str, ...], rows: Sequence[BaseModel]) -> bytes:
+def series_csv(rows: Sequence[SeriesRow]) -> bytes:
+    """`series.csv`, with `rows` in the order given (series.csv)."""
+    return _write(SERIES_COLUMNS, rows)
+
+
+def analysis_csv(rows: Sequence[AnalysisRow]) -> bytes:
+    """`analysis.csv`, with `rows` in the order given, and each row's `inputs` a JSON array in
+    one cell (analysis.csv)."""
+    return _write(ANALYSIS_COLUMNS, rows, {"inputs": _json_list})
+
+
+def _write(
+    columns: tuple[str, ...],
+    rows: Sequence[BaseModel],
+    cells: Mapping[str, Callable[[object], str]] | None = None,
+) -> bytes:
     text = io.StringIO()
     writer = csv.writer(text, lineterminator="\n")
     writer.writerow(columns)
+    cells = cells or {}
     for row in rows:
-        writer.writerow(_cell(getattr(row, column)) for column in columns)
+        writer.writerow(cells.get(column, _cell)(getattr(row, column)) for column in columns)
     return text.getvalue().encode("utf-8")
+
+
+def _json_list(value: object) -> str:
+    """A tuple of text as a JSON array in one cell, such as `["daily/strategy"]`, or `[]`."""
+    return json.dumps(list(cast("tuple[str, ...]", value)))
 
 
 def _cell(value: object) -> str:
@@ -134,6 +166,21 @@ def read_differences_csv_v1_1(content: bytes, source_name: str) -> tuple[Differe
     return _read(
         content, source_name, DIFFERENCES_COLUMNS_V1_1, DifferencesRowV1_1, _DIFFERENCES_READERS
     )
+
+
+def read_series_csv(content: bytes, source_name: str) -> tuple[SeriesRow, ...]:
+    """Reads `series.csv` from its bytes, as `read_metrics_csv` reads `metrics.csv`. A row its
+    model refuses, such as an available value whose `date` is empty, isn't a valid row
+    (series.csv)."""
+    return _read(content, source_name, SERIES_COLUMNS, SeriesRow, _SERIES_READERS)
+
+
+def read_analysis_csv(content: bytes, source_name: str) -> tuple[AnalysisRow, ...]:
+    """Reads `analysis.csv` from its bytes, as `read_metrics_csv` reads `metrics.csv`, with each
+    row's `inputs` a JSON array of text in one cell. A row its model refuses, such as a `value`
+    without exactly `decimals` digits, or an `analysis_set` this version doesn't know, isn't a
+    valid row (analysis.csv)."""
+    return _read(content, source_name, ANALYSIS_COLUMNS, AnalysisRow, _ANALYSIS_READERS)
 
 
 def _read[M: BaseModel](
@@ -257,6 +304,19 @@ def _flags(cell: str) -> tuple[str, ...]:
     return tuple(cell.split(";")) if cell else ()
 
 
+def _inputs(cell: str) -> tuple[str, ...]:
+    """A JSON array of text in one cell; anything else, an empty cell included, isn't one."""
+    try:
+        loaded: object = json.loads(cell)
+    except (json.JSONDecodeError, RecursionError):
+        raise ValueError from None
+    if not isinstance(loaded, list) or not all(
+        isinstance(item, str) for item in cast("list[object]", loaded)
+    ):
+        raise ValueError
+    return tuple(cast("list[str]", loaded))
+
+
 _READERS: Final[dict[str, Callable[[str], object]]] = {
     "critical": _boolean,
     "source_decimals": _integer,
@@ -273,3 +333,21 @@ _DIFFERENCES_READERS: Final[dict[str, Callable[[str], object]]] = {
     "flags": _flags,
 }
 """How `differences.csv`'s columns that aren't text are read."""
+
+_SERIES_READERS: Final[dict[str, Callable[[str], object]]] = {
+    "date": _date,
+    "period_start": _date,
+    "source_decimals": _integer,
+}
+"""How `series.csv`'s columns that aren't text are read."""
+
+_ANALYSIS_READERS: Final[dict[str, Callable[[str], object]]] = {
+    "window_days": _integer,
+    "decimals": _integer,
+    "observations": _integer,
+    "period_start": _date,
+    "period_end": _date,
+    "flags": _flags,
+    "inputs": _inputs,
+}
+"""How `analysis.csv`'s columns that aren't text are read."""

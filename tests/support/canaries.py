@@ -28,8 +28,9 @@ scans, R02-T09 the review configuration's, R03-T13 the experiment configuration'
 the revision's reason and Portfolio123's message. Release 0.4.0's R04-T06 listed
 `experiment-configs/ranking/canaries.xml`'s, which it wrote, and R04-T13 added them to the scans,
 with the ranking variants', the snapshot's, and the `rank_update`'s message (release 0.4.0, test
-pairing, canaries). Each value is ASCII without characters JSON escapes, so a scan of the bytes
-finds it however a file encodes it. Each number is long enough, or holds a point, so that no hash
+pairing, canaries). Release 0.5.0's R05-T06 listed `responses/hand-checkable-canaries.json`'s,
+which it wrote; R05-AC15's scan of the logs adds them. Each value is ASCII without characters JSON
+escapes, so a scan of the bytes finds it however a file encodes it. Each number is long enough, or holds a point, so that no hash
 or ID a log holds contains it by chance.
 """
 
@@ -181,6 +182,12 @@ REVISION_REASON: Final = "canary-revision-reason-5f024a69"
 PROVIDER_MESSAGE: Final = "canary-provider-message-6b7f758e"
 """Portfolio123's message in the body of a 400, which the attempt record's error message gives,
 and a loggable message never does."""
+
+HAND_CHECKABLE_RESPONSE: Final = ("102.6481", "101.3957", "1.2874", "10.5164")
+"""Every canary in `responses/hand-checkable-canaries.json`, `hand-checkable.json` with levels and
+returns of distinctive digits: the strategy's level on 2024-01-02, the benchmark's on 2024-01-03,
+the first period's `Bench%`, and the second period's `Ret%`. R05-T06 wrote the response; the scan
+of the logs for them is R05-AC15's (release 0.5.0, test pairing, canaries)."""
 
 LOG_FILE: Final = "trialfolio.log"
 """A log file's name, and with a number after it, a rotated one's."""

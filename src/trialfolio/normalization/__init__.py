@@ -11,6 +11,9 @@ The package's modules, each importing only those before it:
   interpreting, for the manifest's `return_series`.
 - `rows`, the row builders. `metrics_rows` gives `metrics.csv`'s 20 rows, and `settings_rows`
   `settings.csv`'s 23, in their documented order.
+- `series`, from 0.5.0, `series.csv`'s rows (R05-T06). `series_rows` gives a result's daily rows,
+  each `chart` level when `chart` has the verified layout's form, and its period rows, earliest
+  `Tran Dt` first, each value read from the saved text with its digits (series.csv).
 - `writer`, the writing of the tables. `write_tables` does both for an attempt that succeeded,
   and writes the two tables. `write_case_tables` does so for an experiment's case, in
   `cases/<case_id>/normalized/`, with `original_key` and `original_value` from the experiment
@@ -61,6 +64,7 @@ from trialfolio.normalization.rows import (
     settings_rows,
     settings_rows_v1_1,
 )
+from trialfolio.normalization.series import series_rows
 from trialfolio.normalization.writer import (
     METRICS_PATH,
     SETTINGS_PATH,
@@ -97,6 +101,7 @@ __all__ = [
     "holds_series",
     "metrics_rows",
     "read_response",
+    "series_rows",
     "setting_text",
     "settings_rows",
     "settings_rows_v1_1",
