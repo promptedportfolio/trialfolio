@@ -1,0 +1,19 @@
+kind: screen
+schema_version: 1.0.0
+title: Four years
+purpose: The hand-checkable example's settings over four years of 365.25 days, for an annualized return checked by hand.
+universe: 'SP500'
+rules:
+  - 'AvgDailyTot(30) > 1000000'
+ranking:
+  formula: 'EarnYield'
+  lower_is_better: false
+max_holdings: 25
+benchmark: 'SPY'
+start_date: 2020-01-01
+end_date: 2024-01-01
+rebalance_weeks: 1
+transaction_price: open
+slippage_percent: 0.25
+pit_method: complete
+precision: 4

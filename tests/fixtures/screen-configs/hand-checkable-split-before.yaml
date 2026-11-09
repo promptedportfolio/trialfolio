@@ -1,0 +1,25 @@
+kind: screen
+schema_version: 1.2.0
+title: The hand-checkable example, split before its coverage
+purpose: The settings of the hand-checkable example of analysis set 1.0.0, in docs/methodology.md.
+universe: 'SP500'
+rules:
+  - 'AvgDailyTot(30) > 1000000'
+ranking:
+  formula: 'EarnYield'
+  lower_is_better: false
+max_holdings: 25
+benchmark: 'SPY'
+start_date: 2024-01-01
+end_date: 2024-01-12
+rebalance_weeks: 1
+transaction_price: open
+slippage_percent: 0.25
+pit_method: complete
+precision: 4
+analysis:
+  period_splits:
+    - date: 2023-12-29
+      label: 'Before the coverage'
+    - date: 2024-01-05
+      label: 'End of the example''s first week'

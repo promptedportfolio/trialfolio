@@ -1,0 +1,23 @@
+kind: screen
+schema_version: 1.2.0
+title: One date
+purpose: The hand-checkable example's settings from a Friday to a Saturday, whose only weekday is the Friday, split on it.
+universe: 'SP500'
+rules:
+  - 'AvgDailyTot(30) > 1000000'
+ranking:
+  formula: 'EarnYield'
+  lower_is_better: false
+max_holdings: 25
+benchmark: 'SPY'
+start_date: 2024-01-05
+end_date: 2024-01-06
+rebalance_weeks: 1
+transaction_price: open
+slippage_percent: 0.25
+pit_method: complete
+precision: 4
+analysis:
+  period_splits:
+    - date: 2024-01-05
+      label: 'The only weekday'

@@ -7,6 +7,12 @@ metric and the coverage from the saved text: numbers as decimals, never as binar
 exactly the digits the file holds. `METRICS` gives the layout's metrics, in `metrics.csv`'s order,
 and `holds_series` says whether a decoded response holds the per-period series that 0.1.0
 preserves without interpreting, for the manifest's `return_series`.
+
+From 0.5.0, `decode_response` gives the decoded response once its required structure is checked,
+which `read_response` and the series' reader both read (series.csv): each JSON number in it is its
+text exactly as the file writes it, which `number_text` gives in plain notation, and `NaN` and
+the infinities are none. `calendar_date` reads a `YYYY-MM-DD` calendar date, as the coverage's
+dates are read.
 """
 
 import json
@@ -142,6 +148,23 @@ def read_response(content: bytes, path: str) -> ScreenBacktestResult:
     layout's required structure. A metric or coverage date that's missing or can't be read is
     unavailable, with its reason, and doesn't make the response invalid.
     """
+    top = decode_response(content, path)
+    results = cast("dict[str, object]", top["results"])
+    columns = cast("list[str]", results["columns"])
+    rows = cast("list[list[object]]", results["rows"])
+    values = {metric.path: _reported(top, metric) for metric in METRICS if metric.path is not None}
+    return ScreenBacktestResult(coverage=_coverage(columns, rows), values=values)
+
+
+def decode_response(content: bytes, path: str) -> Mapping[str, object]:
+    """A saved `response.json`, named by its `path` in messages, decoded, once its required
+    structure is checked: `stats`, with `port` and `bench`, and `results`, whose `columns` are
+    strings and whose `rows` are arrays as long as `columns`. Each JSON number is its text, which
+    `number_text` reads, and `NaN` and the infinities are no number.
+
+    Raises `TrialFolioError` with `provider.response_invalid` when the file doesn't have the
+    layout's required structure.
+    """
     try:
         loaded: object = json.loads(
             content.decode("utf-8"),
@@ -169,9 +192,27 @@ def read_response(content: bytes, path: str) -> ScreenBacktestResult:
     for row in cast("list[object]", rows):
         if not isinstance(row, list) or len(cast("list[object]", row)) != width:
             raise _invalid(path, "a row of `results.rows` isn't an array as long as `columns`.")
-    values = {metric.path: _reported(top, metric) for metric in METRICS if metric.path is not None}
-    coverage = _coverage(cast("list[str]", columns), cast("list[list[object]]", rows))
-    return ScreenBacktestResult(coverage=coverage, values=values)
+    return top
+
+
+def number_text(value: object) -> str | None:
+    """A decoded JSON number's text, in plain notation, with exactly the digits the saved file
+    gives it, so `1e-05` is `0.00001`; None for anything else, `NaN`, the infinities, a string,
+    and a boolean included (numbers and precision)."""
+    if type(value) is not _Number:
+        return None
+    return format(Decimal(value), "f")
+
+
+def calendar_date(value: object) -> date | None:
+    """A `YYYY-MM-DD` calendar date, as a decoded response gives it as text; None for anything
+    else, a number included, and for a date no calendar has, such as 2024-01-32."""
+    if type(value) is not str or not _DATE.fullmatch(value):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def holds_series(payload: object) -> bool:
@@ -247,13 +288,10 @@ def _dates(rows: Sequence[Sequence[object]], column: int) -> list[date]:
     earliest or latest can't be known."""
     dates: list[date] = []
     for row in rows:
-        value = row[column]
-        if type(value) is not str or not _DATE.fullmatch(value):
+        read = calendar_date(row[column])
+        if read is None:
             return []
-        try:
-            dates.append(date.fromisoformat(value))
-        except ValueError:
-            return []
+        dates.append(read)
     return dates
 
 
